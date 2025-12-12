@@ -6,16 +6,25 @@ Features:
 - Estimated completion times based on historical average
 - Break down tasks into subtasks
 - Add new tasks dynamically
+- Encrypted state persistence with AES-256 GCM
 """
 
 import sys
 import time
 from typing import List, Optional
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 import tempfile
+import json
+import os
+from pathlib import Path
+from base64 import b64encode, b64decode
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from PySide6.QtCore import (
     QAbstractListModel,
@@ -51,6 +60,63 @@ class BurndownSnapshot:
     total_tasks: int
 
 
+# Encryption utilities
+def get_state_file_path() -> Path:
+    """Get the path to the encrypted state file."""
+    # Store in user's home directory
+    home = Path.home()
+    state_dir = home / ".progress_list"
+    state_dir.mkdir(exist_ok=True)
+    return state_dir / "state.enc"
+
+
+def derive_key(password: str, salt: bytes) -> bytes:
+    """Derive a 256-bit key from a password using PBKDF2."""
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,  # 256 bits
+        salt=salt,
+        iterations=100000,
+        backend=default_backend()
+    )
+    return kdf.derive(password.encode('utf-8'))
+
+
+def encrypt_data(data: dict, password: str) -> bytes:
+    """Encrypt data using AES-256 GCM."""
+    # Generate a random salt and nonce
+    salt = os.urandom(16)
+    nonce = os.urandom(12)
+    
+    # Derive key from password
+    key = derive_key(password, salt)
+    
+    # Encrypt the data
+    aesgcm = AESGCM(key)
+    json_data = json.dumps(data).encode('utf-8')
+    ciphertext = aesgcm.encrypt(nonce, json_data, None)
+    
+    # Combine salt + nonce + ciphertext
+    return salt + nonce + ciphertext
+
+
+def decrypt_data(encrypted_data: bytes, password: str) -> dict:
+    """Decrypt data using AES-256 GCM."""
+    # Extract salt, nonce, and ciphertext
+    salt = encrypted_data[:16]
+    nonce = encrypted_data[16:28]
+    ciphertext = encrypted_data[28:]
+    
+    # Derive key from password
+    key = derive_key(password, salt)
+    
+    # Decrypt the data
+    aesgcm = AESGCM(key)
+    json_data = aesgcm.decrypt(nonce, ciphertext, None)
+    
+    return json.loads(json_data.decode('utf-8'))
+
+
 class TaskModel(QAbstractListModel):
     TitleRole = Qt.UserRole + 1
     CompletedRole = Qt.UserRole + 2
@@ -64,10 +130,12 @@ class TaskModel(QAbstractListModel):
     avgTimeChanged = Signal()
     totalEstimateChanged = Signal()
     chartImageChanged = Signal()
+    passwordRequested = Signal()  # Signal when password is needed
 
-    def __init__(self, tasks: List[Task] | None = None):
+    def __init__(self, tasks: List[Task] | None = None, password: str | None = None):
         super().__init__()
         self._tasks: List[Task] = tasks or []
+        self._password: str | None = password  # Store password for saving state
         self._timer = QTimer()
         self._timer.timeout.connect(self._updateActiveTasks)
         self._timer.start(1000)  # Update every second
@@ -593,6 +661,160 @@ class TaskModel(QAbstractListModel):
         for title in sample_tasks:
             self.addTask(title)
 
+    def _serialize_state(self) -> dict:
+        """Serialize the current state to a dictionary."""
+        # Convert tasks to dict format
+        tasks_data = []
+        for task in self._tasks:
+            task_dict = {
+                'title': task.title,
+                'completed': task.completed,
+                'time_spent': task.time_spent,
+                'start_time': task.start_time,
+                'parent_index': task.parent_index,
+                'indent_level': task.indent_level,
+                'custom_estimate': task.custom_estimate,
+            }
+            tasks_data.append(task_dict)
+        
+        # Convert snapshots to dict format
+        snapshots_data = []
+        for snapshot in self._burndown_snapshots:
+            snapshot_dict = {
+                'timestamp': snapshot.timestamp.isoformat(),
+                'remaining_tasks': snapshot.remaining_tasks,
+                'completed_tasks': snapshot.completed_tasks,
+                'total_tasks': snapshot.total_tasks,
+            }
+            snapshots_data.append(snapshot_dict)
+        
+        return {
+            'version': 1,
+            'tasks': tasks_data,
+            'snapshots': snapshots_data,
+            'start_time': self._start_time.isoformat(),
+        }
+
+    def _deserialize_state(self, state: dict) -> None:
+        """Deserialize state from a dictionary and restore it."""
+        if state.get('version') != 1:
+            print(f"Unknown state version: {state.get('version')}")
+            return
+        
+        # Restore tasks
+        self.beginResetModel()
+        self._tasks.clear()
+        for task_data in state.get('tasks', []):
+            task = Task(
+                title=task_data['title'],
+                completed=task_data['completed'],
+                time_spent=task_data['time_spent'],
+                start_time=task_data.get('start_time'),
+                parent_index=task_data.get('parent_index', -1),
+                indent_level=task_data.get('indent_level', 0),
+                custom_estimate=task_data.get('custom_estimate'),
+            )
+            self._tasks.append(task)
+        self.endResetModel()
+        
+        # Restore snapshots
+        self._burndown_snapshots.clear()
+        for snapshot_data in state.get('snapshots', []):
+            snapshot = BurndownSnapshot(
+                timestamp=datetime.fromisoformat(snapshot_data['timestamp']),
+                remaining_tasks=snapshot_data['remaining_tasks'],
+                completed_tasks=snapshot_data['completed_tasks'],
+                total_tasks=snapshot_data['total_tasks'],
+            )
+            self._burndown_snapshots.append(snapshot)
+        
+        # Restore start time
+        if 'start_time' in state:
+            self._start_time = datetime.fromisoformat(state['start_time'])
+        
+        # Update UI
+        self.avgTimeChanged.emit()
+        self.totalEstimateChanged.emit()
+        self._updateChartImage()
+        print(f"State restored: {len(self._tasks)} tasks, {len(self._burndown_snapshots)} snapshots")
+
+    @Slot(result=bool)
+    def save_state(self) -> bool:
+        """Save the current state to disk with encryption."""
+        if not self._password:
+            print("No password set, cannot save state")
+            return False
+        
+        try:
+            state = self._serialize_state()
+            encrypted_data = encrypt_data(state, self._password)
+            state_file = get_state_file_path()
+            state_file.write_bytes(encrypted_data)
+            print(f"State saved to {state_file}")
+            return True
+        except Exception as e:
+            print(f"Error saving state: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
+    @staticmethod
+    def load_state(password: str) -> Optional['TaskModel']:
+        """Load state from disk with decryption."""
+        state_file = get_state_file_path()
+        if not state_file.exists():
+            print("No saved state found")
+            return None
+        
+        try:
+            encrypted_data = state_file.read_bytes()
+            state = decrypt_data(encrypted_data, password)
+            model = TaskModel(password=password)
+            model._deserialize_state(state)
+            return model
+        except Exception as e:
+            print(f"Error loading state: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    @Slot(str)
+    def setPassword(self, password: str) -> None:
+        """Set the password for encrypting/decrypting state."""
+        self._password = password
+        print("Password set")
+
+    @Slot(result=bool)
+    def hasSavedState(self) -> bool:
+        """Check if there's a saved state file."""
+        return get_state_file_path().exists()
+
+    @Slot(str, result=bool)
+    def loadStateWithPassword(self, password: str) -> bool:
+        """Load state with the given password and update current model."""
+        state_file = get_state_file_path()
+        if not state_file.exists():
+            print("No saved state found")
+            return False
+        
+        try:
+            print(f"Attempting to load state from {state_file}")
+            encrypted_data = state_file.read_bytes()
+            print(f"Read {len(encrypted_data)} bytes of encrypted data")
+            
+            state = decrypt_data(encrypted_data, password)
+            print(f"Successfully decrypted state")
+            
+            self._password = password
+            self._deserialize_state(state)
+            print(f"Successfully loaded state")
+            return True
+        except Exception as e:
+            print(f"Error loading state: {type(e).__name__}: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+
 
 QML_UI = rb"""
 import QtQuick 2.15
@@ -607,6 +829,17 @@ ApplicationWindow {
     height: 1000
     title: "Progress Tracker"
     color: "#0f1115"
+
+    property bool hasLoadedState: false
+
+    Component.onCompleted: {
+        // Check if there's a saved state file
+        if (taskModel.hasSavedState()) {
+            loadPasswordDialog.open()
+        } else {
+            hasLoadedState = true
+        }
+    }
 
     function formatTime(minutes) {
         if (minutes === 0) return "N/A"
@@ -1160,6 +1393,209 @@ ApplicationWindow {
                     }
                 }
             }
+        }
+    }
+
+    // Password dialog for encrypting state on close
+    Dialog {
+        id: passwordDialog
+        title: "Enter Password"
+        modal: true
+        anchors.centerIn: parent
+        width: 350
+        height: 200
+
+        property bool isClosing: false
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+
+            Label {
+                text: "Enter a password to encrypt your tasks:"
+                color: "#f5f6f8"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            TextField {
+                id: passwordInput
+                Layout.fillWidth: true
+                placeholderText: "Password"
+                echoMode: TextInput.Password
+                color: "#f5f6f8"
+                selectByMouse: true
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#4a5568"
+                }
+                onAccepted: {
+                    var pwd = text.trim()
+                    if (pwd.length > 0) {
+                        taskModel.setPassword(pwd)
+                        passwordDialog.accept()
+                    }
+                }
+                Component.onCompleted: {
+                    forceActiveFocus()
+                }
+            }
+
+            Label {
+                text: "Password must be at least 1 character"
+                color: "#8a93a5"
+                font.pixelSize: 10
+                Layout.fillWidth: true
+            }
+
+            RowLayout {
+                Layout.alignment: Qt.AlignRight
+                spacing: 8
+
+                Button {
+                    text: "Save & Exit"
+                    enabled: passwordInput.text.trim().length > 0
+                    onClicked: {
+                        taskModel.setPassword(passwordInput.text.trim())
+                        passwordDialog.accept()
+                    }
+                }
+
+                Button {
+                    text: "Exit Without Saving"
+                    onClicked: {
+                        passwordDialog.reject()
+                    }
+                }
+
+                Button {
+                    text: "Cancel"
+                    onClicked: {
+                        passwordDialog.isClosing = false
+                        passwordDialog.close()
+                    }
+                }
+            }
+        }
+
+        onAccepted: {
+            if (isClosing) {
+                // Save state before closing
+                taskModel.save_state()
+                root.allowClose = true
+                Qt.quit()
+            }
+        }
+
+        onRejected: {
+            if (isClosing) {
+                // Exit without saving
+                root.allowClose = true
+                Qt.quit()
+            }
+        }
+    }
+
+    // Password dialog for loading state on startup
+    Dialog {
+        id: loadPasswordDialog
+        title: "Saved State Found"
+        modal: true
+        anchors.centerIn: parent
+        width: 350
+        height: 220
+        closePolicy: Popup.NoAutoClose
+
+        function attemptLoad() {
+            loadErrorLabel.text = ""
+            var pwd = loadPasswordInput.text.trim()
+            console.log("Attempting to load with password of length:", pwd.length)
+            var success = taskModel.loadStateWithPassword(pwd)
+            console.log("Load result:", success)
+            if (success) {
+                root.hasLoadedState = true
+                loadPasswordDialog.close()
+            } else {
+                loadErrorLabel.text = "Failed to load state. Wrong password?"
+                loadPasswordInput.text = ""
+                loadPasswordInput.forceActiveFocus()
+            }
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+
+            Label {
+                text: "A saved state was found. Enter your password to load it:"
+                color: "#f5f6f8"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            TextField {
+                id: loadPasswordInput
+                Layout.fillWidth: true
+                placeholderText: "Password"
+                echoMode: TextInput.Password
+                color: "#f5f6f8"
+                selectByMouse: true
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#4a5568"
+                }
+                onAccepted: {
+                    if (text.length > 0) {
+                        loadPasswordDialog.attemptLoad()
+                    }
+                }
+                Component.onCompleted: {
+                    forceActiveFocus()
+                }
+            }
+
+            Label {
+                id: loadErrorLabel
+                text: ""
+                color: "#ff6b6b"
+                font.pixelSize: 10
+                Layout.fillWidth: true
+                visible: text.length > 0
+            }
+
+            RowLayout {
+                Layout.alignment: Qt.AlignRight
+                spacing: 8
+
+                Button {
+                    text: "Load"
+                    enabled: loadPasswordInput.text.length > 0
+                    onClicked: {
+                        loadPasswordDialog.attemptLoad()
+                    }
+                }
+
+                Button {
+                    text: "Start Fresh"
+                    onClicked: {
+                        root.hasLoadedState = true
+                        loadPasswordDialog.close()
+                    }
+                }
+            }
+        }
+    }
+
+    // Handle window close event
+    property bool allowClose: false
+    
+    onClosing: function(close) {
+        if (!allowClose) {
+            close.accepted = false
+            passwordDialog.isClosing = true
+            passwordDialog.open()
         }
     }
 }
