@@ -11,7 +11,7 @@ def main():
         sys.executable,
         "-m",
         "pytest",
-        "test_progress_list.py",
+        "tests/test_progress_list.py",
         "--cov=progress_list",
         "--cov-report=term-missing",
         "--cov-report=html",
