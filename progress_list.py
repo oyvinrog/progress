@@ -13,6 +13,9 @@ import time
 from typing import List, Optional
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
+import tempfile
 
 from PySide6.QtCore import (
     QAbstractListModel,
@@ -22,8 +25,9 @@ from PySide6.QtCore import (
     QTimer,
     Property,
     Signal,
+    QUrl,
 )
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtWidgets import QApplication
 from PySide6.QtQml import QQmlApplicationEngine
 
 
@@ -38,6 +42,15 @@ class Task:
     custom_estimate: Optional[float] = None  # minutes, overrides avg estimate if set
 
 
+@dataclass
+class BurndownSnapshot:
+    """A snapshot of progress for the burndown chart."""
+    timestamp: datetime
+    remaining_tasks: int
+    completed_tasks: int
+    total_tasks: int
+
+
 class TaskModel(QAbstractListModel):
     TitleRole = Qt.UserRole + 1
     CompletedRole = Qt.UserRole + 2
@@ -50,6 +63,7 @@ class TaskModel(QAbstractListModel):
 
     avgTimeChanged = Signal()
     totalEstimateChanged = Signal()
+    chartImageChanged = Signal()
 
     def __init__(self, tasks: List[Task] | None = None):
         super().__init__()
@@ -57,6 +71,18 @@ class TaskModel(QAbstractListModel):
         self._timer = QTimer()
         self._timer.timeout.connect(self._updateActiveTasks)
         self._timer.start(1000)  # Update every second
+
+        # Burndown chart tracking
+        self._burndown_snapshots: List[BurndownSnapshot] = []
+        self._snapshot_timer = QTimer()
+        self._snapshot_timer.timeout.connect(self._takeSnapshot)
+        self._snapshot_timer.start(10000)  # Take snapshot every 10 seconds
+        self._start_time = datetime.now()
+        self._chart_image_path = ""
+        self._chart_update_timer = QTimer()
+        self._chart_update_timer.timeout.connect(self._updateChartImage)
+        self._chart_update_timer.start(2000)  # Update chart every 2 seconds
+        self._takeSnapshot()  # Take initial snapshot
 
     def rowCount(self, parent: QModelIndex | None = QModelIndex()) -> int:  # type: ignore[override]
         return len(self._tasks)
@@ -134,6 +160,11 @@ class TaskModel(QAbstractListModel):
 
         future_time = datetime.now() + timedelta(minutes=total_time)
         return future_time.strftime("%H:%M")
+
+    @Property(str, notify=chartImageChanged)
+    def chartImagePath(self) -> str:
+        """Get the path to the burndown chart image."""
+        return self._chart_image_path
 
     def _estimateTaskTime(self, row: int) -> float:
         """Estimate time for a single task to complete."""
@@ -224,6 +255,145 @@ class TaskModel(QAbstractListModel):
             last = self.index(len(self._tasks) - 1, 0)
             self.dataChanged.emit(first, last, [self.TimeSpentRole, self.CompletionTimeRole, self.EstimatedTimeOfDayRole])
 
+    def _takeSnapshot(self) -> None:
+        """Take a snapshot of current progress for the burndown chart."""
+        total = len(self._tasks)
+        completed = sum(1 for t in self._tasks if t.completed)
+        remaining = total - completed
+
+        snapshot = BurndownSnapshot(
+            timestamp=datetime.now(),
+            remaining_tasks=remaining,
+            completed_tasks=completed,
+            total_tasks=total,
+        )
+        self._burndown_snapshots.append(snapshot)
+        print(f"Snapshot taken: {remaining}/{total} remaining (total snapshots: {len(self._burndown_snapshots)})")
+
+        # Update chart image immediately
+        self._updateChartImage()
+
+    def _updateChartImage(self) -> None:
+        """Generate and save the burndown chart image."""
+        try:
+            if not self._burndown_snapshots:
+                print("No snapshots yet, skipping chart update")
+                return
+
+            # Calculate elapsed time in minutes from start
+            start_time = self._burndown_snapshots[0].timestamp
+            times = [(s.timestamp - start_time).total_seconds() / 60.0 for s in self._burndown_snapshots]
+            remaining = [s.remaining_tasks for s in self._burndown_snapshots]
+            # Use the maximum total tasks seen across all snapshots
+            total_tasks = max(s.total_tasks for s in self._burndown_snapshots)
+
+            if total_tasks == 0:
+                print("No tasks yet, skipping chart update")
+                return
+
+            print(f"Generating chart with {len(self._burndown_snapshots)} snapshots, {total_tasks} total tasks")
+
+            # Create the plot with Agg backend
+            import matplotlib
+            matplotlib.use('Agg')
+
+            plt.style.use('dark_background')
+            fig, ax = plt.subplots(figsize=(8, 4), dpi=100)
+
+            # Plot actual burndown
+            if len(times) == 1:
+                ax.plot(times, remaining, 'o', color='#4a9eff', markersize=8, label='Actual')
+            else:
+                ax.plot(times, remaining, 'o-', color='#4a9eff', linewidth=2, markersize=5, label='Actual')
+
+            # Plot ideal burndown line
+            if len(times) > 1 and max(times) > 0:
+                ideal_line = [total_tasks * (1 - t / max(times)) for t in times]
+                ax.plot(times, ideal_line, '--', color='#82c3a5', linewidth=2, alpha=0.7, label='Ideal')
+
+            # Styling
+            ax.set_xlabel('Time (minutes)', fontsize=10, color='#f5f6f8')
+            ax.set_ylabel('Remaining Tasks', fontsize=10, color='#f5f6f8')
+            ax.set_title('Burndown Chart', fontsize=12, color='#f5f6f8', pad=10)
+            ax.grid(True, alpha=0.2, color='#8a93a5')
+            ax.legend(loc='upper right', fontsize=9)
+
+            # Set y-axis to start at 0
+            ax.set_ylim(bottom=0)
+
+            # Format ticks
+            ax.tick_params(colors='#9aa6b8', labelsize=8)
+            ax.spines['bottom'].set_color('#2e3744')
+            ax.spines['top'].set_color('#2e3744')
+            ax.spines['left'].set_color('#2e3744')
+            ax.spines['right'].set_color('#2e3744')
+            fig.patch.set_facecolor('#0f1115')
+            ax.set_facecolor('#161a20')
+
+            plt.tight_layout()
+
+            # Save to temporary file
+            if not self._chart_image_path:
+                import os
+                temp_dir = tempfile.gettempdir()
+                self._chart_image_path = os.path.join(temp_dir, 'burndown_chart.png')
+
+            fig.savefig(self._chart_image_path, facecolor='#0f1115', edgecolor='none')
+            plt.close(fig)
+
+            print(f"Chart updated: {self._chart_image_path} ({len(self._burndown_snapshots)} snapshots)")
+            self.chartImageChanged.emit()
+        except Exception as e:
+            print(f"Error generating chart: {e}")
+            import traceback
+            traceback.print_exc()
+
+    @Slot()
+    def showBurndownChart(self) -> None:
+        """Display the burndown chart in a matplotlib window."""
+        if not self._burndown_snapshots:
+            return
+
+        # Calculate elapsed time in minutes from start
+        start_time = self._burndown_snapshots[0].timestamp
+        times = [(s.timestamp - start_time).total_seconds() / 60.0 for s in self._burndown_snapshots]
+        remaining = [s.remaining_tasks for s in self._burndown_snapshots]
+        total_tasks = self._burndown_snapshots[0].total_tasks
+
+        # Create the plot
+        plt.style.use('dark_background')
+        fig, ax = plt.subplots(figsize=(10, 6))
+
+        # Plot actual burndown
+        ax.plot(times, remaining, 'o-', color='#4a9eff', linewidth=2, markersize=6, label='Actual')
+
+        # Plot ideal burndown line
+        if len(times) > 1 and total_tasks > 0:
+            ideal_line = [total_tasks * (1 - t / max(times)) for t in times]
+            ax.plot(times, ideal_line, '--', color='#82c3a5', linewidth=2, alpha=0.7, label='Ideal')
+
+        # Styling
+        ax.set_xlabel('Time (minutes)', fontsize=12, color='#f5f6f8')
+        ax.set_ylabel('Remaining Tasks', fontsize=12, color='#f5f6f8')
+        ax.set_title('Burndown Chart', fontsize=16, color='#f5f6f8', pad=20)
+        ax.grid(True, alpha=0.2, color='#8a93a5')
+        ax.legend(loc='upper right', fontsize=10)
+
+        # Set y-axis to start at 0
+        ax.set_ylim(bottom=0)
+
+        # Format ticks
+        ax.tick_params(colors='#9aa6b8')
+        ax.spines['bottom'].set_color('#2e3744')
+        ax.spines['top'].set_color('#2e3744')
+        ax.spines['left'].set_color('#2e3744')
+        ax.spines['right'].set_color('#2e3744')
+        fig.patch.set_facecolor('#0f1115')
+        ax.set_facecolor('#161a20')
+
+        plt.tight_layout()
+        plt.show()
+
     @Slot(str)
     def addTask(self, title: str, parent_row: int = -1) -> None:
         title = title.strip()
@@ -251,6 +421,7 @@ class TaskModel(QAbstractListModel):
         self.beginInsertRows(QModelIndex(), insert_pos, insert_pos)
         self._tasks.insert(insert_pos, task)
         self.endInsertRows()
+        self._takeSnapshot()  # Update burndown chart
 
     @Slot(int, bool)
     def toggleComplete(self, row: int, completed: bool) -> None:
@@ -274,6 +445,7 @@ class TaskModel(QAbstractListModel):
         self.dataChanged.emit(idx, idx)
         self.avgTimeChanged.emit()
         self.totalEstimateChanged.emit()
+        self._takeSnapshot()  # Update burndown chart
 
         # Update estimates for all tasks
         if len(self._tasks) > 0:
@@ -397,6 +569,7 @@ class TaskModel(QAbstractListModel):
             self.endRemoveRows()
 
         self.avgTimeChanged.emit()
+        self._takeSnapshot()  # Update burndown chart
 
     @Slot()
     def clear(self) -> None:
@@ -406,6 +579,7 @@ class TaskModel(QAbstractListModel):
         self._tasks.clear()
         self.endRemoveRows()
         self.avgTimeChanged.emit()
+        self._takeSnapshot()  # Update burndown chart
 
     @Slot()
     def pasteSampleTasks(self) -> None:
@@ -429,8 +603,8 @@ import QtQuick.Dialogs
 ApplicationWindow {
     id: root
     visible: true
-    width: 800
-    height: 720
+    width: 900
+    height: 1000
     title: "Progress Tracker"
     color: "#0f1115"
 
@@ -599,6 +773,55 @@ ApplicationWindow {
                 onClicked: {
                     taskModel.addTask(inputField.text, -1)
                     inputField.text = ""
+                }
+            }
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 280
+            radius: 10
+            color: "#161a20"
+            border.color: "#222832"
+            visible: listView.count > 0
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 8
+                spacing: 4
+
+                Label {
+                    text: "Burndown Chart"
+                    font.pixelSize: 14
+                    font.bold: true
+                    color: "#f5f6f8"
+                    Layout.alignment: Qt.AlignHCenter
+                }
+
+                Image {
+                    id: chartImage
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    source: taskModel.chartImagePath ? "file://" + taskModel.chartImagePath : ""
+                    fillMode: Image.PreserveAspectFit
+                    cache: false
+                    asynchronous: true
+
+                    Connections {
+                        target: taskModel
+                        function onChartImageChanged() {
+                            chartImage.source = ""
+                            chartImage.source = "file://" + taskModel.chartImagePath
+                        }
+                    }
+
+                    Label {
+                        anchors.centerIn: parent
+                        text: "Chart will appear after completing some tasks..."
+                        color: "#8a93a5"
+                        font.pixelSize: 12
+                        visible: !chartImage.source
+                    }
                 }
             }
         }
@@ -949,7 +1172,7 @@ def get_tasks() -> List[Task]:
     Returns:
         List of Task objects with completion status and time tracking.
     """
-    app = QGuiApplication(sys.argv)
+    app = QApplication(sys.argv)
     engine = QQmlApplicationEngine()
     model = TaskModel()
     engine.rootContext().setContextProperty("taskModel", model)
@@ -971,7 +1194,7 @@ def get_tasks() -> List[Task]:
 
 
 def main() -> int:
-    app = QGuiApplication(sys.argv)
+    app = QApplication(sys.argv)
     engine = QQmlApplicationEngine()
     model = TaskModel()
     engine.rootContext().setContextProperty("taskModel", model)
