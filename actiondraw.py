@@ -1,39 +1,40 @@
-"""ActionDraw module for creating diagrams with boxes, tasks, and edges.
+"""ActionDraw diagramming module built with PySide6 and QML.
 
-Features:
-- Draw boxes with text
-- Add tasks from progress list to diagram
-- Draw edges between items
-- Drag and drop tasks
-- Create new tasks that are added to progress tracker
+The implementation focuses on predictable coordinate handling so drawing
+connections between items works reliably when dragging across the canvas.
 """
 
+from __future__ import annotations
+
 import sys
-from typing import List, Optional, Tuple
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
+from itertools import count
+from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import (
     QAbstractListModel,
     QModelIndex,
-    Qt,
-    Slot,
     Property,
+    Qt,
     Signal,
-    QPointF,
+    Slot,
 )
-from PySide6.QtWidgets import QApplication
 from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtWidgets import QApplication
 
 
 class DiagramItemType(Enum):
+    """Supported diagram item types."""
+
     BOX = "box"
     TASK = "task"
 
 
 @dataclass
 class DiagramItem:
-    """Represents an item in the diagram (box or task)."""
+    """A rectangular shape displayed on the canvas."""
+
     id: str
     item_type: DiagramItemType
     x: float
@@ -41,20 +42,22 @@ class DiagramItem:
     width: float = 120.0
     height: float = 60.0
     text: str = ""
-    task_index: int = -1  # -1 for boxes, >= 0 for tasks
+    task_index: int = -1
     color: str = "#4a9eff"
 
 
 @dataclass
 class DiagramEdge:
-    """Represents an edge between two diagram items."""
+    """A directed connection between two diagram items."""
+
     id: str
     from_id: str
     to_id: str
 
 
 class DiagramModel(QAbstractListModel):
-    """Model for managing diagram items."""
+    """Qt model exposing diagram items to QML."""
+
     IdRole = Qt.UserRole + 1
     TypeRole = Qt.UserRole + 2
     XRole = Qt.UserRole + 3
@@ -72,40 +75,43 @@ class DiagramModel(QAbstractListModel):
         super().__init__()
         self._items: List[DiagramItem] = []
         self._edges: List[DiagramEdge] = []
-        self._next_id = 0
         self._task_model = task_model
-        self._selected_item_id: Optional[str] = None
-        self._edge_drawing_from: Optional[str] = None
+        self._id_source = count()
+        self._edge_source_id: Optional[str] = None
+        self._edge_drag_x: float = 0.0
+        self._edge_drag_y: float = 0.0
+        self._is_dragging_edge: bool = False
 
-    def rowCount(self, parent: QModelIndex | None = QModelIndex()) -> int:
+    # --- Qt model overrides -------------------------------------------------
+    def rowCount(self, parent: QModelIndex | None = QModelIndex()) -> int:  # type: ignore[override]
         return len(self._items)
 
-    def data(self, index: QModelIndex, role: int = Qt.DisplayRole):
+    def data(self, index: QModelIndex, role: int = Qt.DisplayRole):  # type: ignore[override]
         if not index.isValid() or not (0 <= index.row() < len(self._items)):
             return None
 
         item = self._items[index.row()]
         if role == self.IdRole:
             return item.id
-        elif role == self.TypeRole:
+        if role == self.TypeRole:
             return item.item_type.value
-        elif role == self.XRole:
+        if role == self.XRole:
             return item.x
-        elif role == self.YRole:
+        if role == self.YRole:
             return item.y
-        elif role == self.WidthRole:
+        if role == self.WidthRole:
             return item.width
-        elif role == self.HeightRole:
+        if role == self.HeightRole:
             return item.height
-        elif role == self.TextRole:
+        if role == self.TextRole:
             return item.text
-        elif role == self.TaskIndexRole:
+        if role == self.TaskIndexRole:
             return item.task_index
-        elif role == self.ColorRole:
+        if role == self.ColorRole:
             return item.color
         return None
 
-    def roleNames(self):
+    def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
         return {
             self.IdRole: b"itemId",
             self.TypeRole: b"itemType",
@@ -118,24 +124,38 @@ class DiagramModel(QAbstractListModel):
             self.ColorRole: b"color",
         }
 
+    # --- Properties exposed to QML -----------------------------------------
     @Property(list, notify=edgesChanged)
-    def edges(self) -> List[dict]:
-        """Get edges as list of dictionaries for QML."""
+    def edges(self) -> List[Dict[str, str]]:
         return [
-            {
-                "id": edge.id,
-                "fromId": edge.from_id,
-                "toId": edge.to_id,
-            }
+            {"id": edge.id, "fromId": edge.from_id, "toId": edge.to_id}
             for edge in self._edges
         ]
 
-    @Slot(float, float, str)
-    def addBox(self, x: float, y: float, text: str = "") -> str:
-        """Add a box to the diagram."""
-        item_id = f"box_{self._next_id}"
-        self._next_id += 1
+    @Property(str, notify=itemsChanged)
+    def edgeDrawingFrom(self) -> str:
+        return self._edge_source_id or ""
 
+    @Property(bool, notify=itemsChanged)
+    def isDraggingEdge(self) -> bool:
+        return self._is_dragging_edge
+
+    @Property(float, notify=itemsChanged)
+    def edgeDragX(self) -> float:
+        return self._edge_drag_x
+
+    @Property(float, notify=itemsChanged)
+    def edgeDragY(self) -> float:
+        return self._edge_drag_y
+
+    @Property(int, notify=itemsChanged)
+    def count(self) -> int:
+        return len(self._items)
+
+    # --- Item management ----------------------------------------------------
+    @Slot(float, float, str, result=str)
+    def addBox(self, x: float, y: float, text: str = "") -> str:
+        item_id = f"box_{next(self._id_source)}"
         item = DiagramItem(
             id=item_id,
             item_type=DiagramItemType.BOX,
@@ -144,36 +164,34 @@ class DiagramModel(QAbstractListModel):
             text=text,
             color="#4a9eff",
         )
-
         self.beginInsertRows(QModelIndex(), len(self._items), len(self._items))
         self._items.append(item)
         self.endInsertRows()
         self.itemsChanged.emit()
         return item_id
 
-    @Slot(int, float, float)
+    @Slot(int, float, float, result=str)
     def addTask(self, task_index: int, x: float, y: float) -> str:
-        """Add a task from the progress list to the diagram."""
-        if not self._task_model or task_index < 0 or task_index >= self._task_model.rowCount():
+        if self._task_model is None:
+            return ""
+        if task_index < 0 or task_index >= self._task_model.rowCount():
             return ""
 
-        # Get task title
         task_idx = self._task_model.index(task_index, 0)
-        task_title = self._task_model.data(task_idx, self._task_model.TitleRole) or "Task"
+        title = self._task_model.data(task_idx, getattr(self._task_model, "TitleRole", Qt.DisplayRole))
+        if title is None:
+            title = "Task"
 
-        item_id = f"task_{self._next_id}"
-        self._next_id += 1
-
+        item_id = f"task_{next(self._id_source)}"
         item = DiagramItem(
             id=item_id,
             item_type=DiagramItemType.TASK,
             x=x,
             y=y,
-            text=task_title,
+            text=title,
             task_index=task_index,
             color="#82c3a5",
         )
-
         self.beginInsertRows(QModelIndex(), len(self._items), len(self._items))
         self._items.append(item)
         self.endInsertRows()
@@ -182,410 +200,389 @@ class DiagramModel(QAbstractListModel):
 
     @Slot(str, float, float)
     def moveItem(self, item_id: str, x: float, y: float) -> None:
-        """Move an item to a new position."""
-        for i, item in enumerate(self._items):
+        for row, item in enumerate(self._items):
             if item.id == item_id:
+                if item.x == x and item.y == y:
+                    return
                 item.x = x
                 item.y = y
-                idx = self.index(i, 0)
-                self.dataChanged.emit(idx, idx, [self.XRole, self.YRole])
-                self.itemsChanged.emit()  # Notify canvas to repaint edges
-                break
+                index = self.index(row, 0)
+                self.dataChanged.emit(index, index, [self.XRole, self.YRole])
+                self.itemsChanged.emit()
+                return
 
     @Slot(str, str)
     def setItemText(self, item_id: str, text: str) -> None:
-        """Set the text of an item."""
-        for i, item in enumerate(self._items):
+        for row, item in enumerate(self._items):
             if item.id == item_id:
+                if item.text == text:
+                    return
                 item.text = text
-                idx = self.index(i, 0)
-                self.dataChanged.emit(idx, idx, [self.TextRole])
+                index = self.index(row, 0)
+                self.dataChanged.emit(index, index, [self.TextRole])
                 self.itemsChanged.emit()
-                break
+                return
 
     @Slot(str, str)
     def addEdge(self, from_id: str, to_id: str) -> None:
-        """Add an edge between two items."""
         if from_id == to_id:
             return
-
-        # Check if edge already exists
         for edge in self._edges:
             if edge.from_id == from_id and edge.to_id == to_id:
                 return
-
         edge_id = f"edge_{len(self._edges)}"
-        edge = DiagramEdge(id=edge_id, from_id=from_id, to_id=to_id)
-        self._edges.append(edge)
+        self._edges.append(DiagramEdge(edge_id, from_id, to_id))
         self.edgesChanged.emit()
 
     @Slot(str)
     def removeItem(self, item_id: str) -> None:
-        """Remove an item and all its edges."""
-        # Remove edges connected to this item
-        self._edges = [e for e in self._edges if e.from_id != item_id and e.to_id != item_id]
-        self.edgesChanged.emit()
+        # Remove edges touching the item
+        removed = False
+        filtered = [edge for edge in self._edges if edge.from_id != item_id and edge.to_id != item_id]
+        if len(filtered) != len(self._edges):
+            self._edges = filtered
+            self.edgesChanged.emit()
 
-        # Remove item
-        for i, item in enumerate(self._items):
+        for row, item in enumerate(self._items):
             if item.id == item_id:
-                self.beginRemoveRows(QModelIndex(), i, i)
-                self._items.pop(i)
+                self.beginRemoveRows(QModelIndex(), row, row)
+                self._items.pop(row)
                 self.endRemoveRows()
                 self.itemsChanged.emit()
+                removed = True
                 break
+
+        if removed and self._edge_source_id == item_id:
+            self._reset_edge_state()
 
     @Slot(str)
     def startEdgeDrawing(self, item_id: str) -> None:
-        """Start drawing an edge from an item."""
-        self._edge_drawing_from = item_id
-        self.itemsChanged.emit()  # Notify QML to update canvas
+        item = self.getItem(item_id)
+        self._edge_source_id = item_id if item else None
+        if item:
+            self._edge_drag_x = item.x + item.width / 2
+            self._edge_drag_y = item.y + item.height / 2
+        else:
+            self._edge_drag_x = 0.0
+            self._edge_drag_y = 0.0
+        self._is_dragging_edge = False
+        self.itemsChanged.emit()
+
+    @Slot(float, float)
+    def updateEdgeDragPosition(self, x: float, y: float) -> None:
+        if not self._edge_source_id:
+            return
+        self._edge_drag_x = x
+        self._edge_drag_y = y
+        self._is_dragging_edge = True
+        self.itemsChanged.emit()
 
     @Slot(str)
-    def finishEdgeDrawing(self, item_id: str) -> None:
-        """Finish drawing an edge to an item."""
-        if self._edge_drawing_from and self._edge_drawing_from != item_id:
-            self.addEdge(self._edge_drawing_from, item_id)
-        self._edge_drawing_from = None
-        self.itemsChanged.emit()  # Notify QML to update canvas
+    def finishEdgeDrawing(self, target_id: str) -> None:
+        if self._edge_source_id and target_id and self._edge_source_id != target_id:
+            self.addEdge(self._edge_source_id, target_id)
+        self._reset_edge_state()
 
     @Slot()
     def cancelEdgeDrawing(self) -> None:
-        """Cancel edge drawing."""
-        self._edge_drawing_from = None
-        self.itemsChanged.emit()  # Notify QML to update canvas
-
-    @Property(str, notify=itemsChanged)
-    def edgeDrawingFrom(self) -> str:
-        """Get the item ID from which edge is being drawn."""
-        return self._edge_drawing_from or ""
-    
-    @Property(int, notify=itemsChanged)
-    def count(self) -> int:
-        """Get the number of items in the model."""
-        return len(self._items)
+        self._reset_edge_state()
 
     @Slot(str, str)
     def createTaskFromText(self, text: str, item_id: str) -> None:
-        """Create a new task from text and update the diagram item."""
         if not self._task_model:
             return
-
-        # Add task to task model
         self._task_model.addTask(text, -1)
-
-        # Find the newly added task (it will be the last one)
         task_count = self._task_model.rowCount()
-        if task_count > 0:
-            new_task_index = task_count - 1
+        if task_count == 0:
+            return
+        new_index = task_count - 1
+        for row, item in enumerate(self._items):
+            if item.id == item_id:
+                item.task_index = new_index
+                item.item_type = DiagramItemType.TASK
+                item.color = "#82c3a5"
+                item.text = text
+                index = self.index(row, 0)
+                self.dataChanged.emit(
+                    index,
+                    index,
+                    [self.TaskIndexRole, self.TypeRole, self.ColorRole, self.TextRole],
+                )
+                self.itemsChanged.emit()
+                break
 
-            # Update the diagram item to reference this task
-            for i, item in enumerate(self._items):
-                if item.id == item_id:
-                    item.task_index = new_task_index
-                    item.item_type = DiagramItemType.TASK
-                    item.color = "#82c3a5"
-                    idx = self.index(i, 0)
-                    self.dataChanged.emit(idx, idx, [self.TaskIndexRole, self.TypeRole, self.ColorRole])
-                    break
-
+    # --- Utilities ----------------------------------------------------------
     def getItem(self, item_id: str) -> Optional[DiagramItem]:
-        """Get an item by ID."""
         for item in self._items:
             if item.id == item_id:
                 return item
         return None
 
+    @Slot(str, result="QVariant")
+    def getItemSnapshot(self, item_id: str) -> Dict[str, Any]:
+        item = self.getItem(item_id)
+        if not item:
+            return {}
+        return {
+            "id": item.id,
+            "type": item.item_type.value,
+            "x": item.x,
+            "y": item.y,
+            "width": item.width,
+            "height": item.height,
+            "text": item.text,
+        }
+
     def getItemAt(self, x: float, y: float) -> Optional[str]:
-        """Get the item ID at the given coordinates."""
-        for item in reversed(self._items):  # Check from top to bottom
-            if (item.x <= x <= item.x + item.width and
-                item.y <= y <= item.y + item.height):
+        for item in reversed(self._items):
+            if item.x <= x <= item.x + item.width and item.y <= y <= item.y + item.height:
                 return item.id
         return None
+
+    @Slot(float, float, result=str)
+    def itemIdAt(self, x: float, y: float) -> str:
+        return self.getItemAt(x, y) or ""
+
+    @Slot()
+    def connectAllItems(self) -> None:
+        if len(self._items) < 2:
+            return
+        ordered = sorted(self._items, key=lambda item: (item.y, item.x))
+        for idx in range(len(ordered) - 1):
+            self.addEdge(ordered[idx].id, ordered[idx + 1].id)
+
+    def _reset_edge_state(self) -> None:
+        changed = self._edge_source_id is not None or self._is_dragging_edge
+        self._edge_source_id = None
+        self._edge_drag_x = 0.0
+        self._edge_drag_y = 0.0
+        self._is_dragging_edge = False
+        if changed:
+            self.itemsChanged.emit()
 
 
 ACTIONDRAW_QML = r"""
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
-import QtQuick.Dialogs
-
 ApplicationWindow {
     id: root
     visible: false
-    width: 1000
+    width: 960
     height: 700
+    color: "#10141c"
     title: "ActionDraw"
-    color: "#0f1115"
 
     function showWindow() {
         root.visible = true
         root.requestActivate()
     }
 
+    property int boardSize: 2000
+
     Dialog {
-        id: doubleClickDialog
-        title: "Add to Diagram"
+        id: addDialog
         modal: true
-        width: 300
-        height: 150
+        title: "Add to Diagram"
+        property real targetX: 0
+        property real targetY: 0
 
-        property real clickX: 0
-        property real clickY: 0
+        contentItem: ColumnLayout {
+            width: 280
+            spacing: 12
 
-        ColumnLayout {
-            anchors.fill: parent
-            spacing: 10
-
-            Label {
-                text: "What would you like to add?"
-                color: "#f5f6f8"
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 8
-
-                Button {
-                    text: "Draw Box"
-                    Layout.fillWidth: true
-                    onClicked: {
-                        boxTextDialog.boxX = doubleClickDialog.clickX
-                        boxTextDialog.boxY = doubleClickDialog.clickY
-                        boxTextDialog.itemId = ""  // Clear itemId for new box
-                        boxTextInput.text = ""  // Clear text field
-                        doubleClickDialog.close()
-                        boxTextDialog.open()
-                    }
-                }
-
-                Button {
-                    text: "Add Action"
-                    Layout.fillWidth: true
-                    onClicked: {
-                        doubleClickDialog.close()
-                        taskSelectionDialog.taskX = doubleClickDialog.clickX
-                        taskSelectionDialog.taskY = doubleClickDialog.clickY
-                        taskSelectionDialog.open()
-                    }
+            Button {
+                text: "Box"
+                onClicked: {
+                    addDialog.close()
+                    boxDialog.editingItemId = ""
+                    boxDialog.targetX = addDialog.targetX
+                    boxDialog.targetY = addDialog.targetY
+                    boxDialog.textValue = ""
+                    boxDialog.open()
                 }
             }
 
             Button {
-                text: "Cancel"
-                Layout.fillWidth: true
-                onClicked: doubleClickDialog.close()
+                text: "Task from List"
+                enabled: taskModel !== null
+                onClicked: {
+                    addDialog.close()
+                    if (taskModel) {
+                        taskDialog.targetX = addDialog.targetX
+                        taskDialog.targetY = addDialog.targetY
+                        taskDialog.open()
+                    }
+                }
             }
+        }
+
+        footer: DialogButtonBox {
+            standardButtons: DialogButtonBox.Cancel
+            onRejected: addDialog.close()
         }
     }
 
     Dialog {
-        id: boxTextDialog
-        title: "Box Text"
+        id: boxDialog
         modal: true
-        width: 300
-        height: 150
+        property real targetX: 0
+        property real targetY: 0
+        property string editingItemId: ""
+        property string textValue: ""
+        title: editingItemId.length === 0 ? "Create Box" : "Edit Item"
 
-        property real boxX: 0
-        property real boxY: 0
-        property string itemId: ""
+        onOpened: boxTextField.forceActiveFocus()
 
-        ColumnLayout {
-            anchors.fill: parent
-            spacing: 10
-
-            Label {
-                text: boxTextDialog.itemId ? "Edit box text:" : "Enter box text:"
-                color: "#f5f6f8"
-            }
+        contentItem: ColumnLayout {
+            width: 320
+            spacing: 12
 
             TextField {
-                id: boxTextInput
+                id: boxTextField
                 Layout.fillWidth: true
-                placeholderText: "Box label"
-                color: "#f5f6f8"
+                text: boxDialog.textValue
+                placeholderText: "Label"
                 selectByMouse: true
+                color: "#f5f6f8"
                 background: Rectangle {
                     color: "#1b2028"
                     radius: 4
-                    border.color: "#4a5568"
+                    border.color: "#384458"
                 }
-                onAccepted: {
-                    if (diagramModel) {
-                        if (boxTextDialog.itemId) {
-                            diagramModel.setItemText(boxTextDialog.itemId, text)
-                        } else {
-                            diagramModel.addBox(boxTextDialog.boxX, boxTextDialog.boxY, text)
-                        }
-                    }
-                    boxTextDialog.close()
-                    boxTextDialog.itemId = ""  // Clear after closing
-                    boxTextInput.text = ""  // Clear text field
-                }
-                Component.onCompleted: {
-                    forceActiveFocus()
-                }
+                onTextChanged: boxDialog.textValue = text
+                onAccepted: boxDialogButtonBox.accept()
             }
+        }
 
-            RowLayout {
-                Layout.alignment: Qt.AlignRight
-                spacing: 8
-
-                Button {
-                    text: boxTextDialog.itemId ? "Update" : "Add"
-                    onClicked: {
-                        if (diagramModel) {
-                            if (boxTextDialog.itemId) {
-                                diagramModel.setItemText(boxTextDialog.itemId, boxTextInput.text)
-                            } else {
-                                diagramModel.addBox(boxTextDialog.boxX, boxTextDialog.boxY, boxTextInput.text)
-                            }
-                        }
-                        boxTextDialog.close()
-                        boxTextDialog.itemId = ""  // Clear after closing
-                        boxTextInput.text = ""  // Clear text field
-                    }
+        footer: DialogButtonBox {
+            id: boxDialogButtonBox
+            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+            onAccepted: {
+                if (!diagramModel)
+                    return
+                if (boxDialog.editingItemId.length === 0) {
+                    diagramModel.addBox(boxDialog.targetX, boxDialog.targetY, boxDialog.textValue)
+                } else {
+                    diagramModel.setItemText(boxDialog.editingItemId, boxDialog.textValue)
                 }
-
-                Button {
-                    text: "Cancel"
-                    onClicked: {
-                        boxTextDialog.close()
-                        boxTextDialog.itemId = ""  // Clear on cancel
-                        boxTextInput.text = ""  // Clear text field
-                    }
-                }
+                boxDialog.close()
             }
+            onRejected: boxDialog.close()
+        }
+
+        onClosed: {
+            boxDialog.textValue = ""
+            boxDialog.editingItemId = ""
         }
     }
 
     Dialog {
-        id: taskSelectionDialog
-        title: "Select Task"
+        id: taskDialog
         modal: true
-        width: 400
-        height: 400
+        title: "Add Task"
+        property real targetX: 0
+        property real targetY: 0
 
-        property real taskX: 0
-        property real taskY: 0
+        contentItem: ColumnLayout {
+            width: 320
+            height: 360
+            spacing: 12
 
-        ColumnLayout {
-            anchors.fill: parent
-            spacing: 10
-
-            Label {
-                text: "Select a task to add:"
-                color: "#f5f6f8"
-            }
-
-            ScrollView {
+            ListView {
+                id: taskListView
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                model: taskModel
                 clip: true
 
-                ListView {
-                    id: taskListView
-                    model: taskModel
-                    delegate: Rectangle {
-                        width: taskListView.width
-                        height: 40
-                        color: mouseArea.containsMouse ? "#2a3240" : "#1f2630"
-                        border.color: "#2e3744"
+                delegate: Item {
+                    width: taskListView.width
+                    height: 40
 
-                        required property int index
-                        required property string title
+                    Rectangle {
+                        anchors.fill: parent
+                        color: mouseArea.containsMouse ? "#283346" : "#1a2230"
+                        border.color: "#30405a"
+                    }
 
-                        Label {
-                            anchors.left: parent.left
-                            anchors.leftMargin: 10
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: parent.title
-                            color: "#f5f6f8"
-                        }
+                    Text {
+                        anchors.centerIn: parent
+                        text: model.title
+                        color: "#f5f6f8"
+                        font.pixelSize: 14
+                    }
 
-                        MouseArea {
-                            id: mouseArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            onClicked: {
-                                if (diagramModel) {
-                                    diagramModel.addTask(parent.index, taskSelectionDialog.taskX, taskSelectionDialog.taskY)
-                                }
-                                taskSelectionDialog.close()
+                    MouseArea {
+                        id: mouseArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: {
+                            if (diagramModel) {
+                                diagramModel.addTask(index, taskDialog.targetX, taskDialog.targetY)
                             }
+                            taskDialog.close()
                         }
                     }
                 }
             }
+        }
 
-            Button {
-                text: "Cancel"
-                Layout.fillWidth: true
-                onClicked: taskSelectionDialog.close()
-            }
+        footer: DialogButtonBox {
+            standardButtons: DialogButtonBox.Cancel
+            onRejected: taskDialog.close()
         }
     }
 
     Dialog {
         id: newTaskDialog
-        title: "Create New Task"
         modal: true
-        width: 300
-        height: 150
+        title: "Create Task"
+        property string pendingItemId: ""
+        property string textValue: ""
 
-        property string itemId: ""
+        function openWithItem(itemId, text) {
+            pendingItemId = itemId
+            textValue = text
+            open()
+        }
 
-        ColumnLayout {
-            anchors.fill: parent
-            spacing: 10
-
-            Label {
-                text: "Enter task name:"
-                color: "#f5f6f8"
-            }
+        contentItem: ColumnLayout {
+            width: 320
+            spacing: 12
 
             TextField {
-                id: newTaskInput
+                id: newTaskField
                 Layout.fillWidth: true
+                text: newTaskDialog.textValue
                 placeholderText: "Task name"
-                color: "#f5f6f8"
                 selectByMouse: true
+                color: "#f5f6f8"
                 background: Rectangle {
                     color: "#1b2028"
                     radius: 4
-                    border.color: "#4a5568"
+                    border.color: "#384458"
                 }
-                onAccepted: {
-                    if (diagramModel && newTaskDialog.itemId) {
-                        diagramModel.createTaskFromText(text, newTaskDialog.itemId)
-                    }
-                    newTaskDialog.close()
-                }
-                Component.onCompleted: {
-                    forceActiveFocus()
-                }
+                onTextChanged: newTaskDialog.textValue = text
+                onAccepted: newTaskButtons.accept()
             }
+        }
 
-            RowLayout {
-                Layout.alignment: Qt.AlignRight
-                spacing: 8
-
-                Button {
-                    text: "Create"
-                    onClicked: {
-                        if (diagramModel && newTaskDialog.itemId) {
-                            diagramModel.createTaskFromText(newTaskInput.text, newTaskDialog.itemId)
-                        }
-                        newTaskDialog.close()
-                    }
+        footer: DialogButtonBox {
+            id: newTaskButtons
+            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+            onAccepted: {
+                if (diagramModel && newTaskDialog.pendingItemId.length > 0) {
+                    diagramModel.createTaskFromText(newTaskDialog.textValue, newTaskDialog.pendingItemId)
                 }
-
-                Button {
-                    text: "Cancel"
-                    onClicked: newTaskDialog.close()
-                }
+                newTaskDialog.close()
             }
+            onRejected: newTaskDialog.close()
+        }
+
+        onClosed: {
+            newTaskDialog.pendingItemId = ""
+            newTaskDialog.textValue = ""
         }
     }
 
@@ -595,26 +592,58 @@ ApplicationWindow {
         spacing: 12
 
         RowLayout {
-            spacing: 8
+            Layout.fillWidth: true
+            spacing: 12
 
             Label {
                 text: "ActionDraw"
-                font.pixelSize: 18
                 color: "#f5f6f8"
+                font.pixelSize: 20
             }
 
-            Item {
-                Layout.fillWidth: true
+            Item { Layout.fillWidth: true }
+
+            Button {
+                text: "Add Box"
+                onClicked: {
+                    var centerX = viewport.contentX + viewport.width / 2
+                    var centerY = viewport.contentY + viewport.height / 2
+                    boxDialog.editingItemId = ""
+                    boxDialog.targetX = centerX
+                    boxDialog.targetY = centerY
+                    boxDialog.textValue = ""
+                    boxDialog.open()
+                }
             }
 
             Button {
-                text: "Clear All"
+                text: "Add Task"
+                enabled: taskModel !== null
                 onClicked: {
-                    if (diagramModel) {
-                        for (var i = diagramModel.count - 1; i >= 0; i--) {
-                            var itemId = diagramModel.data(diagramModel.index(i, 0), diagramModel.IdRole)
-                            diagramModel.removeItem(itemId)
-                        }
+                    if (!taskModel)
+                        return
+                    var centerX = viewport.contentX + viewport.width / 2
+                    var centerY = viewport.contentY + viewport.height / 2
+                    taskDialog.targetX = centerX
+                    taskDialog.targetY = centerY
+                    taskDialog.open()
+                }
+            }
+
+            Button {
+                text: "Connect All"
+                onClicked: diagramModel && diagramModel.connectAllItems()
+            }
+
+            Button {
+                text: "Clear"
+                onClicked: {
+                    if (!diagramModel)
+                        return
+                    for (var i = diagramModel.count - 1; i >= 0; --i) {
+                        var idx = diagramModel.index(i, 0)
+                        var itemId = diagramModel.data(idx, diagramModel.IdRole)
+                        diagramModel.removeItem(itemId)
                     }
                 }
             }
@@ -624,44 +653,45 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.fillHeight: true
             radius: 10
-            color: "#161a20"
-            border.color: "#222832"
+            color: "#161c24"
+            border.color: "#243040"
 
             Flickable {
-                id: flickable
+                id: viewport
                 anchors.fill: parent
-                anchors.margins: 8
-                contentWidth: Math.max(width, canvas.width)
-                contentHeight: Math.max(height, canvas.height)
+                contentWidth: root.boardSize
+                contentHeight: root.boardSize
                 clip: true
 
-                property real canvasWidth: 2000
-                property real canvasHeight: 2000
+                Item {
+                    id: diagramLayer
+                    width: root.boardSize
+                    height: root.boardSize
 
-                Canvas {
-                    id: canvas
-                    width: flickable.canvasWidth
-                    height: flickable.canvasHeight
+                    Canvas {
+                        id: edgeCanvas
+                        anchors.fill: parent
+                        z: 0
 
-                    property var edges: diagramModel ? diagramModel.edges : []
+                        onPaint: {
+                            var ctx = getContext("2d")
+                            ctx.clearRect(0, 0, width, height)
+                            if (!diagramModel)
+                                return
 
-                    onEdgesChanged: requestPaint()
-                    onPaint: {
-                        var ctx = getContext("2d")
-                        ctx.clearRect(0, 0, width, height)
+                            ctx.strokeStyle = "#4a5568"
+                            ctx.lineWidth = 2
 
-                        if (!diagramModel) return
+                            var edges = diagramModel.edges
+                            for (var i = 0; i < edges.length; ++i) {
+                                var edge = edges[i]
+                                var fromItem = diagramModel.getItemSnapshot(edge.fromId)
+                                var toItem = diagramModel.getItemSnapshot(edge.toId)
+                                if (!fromItem.x && fromItem.x !== 0)
+                                    continue
+                                if (!toItem.x && toItem.x !== 0)
+                                    continue
 
-                        // Draw edges
-                        ctx.strokeStyle = "#4a5568"
-                        ctx.lineWidth = 2
-
-                        for (var i = 0; i < edges.length; i++) {
-                            var edge = edges[i]
-                            var fromItem = getItemById(edge.fromId)
-                            var toItem = getItemById(edge.toId)
-
-                            if (fromItem && toItem) {
                                 var fromX = fromItem.x + fromItem.width / 2
                                 var fromY = fromItem.y + fromItem.height / 2
                                 var toX = toItem.x + toItem.width / 2
@@ -672,131 +702,56 @@ ApplicationWindow {
                                 ctx.lineTo(toX, toY)
                                 ctx.stroke()
 
-                                // Draw arrowhead
                                 var angle = Math.atan2(toY - fromY, toX - fromX)
-                                var arrowLength = 10
+                                var arrowSize = 10
                                 var arrowAngle = Math.PI / 6
 
                                 ctx.beginPath()
                                 ctx.moveTo(toX, toY)
                                 ctx.lineTo(
-                                    toX - arrowLength * Math.cos(angle - arrowAngle),
-                                    toY - arrowLength * Math.sin(angle - arrowAngle)
+                                    toX - arrowSize * Math.cos(angle - arrowAngle),
+                                    toY - arrowSize * Math.sin(angle - arrowAngle)
                                 )
                                 ctx.lineTo(
-                                    toX - arrowLength * Math.cos(angle + arrowAngle),
-                                    toY - arrowLength * Math.sin(angle + arrowAngle)
+                                    toX - arrowSize * Math.cos(angle + arrowAngle),
+                                    toY - arrowSize * Math.sin(angle + arrowAngle)
                                 )
                                 ctx.closePath()
                                 ctx.fillStyle = "#4a5568"
                                 ctx.fill()
                             }
-                        }
 
-                        // Draw temporary edge if drawing
-                        if (diagramModel && diagramModel.edgeDrawingFrom) {
-                            var fromItem = getItemById(diagramModel.edgeDrawingFrom)
-                            if (fromItem) {
-                                var fromX = fromItem.x + fromItem.width / 2
-                                var fromY = fromItem.y + fromItem.height / 2
-                                var toX = edgeDrawingMouseArea.mouseX + flickable.contentX
-                                var toY = edgeDrawingMouseArea.mouseY + flickable.contentY
-
-                                ctx.strokeStyle = "#82c3a5"
-                                ctx.lineWidth = 2
-                                ctx.setLineDash([5, 5])
-                                ctx.beginPath()
-                                ctx.moveTo(fromX, fromY)
-                                ctx.lineTo(toX, toY)
-                                ctx.stroke()
-                                ctx.setLineDash([])
-                            }
-                        }
-                    }
-
-                    function getItemById(itemId) {
-                        if (!diagramModel) return null
-                        for (var i = 0; i < diagramModel.count; i++) {
-                            var idx = diagramModel.index(i, 0)
-                            if (diagramModel.data(idx, diagramModel.IdRole) === itemId) {
-                                return {
-                                    x: diagramModel.data(idx, diagramModel.XRole),
-                                    y: diagramModel.data(idx, diagramModel.YRole),
-                                    width: diagramModel.data(idx, diagramModel.WidthRole),
-                                    height: diagramModel.data(idx, diagramModel.HeightRole)
+                            if (diagramModel.edgeDrawingFrom.length > 0 && diagramModel.isDraggingEdge) {
+                                var origin = diagramModel.getItemSnapshot(diagramModel.edgeDrawingFrom)
+                                if (origin.x || origin.x === 0) {
+                                    var originX = origin.x + origin.width / 2
+                                    var originY = origin.y + origin.height / 2
+                                    ctx.setLineDash([6, 4])
+                                    ctx.strokeStyle = "#82c3a5"
+                                    ctx.beginPath()
+                                    ctx.moveTo(originX, originY)
+                                    ctx.lineTo(diagramModel.edgeDragX, diagramModel.edgeDragY)
+                                    ctx.stroke()
+                                    ctx.setLineDash([])
                                 }
                             }
                         }
-                        return null
                     }
 
                     Connections {
                         target: diagramModel
-                        function onEdgesChanged() {
-                            canvas.requestPaint()
-                        }
-                        function onItemsChanged() {
-                            canvas.requestPaint()
-                        }
+                        function onEdgesChanged() { edgeCanvas.requestPaint() }
+                        function onItemsChanged() { edgeCanvas.requestPaint() }
                     }
 
                     MouseArea {
-                        id: canvasMouseArea
-                        anchors.fill: parent
-                        acceptedButtons: Qt.LeftButton | Qt.RightButton
-
-                        onDoubleClicked: function(mouse) {
-                            var globalX = mouse.x + flickable.contentX
-                            var globalY = mouse.y + flickable.contentY
-                            doubleClickDialog.clickX = globalX
-                            doubleClickDialog.clickY = globalY
-                            doubleClickDialog.open()
-                        }
-                    }
-
-                    MouseArea {
-                        id: edgeDrawingMouseArea
                         anchors.fill: parent
                         acceptedButtons: Qt.LeftButton
-                        propagateComposedEvents: true
-                        z: -1
-                        enabled: diagramModel && diagramModel.edgeDrawingFrom
-                        hoverEnabled: true
-
-                        onPressed: function(mouse) {
-                            if (diagramModel && diagramModel.edgeDrawingFrom) {
-                                var globalX = mouse.x + flickable.contentX
-                                var globalY = mouse.y + flickable.contentY
-                                var itemId = getItemAt(globalX, globalY)
-                                if (itemId && itemId !== diagramModel.edgeDrawingFrom) {
-                                    diagramModel.finishEdgeDrawing(itemId)
-                                } else {
-                                    diagramModel.cancelEdgeDrawing()
-                                }
-                                canvas.requestPaint()
-                            }
-                        }
-
-                        onPositionChanged: function(mouse) {
-                            if (diagramModel && diagramModel.edgeDrawingFrom) {
-                                canvas.requestPaint()
-                            }
-                        }
-
-                        function getItemAt(x, y) {
-                            if (!diagramModel) return ""
-                            for (var i = diagramModel.count - 1; i >= 0; i--) {
-                                var idx = diagramModel.index(i, 0)
-                                var itemX = diagramModel.data(idx, diagramModel.XRole)
-                                var itemY = diagramModel.data(idx, diagramModel.YRole)
-                                var itemW = diagramModel.data(idx, diagramModel.WidthRole)
-                                var itemH = diagramModel.data(idx, diagramModel.HeightRole)
-
-                                if (x >= itemX && x <= itemX + itemW && y >= itemY && y <= itemY + itemH) {
-                                    return diagramModel.data(idx, diagramModel.IdRole)
-                                }
-                            }
-                            return ""
+                        onDoubleClicked: function(mouse) {
+                            var pos = mapToItem(diagramLayer, mouse.x, mouse.y)
+                            addDialog.targetX = pos.x
+                            addDialog.targetY = pos.y
+                            addDialog.open()
                         }
                     }
 
@@ -805,6 +760,11 @@ ApplicationWindow {
 
                         Rectangle {
                             id: itemRect
+                            property string itemId: model.itemId
+                            property string itemType: model.itemType
+                            property int taskIndex: model.taskIndex
+                            property real dragStartX: 0
+                            property real dragStartY: 0
                             x: model.x
                             y: model.y
                             width: model.width
@@ -813,151 +773,136 @@ ApplicationWindow {
                             color: model.color
                             border.color: "#2e3744"
                             border.width: 1
-                            opacity: 0.9
+                            z: 5
 
-                            required property var model
-
-                            Drag.active: dragMouseArea.drag.active
-                            Drag.hotSpot.x: width / 2
-                            Drag.hotSpot.y: height / 2
-
-                            MouseArea {
-                                id: dragMouseArea
-                                anchors.fill: parent
-                                drag.target: parent
+                            DragHandler {
+                                id: itemDrag
+                                target: null
                                 acceptedButtons: Qt.LeftButton
-                                cursorShape: drag.active ? Qt.ClosedHandCursor : Qt.OpenHandCursor
-
-                                onPressed: function(mouse) {
-                                    // Check if clicking on edge button
-                                    var edgeButtonX = width - 30
-                                    var edgeButtonY = 5
-                                    if (mouse.x >= edgeButtonX && mouse.x <= edgeButtonX + 25 &&
-                                        mouse.y >= edgeButtonY && mouse.y <= edgeButtonY + 25) {
-                                        // Start edge drawing
-                                        if (diagramModel) {
-                                            diagramModel.startEdgeDrawing(model.itemId)
-                                            canvas.requestPaint()
-                                        }
-                                        mouse.accepted = false
+                                onActiveChanged: {
+                                    if (!diagramModel)
                                         return
+                                    if (active) {
+                                        itemRect.dragStartX = model.x
+                                        itemRect.dragStartY = model.y
                                     }
                                 }
-
-                                onReleased: function(mouse) {
-                                    if (drag.active) {
-                                        // Update position in model
-                                        var newX = itemRect.x
-                                        var newY = itemRect.y
-                                        if (diagramModel) {
-                                            diagramModel.moveItem(model.itemId, newX, newY)
-                                        }
-                                    }
-                                }
-
-                                onDoubleClicked: function(mouse) {
-                                    // Edit text
-                                    var edgeButtonX = width - 30
-                                    var edgeButtonY = 5
-                                    var deleteButtonX = width - 30
-                                    var deleteButtonY = height - 30
-                                    if ((mouse.x >= edgeButtonX && mouse.x <= edgeButtonX + 25 &&
-                                         mouse.y >= edgeButtonY && mouse.y <= edgeButtonY + 25) ||
-                                        (mouse.x >= deleteButtonX && mouse.x <= deleteButtonX + 25 &&
-                                         mouse.y >= deleteButtonY && mouse.y <= deleteButtonY + 25)) {
+                                onTranslationChanged: {
+                                    if (!diagramModel || !active)
                                         return
-                                    }
+                                    var newX = itemRect.dragStartX + translation.x
+                                    var newY = itemRect.dragStartY + translation.y
+                                    diagramModel.moveItem(itemRect.itemId, newX, newY)
+                                    edgeCanvas.requestPaint()
+                                }
+                            }
 
-                                    if (model.itemType === "box") {
-                                        // Edit box text
-                                        boxTextDialog.itemId = model.itemId
-                                        boxTextDialog.boxX = model.x
-                                        boxTextDialog.boxY = model.y
-                                        boxTextInput.text = model.text
-                                        boxTextDialog.open()
-                                    } else if (model.itemType === "task" && model.taskIndex < 0) {
-                                        // Create new task
-                                        newTaskDialog.itemId = model.itemId
-                                        newTaskInput.text = model.text
-                                        newTaskDialog.open()
+                            TapHandler {
+                                acceptedButtons: Qt.LeftButton
+                                gesturePolicy: TapHandler.DragThreshold
+                                onDoubleTapped: {
+                                    if (itemRect.itemType === "box") {
+                                        boxDialog.editingItemId = itemRect.itemId
+                                        boxDialog.textValue = model.text
+                                        boxDialog.targetX = model.x
+                                        boxDialog.targetY = model.y
+                                        boxDialog.open()
+                                    } else if (itemRect.itemType === "task" && itemRect.taskIndex < 0) {
+                                        newTaskDialog.openWithItem(itemRect.itemId, model.text)
                                     }
                                 }
                             }
 
                             Text {
                                 anchors.centerIn: parent
+                                width: parent.width - 32
                                 text: model.text
                                 color: "#f5f6f8"
-                                font.pixelSize: 12
                                 wrapMode: Text.WordWrap
-                                width: parent.width - 40
                                 horizontalAlignment: Text.AlignHCenter
+                                font.pixelSize: 13
                             }
 
-                            // Edge button
                             Rectangle {
-                                x: parent.width - 30
-                                y: 5
-                                width: 25
-                                height: 25
+                                id: edgeHandle
+                                width: 26
+                                height: 26
                                 radius: 4
-                                color: edgeButtonMouseArea.containsMouse ? "#384050" : "#28303d"
-                                border.color: "#2e3744"
+                                anchors.top: parent.top
+                                anchors.topMargin: 6
+                                anchors.right: parent.right
+                                anchors.rightMargin: 6
+                                color: edgeDrag.active ? "#4c627f" : "#2a3444"
+                                border.color: edgeDrag.active ? "#74a0d9" : "#3b485c"
+                                property point dragPoint: Qt.point(model.x, model.y)
 
                                 Text {
                                     anchors.centerIn: parent
                                     text: "→"
-                                    color: "#9aa6b8"
-                                    font.pixelSize: 14
+                                    color: "#d2d9e7"
+                                    font.pixelSize: 16
                                 }
 
-                                MouseArea {
-                                    id: edgeButtonMouseArea
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    onClicked: {
-                                        if (diagramModel) {
-                                            diagramModel.startEdgeDrawing(model.itemId)
-                                            canvas.requestPaint()
+                                DragHandler {
+                                    id: edgeDrag
+                                    target: null
+                                    acceptedButtons: Qt.LeftButton
+                                    onActiveChanged: {
+                                        if (!diagramModel)
+                                            return
+                                        if (active) {
+                                            var startPos = edgeHandle.mapToItem(diagramLayer, edgeHandle.width / 2, edgeHandle.height / 2)
+                                            edgeHandle.dragPoint = Qt.point(startPos.x, startPos.y)
+                                            diagramModel.startEdgeDrawing(itemRect.itemId)
+                                            diagramModel.updateEdgeDragPosition(edgeHandle.dragPoint.x, edgeHandle.dragPoint.y)
+                                            edgeCanvas.requestPaint()
+                                        } else {
+                                            var dropId = diagramModel.itemIdAt(edgeHandle.dragPoint.x, edgeHandle.dragPoint.y)
+                                            if (dropId && dropId !== itemRect.itemId) {
+                                                diagramModel.finishEdgeDrawing(dropId)
+                                            } else {
+                                                diagramModel.cancelEdgeDrawing()
+                                            }
+                                            edgeCanvas.requestPaint()
                                         }
+                                    }
+                                    onCentroidChanged: {
+                                        if (!diagramModel || !active)
+                                            return
+                                        var pos = itemRect.mapToItem(diagramLayer, centroid.position.x, centroid.position.y)
+                                        edgeHandle.dragPoint = Qt.point(pos.x, pos.y)
+                                        diagramModel.updateEdgeDragPosition(edgeHandle.dragPoint.x, edgeHandle.dragPoint.y)
+                                        edgeCanvas.requestPaint()
                                     }
                                 }
                             }
 
-                            // Delete button
                             Rectangle {
-                                x: parent.width - 30
-                                y: parent.height - 30
-                                width: 25
-                                height: 25
+                                id: deleteButton
+                                width: 24
+                                height: 24
                                 radius: 4
-                                color: deleteButtonMouseArea.containsMouse ? "#5a2020" : "#3a1010"
-                                border.color: "#4a2020"
+                                anchors.right: parent.right
+                                anchors.rightMargin: 6
+                                anchors.bottom: parent.bottom
+                                anchors.bottomMargin: 6
+                                color: "#3a1010"
+                                border.color: "#612020"
 
                                 Text {
                                     anchors.centerIn: parent
                                     text: "×"
-                                    color: "#ff6b6b"
+                                    color: "#ff7b7b"
                                     font.pixelSize: 16
                                 }
 
-                                MouseArea {
-                                    id: deleteButtonMouseArea
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    onClicked: {
+                                TapHandler {
+                                    acceptedButtons: Qt.LeftButton
+                                    onTapped: {
                                         if (diagramModel) {
-                                            diagramModel.removeItem(model.itemId)
+                                            diagramModel.removeItem(itemRect.itemId)
                                         }
                                     }
-                                }
-                            }
-
-                            Connections {
-                                target: diagramModel
-                                function onItemsChanged() {
-                                    itemRect.x = model.x
-                                    itemRect.y = model.y
                                 }
                             }
                         }
@@ -971,13 +916,27 @@ ApplicationWindow {
 
 
 def create_actiondraw_window(diagram_model: DiagramModel, task_model) -> QQmlApplicationEngine:
-    """Create and return an ActionDraw window."""
+    """Create and return a QQmlApplicationEngine hosting the ActionDraw UI."""
+
     engine = QQmlApplicationEngine()
     engine.rootContext().setContextProperty("diagramModel", diagram_model)
     engine.rootContext().setContextProperty("taskModel", task_model)
-    # Convert string to bytes for loadData
-    qml_bytes = ACTIONDRAW_QML.encode('utf-8')
-    engine.loadData(qml_bytes)
-
+    engine.loadData(ACTIONDRAW_QML.encode("utf-8"))
     return engine
+
+
+def main() -> int:
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication(sys.argv)
+
+    model = DiagramModel()
+    engine = create_actiondraw_window(model, None)
+    if engine.rootObjects():
+        engine.rootObjects()[0].showWindow()
+    return app.exec()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
 
