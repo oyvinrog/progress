@@ -2,6 +2,8 @@
 
 A progress tracking task list with time estimation using PySide6 + QML.
 
+![Screenshot](assets/screenshot.png)
+
 ## Features
 
 - ✓ Tasks with checkboxes to mark completion
