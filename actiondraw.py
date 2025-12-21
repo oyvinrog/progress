@@ -29,6 +29,10 @@ class DiagramItemType(Enum):
 
     BOX = "box"
     TASK = "task"
+    DATABASE = "database"
+    SERVER = "server"
+    CLOUD = "cloud"
+    NOTE = "note"
 
 
 @dataclass
@@ -44,6 +48,7 @@ class DiagramItem:
     text: str = ""
     task_index: int = -1
     color: str = "#4a9eff"
+    text_color: str = "#f5f6f8"
 
 
 @dataclass
@@ -53,6 +58,50 @@ class DiagramEdge:
     id: str
     from_id: str
     to_id: str
+
+
+ITEM_PRESETS: Dict[str, Dict[str, Any]] = {
+    "box": {
+        "type": DiagramItemType.BOX,
+        "width": 120.0,
+        "height": 60.0,
+        "color": "#4a9eff",
+        "text": "Box",
+        "text_color": "#f5f6f8",
+    },
+    "database": {
+        "type": DiagramItemType.DATABASE,
+        "width": 160.0,
+        "height": 90.0,
+        "color": "#c18f5e",
+        "text": "Database",
+        "text_color": "#1b2028",
+    },
+    "server": {
+        "type": DiagramItemType.SERVER,
+        "width": 150.0,
+        "height": 90.0,
+        "color": "#3d495c",
+        "text": "Server",
+        "text_color": "#f5f6f8",
+    },
+    "cloud": {
+        "type": DiagramItemType.CLOUD,
+        "width": 170.0,
+        "height": 100.0,
+        "color": "#6a9ddb",
+        "text": "Cloud",
+        "text_color": "#1b2028",
+    },
+    "note": {
+        "type": DiagramItemType.NOTE,
+        "width": 160.0,
+        "height": 110.0,
+        "color": "#f7e07b",
+        "text": "Note",
+        "text_color": "#1b2028",
+    },
+}
 
 
 class DiagramModel(QAbstractListModel):
@@ -67,6 +116,7 @@ class DiagramModel(QAbstractListModel):
     TextRole = Qt.UserRole + 7
     TaskIndexRole = Qt.UserRole + 8
     ColorRole = Qt.UserRole + 9
+    TextColorRole = Qt.UserRole + 10
 
     itemsChanged = Signal()
     edgesChanged = Signal()
@@ -81,6 +131,40 @@ class DiagramModel(QAbstractListModel):
         self._edge_drag_x: float = 0.0
         self._edge_drag_y: float = 0.0
         self._is_dragging_edge: bool = False
+
+    def _next_id(self, prefix: str) -> str:
+        return f"{prefix}_{next(self._id_source)}"
+
+    def _build_item_from_preset(
+        self,
+        preset_name: str,
+        x: float,
+        y: float,
+        text: Optional[str] = None,
+    ) -> Optional[DiagramItem]:
+        preset = ITEM_PRESETS.get(preset_name.lower())
+        if not preset:
+            return None
+
+        label = text if text and text.strip() else preset["text"]
+        item_id = self._next_id(preset_name.lower())
+        return DiagramItem(
+            id=item_id,
+            item_type=preset["type"],
+            x=x,
+            y=y,
+            width=float(preset["width"]),
+            height=float(preset["height"]),
+            text=label,
+            color=str(preset["color"]),
+            text_color=str(preset["text_color"]),
+        )
+
+    def _append_item(self, item: DiagramItem) -> None:
+        self.beginInsertRows(QModelIndex(), len(self._items), len(self._items))
+        self._items.append(item)
+        self.endInsertRows()
+        self.itemsChanged.emit()
 
     # --- Qt model overrides -------------------------------------------------
     def rowCount(self, parent: QModelIndex | None = QModelIndex()) -> int:  # type: ignore[override]
@@ -109,6 +193,8 @@ class DiagramModel(QAbstractListModel):
             return item.task_index
         if role == self.ColorRole:
             return item.color
+        if role == self.TextColorRole:
+            return item.text_color
         return None
 
     def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
@@ -122,6 +208,7 @@ class DiagramModel(QAbstractListModel):
             self.TextRole: b"text",
             self.TaskIndexRole: b"taskIndex",
             self.ColorRole: b"color",
+            self.TextColorRole: b"textColor",
         }
 
     # --- Properties exposed to QML -----------------------------------------
@@ -155,20 +242,26 @@ class DiagramModel(QAbstractListModel):
     # --- Item management ----------------------------------------------------
     @Slot(float, float, str, result=str)
     def addBox(self, x: float, y: float, text: str = "") -> str:
-        item_id = f"box_{next(self._id_source)}"
-        item = DiagramItem(
-            id=item_id,
-            item_type=DiagramItemType.BOX,
-            x=x,
-            y=y,
-            text=text,
-            color="#4a9eff",
-        )
-        self.beginInsertRows(QModelIndex(), len(self._items), len(self._items))
-        self._items.append(item)
-        self.endInsertRows()
-        self.itemsChanged.emit()
-        return item_id
+        item = self._build_item_from_preset("box", x, y, text)
+        if not item:
+            return ""
+        self._append_item(item)
+        return item.id
+
+    def _add_preset(self, preset: str, x: float, y: float, text: str = "") -> str:
+        item = self._build_item_from_preset(preset, x, y, text)
+        if not item:
+            return ""
+        self._append_item(item)
+        return item.id
+
+    @Slot(str, float, float, result=str)
+    def addPresetItem(self, preset: str, x: float, y: float) -> str:
+        return self._add_preset(preset, x, y, "")
+
+    @Slot(str, float, float, str, result=str)
+    def addPresetItemWithText(self, preset: str, x: float, y: float, text: str) -> str:
+        return self._add_preset(preset, x, y, text)
 
     @Slot(int, float, float, result=str)
     def addTask(self, task_index: int, x: float, y: float) -> str:
@@ -191,11 +284,9 @@ class DiagramModel(QAbstractListModel):
             text=title,
             task_index=task_index,
             color="#82c3a5",
+            text_color="#1b2028" if title else "#f5f6f8",
         )
-        self.beginInsertRows(QModelIndex(), len(self._items), len(self._items))
-        self._items.append(item)
-        self.endInsertRows()
-        self.itemsChanged.emit()
+        self._append_item(item)
         return item_id
 
     @Slot(str, float, float)
@@ -220,6 +311,21 @@ class DiagramModel(QAbstractListModel):
                 item.text = text
                 index = self.index(row, 0)
                 self.dataChanged.emit(index, index, [self.TextRole])
+                self.itemsChanged.emit()
+                return
+
+    @Slot(str, float, float)
+    def resizeItem(self, item_id: str, width: float, height: float) -> None:
+        new_width = max(40.0, width)
+        new_height = max(30.0, height)
+        for row, item in enumerate(self._items):
+            if item.id == item_id:
+                if item.width == new_width and item.height == new_height:
+                    return
+                item.width = new_width
+                item.height = new_height
+                index = self.index(row, 0)
+                self.dataChanged.emit(index, index, [self.WidthRole, self.HeightRole])
                 self.itemsChanged.emit()
                 return
 
@@ -302,11 +408,18 @@ class DiagramModel(QAbstractListModel):
                 item.item_type = DiagramItemType.TASK
                 item.color = "#82c3a5"
                 item.text = text
+                item.text_color = "#1b2028"
                 index = self.index(row, 0)
                 self.dataChanged.emit(
                     index,
                     index,
-                    [self.TaskIndexRole, self.TypeRole, self.ColorRole, self.TextRole],
+                    [
+                        self.TaskIndexRole,
+                        self.TypeRole,
+                        self.ColorRole,
+                        self.TextRole,
+                        self.TextColorRole,
+                    ],
                 )
                 self.itemsChanged.emit()
                 break
@@ -379,6 +492,115 @@ ApplicationWindow {
     }
 
     property int boardSize: 2000
+    property bool showGrid: true
+    property bool snapToGrid: true
+    property real gridSpacing: 60
+    property real zoomLevel: 1.0
+    property real minZoom: 0.4
+    property real maxZoom: 2.5
+    readonly property var presetDefaults: ({
+        "box": { "text": "Box", "title": "Create Box" },
+        "database": { "text": "Database", "title": "Create Database" },
+        "server": { "text": "Server", "title": "Create Server" },
+        "cloud": { "text": "Cloud", "title": "Create Cloud" },
+        "note": { "text": "Note", "title": "Create Note" }
+    })
+
+    function clampZoom(value) {
+        if (value < root.minZoom)
+            return root.minZoom
+        if (value > root.maxZoom)
+            return root.maxZoom
+        return value
+    }
+
+    function snapValue(value) {
+        if (!root.snapToGrid)
+            return value
+        return Math.round(value / root.gridSpacing) * root.gridSpacing
+    }
+
+    function snapPoint(point) {
+        return Qt.point(snapValue(point.x), snapValue(point.y))
+    }
+
+    function diagramCenterPoint() {
+        var cx = (viewport.contentX + viewport.width / 2) / root.zoomLevel
+        var cy = (viewport.contentY + viewport.height / 2) / root.zoomLevel
+        return snapPoint(Qt.point(cx, cy))
+    }
+
+    function openPresetDialog(preset, point, itemId, initialText) {
+        if (!root.presetDefaults[preset])
+            preset = "box"
+        var defaults = root.presetDefaults[preset]
+        boxDialog.editingItemId = itemId || ""
+        boxDialog.presetName = preset
+        boxDialog.targetX = snapValue(point.x)
+        boxDialog.targetY = snapValue(point.y)
+        boxDialog.textValue = initialText !== undefined ? initialText : (defaults && defaults.text ? defaults.text : "")
+        boxDialog.open()
+    }
+
+    function addPresetAtCenter(preset) {
+        openPresetDialog(preset, diagramCenterPoint(), "", undefined)
+    }
+
+    function addBoxAtCenter() {
+        addPresetAtCenter("box")
+    }
+
+    function presetTitle(preset) {
+        var defaults = root.presetDefaults[preset]
+        if (defaults && defaults.title)
+            return defaults.title
+        return "Create Item"
+    }
+
+    function setZoomInternal(newZoom, focusX, focusY) {
+        var clamped = clampZoom(newZoom)
+        if (Math.abs(clamped - root.zoomLevel) < 0.0001)
+            return
+        var fx = focusX === undefined ? viewport.width / 2 : focusX
+        var fy = focusY === undefined ? viewport.height / 2 : focusY
+        var focusContentX = viewport.contentX + fx
+        var focusContentY = viewport.contentY + fy
+        var focusDiagramX = focusContentX / root.zoomLevel
+        var focusDiagramY = focusContentY / root.zoomLevel
+        root.zoomLevel = clamped
+        var newContentX = focusDiagramX * root.zoomLevel - fx
+        var newContentY = focusDiagramY * root.zoomLevel - fy
+        var maxX = Math.max(0, viewport.contentWidth - viewport.width)
+        var maxY = Math.max(0, viewport.contentHeight - viewport.height)
+        viewport.contentX = Math.min(Math.max(newContentX, 0), maxX)
+        viewport.contentY = Math.min(Math.max(newContentY, 0), maxY)
+        if (gridCanvas)
+            gridCanvas.requestPaint()
+        if (edgeCanvas)
+            edgeCanvas.requestPaint()
+    }
+
+    function applyZoomFactor(factor, focusX, focusY) {
+        setZoomInternal(root.zoomLevel * factor, focusX, focusY)
+    }
+
+    function setZoomDirect(value, focusX, focusY) {
+        setZoomInternal(value, focusX, focusY)
+    }
+
+    function centerOnPoint(x, y) {
+        var targetX = x * root.zoomLevel - viewport.width / 2
+        var targetY = y * root.zoomLevel - viewport.height / 2
+        var maxX = Math.max(0, viewport.contentWidth - viewport.width)
+        var maxY = Math.max(0, viewport.contentHeight - viewport.height)
+        viewport.contentX = Math.min(Math.max(targetX, 0), maxX)
+        viewport.contentY = Math.min(Math.max(targetY, 0), maxY)
+    }
+
+    function resetView() {
+        setZoomInternal(1.0)
+        centerOnPoint(root.boardSize / 2, root.boardSize / 2)
+    }
 
     Dialog {
         id: addDialog
@@ -388,18 +610,46 @@ ApplicationWindow {
         property real targetY: 0
 
         contentItem: ColumnLayout {
-            width: 280
+            width: 320
             spacing: 12
 
             Button {
                 text: "Box"
                 onClicked: {
                     addDialog.close()
-                    boxDialog.editingItemId = ""
-                    boxDialog.targetX = addDialog.targetX
-                    boxDialog.targetY = addDialog.targetY
-                    boxDialog.textValue = ""
-                    boxDialog.open()
+                    root.openPresetDialog("box", Qt.point(addDialog.targetX, addDialog.targetY), "", undefined)
+                }
+            }
+
+            Button {
+                text: "Database"
+                onClicked: {
+                    addDialog.close()
+                    root.openPresetDialog("database", Qt.point(addDialog.targetX, addDialog.targetY), "", undefined)
+                }
+            }
+
+            Button {
+                text: "Server"
+                onClicked: {
+                    addDialog.close()
+                    root.openPresetDialog("server", Qt.point(addDialog.targetX, addDialog.targetY), "", undefined)
+                }
+            }
+
+            Button {
+                text: "Cloud"
+                onClicked: {
+                    addDialog.close()
+                    root.openPresetDialog("cloud", Qt.point(addDialog.targetX, addDialog.targetY), "", undefined)
+                }
+            }
+
+            Button {
+                text: "Note"
+                onClicked: {
+                    addDialog.close()
+                    root.openPresetDialog("note", Qt.point(addDialog.targetX, addDialog.targetY), "", undefined)
                 }
             }
 
@@ -409,8 +659,8 @@ ApplicationWindow {
                 onClicked: {
                     addDialog.close()
                     if (taskModel) {
-                        taskDialog.targetX = addDialog.targetX
-                        taskDialog.targetY = addDialog.targetY
+                        taskDialog.targetX = snapValue(addDialog.targetX)
+                        taskDialog.targetY = snapValue(addDialog.targetY)
                         taskDialog.open()
                     }
                 }
@@ -430,7 +680,8 @@ ApplicationWindow {
         property real targetY: 0
         property string editingItemId: ""
         property string textValue: ""
-        title: editingItemId.length === 0 ? "Create Box" : "Edit Item"
+        property string presetName: "box"
+        title: boxDialog.editingItemId.length === 0 ? root.presetTitle(boxDialog.presetName) : "Edit Label"
 
         onOpened: boxTextField.forceActiveFocus()
 
@@ -462,7 +713,12 @@ ApplicationWindow {
                 if (!diagramModel)
                     return
                 if (boxDialog.editingItemId.length === 0) {
-                    diagramModel.addBox(boxDialog.targetX, boxDialog.targetY, boxDialog.textValue)
+                    diagramModel.addPresetItemWithText(
+                        boxDialog.presetName,
+                        snapValue(boxDialog.targetX),
+                        snapValue(boxDialog.targetY),
+                        boxDialog.textValue
+                    )
                 } else {
                     diagramModel.setItemText(boxDialog.editingItemId, boxDialog.textValue)
                 }
@@ -474,6 +730,7 @@ ApplicationWindow {
         onClosed: {
             boxDialog.textValue = ""
             boxDialog.editingItemId = ""
+            boxDialog.presetName = "box"
         }
     }
 
@@ -519,7 +776,11 @@ ApplicationWindow {
                         hoverEnabled: true
                         onClicked: {
                             if (diagramModel) {
-                                diagramModel.addTask(index, taskDialog.targetX, taskDialog.targetY)
+                                diagramModel.addTask(
+                                    index,
+                                    snapValue(taskDialog.targetX),
+                                    snapValue(taskDialog.targetY)
+                                )
                             }
                             taskDialog.close()
                         }
@@ -601,18 +862,37 @@ ApplicationWindow {
                 font.pixelSize: 20
             }
 
-            Item { Layout.fillWidth: true }
-
             Button {
                 text: "Add Box"
-                onClicked: {
-                    var centerX = viewport.contentX + viewport.width / 2
-                    var centerY = viewport.contentY + viewport.height / 2
-                    boxDialog.editingItemId = ""
-                    boxDialog.targetX = centerX
-                    boxDialog.targetY = centerY
-                    boxDialog.textValue = ""
-                    boxDialog.open()
+                onClicked: root.addBoxAtCenter()
+            }
+
+            Button {
+                id: addNodeButton
+                text: "Add Node"
+                onClicked: nodeMenu.open()
+            }
+
+            Menu {
+                id: nodeMenu
+                parent: addNodeButton
+                y: addNodeButton.height
+
+                MenuItem {
+                    text: "Database"
+                    onTriggered: root.addPresetAtCenter("database")
+                }
+                MenuItem {
+                    text: "Server"
+                    onTriggered: root.addPresetAtCenter("server")
+                }
+                MenuItem {
+                    text: "Cloud"
+                    onTriggered: root.addPresetAtCenter("cloud")
+                }
+                MenuItem {
+                    text: "Note"
+                    onTriggered: root.addPresetAtCenter("note")
                 }
             }
 
@@ -622,10 +902,9 @@ ApplicationWindow {
                 onClicked: {
                     if (!taskModel)
                         return
-                    var centerX = viewport.contentX + viewport.width / 2
-                    var centerY = viewport.contentY + viewport.height / 2
-                    taskDialog.targetX = centerX
-                    taskDialog.targetY = centerY
+                    var center = diagramCenterPoint()
+                    taskDialog.targetX = center.x
+                    taskDialog.targetY = center.y
                     taskDialog.open()
                 }
             }
@@ -645,6 +924,66 @@ ApplicationWindow {
                         var itemId = diagramModel.data(idx, diagramModel.IdRole)
                         diagramModel.removeItem(itemId)
                     }
+                    resetView()
+                }
+            }
+
+            Item { Layout.fillWidth: true }
+
+            CheckBox {
+                text: "Grid"
+                checked: root.showGrid
+                onToggled: root.showGrid = checked
+                indicator.width: 18
+                indicator.height: 18
+                palette.text: "#f5f6f8"
+            }
+
+            CheckBox {
+                text: "Snap"
+                checked: root.snapToGrid
+                onToggled: root.snapToGrid = checked
+                indicator.width: 18
+                indicator.height: 18
+                palette.text: "#f5f6f8"
+            }
+
+            RowLayout {
+                spacing: 6
+                Layout.alignment: Qt.AlignVCenter
+
+                Label {
+                    text: "Zoom"
+                    color: "#f5f6f8"
+                }
+
+                Button {
+                    text: "-"
+                    onClicked: root.applyZoomFactor(0.9, viewport.width / 2, viewport.height / 2)
+                }
+
+                Slider {
+                    id: zoomSlider
+                    Layout.preferredWidth: 140
+                    from: root.minZoom
+                    to: root.maxZoom
+                    stepSize: 0.01
+                    value: root.zoomLevel
+                    onValueChanged: {
+                        if (Math.abs(root.zoomLevel - value) > 0.0001) {
+                            root.setZoomDirect(value, viewport.width / 2, viewport.height / 2)
+                        }
+                    }
+                }
+
+                Button {
+                    text: "+"
+                    onClicked: root.applyZoomFactor(1.1, viewport.width / 2, viewport.height / 2)
+                }
+
+                Button {
+                    text: "Reset"
+                    onClicked: root.resetView()
                 }
             }
         }
@@ -659,19 +998,78 @@ ApplicationWindow {
             Flickable {
                 id: viewport
                 anchors.fill: parent
-                contentWidth: root.boardSize
-                contentHeight: root.boardSize
+                contentWidth: root.boardSize * root.zoomLevel
+                contentHeight: root.boardSize * root.zoomLevel
                 clip: true
+
+                WheelHandler {
+                    target: null
+                    acceptedModifiers: Qt.ControlModifier
+                    onWheel: {
+                        var delta = wheel.angleDelta.y / 120
+                        if (delta === 0)
+                            return
+                        var factor = Math.pow(1.1, delta)
+                        root.applyZoomFactor(factor, wheel.x, wheel.y)
+                    }
+                }
+
+                PinchHandler {
+                    id: viewportPinch
+                    target: null
+                    property real lastScale: 1.0
+                    onActiveChanged: {
+                        if (active)
+                            lastScale = 1.0
+                    }
+                    onScaleChanged: {
+                        if (!active)
+                            return
+                        var factor = scale / lastScale
+                        root.applyZoomFactor(factor, centroid.position.x, centroid.position.y)
+                        lastScale = scale
+                    }
+                }
 
                 Item {
                     id: diagramLayer
                     width: root.boardSize
                     height: root.boardSize
+                    transformOrigin: Item.TopLeft
+                    scale: root.zoomLevel
+
+                    Canvas {
+                        id: gridCanvas
+                        anchors.fill: parent
+                        visible: root.showGrid
+                        opacity: root.showGrid ? 1 : 0
+                        z: 0
+
+                        onPaint: {
+                            var ctx = getContext("2d")
+                            ctx.clearRect(0, 0, width, height)
+                            if (!root.showGrid)
+                                return
+                            var spacing = root.gridSpacing
+                            ctx.strokeStyle = "rgba(255, 255, 255, 0.05)"
+                            ctx.lineWidth = 1
+                            ctx.beginPath()
+                            for (var x = 0; x <= width; x += spacing) {
+                                ctx.moveTo(x, 0)
+                                ctx.lineTo(x, height)
+                            }
+                            for (var y = 0; y <= height; y += spacing) {
+                                ctx.moveTo(0, y)
+                                ctx.lineTo(width, y)
+                            }
+                            ctx.stroke()
+                        }
+                    }
 
                     Canvas {
                         id: edgeCanvas
                         anchors.fill: parent
-                        z: 0
+                        z: 1
 
                         onPaint: {
                             var ctx = getContext("2d")
@@ -679,7 +1077,7 @@ ApplicationWindow {
                             if (!diagramModel)
                                 return
 
-                            ctx.strokeStyle = "#4a5568"
+                            ctx.strokeStyle = "#7b88a8"
                             ctx.lineWidth = 2
 
                             var edges = diagramModel.edges
@@ -717,7 +1115,7 @@ ApplicationWindow {
                                     toY - arrowSize * Math.sin(angle + arrowAngle)
                                 )
                                 ctx.closePath()
-                                ctx.fillStyle = "#4a5568"
+                                ctx.fillStyle = "#7b88a8"
                                 ctx.fill()
                             }
 
@@ -744,13 +1142,20 @@ ApplicationWindow {
                         function onItemsChanged() { edgeCanvas.requestPaint() }
                     }
 
+                    Connections {
+                        target: root
+                        function onShowGridChanged() { gridCanvas.requestPaint() }
+                        function onGridSpacingChanged() { gridCanvas.requestPaint() }
+                    }
+
                     MouseArea {
                         anchors.fill: parent
                         acceptedButtons: Qt.LeftButton
                         onDoubleClicked: function(mouse) {
                             var pos = mapToItem(diagramLayer, mouse.x, mouse.y)
-                            addDialog.targetX = pos.x
-                            addDialog.targetY = pos.y
+                            var snapped = root.snapPoint(pos)
+                            addDialog.targetX = snapped.x
+                            addDialog.targetY = snapped.y
                             addDialog.open()
                         }
                     }
@@ -765,20 +1170,173 @@ ApplicationWindow {
                             property int taskIndex: model.taskIndex
                             property real dragStartX: 0
                             property real dragStartY: 0
+                            property real pinchStartWidth: model.width
+                            property real pinchStartHeight: model.height
                             x: model.x
                             y: model.y
                             width: model.width
                             height: model.height
-                            radius: 8
+                            radius: itemRect.itemType === "cloud" ? Math.min(width, height) / 2 : 12
                             color: model.color
-                            border.color: "#2e3744"
                             border.width: 1
+                            border.color: itemDrag.active ? Qt.lighter(model.color, 1.4) : Qt.darker(model.color, 1.6)
                             z: 5
+
+                            Behavior on x { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
+                            Behavior on y { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
+
+                            Rectangle {
+                                anchors.fill: parent
+                                color: Qt.rgba(0, 0, 0, itemDrag.active ? 0.08 : 0)
+                                radius: itemRect.radius
+                            }
+
+                            Item {
+                                anchors.fill: parent
+                                visible: itemRect.itemType === "database"
+
+                                Rectangle {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    anchors.top: parent.top
+                                    anchors.topMargin: 6
+                                    width: parent.width - 12
+                                    height: parent.height * 0.25
+                                    radius: height / 2
+                                    color: Qt.lighter(model.color, 1.3)
+                                    opacity: 0.9
+                                }
+
+                                Rectangle {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    anchors.bottom: parent.bottom
+                                    anchors.bottomMargin: 6
+                                    width: parent.width - 12
+                                    height: parent.height * 0.22
+                                    radius: height / 2
+                                    color: Qt.darker(model.color, 1.2)
+                                    opacity: 0.7
+                                }
+                            }
+
+                            Item {
+                                anchors.fill: parent
+                                visible: itemRect.itemType === "server"
+
+                                Column {
+                                    anchors.fill: parent
+                                    anchors.margins: 12
+                                    spacing: 8
+
+                                    Rectangle {
+                                        height: 6
+                                        radius: 3
+                                        color: Qt.darker(model.color, 1.4)
+                                        opacity: 0.5
+                                    }
+
+                                    Row {
+                                        spacing: 8
+                                        anchors.horizontalCenter: parent.horizontalCenter
+
+                                        Rectangle {
+                                            width: 12
+                                            height: 12
+                                            radius: 6
+                                            color: "#5af58a"
+                                        }
+
+                                        Rectangle {
+                                            width: 12
+                                            height: 12
+                                            radius: 6
+                                            color: "#ffe266"
+                                        }
+
+                                        Rectangle {
+                                            width: 12
+                                            height: 12
+                                            radius: 6
+                                            color: "#f66d5a"
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        height: 6
+                                        radius: 3
+                                        color: Qt.lighter(model.color, 1.2)
+                                        opacity: 0.5
+                                    }
+                                }
+                            }
+
+                            Item {
+                                anchors.fill: parent
+                                visible: itemRect.itemType === "cloud"
+
+                                Rectangle {
+                                    width: parent.width * 0.55
+                                    height: parent.height * 0.55
+                                    radius: height / 2
+                                    anchors.centerIn: parent
+                                    color: Qt.lighter(model.color, 1.25)
+                                    opacity: 0.9
+                                }
+
+                                Rectangle {
+                                    width: parent.width * 0.45
+                                    height: parent.height * 0.45
+                                    radius: height / 2
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: parent.width * 0.08
+                                    color: Qt.lighter(model.color, 1.4)
+                                    opacity: 0.85
+                                }
+
+                                Rectangle {
+                                    width: parent.width * 0.45
+                                    height: parent.height * 0.45
+                                    radius: height / 2
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: parent.width * 0.08
+                                    color: Qt.lighter(model.color, 1.4)
+                                    opacity: 0.85
+                                }
+                            }
+
+                            Rectangle {
+                                width: 22
+                                height: 22
+                                anchors.top: parent.top
+                                anchors.right: parent.right
+                                anchors.topMargin: 8
+                                anchors.rightMargin: 8
+                                color: Qt.lighter(model.color, 1.3)
+                                border.color: Qt.darker(model.color, 1.2)
+                                rotation: 45
+                                visible: itemRect.itemType === "note"
+                                radius: 2
+                                transformOrigin: Item.Center
+                            }
+
+                            Text {
+                                anchors.centerIn: parent
+                                width: parent.width - 36
+                                text: model.text
+                                color: model.textColor
+                                wrapMode: Text.WordWrap
+                                horizontalAlignment: Text.AlignHCenter
+                                textFormat: Text.PlainText
+                                font.pixelSize: 14
+                                font.bold: itemRect.itemType === "task"
+                            }
 
                             DragHandler {
                                 id: itemDrag
                                 target: null
                                 acceptedButtons: Qt.LeftButton
+                                cursorShape: Qt.ClosedHandCursor
                                 onActiveChanged: {
                                     if (!diagramModel)
                                         return
@@ -790,9 +1348,34 @@ ApplicationWindow {
                                 onTranslationChanged: {
                                     if (!diagramModel || !active)
                                         return
-                                    var newX = itemRect.dragStartX + translation.x
-                                    var newY = itemRect.dragStartY + translation.y
+                                    var newX = itemRect.dragStartX + translation.x / root.zoomLevel
+                                    var newY = itemRect.dragStartY + translation.y / root.zoomLevel
+                                    newX = root.snapValue(newX)
+                                    newY = root.snapValue(newY)
                                     diagramModel.moveItem(itemRect.itemId, newX, newY)
+                                    edgeCanvas.requestPaint()
+                                }
+                            }
+
+                            PinchHandler {
+                                id: itemPinch
+                                target: null
+                                onActiveChanged: {
+                                    if (active) {
+                                        itemRect.pinchStartWidth = model.width
+                                        itemRect.pinchStartHeight = model.height
+                                    }
+                                }
+                                onScaleChanged: {
+                                    if (!active || !diagramModel)
+                                        return
+                                    var newWidth = Math.max(60, itemRect.pinchStartWidth * scale)
+                                    var newHeight = Math.max(40, itemRect.pinchStartHeight * scale)
+                                    if (root.snapToGrid) {
+                                        newWidth = Math.max(root.gridSpacing, Math.round(newWidth / root.gridSpacing) * root.gridSpacing)
+                                        newHeight = Math.max(root.gridSpacing, Math.round(newHeight / root.gridSpacing) * root.gridSpacing)
+                                    }
+                                    diagramModel.resizeItem(itemRect.itemId, newWidth, newHeight)
                                     edgeCanvas.requestPaint()
                                 }
                             }
@@ -801,26 +1384,12 @@ ApplicationWindow {
                                 acceptedButtons: Qt.LeftButton
                                 gesturePolicy: TapHandler.DragThreshold
                                 onDoubleTapped: {
-                                    if (itemRect.itemType === "box") {
-                                        boxDialog.editingItemId = itemRect.itemId
-                                        boxDialog.textValue = model.text
-                                        boxDialog.targetX = model.x
-                                        boxDialog.targetY = model.y
-                                        boxDialog.open()
-                                    } else if (itemRect.itemType === "task" && itemRect.taskIndex < 0) {
+                                    if (itemRect.itemType === "task" && itemRect.taskIndex < 0) {
                                         newTaskDialog.openWithItem(itemRect.itemId, model.text)
+                                    } else if (itemRect.itemType !== "task") {
+                                        root.openPresetDialog(itemRect.itemType, Qt.point(model.x, model.y), itemRect.itemId, model.text)
                                     }
                                 }
-                            }
-
-                            Text {
-                                anchors.centerIn: parent
-                                width: parent.width - 32
-                                text: model.text
-                                color: "#f5f6f8"
-                                wrapMode: Text.WordWrap
-                                horizontalAlignment: Text.AlignHCenter
-                                font.pixelSize: 13
                             }
 
                             Rectangle {
@@ -847,6 +1416,7 @@ ApplicationWindow {
                                     id: edgeDrag
                                     target: null
                                     acceptedButtons: Qt.LeftButton
+                                    cursorShape: Qt.CrossCursor
                                     onActiveChanged: {
                                         if (!diagramModel)
                                             return
@@ -911,6 +1481,8 @@ ApplicationWindow {
             }
         }
     }
+
+    Component.onCompleted: Qt.callLater(resetView)
 }
 """
 

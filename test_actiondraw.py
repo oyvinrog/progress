@@ -73,6 +73,22 @@ class TestDiagramModelBasics:
         assert empty_diagram_model.data(index, empty_diagram_model.XRole) == 10.0
         assert empty_diagram_model.data(index, empty_diagram_model.YRole) == 20.0
 
+    def test_add_preset_item(self, empty_diagram_model):
+        item_id = empty_diagram_model.addPresetItem("database", 50.0, 75.0)
+        assert item_id.startswith("database_")
+        index = empty_diagram_model.index(0, 0)
+        assert empty_diagram_model.data(index, empty_diagram_model.TypeRole) == "database"
+        assert empty_diagram_model.data(index, empty_diagram_model.TextRole) == "Database"
+        assert empty_diagram_model.data(index, empty_diagram_model.ColorRole) == "#c18f5e"
+        assert empty_diagram_model.data(index, empty_diagram_model.TextColorRole) == "#1b2028"
+
+        custom_id = empty_diagram_model.addPresetItemWithText("note", 10.0, 20.0, "Release Plan")
+        assert custom_id.startswith("note_")
+        index = empty_diagram_model.index(1, 0)
+        assert empty_diagram_model.data(index, empty_diagram_model.TypeRole) == "note"
+        assert empty_diagram_model.data(index, empty_diagram_model.TextRole) == "Release Plan"
+        assert empty_diagram_model.data(index, empty_diagram_model.TextColorRole) == "#1b2028"
+
     def test_add_task(self, diagram_model_with_task_model):
         item_id = diagram_model_with_task_model.addTask(0, 50.0, 100.0)
         assert item_id.startswith("task_")
@@ -107,6 +123,13 @@ class TestDiagramModelBasics:
     def test_set_item_text_invalid(self, empty_diagram_model):
         empty_diagram_model.addBox(0.0, 0.0, "Old")
         empty_diagram_model.setItemText("missing", "New")
+
+    def test_resize_item(self, empty_diagram_model):
+        item_id = empty_diagram_model.addBox(0.0, 0.0, "Box")
+        empty_diagram_model.resizeItem(item_id, 200.0, 120.0)
+        index = empty_diagram_model.index(0, 0)
+        assert empty_diagram_model.data(index, empty_diagram_model.WidthRole) == 200.0
+        assert empty_diagram_model.data(index, empty_diagram_model.HeightRole) == 120.0
 
 
 class TestEdges:
@@ -189,6 +212,7 @@ class TestQueries:
         assert roles[empty_diagram_model.IdRole] == b"itemId"
         assert roles[empty_diagram_model.TextRole] == b"text"
         assert roles[empty_diagram_model.ColorRole] == b"color"
+        assert roles[empty_diagram_model.TextColorRole] == b"textColor"
 
     def test_data_invalid_index(self, empty_diagram_model):
         assert empty_diagram_model.data(empty_diagram_model.index(10, 0), empty_diagram_model.IdRole) is None
