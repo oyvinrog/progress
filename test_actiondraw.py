@@ -228,6 +228,25 @@ class TestTaskIntegration:
         index = diagram_model_with_task_model.index(0, 0)
         assert diagram_model_with_task_model.data(index, diagram_model_with_task_model.TypeRole) == "task"
 
+    def test_add_task_from_text(self, diagram_model_with_task_model):
+        original_task_count = diagram_model_with_task_model._task_model.rowCount()
+        item_id = diagram_model_with_task_model.addTaskFromText("Freetext Task", 100.0, 200.0)
+        assert item_id.startswith("task_")
+        assert diagram_model_with_task_model._task_model.rowCount() == original_task_count + 1
+        index = diagram_model_with_task_model.index(0, 0)
+        assert diagram_model_with_task_model.data(index, diagram_model_with_task_model.TypeRole) == "task"
+        assert diagram_model_with_task_model.data(index, diagram_model_with_task_model.TextRole) == "Freetext Task"
+
+    def test_add_task_from_text_empty_string(self, diagram_model_with_task_model):
+        original_count = diagram_model_with_task_model._task_model.rowCount()
+        item_id = diagram_model_with_task_model.addTaskFromText("   ", 0.0, 0.0)
+        assert item_id == ""
+        assert diagram_model_with_task_model._task_model.rowCount() == original_count
+
+    def test_add_task_from_text_no_task_model(self, empty_diagram_model):
+        item_id = empty_diagram_model.addTaskFromText("Should Fail", 0.0, 0.0)
+        assert item_id == ""
+
     def test_add_task_uses_title(self, diagram_model_with_task_model):
         item_id = diagram_model_with_task_model.addTask(1, 25.0, 35.0)
         index = diagram_model_with_task_model.index(0, 0)

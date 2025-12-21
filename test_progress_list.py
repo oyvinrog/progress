@@ -80,6 +80,18 @@ class TestTaskModel:
         """Test model initializes with tasks."""
         assert task_model_with_tasks.rowCount() == 3
 
+    def test_task_count_property_updates(self, task_model):
+        """Task count property reflects list mutations."""
+        assert task_model.taskCount == 0
+        task_model.addTask("Task A")
+        assert task_model.taskCount == 1
+        task_model.addTask("Task B")
+        assert task_model.taskCount == 2
+        task_model.removeAt(0)
+        assert task_model.taskCount == 1
+        task_model.clear()
+        assert task_model.taskCount == 0
+
     def test_role_names(self, task_model):
         """Test role names are correctly defined."""
         roles = task_model.roleNames()

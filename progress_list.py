@@ -67,6 +67,7 @@ class TaskModel(QAbstractListModel):
     avgTimeChanged = Signal()
     totalEstimateChanged = Signal()
     chartImageChanged = Signal()
+    taskCountChanged = Signal()
 
     def __init__(self, tasks: List[Task] | None = None):
         super().__init__()
@@ -86,8 +87,14 @@ class TaskModel(QAbstractListModel):
         self._chart_update_timer.timeout.connect(self._updateChartImage)
         self._chart_update_timer.start(2000)  # Update chart every 2 seconds
         self._takeSnapshot()  # Take initial snapshot
+        self.taskCountChanged.emit()
 
     def rowCount(self, parent: QModelIndex | None = QModelIndex()) -> int:  # type: ignore[override]
+        return len(self._tasks)
+
+    @Property(int, notify=taskCountChanged)
+    def taskCount(self) -> int:
+        """Expose the current number of tasks to QML."""
         return len(self._tasks)
 
     def data(self, index: QModelIndex, role: int = Qt.DisplayRole):  # type: ignore[override]
@@ -425,6 +432,7 @@ class TaskModel(QAbstractListModel):
         self._tasks.insert(insert_pos, task)
         self.endInsertRows()
         self._takeSnapshot()  # Update burndown chart
+        self.taskCountChanged.emit()
 
     @Slot(int, bool)
     def toggleComplete(self, row: int, completed: bool) -> None:
@@ -573,6 +581,7 @@ class TaskModel(QAbstractListModel):
 
         self.avgTimeChanged.emit()
         self._takeSnapshot()  # Update burndown chart
+        self.taskCountChanged.emit()
 
     @Slot()
     def clear(self) -> None:
@@ -583,6 +592,7 @@ class TaskModel(QAbstractListModel):
         self.endRemoveRows()
         self.avgTimeChanged.emit()
         self._takeSnapshot()  # Update burndown chart
+        self.taskCountChanged.emit()
 
     @Slot()
     def pasteSampleTasks(self) -> None:

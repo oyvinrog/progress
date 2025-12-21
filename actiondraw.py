@@ -424,6 +424,38 @@ class DiagramModel(QAbstractListModel):
                 self.itemsChanged.emit()
                 break
 
+    @Slot(str, float, float, result=str)
+    def addTaskFromText(self, text: str, x: float, y: float) -> str:
+        """Create a new task in the task list and add it to the diagram."""
+        text = text.strip()
+        if not text or not self._task_model:
+            return ""
+
+        # Add to the task model first
+        self._task_model.addTask(text, -1)
+        task_count = self._task_model.rowCount()
+        if task_count == 0:
+            return ""
+
+        new_index = task_count - 1
+
+        # Create diagram item for the task
+        item_id = self._next_id("task")
+        item = DiagramItem(
+            id=item_id,
+            item_type=DiagramItemType.TASK,
+            x=x,
+            y=y,
+            width=140.0,
+            height=70.0,
+            text=text,
+            task_index=new_index,
+            color="#82c3a5",
+            text_color="#1b2028",
+        )
+        self._append_item(item)
+        return item_id
+
     # --- Utilities ----------------------------------------------------------
     def getItem(self, item_id: str) -> Optional[DiagramItem]:
         for item in self._items:
@@ -655,7 +687,7 @@ ApplicationWindow {
 
             Button {
                 text: "Task from List"
-                enabled: taskModel !== null
+                enabled: taskModel && taskModel.taskCount > 0
                 onClicked: {
                     addDialog.close()
                     if (taskModel) {
@@ -663,6 +695,15 @@ ApplicationWindow {
                         taskDialog.targetY = snapValue(addDialog.targetY)
                         taskDialog.open()
                     }
+                }
+            }
+
+            Button {
+                text: "New Task (freetext)"
+                enabled: diagramModel !== null
+                onClicked: {
+                    addDialog.close()
+                    root.openQuickTaskDialog(Qt.point(addDialog.targetX, addDialog.targetY))
                 }
             }
         }
@@ -787,6 +828,16 @@ ApplicationWindow {
                     }
                 }
             }
+
+            Label {
+                anchors.centerIn: parent
+                text: taskModel ? "No tasks available. Add tasks in Progress Tracker." : "Task list unavailable. Open ActionDraw from the task app."
+                color: "#8a93a5"
+                wrapMode: Text.WordWrap
+                width: parent.width - 32
+                horizontalAlignment: Text.AlignHCenter
+                visible: !taskModel || taskListView.count === 0
+            }
         }
 
         footer: DialogButtonBox {
@@ -845,6 +896,72 @@ ApplicationWindow {
             newTaskDialog.pendingItemId = ""
             newTaskDialog.textValue = ""
         }
+    }
+
+    Dialog {
+        id: quickTaskDialog
+        modal: true
+        title: "New Task"
+        property real targetX: 0
+        property real targetY: 0
+
+        onOpened: quickTaskField.forceActiveFocus()
+
+        contentItem: ColumnLayout {
+            width: 320
+            spacing: 12
+
+            Label {
+                text: "Create a new task that will be added to both the diagram and your Progress List."
+                color: "#8a93a5"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            TextField {
+                id: quickTaskField
+                Layout.fillWidth: true
+                placeholderText: "Task name"
+                selectByMouse: true
+                color: "#f5f6f8"
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#384458"
+                }
+                onAccepted: quickTaskButtons.accept()
+            }
+        }
+
+        footer: DialogButtonBox {
+            id: quickTaskButtons
+            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+            onAccepted: {
+                if (diagramModel && quickTaskField.text.trim().length > 0) {
+                    diagramModel.addTaskFromText(
+                        quickTaskField.text,
+                        snapValue(quickTaskDialog.targetX),
+                        snapValue(quickTaskDialog.targetY)
+                    )
+                }
+                quickTaskDialog.close()
+            }
+            onRejected: quickTaskDialog.close()
+        }
+
+        onClosed: {
+            quickTaskField.text = ""
+        }
+    }
+
+    function openQuickTaskDialog(point) {
+        quickTaskDialog.targetX = point.x
+        quickTaskDialog.targetY = point.y
+        quickTaskDialog.open()
+    }
+
+    function addQuickTaskAtCenter() {
+        openQuickTaskDialog(diagramCenterPoint())
     }
 
     ColumnLayout {
@@ -907,6 +1024,12 @@ ApplicationWindow {
                     taskDialog.targetY = center.y
                     taskDialog.open()
                 }
+            }
+
+            Button {
+                text: "New Task"
+                enabled: diagramModel !== null
+                onClicked: root.addQuickTaskAtCenter()
             }
 
             Button {
