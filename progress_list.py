@@ -26,9 +26,12 @@ from PySide6.QtCore import (
     Property,
     Signal,
     QUrl,
+    QObject,
 )
 from PySide6.QtWidgets import QApplication
 from PySide6.QtQml import QQmlApplicationEngine
+
+from actiondraw import DiagramModel, create_actiondraw_window
 
 
 @dataclass
@@ -594,6 +597,29 @@ class TaskModel(QAbstractListModel):
             self.addTask(title)
 
 
+class ActionDrawManager(QObject):
+    """Manager for the ActionDraw window."""
+    
+    def __init__(self, task_model: TaskModel):
+        super().__init__()
+        self._task_model = task_model
+        self._diagram_model = DiagramModel(task_model=task_model)
+        self._actiondraw_engine = None
+        self._actiondraw_window = None
+    
+    @Slot()
+    def showActionDraw(self) -> None:
+        """Show the ActionDraw window."""
+        if self._actiondraw_engine is None:
+            self._actiondraw_engine = create_actiondraw_window(self._diagram_model, self._task_model)
+            root_objects = self._actiondraw_engine.rootObjects()
+            if root_objects:
+                self._actiondraw_window = root_objects[0]
+        
+        if self._actiondraw_window:
+            self._actiondraw_window.showWindow()
+
+
 QML_UI = rb"""
 import QtQuick 2.15
 import QtQuick.Controls 2.15
@@ -828,6 +854,13 @@ ApplicationWindow {
 
         RowLayout {
             spacing: 8
+
+            Button {
+                text: "ActionDraw"
+                onClicked: {
+                    actionDrawManager.showActionDraw()
+                }
+            }
 
             Button {
                 text: "Paste sample tasks"
@@ -1176,6 +1209,11 @@ def get_tasks() -> List[Task]:
     engine = QQmlApplicationEngine()
     model = TaskModel()
     engine.rootContext().setContextProperty("taskModel", model)
+    
+    # Create ActionDraw manager
+    actiondraw_manager = ActionDrawManager(model)
+    engine.rootContext().setContextProperty("actionDrawManager", actiondraw_manager)
+    
     engine.loadData(QML_UI)
 
     if not engine.rootObjects():
@@ -1198,6 +1236,11 @@ def main() -> int:
     engine = QQmlApplicationEngine()
     model = TaskModel()
     engine.rootContext().setContextProperty("taskModel", model)
+    
+    # Create ActionDraw manager
+    actiondraw_manager = ActionDrawManager(model)
+    engine.rootContext().setContextProperty("actionDrawManager", actiondraw_manager)
+    
     engine.loadData(QML_UI)
 
     if not engine.rootObjects():

@@ -533,7 +533,7 @@ class TestSignals:
 class TestGetTasksFunction:
     """Tests for the get_tasks() function."""
 
-    @patch('progress_list.QGuiApplication')
+    @patch('progress_list.QApplication')
     @patch('progress_list.QQmlApplicationEngine')
     def test_get_tasks_empty(self, mock_engine_class, mock_app_class):
         """Test get_tasks with no tasks."""
@@ -555,7 +555,7 @@ class TestGetTasksFunction:
             result = get_tasks()
             assert result == []
 
-    @patch('progress_list.QGuiApplication')
+    @patch('progress_list.QApplication')
     @patch('progress_list.QQmlApplicationEngine')
     def test_get_tasks_with_tasks(self, mock_engine_class, mock_app_class):
         """Test get_tasks returns task list."""
@@ -582,7 +582,7 @@ class TestGetTasksFunction:
             assert result[0].title == "Task 1"
             assert result[1].title == "Task 2"
 
-    @patch('progress_list.QGuiApplication')
+    @patch('progress_list.QApplication')
     @patch('progress_list.QQmlApplicationEngine')
     def test_get_tasks_no_root_objects(self, mock_engine_class, mock_app_class):
         """Test get_tasks when engine fails to load."""
@@ -601,7 +601,7 @@ class TestGetTasksFunction:
 class TestMainFunction:
     """Tests for the main() function."""
 
-    @patch('progress_list.QGuiApplication')
+    @patch('progress_list.QApplication')
     @patch('progress_list.QQmlApplicationEngine')
     def test_main_success(self, mock_engine_class, mock_app_class):
         """Test main function successful execution."""
@@ -617,7 +617,7 @@ class TestMainFunction:
         result = main()
         assert result == 0
 
-    @patch('progress_list.QGuiApplication')
+    @patch('progress_list.QApplication')
     @patch('progress_list.QQmlApplicationEngine')
     def test_main_failure(self, mock_engine_class, mock_app_class):
         """Test main function when engine fails."""
