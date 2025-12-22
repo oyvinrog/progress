@@ -183,6 +183,41 @@ class TestEdges:
         empty_diagram_model.cancelEdgeDrawing()
         assert empty_diagram_model.edgeDrawingFrom == ""
 
+    def test_remove_edge(self, empty_diagram_model):
+        a = empty_diagram_model.addBox(0.0, 0.0, "A")
+        b = empty_diagram_model.addBox(50.0, 50.0, "B")
+        empty_diagram_model.addEdge(a, b)
+        assert len(empty_diagram_model.edges) == 1
+        edge_id = empty_diagram_model.edges[0]["id"]
+        empty_diagram_model.removeEdge(edge_id)
+        assert empty_diagram_model.edges == []
+
+    def test_remove_edge_invalid(self, empty_diagram_model):
+        a = empty_diagram_model.addBox(0.0, 0.0, "A")
+        b = empty_diagram_model.addBox(50.0, 50.0, "B")
+        empty_diagram_model.addEdge(a, b)
+        empty_diagram_model.removeEdge("nonexistent_edge")
+        assert len(empty_diagram_model.edges) == 1
+
+    def test_remove_edge_between(self, empty_diagram_model):
+        a = empty_diagram_model.addBox(0.0, 0.0, "A")
+        b = empty_diagram_model.addBox(50.0, 50.0, "B")
+        c = empty_diagram_model.addBox(100.0, 100.0, "C")
+        empty_diagram_model.addEdge(a, b)
+        empty_diagram_model.addEdge(b, c)
+        assert len(empty_diagram_model.edges) == 2
+        empty_diagram_model.removeEdgeBetween(a, b)
+        assert len(empty_diagram_model.edges) == 1
+        assert empty_diagram_model.edges[0]["fromId"] == b
+        assert empty_diagram_model.edges[0]["toId"] == c
+
+    def test_remove_edge_between_invalid(self, empty_diagram_model):
+        a = empty_diagram_model.addBox(0.0, 0.0, "A")
+        b = empty_diagram_model.addBox(50.0, 50.0, "B")
+        empty_diagram_model.addEdge(a, b)
+        empty_diagram_model.removeEdgeBetween(b, a)  # Wrong direction
+        assert len(empty_diagram_model.edges) == 1
+
 
 class TestQueries:
     def test_get_item(self, empty_diagram_model):

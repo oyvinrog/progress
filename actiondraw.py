@@ -385,6 +385,24 @@ class DiagramModel(QAbstractListModel):
         self.edgesChanged.emit()
 
     @Slot(str)
+    def removeEdge(self, edge_id: str) -> None:
+        """Remove an edge by its ID."""
+        for idx, edge in enumerate(self._edges):
+            if edge.id == edge_id:
+                self._edges.pop(idx)
+                self.edgesChanged.emit()
+                return
+
+    @Slot(str, str)
+    def removeEdgeBetween(self, from_id: str, to_id: str) -> None:
+        """Remove an edge between two items."""
+        for idx, edge in enumerate(self._edges):
+            if edge.from_id == from_id and edge.to_id == to_id:
+                self._edges.pop(idx)
+                self.edgesChanged.emit()
+                return
+
+    @Slot(str)
     def removeItem(self, item_id: str) -> None:
         # Remove edges touching the item
         removed = False
@@ -1298,15 +1316,48 @@ ApplicationWindow {
                         id: edgeCanvas
                         anchors.fill: parent
                         z: 1
+                        property string hoveredEdgeId: ""
+                        property string selectedEdgeId: ""
+
+                        function distanceToSegment(px, py, x1, y1, x2, y2) {
+                            var dx = x2 - x1
+                            var dy = y2 - y1
+                            var lengthSq = dx * dx + dy * dy
+                            if (lengthSq === 0)
+                                return Math.sqrt((px - x1) * (px - x1) + (py - y1) * (py - y1))
+                            var t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lengthSq))
+                            var projX = x1 + t * dx
+                            var projY = y1 + t * dy
+                            return Math.sqrt((px - projX) * (px - projX) + (py - projY) * (py - projY))
+                        }
+
+                        function findEdgeAt(mx, my) {
+                            if (!diagramModel)
+                                return ""
+                            var edges = diagramModel.edges
+                            var threshold = 8
+                            for (var i = edges.length - 1; i >= 0; --i) {
+                                var edge = edges[i]
+                                var fromItem = diagramModel.getItemSnapshot(edge.fromId)
+                                var toItem = diagramModel.getItemSnapshot(edge.toId)
+                                if ((!fromItem.x && fromItem.x !== 0) || (!toItem.x && toItem.x !== 0))
+                                    continue
+                                var fromX = fromItem.x + fromItem.width / 2
+                                var fromY = fromItem.y + fromItem.height / 2
+                                var toX = toItem.x + toItem.width / 2
+                                var toY = toItem.y + toItem.height / 2
+                                var dist = distanceToSegment(mx, my, fromX, fromY, toX, toY)
+                                if (dist <= threshold)
+                                    return edge.id
+                            }
+                            return ""
+                        }
 
                         onPaint: {
                             var ctx = getContext("2d")
                             ctx.clearRect(0, 0, width, height)
                             if (!diagramModel)
                                 return
-
-                            ctx.strokeStyle = "#7b88a8"
-                            ctx.lineWidth = 2
 
                             var edges = diagramModel.edges
                             for (var i = 0; i < edges.length; ++i) {
@@ -1322,6 +1373,19 @@ ApplicationWindow {
                                 var fromY = fromItem.y + fromItem.height / 2
                                 var toX = toItem.x + toItem.width / 2
                                 var toY = toItem.y + toItem.height / 2
+
+                                var isHovered = edgeCanvas.hoveredEdgeId === edge.id
+                                var isSelected = edgeCanvas.selectedEdgeId === edge.id
+                                if (isSelected) {
+                                    ctx.strokeStyle = "#ff6b6b"
+                                    ctx.lineWidth = 3
+                                } else if (isHovered) {
+                                    ctx.strokeStyle = "#a8b8d8"
+                                    ctx.lineWidth = 3
+                                } else {
+                                    ctx.strokeStyle = "#7b88a8"
+                                    ctx.lineWidth = 2
+                                }
 
                                 ctx.beginPath()
                                 ctx.moveTo(fromX, fromY)
@@ -1343,7 +1407,13 @@ ApplicationWindow {
                                     toY - arrowSize * Math.sin(angle + arrowAngle)
                                 )
                                 ctx.closePath()
-                                ctx.fillStyle = "#7b88a8"
+                                if (isSelected) {
+                                    ctx.fillStyle = "#ff6b6b"
+                                } else if (isHovered) {
+                                    ctx.fillStyle = "#a8b8d8"
+                                } else {
+                                    ctx.fillStyle = "#7b88a8"
+                                }
                                 ctx.fill()
                             }
 
@@ -1359,6 +1429,67 @@ ApplicationWindow {
                                     ctx.lineTo(diagramModel.edgeDragX, diagramModel.edgeDragY)
                                     ctx.stroke()
                                     ctx.setLineDash([])
+                                }
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            acceptedButtons: Qt.LeftButton | Qt.RightButton
+                            propagateComposedEvents: true
+                            z: -1
+
+                            onPositionChanged: function(mouse) {
+                                var edgeId = edgeCanvas.findEdgeAt(mouse.x, mouse.y)
+                                if (edgeCanvas.hoveredEdgeId !== edgeId) {
+                                    edgeCanvas.hoveredEdgeId = edgeId
+                                    edgeCanvas.requestPaint()
+                                }
+                            }
+
+                            onExited: {
+                                if (edgeCanvas.hoveredEdgeId !== "") {
+                                    edgeCanvas.hoveredEdgeId = ""
+                                    edgeCanvas.requestPaint()
+                                }
+                            }
+
+                            onClicked: function(mouse) {
+                                var edgeId = edgeCanvas.findEdgeAt(mouse.x, mouse.y)
+                                if (edgeId === "") {
+                                    if (edgeCanvas.selectedEdgeId !== "") {
+                                        edgeCanvas.selectedEdgeId = ""
+                                        edgeCanvas.requestPaint()
+                                    }
+                                    mouse.accepted = false
+                                    return
+                                }
+                                if (mouse.button === Qt.RightButton) {
+                                    // Right-click to delete immediately
+                                    diagramModel.removeEdge(edgeId)
+                                    edgeCanvas.selectedEdgeId = ""
+                                    edgeCanvas.hoveredEdgeId = ""
+                                } else {
+                                    // Left-click to select/deselect
+                                    if (edgeCanvas.selectedEdgeId === edgeId) {
+                                        edgeCanvas.selectedEdgeId = ""
+                                    } else {
+                                        edgeCanvas.selectedEdgeId = edgeId
+                                    }
+                                    edgeCanvas.requestPaint()
+                                }
+                            }
+
+                            onDoubleClicked: function(mouse) {
+                                var edgeId = edgeCanvas.findEdgeAt(mouse.x, mouse.y)
+                                if (edgeId !== "") {
+                                    // Double-click to delete
+                                    diagramModel.removeEdge(edgeId)
+                                    edgeCanvas.selectedEdgeId = ""
+                                    edgeCanvas.hoveredEdgeId = ""
+                                } else {
+                                    mouse.accepted = false
                                 }
                             }
                         }
