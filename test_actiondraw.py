@@ -245,6 +245,54 @@ class TestEdges:
         empty_diagram_model.removeEdgeBetween(b, a)  # Wrong direction
         assert len(empty_diagram_model.edges) == 1
 
+    def test_edge_hover_target_during_drag(self, empty_diagram_model):
+        """Edge dragging identifies hover target with enlarged hit area."""
+        # Box A at (0,0), default size 120x60
+        a = empty_diagram_model.addBox(0.0, 0.0, "A")
+        # Box B at (200, 0), default size 120x60
+        b = empty_diagram_model.addBox(200.0, 0.0, "B")
+        empty_diagram_model.startEdgeDrawing(a)
+        # Drag to exact center of B
+        empty_diagram_model.updateEdgeDragPosition(260.0, 30.0)
+        assert empty_diagram_model.edgeHoverTargetId == b
+
+    def test_edge_hover_target_with_margin(self, empty_diagram_model):
+        """Edge dragging uses 20px margin for easier drop targeting."""
+        # Box at (100, 100), size 120x60
+        a = empty_diagram_model.addBox(0.0, 0.0, "A")
+        b = empty_diagram_model.addBox(100.0, 100.0, "B")
+        empty_diagram_model.startEdgeDrawing(a)
+        # Position 15 pixels to the left of B (within 20px margin)
+        empty_diagram_model.updateEdgeDragPosition(85.0, 130.0)
+        assert empty_diagram_model.edgeHoverTargetId == b
+
+    def test_edge_hover_target_outside_margin(self, empty_diagram_model):
+        """No hover target when drag is outside margin."""
+        a = empty_diagram_model.addBox(0.0, 0.0, "A")
+        b = empty_diagram_model.addBox(200.0, 200.0, "B")
+        empty_diagram_model.startEdgeDrawing(a)
+        # Position 30 pixels away (outside 20px margin)
+        empty_diagram_model.updateEdgeDragPosition(165.0, 230.0)
+        assert empty_diagram_model.edgeHoverTargetId == ""
+
+    def test_edge_hover_target_excludes_source(self, empty_diagram_model):
+        """Source item is not a valid hover target."""
+        a = empty_diagram_model.addBox(0.0, 0.0, "A")
+        empty_diagram_model.startEdgeDrawing(a)
+        # Drag within source item bounds
+        empty_diagram_model.updateEdgeDragPosition(60.0, 30.0)
+        assert empty_diagram_model.edgeHoverTargetId == ""
+
+    def test_edge_hover_target_clears_on_cancel(self, empty_diagram_model):
+        """Hover target clears when edge drawing is cancelled."""
+        a = empty_diagram_model.addBox(0.0, 0.0, "A")
+        b = empty_diagram_model.addBox(200.0, 0.0, "B")
+        empty_diagram_model.startEdgeDrawing(a)
+        empty_diagram_model.updateEdgeDragPosition(260.0, 30.0)
+        assert empty_diagram_model.edgeHoverTargetId == b
+        empty_diagram_model.cancelEdgeDrawing()
+        assert empty_diagram_model.edgeHoverTargetId == ""
+
 
 class TestQueries:
     def test_get_item(self, empty_diagram_model):
@@ -268,6 +316,17 @@ class TestQueries:
         item_id = empty_diagram_model.addBox(0.0, 0.0, "Box")
         assert empty_diagram_model.itemIdAt(20.0, 20.0) == item_id
         assert empty_diagram_model.itemIdAt(500.0, 500.0) == ""
+
+    def test_get_item_at_with_margin(self, empty_diagram_model):
+        """Hit detection with margin enlarges the hit area."""
+        # Box at (100, 100), size 120x60
+        item_id = empty_diagram_model.addBox(100.0, 100.0, "Box")
+        # Inside exact bounds
+        assert empty_diagram_model.getItemAtWithMargin(150.0, 130.0, 0.0) == item_id
+        # Just outside left edge (99), but within 10px margin
+        assert empty_diagram_model.getItemAtWithMargin(95.0, 130.0, 10.0) == item_id
+        # Outside even with margin
+        assert empty_diagram_model.getItemAtWithMargin(80.0, 130.0, 10.0) is None
 
     def test_role_names(self, empty_diagram_model):
         roles = empty_diagram_model.roleNames()

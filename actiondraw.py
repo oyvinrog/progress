@@ -148,6 +148,7 @@ class DiagramModel(QAbstractListModel):
         self._items: List[DiagramItem] = []
         self._edges: List[DiagramEdge] = []
         self._strokes: List[DrawingStroke] = []
+        self._edge_hover_target_id: str = ""
         self._stroke_id_source = count()
         self._drawing_mode: bool = False
         self._brush_color: str = "#ffffff"
@@ -267,6 +268,10 @@ class DiagramModel(QAbstractListModel):
     @Property(float, notify=itemsChanged)
     def edgeDragY(self) -> float:
         return self._edge_drag_y
+
+    @Property(str, notify=itemsChanged)
+    def edgeHoverTargetId(self) -> str:
+        return self._edge_hover_target_id
 
     @Property(int, notify=itemsChanged)
     def count(self) -> int:
@@ -582,6 +587,12 @@ class DiagramModel(QAbstractListModel):
         self._edge_drag_x = x
         self._edge_drag_y = y
         self._is_dragging_edge = True
+        # Find hover target with enlarged margin (20px) for easier drops
+        hover_id = self.getItemAtWithMargin(x, y, 20.0) or ""
+        # Don't hover on source item
+        if hover_id == self._edge_source_id:
+            hover_id = ""
+        self._edge_hover_target_id = hover_id
         self.itemsChanged.emit()
 
     @Slot(str)
@@ -685,6 +696,23 @@ class DiagramModel(QAbstractListModel):
                 return item.id
         return None
 
+    def getItemAtWithMargin(self, x: float, y: float, margin: float) -> Optional[str]:
+        """Find item at position with enlarged hit area.
+
+        Args:
+            x: X coordinate in diagram space.
+            y: Y coordinate in diagram space.
+            margin: Extra pixels to extend hit area on each side.
+
+        Returns:
+            Item ID if found, None otherwise.
+        """
+        for item in reversed(self._items):
+            if (item.x - margin <= x <= item.x + item.width + margin and
+                    item.y - margin <= y <= item.y + item.height + margin):
+                return item.id
+        return None
+
     @Slot(float, float, result=str)
     def itemIdAt(self, x: float, y: float) -> str:
         return self.getItemAt(x, y) or ""
@@ -703,6 +731,7 @@ class DiagramModel(QAbstractListModel):
         self._edge_drag_x = 0.0
         self._edge_drag_y = 0.0
         self._is_dragging_edge = False
+        self._edge_hover_target_id = ""
         if changed:
             self.itemsChanged.emit()
 
@@ -2032,16 +2061,21 @@ ApplicationWindow {
                             property real dragStartY: 0
                             property real pinchStartWidth: model.width
                             property real pinchStartHeight: model.height
+                            property bool isEdgeDropTarget: diagramModel && diagramModel.edgeHoverTargetId === itemRect.itemId
                             x: model.x
                             y: model.y
                             width: model.width
                             height: model.height
                             radius: itemRect.itemType === "cloud" ? Math.min(width, height) / 2 : 12
                             color: model.color
-                            border.width: 1
-                            border.color: itemDrag.active ? Qt.lighter(model.color, 1.4) : Qt.darker(model.color, 1.6)
-                            z: 5
+                            border.width: isEdgeDropTarget ? 3 : 1
+                            border.color: isEdgeDropTarget ? "#74d9a0" : (itemDrag.active ? Qt.lighter(model.color, 1.4) : Qt.darker(model.color, 1.6))
+                            z: isEdgeDropTarget ? 10 : 5
+                            scale: isEdgeDropTarget ? 1.08 : 1.0
+                            transformOrigin: Item.Center
 
+                            Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
+                            Behavior on border.width { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
                             Behavior on x { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
                             Behavior on y { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
 
@@ -2291,7 +2325,7 @@ ApplicationWindow {
                                             diagramModel.updateEdgeDragPosition(edgeHandle.dragPoint.x, edgeHandle.dragPoint.y)
                                             edgeCanvas.requestPaint()
                                         } else {
-                                            var dropId = diagramModel.itemIdAt(edgeHandle.dragPoint.x, edgeHandle.dragPoint.y)
+                                            var dropId = diagramModel.edgeHoverTargetId
                                             if (dropId && dropId !== itemRect.itemId) {
                                                 diagramModel.finishEdgeDrawing(dropId)
                                             } else {
