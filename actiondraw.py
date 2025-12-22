@@ -1513,9 +1513,7 @@ ApplicationWindow {
                         onDoubleClicked: function(mouse) {
                             var pos = mapToItem(diagramLayer, mouse.x, mouse.y)
                             var snapped = root.snapPoint(pos)
-                            addDialog.targetX = snapped.x
-                            addDialog.targetY = snapped.y
-                            addDialog.open()
+                            diagramModel.addBox(snapped.x, snapped.y, "")
                         }
                     }
 
