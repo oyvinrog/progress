@@ -1117,30 +1117,32 @@ ApplicationWindow {
                     border.color: "#384458"
                 }
                 onTextChanged: boxDialog.textValue = text
-                onAccepted: boxDialogButtonBox.accept()
+                Keys.onReturnPressed: boxDialog.accept()
+                Keys.onEnterPressed: boxDialog.accept()
             }
         }
 
         footer: DialogButtonBox {
             id: boxDialogButtonBox
             standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
-            onAccepted: {
-                if (!diagramModel)
-                    return
-                if (boxDialog.editingItemId.length === 0) {
-                    diagramModel.addPresetItemWithText(
-                        boxDialog.presetName,
-                        snapValue(boxDialog.targetX),
-                        snapValue(boxDialog.targetY),
-                        boxDialog.textValue
-                    )
-                } else {
-                    diagramModel.setItemText(boxDialog.editingItemId, boxDialog.textValue)
-                }
-                boxDialog.close()
-            }
-            onRejected: boxDialog.close()
         }
+
+        onAccepted: {
+            if (!diagramModel)
+                return
+            if (boxDialog.editingItemId.length === 0) {
+                diagramModel.addPresetItemWithText(
+                    boxDialog.presetName,
+                    snapValue(boxDialog.targetX),
+                    snapValue(boxDialog.targetY),
+                    boxDialog.textValue
+                )
+            } else {
+                diagramModel.setItemText(boxDialog.editingItemId, boxDialog.textValue)
+            }
+            boxDialog.close()
+        }
+        onRejected: boxDialog.close()
 
         onClosed: {
             boxDialog.textValue = ""
@@ -1309,25 +1311,27 @@ ApplicationWindow {
                     radius: 4
                     border.color: "#384458"
                 }
-                onAccepted: quickTaskButtons.accept()
+                Keys.onReturnPressed: quickTaskDialog.accept()
+                Keys.onEnterPressed: quickTaskDialog.accept()
             }
         }
 
         footer: DialogButtonBox {
             id: quickTaskButtons
             standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
-            onAccepted: {
-                if (diagramModel && quickTaskField.text.trim().length > 0) {
-                    diagramModel.addTaskFromText(
-                        quickTaskField.text,
-                        snapValue(quickTaskDialog.targetX),
-                        snapValue(quickTaskDialog.targetY)
-                    )
-                }
-                quickTaskDialog.close()
-            }
-            onRejected: quickTaskDialog.close()
         }
+
+        onAccepted: {
+            if (diagramModel && quickTaskField.text.trim().length > 0) {
+                diagramModel.addTaskFromText(
+                    quickTaskField.text,
+                    snapValue(quickTaskDialog.targetX),
+                    snapValue(quickTaskDialog.targetY)
+                )
+            }
+            quickTaskDialog.close()
+        }
+        onRejected: quickTaskDialog.close()
 
         onClosed: {
             quickTaskField.text = ""
