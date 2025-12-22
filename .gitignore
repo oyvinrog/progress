@@ -5,6 +5,8 @@ __pycache__/
 .github/prompts/
 # C extensions
 *.so
+# Memory used for Copilot
+MEMORY.md
 
 # Distribution / packaging
 .Python

@@ -1124,24 +1124,25 @@ ApplicationWindow {
         id: taskDialog
         modal: true
         title: "Add Task"
+        width: 450
         property real targetX: 0
         property real targetY: 0
 
         contentItem: ColumnLayout {
-            width: 320
-            height: 360
             spacing: 12
 
             ListView {
                 id: taskListView
                 Layout.fillWidth: true
                 Layout.fillHeight: true
+                Layout.preferredWidth: 420
+                Layout.preferredHeight: 320
                 model: taskModel
                 clip: true
 
                 delegate: Item {
                     width: taskListView.width
-                    height: 40
+                    height: Math.max(40, taskText.implicitHeight + 16)
 
                     Rectangle {
                         anchors.fill: parent
@@ -1150,10 +1151,15 @@ ApplicationWindow {
                     }
 
                     Text {
-                        anchors.centerIn: parent
+                        id: taskText
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.margins: 12
                         text: model.title
                         color: "#f5f6f8"
                         font.pixelSize: 14
+                        wrapMode: Text.WordWrap
                     }
 
                     MouseArea {
@@ -1175,11 +1181,11 @@ ApplicationWindow {
             }
 
             Label {
-                anchors.centerIn: parent
                 text: taskModel ? "No tasks available. Add tasks in Progress Tracker." : "Task list unavailable. Open ActionDraw from the task app."
                 color: "#8a93a5"
                 wrapMode: Text.WordWrap
-                width: parent.width - 32
+                Layout.fillWidth: true
+                Layout.alignment: Qt.AlignHCenter
                 horizontalAlignment: Text.AlignHCenter
                 visible: !taskModel || taskListView.count === 0
             }
