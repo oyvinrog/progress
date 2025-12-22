@@ -1726,6 +1726,28 @@ ApplicationWindow {
                     transformOrigin: Item.TopLeft
                     scale: root.zoomLevel
 
+                    property real contextMenuX: 0
+                    property real contextMenuY: 0
+
+                    Menu {
+                        id: canvasContextMenu
+
+                        MenuItem {
+                            text: "Box"
+                            onTriggered: {
+                                var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
+                                diagramModel.addBox(snapped.x, snapped.y, "")
+                            }
+                        }
+                        MenuItem {
+                            text: "New Task"
+                            onTriggered: {
+                                var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
+                                root.openQuickTaskDialog(snapped)
+                            }
+                        }
+                    }
+
                     Canvas {
                         id: gridCanvas
                         anchors.fill: parent
@@ -2040,12 +2062,22 @@ ApplicationWindow {
 
                     MouseArea {
                         anchors.fill: parent
-                        acceptedButtons: Qt.LeftButton
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
                         enabled: !diagramModel || !diagramModel.drawingMode
                         onDoubleClicked: function(mouse) {
-                            var pos = mapToItem(diagramLayer, mouse.x, mouse.y)
-                            var snapped = root.snapPoint(pos)
-                            diagramModel.addBox(snapped.x, snapped.y, "")
+                            if (mouse.button === Qt.LeftButton) {
+                                var pos = mapToItem(diagramLayer, mouse.x, mouse.y)
+                                var snapped = root.snapPoint(pos)
+                                diagramModel.addBox(snapped.x, snapped.y, "")
+                            }
+                        }
+                        onClicked: function(mouse) {
+                            if (mouse.button === Qt.RightButton) {
+                                var pos = mapToItem(diagramLayer, mouse.x, mouse.y)
+                                diagramLayer.contextMenuX = pos.x
+                                diagramLayer.contextMenuY = pos.y
+                                canvasContextMenu.popup()
+                            }
                         }
                     }
 
