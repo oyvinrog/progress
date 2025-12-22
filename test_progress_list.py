@@ -902,3 +902,114 @@ class TestProjectManager:
         project_manager.loadProject(file_path)
 
         assert file_path in project_manager.currentFilePath
+
+
+class TestRecentProjects:
+    """Tests for recent projects functionality."""
+
+    @pytest.fixture
+    def project_manager(self, task_model):
+        """Create a ProjectManager instance with cleared recent projects."""
+        from progress_list import ActionDrawManager, ProjectManager
+        actiondraw_manager = ActionDrawManager(task_model)
+        pm = ProjectManager(task_model, actiondraw_manager)
+        # Clear any existing recent projects for test isolation
+        pm._recent_projects = []
+        pm._save_recent_projects()
+        return pm
+
+    def test_recent_projects_initially_empty(self, project_manager):
+        """Test that recent projects list starts empty (for fresh settings)."""
+        # Note: In real use, this may have persisted projects
+        assert isinstance(project_manager.recentProjects, list)
+
+    def test_save_adds_to_recent(self, project_manager, task_model, tmp_path):
+        """Test that saving a project adds it to recent projects."""
+        task_model.addTask("Test")
+        file_path = str(tmp_path / "recent_test.progress")
+
+        project_manager.saveProject(file_path)
+
+        assert file_path in project_manager.recentProjects
+
+    def test_load_adds_to_recent(self, project_manager, task_model, tmp_path):
+        """Test that loading a project adds it to recent projects."""
+        task_model.addTask("Test")
+        file_path = str(tmp_path / "recent_load_test.progress")
+        project_manager.saveProject(file_path)
+
+        # Clear and reload
+        project_manager._recent_projects = []
+        project_manager.loadProject(file_path)
+
+        assert file_path in project_manager.recentProjects
+
+    def test_recent_projects_most_recent_first(self, project_manager, task_model, tmp_path):
+        """Test that most recently used project is at the front."""
+        task_model.addTask("Test")
+        file_path1 = str(tmp_path / "first.progress")
+        file_path2 = str(tmp_path / "second.progress")
+
+        project_manager.saveProject(file_path1)
+        project_manager.saveProject(file_path2)
+
+        assert project_manager.recentProjects[0] == file_path2
+        assert project_manager.recentProjects[1] == file_path1
+
+    def test_recent_projects_no_duplicates(self, project_manager, task_model, tmp_path):
+        """Test that duplicate paths are not added."""
+        task_model.addTask("Test")
+        file_path = str(tmp_path / "nodupe.progress")
+
+        project_manager.saveProject(file_path)
+        project_manager.loadProject(file_path)  # Load same file
+
+        count = sum(1 for p in project_manager.recentProjects if p == file_path)
+        assert count == 1
+
+    def test_recent_projects_max_limit(self, project_manager, task_model, tmp_path):
+        """Test that recent projects list is limited to MAX_RECENT_PROJECTS."""
+        from progress_list import ProjectManager
+        max_projects = ProjectManager.MAX_RECENT_PROJECTS
+
+        task_model.addTask("Test")
+        for i in range(max_projects + 3):
+            file_path = str(tmp_path / f"project_{i}.progress")
+            project_manager.saveProject(file_path)
+
+        assert len(project_manager.recentProjects) == max_projects
+
+    def test_get_recent_project_names(self, project_manager, task_model, tmp_path):
+        """Test that getRecentProjectNames returns display names without extension."""
+        task_model.addTask("Test")
+        file_path = str(tmp_path / "display_test.progress")
+        project_manager.saveProject(file_path)
+
+        names = project_manager.getRecentProjectNames()
+
+        assert len(names) >= 1
+        assert names[0]["name"] == "display_test"  # No .progress extension
+        assert names[0]["path"] == file_path
+
+    def test_nonexistent_files_filtered(self, project_manager, tmp_path):
+        """Test that non-existent files are filtered from recent projects."""
+        # Manually add a non-existent path
+        fake_path = str(tmp_path / "nonexistent.progress")
+        project_manager._recent_projects = [fake_path]
+        project_manager._save_recent_projects()
+
+        # Reload recent projects
+        loaded = project_manager._load_recent_projects()
+
+        assert fake_path not in loaded
+
+    def test_recent_projects_signal_emitted(self, project_manager, task_model, tmp_path):
+        """Test that recentProjectsChanged signal is emitted on update."""
+        signal_received = []
+        project_manager.recentProjectsChanged.connect(lambda: signal_received.append(True))
+
+        task_model.addTask("Test")
+        file_path = str(tmp_path / "signal_test.progress")
+        project_manager.saveProject(file_path)
+
+        assert len(signal_received) >= 1

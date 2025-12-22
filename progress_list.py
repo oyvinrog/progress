@@ -30,6 +30,7 @@ from PySide6.QtCore import (
     Signal,
     QUrl,
     QObject,
+    QSettings,
 )
 from PySide6.QtWidgets import QApplication
 from PySide6.QtQml import QQmlApplicationEngine
@@ -704,16 +705,69 @@ class ProjectManager(QObject):
     """
 
     PROJECT_VERSION = "1.0"
+    MAX_RECENT_PROJECTS = 8
     
     saveCompleted = Signal(str)  # Emitted with file path after successful save
     loadCompleted = Signal(str)  # Emitted with file path after successful load
     errorOccurred = Signal(str)  # Emitted with error message on failure
+    recentProjectsChanged = Signal()  # Emitted when recent projects list changes
 
     def __init__(self, task_model: TaskModel, actiondraw_manager: ActionDrawManager):
         super().__init__()
         self._task_model = task_model
         self._actiondraw_manager = actiondraw_manager
         self._current_file_path: str = ""
+        self._settings = QSettings("ProgressTracker", "ProgressTracker")
+        self._recent_projects: List[str] = self._load_recent_projects()
+
+    def _load_recent_projects(self) -> List[str]:
+        """Load recent projects list from settings."""
+        stored = self._settings.value("recentProjects", [])
+        # QSettings may return a string if only one item, or None
+        if stored is None:
+            return []
+        if isinstance(stored, str):
+            stored = [stored] if stored else []
+        if isinstance(stored, list):
+            # Filter out non-existent files
+            return [p for p in stored if p and os.path.exists(p)][:self.MAX_RECENT_PROJECTS]
+        return []
+
+    def _save_recent_projects(self) -> None:
+        """Save recent projects list to settings."""
+        self._settings.setValue("recentProjects", self._recent_projects)
+        self._settings.sync()  # Ensure settings are written to disk
+
+    def _add_to_recent(self, file_path: str) -> None:
+        """Add a project to the recent projects list."""
+        if not file_path or not os.path.exists(file_path):
+            return
+        # Remove if already in list
+        if file_path in self._recent_projects:
+            self._recent_projects.remove(file_path)
+        # Add to front
+        self._recent_projects.insert(0, file_path)
+        # Trim to max size
+        self._recent_projects = self._recent_projects[:self.MAX_RECENT_PROJECTS]
+        self._save_recent_projects()
+        self.recentProjectsChanged.emit()
+
+    @Property("QVariantList", notify=recentProjectsChanged)
+    def recentProjects(self) -> List[str]:
+        """Return the list of recent project file paths."""
+        return self._recent_projects
+
+    @Slot(result=list)
+    def getRecentProjectNames(self) -> List[Dict[str, str]]:
+        """Return list of recent projects with display name and path."""
+        result = []
+        for path in self._recent_projects:
+            name = os.path.basename(path)
+            # Remove .progress extension for display
+            if name.endswith(".progress"):
+                name = name[:-9]
+            result.append({"name": name, "path": path})
+        return result
 
     @Property(str, constant=False)
     def currentFilePath(self) -> str:
@@ -751,6 +805,7 @@ class ProjectManager(QObject):
                 json.dump(project_data, f, indent=2, ensure_ascii=False)
 
             self._current_file_path = file_path
+            self._add_to_recent(file_path)
             self.saveCompleted.emit(file_path)
             print(f"Project saved to: {file_path}")
 
@@ -796,6 +851,7 @@ class ProjectManager(QObject):
             self._actiondraw_manager.diagram_model.from_dict(diagram_data)
 
             self._current_file_path = file_path
+            self._add_to_recent(file_path)
             self.loadCompleted.emit(file_path)
             print(f"Project loaded from: {file_path}")
 
@@ -1049,20 +1105,62 @@ ApplicationWindow {
             spacing: 8
 
             Button {
-                text: "ActionDraw"
-                onClicked: {
-                    actionDrawManager.showActionDraw()
+                id: fileMenuButton
+                text: "File"
+                onClicked: fileMenu.open()
+
+                Menu {
+                    id: fileMenu
+                    y: fileMenuButton.height
+
+                    MenuItem {
+                        text: "Save As..."
+                        onTriggered: saveDialog.open()
+                    }
+
+                    MenuItem {
+                        text: "Load..."
+                        onTriggered: loadDialog.open()
+                    }
+
+                    MenuSeparator {}
+
+                    Menu {
+                        id: recentMenu
+                        title: "Recent Projects"
+                        enabled: recentRepeater.count > 0
+
+                        Repeater {
+                            id: recentRepeater
+                            model: projectManager.recentProjects
+
+                            MenuItem {
+                                property string filePath: modelData
+                                property string fileName: {
+                                    var name = filePath.split("/").pop()
+                                    if (name.endsWith(".progress"))
+                                        name = name.slice(0, -9)
+                                    return name
+                                }
+                                text: fileName
+                                onTriggered: projectManager.loadProject(filePath)
+                            }
+                        }
+
+                        MenuItem {
+                            text: "(No recent projects)"
+                            enabled: false
+                            visible: recentRepeater.count === 0
+                        }
+                    }
                 }
             }
 
             Button {
-                text: "Save As..."
-                onClicked: saveDialog.open()
-            }
-
-            Button {
-                text: "Load..."
-                onClicked: loadDialog.open()
+                text: "ActionDraw"
+                onClicked: {
+                    actionDrawManager.showActionDraw()
+                }
             }
 
             Button {
