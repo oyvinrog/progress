@@ -11,6 +11,8 @@ from actiondraw import (
     DiagramItem,
     DiagramItemType,
     DiagramModel,
+    DrawingPoint,
+    DrawingStroke,
     create_actiondraw_window,
 )
 from progress_list import TaskModel
@@ -56,6 +58,31 @@ class TestDataClasses:
         assert edge.id == "edge_1"
         assert edge.from_id == "a"
         assert edge.to_id == "b"
+
+    def test_drawing_point(self):
+        point = DrawingPoint(x=100.5, y=200.25)
+        assert point.x == 100.5
+        assert point.y == 200.25
+
+    def test_drawing_stroke_defaults(self):
+        stroke = DrawingStroke(
+            id="stroke_0",
+            points=[DrawingPoint(0.0, 0.0), DrawingPoint(10.0, 10.0)],
+        )
+        assert stroke.id == "stroke_0"
+        assert stroke.color == "#ffffff"
+        assert stroke.width == 3.0
+        assert len(stroke.points) == 2
+
+    def test_drawing_stroke_custom(self):
+        stroke = DrawingStroke(
+            id="stroke_1",
+            points=[DrawingPoint(5.0, 5.0)],
+            color="#ff0000",
+            width=10.0,
+        )
+        assert stroke.color == "#ff0000"
+        assert stroke.width == 10.0
 
 
 class TestDiagramModelBasics:
@@ -617,6 +644,241 @@ class TestDiagramModelSerialization:
         # Extract number from ID
         id_num = int(new_id.split("_")[1])
         assert id_num >= 6
+
+
+class TestDrawingFeature:
+    """Tests for the freehand drawing functionality."""
+
+    def test_drawing_mode_default(self, empty_diagram_model):
+        """Test that drawing mode is off by default."""
+        assert empty_diagram_model.drawingMode is False
+
+    def test_set_drawing_mode(self, empty_diagram_model):
+        """Test toggling drawing mode on and off."""
+        empty_diagram_model.setDrawingMode(True)
+        assert empty_diagram_model.drawingMode is True
+
+        empty_diagram_model.setDrawingMode(False)
+        assert empty_diagram_model.drawingMode is False
+
+    def test_brush_color_default(self, empty_diagram_model):
+        """Test default brush color."""
+        assert empty_diagram_model.brushColor == "#ffffff"
+
+    def test_set_brush_color(self, empty_diagram_model):
+        """Test changing brush color."""
+        empty_diagram_model.setBrushColor("#ff5555")
+        assert empty_diagram_model.brushColor == "#ff5555"
+
+    def test_brush_width_default(self, empty_diagram_model):
+        """Test default brush width."""
+        assert empty_diagram_model.brushWidth == 3.0
+
+    def test_set_brush_width(self, empty_diagram_model):
+        """Test changing brush width."""
+        empty_diagram_model.setBrushWidth(10.0)
+        assert empty_diagram_model.brushWidth == 10.0
+
+    def test_brush_width_clamped(self, empty_diagram_model):
+        """Test brush width is clamped to valid range."""
+        empty_diagram_model.setBrushWidth(0.5)
+        assert empty_diagram_model.brushWidth == 1.0
+
+        empty_diagram_model.setBrushWidth(100.0)
+        assert empty_diagram_model.brushWidth == 50.0
+
+    def test_empty_strokes(self, empty_diagram_model):
+        """Test that strokes list is empty initially."""
+        assert empty_diagram_model.strokes == []
+
+    def test_start_stroke(self, empty_diagram_model):
+        """Test starting a stroke."""
+        empty_diagram_model.startStroke(100.0, 200.0)
+        current = empty_diagram_model.getCurrentStroke()
+        assert current["points"] is not None
+        assert len(current["points"]) == 1
+        assert current["points"][0]["x"] == 100.0
+        assert current["points"][0]["y"] == 200.0
+
+    def test_continue_stroke(self, empty_diagram_model):
+        """Test adding points to a stroke."""
+        empty_diagram_model.startStroke(0.0, 0.0)
+        empty_diagram_model.continueStroke(10.0, 10.0)
+        empty_diagram_model.continueStroke(20.0, 20.0)
+
+        current = empty_diagram_model.getCurrentStroke()
+        assert len(current["points"]) == 3
+
+    def test_end_stroke(self, empty_diagram_model):
+        """Test finishing a stroke adds it to the strokes list."""
+        empty_diagram_model.startStroke(0.0, 0.0)
+        empty_diagram_model.continueStroke(50.0, 50.0)
+        empty_diagram_model.endStroke()
+
+        strokes = empty_diagram_model.strokes
+        assert len(strokes) == 1
+        assert strokes[0]["points"][0]["x"] == 0.0
+        assert strokes[0]["points"][1]["x"] == 50.0
+
+    def test_stroke_uses_current_brush_settings(self, empty_diagram_model):
+        """Test that strokes use the current brush color and width."""
+        empty_diagram_model.setBrushColor("#ff0000")
+        empty_diagram_model.setBrushWidth(8.0)
+
+        empty_diagram_model.startStroke(0.0, 0.0)
+        empty_diagram_model.continueStroke(10.0, 10.0)
+        empty_diagram_model.endStroke()
+
+        strokes = empty_diagram_model.strokes
+        assert strokes[0]["color"] == "#ff0000"
+        assert strokes[0]["width"] == 8.0
+
+    def test_single_point_stroke_not_saved(self, empty_diagram_model):
+        """Test that single-point strokes are not saved."""
+        empty_diagram_model.startStroke(0.0, 0.0)
+        empty_diagram_model.endStroke()
+
+        assert len(empty_diagram_model.strokes) == 0
+
+    def test_undo_last_stroke(self, empty_diagram_model):
+        """Test undoing the last stroke."""
+        # Draw two strokes
+        empty_diagram_model.startStroke(0.0, 0.0)
+        empty_diagram_model.continueStroke(10.0, 10.0)
+        empty_diagram_model.endStroke()
+
+        empty_diagram_model.startStroke(20.0, 20.0)
+        empty_diagram_model.continueStroke(30.0, 30.0)
+        empty_diagram_model.endStroke()
+
+        assert len(empty_diagram_model.strokes) == 2
+
+        empty_diagram_model.undoLastStroke()
+        assert len(empty_diagram_model.strokes) == 1
+
+        empty_diagram_model.undoLastStroke()
+        assert len(empty_diagram_model.strokes) == 0
+
+    def test_undo_empty_strokes(self, empty_diagram_model):
+        """Test that undoing on empty list doesn't crash."""
+        empty_diagram_model.undoLastStroke()  # Should not raise
+        assert len(empty_diagram_model.strokes) == 0
+
+    def test_clear_strokes(self, empty_diagram_model):
+        """Test clearing all strokes."""
+        # Draw some strokes
+        for _ in range(3):
+            empty_diagram_model.startStroke(0.0, 0.0)
+            empty_diagram_model.continueStroke(10.0, 10.0)
+            empty_diagram_model.endStroke()
+
+        assert len(empty_diagram_model.strokes) == 3
+
+        empty_diagram_model.clearStrokes()
+        assert len(empty_diagram_model.strokes) == 0
+
+    def test_strokes_serialization(self, empty_diagram_model):
+        """Test that strokes are included in to_dict output."""
+        empty_diagram_model.setBrushColor("#00ff00")
+        empty_diagram_model.setBrushWidth(5.0)
+        empty_diagram_model.startStroke(10.0, 20.0)
+        empty_diagram_model.continueStroke(30.0, 40.0)
+        empty_diagram_model.continueStroke(50.0, 60.0)
+        empty_diagram_model.endStroke()
+
+        data = empty_diagram_model.to_dict()
+        assert "strokes" in data
+        assert len(data["strokes"]) == 1
+
+        stroke = data["strokes"][0]
+        assert stroke["color"] == "#00ff00"
+        assert stroke["width"] == 5.0
+        assert len(stroke["points"]) == 3
+        assert stroke["points"][0] == {"x": 10.0, "y": 20.0}
+
+    def test_strokes_deserialization(self, empty_diagram_model):
+        """Test that strokes are loaded from from_dict."""
+        data = {
+            "items": [],
+            "edges": [],
+            "strokes": [
+                {
+                    "id": "stroke_0",
+                    "color": "#ff00ff",
+                    "width": 7.0,
+                    "points": [
+                        {"x": 100.0, "y": 100.0},
+                        {"x": 150.0, "y": 150.0},
+                        {"x": 200.0, "y": 100.0},
+                    ],
+                }
+            ],
+        }
+
+        empty_diagram_model.from_dict(data)
+
+        strokes = empty_diagram_model.strokes
+        assert len(strokes) == 1
+        assert strokes[0]["color"] == "#ff00ff"
+        assert strokes[0]["width"] == 7.0
+        assert len(strokes[0]["points"]) == 3
+
+    def test_strokes_cleared_on_from_dict(self, empty_diagram_model):
+        """Test that existing strokes are cleared when loading."""
+        # Add some strokes
+        empty_diagram_model.startStroke(0.0, 0.0)
+        empty_diagram_model.continueStroke(10.0, 10.0)
+        empty_diagram_model.endStroke()
+
+        # Load empty diagram
+        data = {"items": [], "edges": [], "strokes": []}
+        empty_diagram_model.from_dict(data)
+
+        assert len(empty_diagram_model.strokes) == 0
+
+    def test_stroke_id_resumes_after_load(self, empty_diagram_model):
+        """Test that stroke ID generation resumes after loading."""
+        data = {
+            "items": [],
+            "edges": [],
+            "strokes": [
+                {
+                    "id": "stroke_10",
+                    "color": "#ffffff",
+                    "width": 3.0,
+                    "points": [{"x": 0.0, "y": 0.0}, {"x": 10.0, "y": 10.0}],
+                }
+            ],
+        }
+        empty_diagram_model.from_dict(data)
+
+        # Draw a new stroke
+        empty_diagram_model.startStroke(0.0, 0.0)
+        empty_diagram_model.continueStroke(10.0, 10.0)
+        empty_diagram_model.endStroke()
+
+        strokes = empty_diagram_model.strokes
+        assert len(strokes) == 2
+        # New stroke should have ID >= stroke_11
+        new_id = strokes[1]["id"]
+        id_num = int(new_id.split("_")[1])
+        assert id_num >= 11
+
+    def test_multiple_strokes_preserved(self, empty_diagram_model):
+        """Test drawing multiple strokes."""
+        colors = ["#ff0000", "#00ff00", "#0000ff"]
+
+        for i, color in enumerate(colors):
+            empty_diagram_model.setBrushColor(color)
+            empty_diagram_model.startStroke(float(i * 10), 0.0)
+            empty_diagram_model.continueStroke(float(i * 10 + 5), 5.0)
+            empty_diagram_model.endStroke()
+
+        strokes = empty_diagram_model.strokes
+        assert len(strokes) == 3
+
+        for i, stroke in enumerate(strokes):
+            assert stroke["color"] == colors[i]
 
 
 if __name__ == "__main__":

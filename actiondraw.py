@@ -60,6 +60,24 @@ class DiagramEdge:
     to_id: str
 
 
+@dataclass
+class DrawingPoint:
+    """A single point in a drawing stroke."""
+
+    x: float
+    y: float
+
+
+@dataclass
+class DrawingStroke:
+    """A freehand drawing stroke on the canvas."""
+
+    id: str
+    points: List[DrawingPoint]
+    color: str = "#ffffff"
+    width: float = 3.0
+
+
 ITEM_PRESETS: Dict[str, Dict[str, Any]] = {
     "box": {
         "type": DiagramItemType.BOX,
@@ -120,11 +138,21 @@ class DiagramModel(QAbstractListModel):
 
     itemsChanged = Signal()
     edgesChanged = Signal()
+    drawingChanged = Signal()
+    drawingModeChanged = Signal()
+    brushColorChanged = Signal()
+    brushWidthChanged = Signal()
 
     def __init__(self, task_model=None):
         super().__init__()
         self._items: List[DiagramItem] = []
         self._edges: List[DiagramEdge] = []
+        self._strokes: List[DrawingStroke] = []
+        self._stroke_id_source = count()
+        self._drawing_mode: bool = False
+        self._brush_color: str = "#ffffff"
+        self._brush_width: float = 3.0
+        self._current_stroke: Optional[DrawingStroke] = None
         self._task_model = task_model
         self._id_source = count()
         self._edge_source_id: Optional[str] = None
@@ -243,6 +271,117 @@ class DiagramModel(QAbstractListModel):
     @Property(int, notify=itemsChanged)
     def count(self) -> int:
         return len(self._items)
+
+    # --- Drawing properties exposed to QML ---------------------------------
+    @Property(bool, notify=drawingModeChanged)
+    def drawingMode(self) -> bool:
+        return self._drawing_mode
+
+    @drawingMode.setter  # type: ignore[no-redef]
+    def drawingMode(self, value: bool) -> None:
+        if self._drawing_mode != value:
+            self._drawing_mode = value
+            self.drawingModeChanged.emit()
+
+    @Slot(bool)
+    def setDrawingMode(self, enabled: bool) -> None:
+        self.drawingMode = enabled
+
+    @Property(str, notify=brushColorChanged)
+    def brushColor(self) -> str:
+        return self._brush_color
+
+    @brushColor.setter  # type: ignore[no-redef]
+    def brushColor(self, value: str) -> None:
+        if self._brush_color != value:
+            self._brush_color = value
+            self.brushColorChanged.emit()
+
+    @Slot(str)
+    def setBrushColor(self, color: str) -> None:
+        self.brushColor = color
+
+    @Property(float, notify=brushWidthChanged)
+    def brushWidth(self) -> float:
+        return self._brush_width
+
+    @brushWidth.setter  # type: ignore[no-redef]
+    def brushWidth(self, value: float) -> None:
+        clamped = max(1.0, min(50.0, value))
+        if self._brush_width != clamped:
+            self._brush_width = clamped
+            self.brushWidthChanged.emit()
+
+    @Slot(float)
+    def setBrushWidth(self, width: float) -> None:
+        self.brushWidth = width
+
+    @Property(list, notify=drawingChanged)
+    def strokes(self) -> List[Dict[str, Any]]:
+        """Return all strokes as a list of dicts for QML consumption."""
+        result = []
+        for stroke in self._strokes:
+            result.append({
+                "id": stroke.id,
+                "color": stroke.color,
+                "width": stroke.width,
+                "points": [{"x": pt.x, "y": pt.y} for pt in stroke.points],
+            })
+        return result
+
+    # --- Drawing operations -------------------------------------------------
+    @Slot(float, float)
+    def startStroke(self, x: float, y: float) -> None:
+        """Begin a new drawing stroke at the given position."""
+        stroke_id = f"stroke_{next(self._stroke_id_source)}"
+        self._current_stroke = DrawingStroke(
+            id=stroke_id,
+            points=[DrawingPoint(x, y)],
+            color=self._brush_color,
+            width=self._brush_width,
+        )
+        self.drawingChanged.emit()
+
+    @Slot(float, float)
+    def continueStroke(self, x: float, y: float) -> None:
+        """Add a point to the current stroke."""
+        if self._current_stroke is not None:
+            self._current_stroke.points.append(DrawingPoint(x, y))
+            self.drawingChanged.emit()
+
+    @Slot()
+    def endStroke(self) -> None:
+        """Finish the current stroke and add it to the strokes list."""
+        if self._current_stroke is not None and len(self._current_stroke.points) >= 2:
+            self._strokes.append(self._current_stroke)
+        self._current_stroke = None
+        self.drawingChanged.emit()
+
+    @Slot(result="QVariant")
+    def getCurrentStroke(self) -> Dict[str, Any]:
+        """Return current stroke being drawn, or empty dict."""
+        if self._current_stroke is None:
+            return {}
+        return {
+            "id": self._current_stroke.id,
+            "color": self._current_stroke.color,
+            "width": self._current_stroke.width,
+            "points": [{"x": pt.x, "y": pt.y} for pt in self._current_stroke.points],
+        }
+
+    @Slot()
+    def clearStrokes(self) -> None:
+        """Remove all drawing strokes."""
+        self._strokes.clear()
+        self._current_stroke = None
+        self.drawingChanged.emit()
+
+    @Slot()
+    def undoLastStroke(self) -> None:
+        """Remove the most recent stroke."""
+        if self._strokes:
+            self._strokes.pop()
+            self.drawingChanged.emit()
 
     # --- Item management ----------------------------------------------------
     @Slot(float, float, str, result=str)
@@ -596,9 +735,19 @@ class DiagramModel(QAbstractListModel):
                 "to_id": edge.to_id,
             })
 
+        strokes_data = []
+        for stroke in self._strokes:
+            strokes_data.append({
+                "id": stroke.id,
+                "color": stroke.color,
+                "width": stroke.width,
+                "points": [{"x": pt.x, "y": pt.y} for pt in stroke.points],
+            })
+
         return {
             "items": items_data,
             "edges": edges_data,
+            "strokes": strokes_data,
         }
 
     def from_dict(self, data: Dict[str, Any]) -> None:
@@ -607,12 +756,14 @@ class DiagramModel(QAbstractListModel):
         Args:
             data: Dictionary containing diagram data (from to_dict).
         """
-        # Clear existing items and edges
+        # Clear existing items, edges, and strokes
         if self._items:
             self.beginRemoveRows(QModelIndex(), 0, len(self._items) - 1)
             self._items.clear()
             self.endRemoveRows()
         self._edges.clear()
+        self._strokes.clear()
+        self._current_stroke = None
 
         # Track highest ID number to resume ID generation
         max_id = 0
@@ -664,8 +815,40 @@ class DiagramModel(QAbstractListModel):
             )
             self._edges.append(edge)
 
+        # Load strokes
+        self._strokes.clear()
+        max_stroke_id = 0
+        strokes_data = data.get("strokes", [])
+        for stroke_data in strokes_data:
+            stroke_id = stroke_data.get("id", "")
+            # Track max stroke ID
+            try:
+                id_parts = stroke_id.rsplit("_", 1)
+                if len(id_parts) == 2:
+                    max_stroke_id = max(max_stroke_id, int(id_parts[1]) + 1)
+            except (ValueError, IndexError):
+                pass
+
+            points = []
+            for pt_data in stroke_data.get("points", []):
+                points.append(DrawingPoint(
+                    x=float(pt_data.get("x", 0.0)),
+                    y=float(pt_data.get("y", 0.0)),
+                ))
+
+            stroke = DrawingStroke(
+                id=stroke_id,
+                points=points,
+                color=stroke_data.get("color", "#ffffff"),
+                width=float(stroke_data.get("width", 3.0)),
+            )
+            self._strokes.append(stroke)
+
+        self._stroke_id_source = count(max_stroke_id)
+
         self.itemsChanged.emit()
         self.edgesChanged.emit()
+        self.drawingChanged.emit()
 
 
 ACTIONDRAW_QML = r"""
@@ -1274,6 +1457,129 @@ ApplicationWindow {
                 }
             }
 
+            Rectangle {
+                width: 1
+                height: 24
+                color: "#3b485c"
+            }
+
+            Button {
+                id: drawModeButton
+                text: diagramModel && diagramModel.drawingMode ? "✏ Drawing" : "✏ Draw"
+                highlighted: diagramModel && diagramModel.drawingMode
+                onClicked: {
+                    if (diagramModel)
+                        diagramModel.setDrawingMode(!diagramModel.drawingMode)
+                }
+            }
+
+            Button {
+                id: colorPickerButton
+                text: ""
+                enabled: diagramModel !== null
+                implicitWidth: 32
+                implicitHeight: 32
+                background: Rectangle {
+                    color: diagramModel ? diagramModel.brushColor : "#ffffff"
+                    border.color: "#5b6878"
+                    border.width: 2
+                    radius: 4
+                }
+                onClicked: colorMenu.open()
+
+                Menu {
+                    id: colorMenu
+                    parent: colorPickerButton
+                    y: colorPickerButton.height
+
+                    MenuItem {
+                        text: "White"
+                        Rectangle { anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter; width: 16; height: 16; radius: 8; color: "#ffffff" }
+                        onTriggered: diagramModel && diagramModel.setBrushColor("#ffffff")
+                    }
+                    MenuItem {
+                        text: "Red"
+                        Rectangle { anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter; width: 16; height: 16; radius: 8; color: "#ff5555" }
+                        onTriggered: diagramModel && diagramModel.setBrushColor("#ff5555")
+                    }
+                    MenuItem {
+                        text: "Orange"
+                        Rectangle { anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter; width: 16; height: 16; radius: 8; color: "#ff9944" }
+                        onTriggered: diagramModel && diagramModel.setBrushColor("#ff9944")
+                    }
+                    MenuItem {
+                        text: "Yellow"
+                        Rectangle { anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter; width: 16; height: 16; radius: 8; color: "#ffee55" }
+                        onTriggered: diagramModel && diagramModel.setBrushColor("#ffee55")
+                    }
+                    MenuItem {
+                        text: "Green"
+                        Rectangle { anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter; width: 16; height: 16; radius: 8; color: "#55ff55" }
+                        onTriggered: diagramModel && diagramModel.setBrushColor("#55ff55")
+                    }
+                    MenuItem {
+                        text: "Cyan"
+                        Rectangle { anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter; width: 16; height: 16; radius: 8; color: "#55ffff" }
+                        onTriggered: diagramModel && diagramModel.setBrushColor("#55ffff")
+                    }
+                    MenuItem {
+                        text: "Blue"
+                        Rectangle { anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter; width: 16; height: 16; radius: 8; color: "#5588ff" }
+                        onTriggered: diagramModel && diagramModel.setBrushColor("#5588ff")
+                    }
+                    MenuItem {
+                        text: "Purple"
+                        Rectangle { anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter; width: 16; height: 16; radius: 8; color: "#aa55ff" }
+                        onTriggered: diagramModel && diagramModel.setBrushColor("#aa55ff")
+                    }
+                    MenuItem {
+                        text: "Pink"
+                        Rectangle { anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter; width: 16; height: 16; radius: 8; color: "#ff55aa" }
+                        onTriggered: diagramModel && diagramModel.setBrushColor("#ff55aa")
+                    }
+                }
+            }
+
+            RowLayout {
+                spacing: 4
+
+                Label {
+                    text: "Size:"
+                    color: "#a8b8c8"
+                }
+
+                Slider {
+                    id: brushSizeSlider
+                    Layout.preferredWidth: 80
+                    from: 1
+                    to: 20
+                    stepSize: 1
+                    value: diagramModel ? diagramModel.brushWidth : 3
+                    onValueChanged: {
+                        if (diagramModel && Math.abs(diagramModel.brushWidth - value) > 0.1)
+                            diagramModel.setBrushWidth(value)
+                    }
+                }
+
+                Label {
+                    text: Math.round(brushSizeSlider.value)
+                    color: "#f5f6f8"
+                    Layout.preferredWidth: 20
+                }
+            }
+
+            Button {
+                text: "Undo"
+                enabled: diagramModel !== null
+                onClicked: diagramModel && diagramModel.undoLastStroke()
+            }
+
+            Button {
+                text: "Clear Drawings"
+                enabled: diagramModel !== null
+                onClicked: diagramModel && diagramModel.clearStrokes()
+            }
+
             Item { Layout.fillWidth: true }
 
             CheckBox {
@@ -1347,6 +1653,7 @@ ApplicationWindow {
                 contentWidth: root.boardSize * root.zoomLevel
                 contentHeight: root.boardSize * root.zoomLevel
                 clip: true
+                interactive: !diagramModel || !diagramModel.drawingMode
 
                 WheelHandler {
                     target: null
@@ -1599,6 +1906,7 @@ ApplicationWindow {
                         target: diagramModel
                         function onEdgesChanged() { edgeCanvas.requestPaint() }
                         function onItemsChanged() { edgeCanvas.requestPaint() }
+                        function onDrawingChanged() { drawingCanvas.requestPaint() }
                     }
 
                     Connections {
@@ -1607,9 +1915,98 @@ ApplicationWindow {
                         function onGridSpacingChanged() { gridCanvas.requestPaint() }
                     }
 
+                    Canvas {
+                        id: drawingCanvas
+                        anchors.fill: parent
+                        z: 2
+
+                        function drawStroke(ctx, stroke) {
+                            if (!stroke.points || stroke.points.length < 1)
+                                return
+                            ctx.strokeStyle = stroke.color
+                            ctx.lineWidth = stroke.width
+                            ctx.lineCap = "round"
+                            ctx.lineJoin = "round"
+                            ctx.beginPath()
+                            ctx.moveTo(stroke.points[0].x, stroke.points[0].y)
+                            if (stroke.points.length === 1) {
+                                // Single point - draw a dot
+                                ctx.arc(stroke.points[0].x, stroke.points[0].y, stroke.width / 2, 0, 2 * Math.PI)
+                                ctx.fillStyle = stroke.color
+                                ctx.fill()
+                            } else {
+                                for (var i = 1; i < stroke.points.length; ++i) {
+                                    ctx.lineTo(stroke.points[i].x, stroke.points[i].y)
+                                }
+                                ctx.stroke()
+                            }
+                        }
+
+                        onPaint: {
+                            var ctx = getContext("2d")
+                            ctx.clearRect(0, 0, width, height)
+                            if (!diagramModel)
+                                return
+
+                            // Draw all completed strokes
+                            var allStrokes = diagramModel.strokes
+                            for (var i = 0; i < allStrokes.length; ++i) {
+                                drawStroke(ctx, allStrokes[i])
+                            }
+
+                            // Draw current stroke being drawn
+                            var current = diagramModel.getCurrentStroke()
+                            if (current && current.points && current.points.length >= 1) {
+                                drawStroke(ctx, current)
+                            }
+                        }
+
+                        MouseArea {
+                            id: drawingMouseArea
+                            anchors.fill: parent
+                            enabled: diagramModel && diagramModel.drawingMode
+                            hoverEnabled: false
+                            acceptedButtons: Qt.LeftButton
+                            z: 100
+
+                            property bool isDrawing: false
+
+                            onPressed: function(mouse) {
+                                if (!diagramModel || !diagramModel.drawingMode)
+                                    return
+                                isDrawing = true
+                                diagramModel.startStroke(mouse.x, mouse.y)
+                                drawingCanvas.requestPaint()
+                            }
+
+                            onPositionChanged: function(mouse) {
+                                if (!diagramModel || !isDrawing)
+                                    return
+                                diagramModel.continueStroke(mouse.x, mouse.y)
+                                drawingCanvas.requestPaint()
+                            }
+
+                            onReleased: function(mouse) {
+                                if (!diagramModel)
+                                    return
+                                isDrawing = false
+                                diagramModel.endStroke()
+                                drawingCanvas.requestPaint()
+                            }
+
+                            onCanceled: {
+                                isDrawing = false
+                                if (diagramModel)
+                                    diagramModel.endStroke()
+                                drawingCanvas.requestPaint()
+                            }
+                        }
+                    }
+
                     MouseArea {
                         anchors.fill: parent
                         acceptedButtons: Qt.LeftButton
+                        enabled: !diagramModel || !diagramModel.drawingMode
                         onDoubleClicked: function(mouse) {
                             var pos = mapToItem(diagramLayer, mouse.x, mouse.y)
                             var snapped = root.snapPoint(pos)
