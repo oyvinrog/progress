@@ -58,6 +58,7 @@ class DiagramEdge:
     id: str
     from_id: str
     to_id: str
+    description: str = ""
 
 
 @dataclass
@@ -249,7 +250,7 @@ class DiagramModel(QAbstractListModel):
     @Property(list, notify=edgesChanged)
     def edges(self) -> List[Dict[str, str]]:
         return [
-            {"id": edge.id, "fromId": edge.from_id, "toId": edge.to_id}
+            {"id": edge.id, "fromId": edge.from_id, "toId": edge.to_id, "description": edge.description}
             for edge in self._edges
         ]
 
@@ -546,6 +547,25 @@ class DiagramModel(QAbstractListModel):
                 self.edgesChanged.emit()
                 return
 
+    @Slot(str, str)
+    def setEdgeDescription(self, edge_id: str, description: str) -> None:
+        """Set description text for an edge."""
+        for edge in self._edges:
+            if edge.id == edge_id:
+                if edge.description == description:
+                    return
+                edge.description = description
+                self.edgesChanged.emit()
+                return
+
+    @Slot(str, result=str)
+    def getEdgeDescription(self, edge_id: str) -> str:
+        """Get description text for an edge."""
+        for edge in self._edges:
+            if edge.id == edge_id:
+                return edge.description
+        return ""
+
     @Slot(str)
     def removeItem(self, item_id: str) -> None:
         # Remove edges touching the item
@@ -762,6 +782,7 @@ class DiagramModel(QAbstractListModel):
                 "id": edge.id,
                 "from_id": edge.from_id,
                 "to_id": edge.to_id,
+                "description": edge.description,
             })
 
         strokes_data = []
@@ -841,6 +862,7 @@ class DiagramModel(QAbstractListModel):
                 id=edge_data.get("id", ""),
                 from_id=edge_data.get("from_id", ""),
                 to_id=edge_data.get("to_id", ""),
+                description=edge_data.get("description", ""),
             )
             self._edges.append(edge)
 
@@ -1148,6 +1170,61 @@ ApplicationWindow {
             boxDialog.textValue = ""
             boxDialog.editingItemId = ""
             boxDialog.presetName = "box"
+        }
+    }
+
+    Dialog {
+        id: edgeDescriptionDialog
+        modal: true
+        title: "Edge Description"
+        property string edgeId: ""
+        property string descriptionValue: ""
+
+        function openWithEdge(eId) {
+            edgeId = eId
+            descriptionValue = diagramModel ? diagramModel.getEdgeDescription(eId) : ""
+            open()
+        }
+
+        onOpened: edgeDescriptionField.forceActiveFocus()
+
+        contentItem: ColumnLayout {
+            width: 320
+            spacing: 12
+
+            TextField {
+                id: edgeDescriptionField
+                Layout.fillWidth: true
+                text: edgeDescriptionDialog.descriptionValue
+                placeholderText: "Description (optional)"
+                selectByMouse: true
+                color: "#f5f6f8"
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#384458"
+                }
+                onTextChanged: edgeDescriptionDialog.descriptionValue = text
+                Keys.onReturnPressed: edgeDescriptionDialog.accept()
+                Keys.onEnterPressed: edgeDescriptionDialog.accept()
+            }
+        }
+
+        footer: DialogButtonBox {
+            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+        }
+
+        onAccepted: {
+            if (diagramModel && edgeDescriptionDialog.edgeId.length > 0) {
+                diagramModel.setEdgeDescription(edgeDescriptionDialog.edgeId, edgeDescriptionDialog.descriptionValue)
+            }
+            close()
+        }
+        onRejected: close()
+
+        onClosed: {
+            edgeDescriptionDialog.edgeId = ""
+            edgeDescriptionDialog.descriptionValue = ""
         }
     }
 
@@ -1883,6 +1960,19 @@ ApplicationWindow {
                                     ctx.fillStyle = "#7b88a8"
                                 }
                                 ctx.fill()
+
+                                // Draw edge description text at midpoint
+                                if (edge.description && edge.description.length > 0) {
+                                    var midX = (fromX + toX) / 2
+                                    var midY = (fromY + toY) / 2
+                                    ctx.font = "12px sans-serif"
+                                    ctx.fillStyle = "#f5f6f8"
+                                    ctx.textAlign = "center"
+                                    ctx.textBaseline = "bottom"
+                                    // Offset text slightly above the line
+                                    var offsetY = -6
+                                    ctx.fillText(edge.description, midX, midY + offsetY)
+                                }
                             }
 
                             if (diagramModel.edgeDrawingFrom.length > 0 && diagramModel.isDraggingEdge) {
@@ -1952,10 +2042,8 @@ ApplicationWindow {
                             onDoubleClicked: function(mouse) {
                                 var edgeId = edgeCanvas.findEdgeAt(mouse.x, mouse.y)
                                 if (edgeId !== "") {
-                                    // Double-click to delete
-                                    diagramModel.removeEdge(edgeId)
-                                    edgeCanvas.selectedEdgeId = ""
-                                    edgeCanvas.hoveredEdgeId = ""
+                                    // Double-click to edit description
+                                    edgeDescriptionDialog.openWithEdge(edgeId)
                                 } else {
                                     mouse.accepted = false
                                 }

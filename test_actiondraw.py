@@ -293,6 +293,38 @@ class TestEdges:
         empty_diagram_model.cancelEdgeDrawing()
         assert empty_diagram_model.edgeHoverTargetId == ""
 
+    def test_set_edge_description(self, empty_diagram_model):
+        """Edge description can be set and retrieved."""
+        a = empty_diagram_model.addBox(0.0, 0.0, "A")
+        b = empty_diagram_model.addBox(100.0, 0.0, "B")
+        empty_diagram_model.addEdge(a, b)
+        edge_id = empty_diagram_model.edges[0]["id"]
+        empty_diagram_model.setEdgeDescription(edge_id, "connects to")
+        assert empty_diagram_model.getEdgeDescription(edge_id) == "connects to"
+        assert empty_diagram_model.edges[0]["description"] == "connects to"
+
+    def test_edge_description_default_empty(self, empty_diagram_model):
+        """Edge description defaults to empty string."""
+        a = empty_diagram_model.addBox(0.0, 0.0, "A")
+        b = empty_diagram_model.addBox(100.0, 0.0, "B")
+        empty_diagram_model.addEdge(a, b)
+        edge_id = empty_diagram_model.edges[0]["id"]
+        assert empty_diagram_model.getEdgeDescription(edge_id) == ""
+        assert empty_diagram_model.edges[0]["description"] == ""
+
+    def test_set_edge_description_invalid_id(self, empty_diagram_model):
+        """Setting description on nonexistent edge does nothing."""
+        a = empty_diagram_model.addBox(0.0, 0.0, "A")
+        b = empty_diagram_model.addBox(100.0, 0.0, "B")
+        empty_diagram_model.addEdge(a, b)
+        empty_diagram_model.setEdgeDescription("nonexistent_edge", "test")
+        edge_id = empty_diagram_model.edges[0]["id"]
+        assert empty_diagram_model.getEdgeDescription(edge_id) == ""
+
+    def test_get_edge_description_invalid_id(self, empty_diagram_model):
+        """Getting description from nonexistent edge returns empty string."""
+        assert empty_diagram_model.getEdgeDescription("nonexistent_edge") == ""
+
 
 class TestQueries:
     def test_get_item(self, empty_diagram_model):
