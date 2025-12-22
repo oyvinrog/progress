@@ -128,6 +128,11 @@ class DiagramModel(QAbstractListModel):
         self._task_model = task_model
         self._id_source = count()
         self._edge_source_id: Optional[str] = None
+        self._renaming_in_progress = False  # Flag to prevent re-entrant rename calls
+        
+        # Connect to task model's taskRenamed signal for bidirectional sync
+        if self._task_model is not None:
+            self._task_model.taskRenamed.connect(self.onTaskRenamed)
         self._edge_drag_x: float = 0.0
         self._edge_drag_y: float = 0.0
         self._is_dragging_edge: bool = False
@@ -313,6 +318,45 @@ class DiagramModel(QAbstractListModel):
                 self.dataChanged.emit(index, index, [self.TextRole])
                 self.itemsChanged.emit()
                 return
+
+    @Slot(str, str)
+    def renameTaskItem(self, item_id: str, new_text: str) -> None:
+        """Rename a task item and sync to the task list."""
+        new_text = new_text.strip()
+        if not new_text:
+            return
+        if self._renaming_in_progress:
+            return
+        for row, item in enumerate(self._items):
+            if item.id == item_id:
+                if item.text == new_text:
+                    return
+                item.text = new_text
+                index = self.index(row, 0)
+                self.dataChanged.emit(index, index, [self.TextRole])
+                self.itemsChanged.emit()
+                # Sync to task model if this is a task item
+                if item.task_index >= 0 and self._task_model is not None:
+                    self._renaming_in_progress = True
+                    try:
+                        self._task_model.renameTask(item.task_index, new_text)
+                    finally:
+                        self._renaming_in_progress = False
+                return
+
+    @Slot(int, str)
+    def onTaskRenamed(self, task_index: int, new_title: str) -> None:
+        """Handle task rename from the task list - update diagram items."""
+        if self._renaming_in_progress:
+            return
+        for row, item in enumerate(self._items):
+            if item.task_index == task_index:
+                if item.text == new_title:
+                    continue
+                item.text = new_title
+                index = self.index(row, 0)
+                self.dataChanged.emit(index, index, [self.TextRole])
+        self.itemsChanged.emit()
 
     @Slot(str, float, float)
     def resizeItem(self, item_id: str, width: float, height: float) -> None:
@@ -954,6 +998,67 @@ ApplicationWindow {
         }
     }
 
+    Dialog {
+        id: taskRenameDialog
+        modal: true
+        title: "Rename Task"
+        property string editingItemId: ""
+        property string textValue: ""
+
+        onOpened: taskRenameField.forceActiveFocus()
+
+        function openWithItem(itemId, text) {
+            editingItemId = itemId
+            textValue = text
+            open()
+        }
+
+        contentItem: ColumnLayout {
+            width: 320
+            spacing: 12
+
+            Label {
+                text: "Rename this task. Changes will be synced to the Progress List."
+                color: "#8a93a5"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            TextField {
+                id: taskRenameField
+                Layout.fillWidth: true
+                text: taskRenameDialog.textValue
+                placeholderText: "Task name"
+                selectByMouse: true
+                color: "#f5f6f8"
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#384458"
+                }
+                onTextChanged: taskRenameDialog.textValue = text
+                onAccepted: taskRenameButtons.accept()
+            }
+        }
+
+        footer: DialogButtonBox {
+            id: taskRenameButtons
+            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+            onAccepted: {
+                if (diagramModel && taskRenameDialog.editingItemId.length > 0 && taskRenameDialog.textValue.trim().length > 0) {
+                    diagramModel.renameTaskItem(taskRenameDialog.editingItemId, taskRenameDialog.textValue)
+                }
+                taskRenameDialog.close()
+            }
+            onRejected: taskRenameDialog.close()
+        }
+
+        onClosed: {
+            taskRenameDialog.editingItemId = ""
+            taskRenameDialog.textValue = ""
+        }
+    }
+
     function openQuickTaskDialog(point) {
         quickTaskDialog.targetX = point.x
         quickTaskDialog.targetY = point.y
@@ -1508,7 +1613,11 @@ ApplicationWindow {
                                 gesturePolicy: TapHandler.DragThreshold
                                 onDoubleTapped: {
                                     if (itemRect.itemType === "task" && itemRect.taskIndex < 0) {
+                                        // Task not yet linked to task list - create new task
                                         newTaskDialog.openWithItem(itemRect.itemId, model.text)
+                                    } else if (itemRect.itemType === "task" && itemRect.taskIndex >= 0) {
+                                        // Task linked to task list - rename it (syncs both ways)
+                                        taskRenameDialog.openWithItem(itemRect.itemId, model.text)
                                     } else if (itemRect.itemType !== "task") {
                                         root.openPresetDialog(itemRect.itemType, Qt.point(model.x, model.y), itemRect.itemId, model.text)
                                     }

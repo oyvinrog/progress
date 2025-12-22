@@ -257,6 +257,92 @@ class TestTaskIntegration:
         assert item_id
 
 
+class TestBidirectionalRename:
+    """Test bidirectional name syncing between diagram and task list."""
+
+    def test_rename_task_item_syncs_to_task_model(self, diagram_model_with_task_model):
+        """Renaming a task in the diagram should update the task list."""
+        task_model = diagram_model_with_task_model._task_model
+        # Add a task from the task list to the diagram
+        item_id = diagram_model_with_task_model.addTask(0, 100.0, 100.0)
+        
+        # Rename via diagram
+        diagram_model_with_task_model.renameTaskItem(item_id, "Renamed Task")
+        
+        # Check diagram item was updated
+        item = diagram_model_with_task_model.getItem(item_id)
+        assert item.text == "Renamed Task"
+        
+        # Check task model was updated
+        task_title = task_model.data(task_model.index(0, 0), task_model.TitleRole)
+        assert task_title == "Renamed Task"
+
+    def test_rename_in_task_model_syncs_to_diagram(self, diagram_model_with_task_model):
+        """Renaming a task in the task list should update the diagram."""
+        task_model = diagram_model_with_task_model._task_model
+        # Add a task from the task list to the diagram
+        item_id = diagram_model_with_task_model.addTask(1, 100.0, 100.0)
+        
+        # Get original name
+        item = diagram_model_with_task_model.getItem(item_id)
+        assert item.text == "Task 2"
+        
+        # Rename via task model
+        task_model.renameTask(1, "Updated From List")
+        
+        # Check diagram item was updated
+        item = diagram_model_with_task_model.getItem(item_id)
+        assert item.text == "Updated From List"
+
+    def test_rename_task_item_no_task_index(self, empty_diagram_model):
+        """Renaming a non-task item should only update the diagram."""
+        item_id = empty_diagram_model.addBox(0.0, 0.0, "Original")
+        empty_diagram_model.renameTaskItem(item_id, "Updated")
+        item = empty_diagram_model.getItem(item_id)
+        assert item.text == "Updated"
+
+    def test_rename_task_item_empty_text(self, diagram_model_with_task_model):
+        """Empty text should be ignored."""
+        item_id = diagram_model_with_task_model.addTask(0, 100.0, 100.0)
+        original_text = diagram_model_with_task_model.getItem(item_id).text
+        
+        diagram_model_with_task_model.renameTaskItem(item_id, "  ")
+        
+        item = diagram_model_with_task_model.getItem(item_id)
+        assert item.text == original_text
+
+    def test_rename_task_item_same_text(self, diagram_model_with_task_model):
+        """Same text should be ignored (no unnecessary updates)."""
+        task_model = diagram_model_with_task_model._task_model
+        item_id = diagram_model_with_task_model.addTask(0, 100.0, 100.0)
+        original_text = diagram_model_with_task_model.getItem(item_id).text
+        
+        # This should not trigger any updates
+        diagram_model_with_task_model.renameTaskItem(item_id, original_text)
+        
+        item = diagram_model_with_task_model.getItem(item_id)
+        assert item.text == original_text
+
+    def test_rename_task_item_invalid_id(self, diagram_model_with_task_model):
+        """Invalid item ID should be handled gracefully."""
+        # Should not raise
+        diagram_model_with_task_model.renameTaskItem("invalid_id", "New Name")
+
+    def test_on_task_renamed_updates_multiple_items(self, diagram_model_with_task_model):
+        """Multiple diagram items pointing to the same task should all update."""
+        task_model = diagram_model_with_task_model._task_model
+        # Add the same task twice to the diagram
+        item_id1 = diagram_model_with_task_model.addTask(0, 100.0, 100.0)
+        item_id2 = diagram_model_with_task_model.addTask(0, 200.0, 200.0)
+        
+        # Rename via task model
+        task_model.renameTask(0, "Shared Update")
+        
+        # Both items should be updated
+        assert diagram_model_with_task_model.getItem(item_id1).text == "Shared Update"
+        assert diagram_model_with_task_model.getItem(item_id2).text == "Shared Update"
+
+
 class TestConnectAll:
     def test_connect_all_orders_by_position(self, empty_diagram_model):
         a = empty_diagram_model.addBox(100.0, 100.0, "A")

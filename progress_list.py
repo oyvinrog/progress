@@ -68,6 +68,7 @@ class TaskModel(QAbstractListModel):
     totalEstimateChanged = Signal()
     chartImageChanged = Signal()
     taskCountChanged = Signal()
+    taskRenamed = Signal(int, str, arguments=['taskIndex', 'newTitle'])  # Emitted when a task is renamed
 
     def __init__(self, tasks: List[Task] | None = None):
         super().__init__()
@@ -482,9 +483,14 @@ class TaskModel(QAbstractListModel):
         if not new_title:
             return
 
+        old_title = self._tasks[row].title
+        if old_title == new_title:
+            return
+
         self._tasks[row].title = new_title
         idx = self.index(row, 0)
         self.dataChanged.emit(idx, idx, [self.TitleRole])
+        self.taskRenamed.emit(row, new_title)
 
     @Slot(int, str)
     def setCustomEstimate(self, row: int, estimate_str: str) -> None:
