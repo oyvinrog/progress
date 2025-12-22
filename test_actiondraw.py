@@ -116,6 +116,34 @@ class TestDiagramModelBasics:
         assert empty_diagram_model.data(index, empty_diagram_model.TextRole) == "Release Plan"
         assert empty_diagram_model.data(index, empty_diagram_model.TextColorRole) == "#1b2028"
 
+    def test_add_freetext_item(self, empty_diagram_model):
+        """Test adding a freetext item with multiline text."""
+        item_id = empty_diagram_model.addPresetItemWithText(
+            "freetext", 100.0, 150.0, "Line 1\nLine 2\nLine 3"
+        )
+        assert item_id.startswith("freetext_")
+        index = empty_diagram_model.index(0, 0)
+        assert empty_diagram_model.data(index, empty_diagram_model.TypeRole) == "freetext"
+        assert empty_diagram_model.data(index, empty_diagram_model.TextRole) == "Line 1\nLine 2\nLine 3"
+        assert empty_diagram_model.data(index, empty_diagram_model.ColorRole) == "#f5f0e6"
+        assert empty_diagram_model.data(index, empty_diagram_model.TextColorRole) == "#2d3436"
+        assert empty_diagram_model.data(index, empty_diagram_model.WidthRole) == 200.0
+        assert empty_diagram_model.data(index, empty_diagram_model.HeightRole) == 140.0
+
+    def test_add_freetext_empty(self, empty_diagram_model):
+        """Test adding a freetext item with empty text."""
+        item_id = empty_diagram_model.addPresetItem("freetext", 50.0, 50.0)
+        assert item_id.startswith("freetext_")
+        index = empty_diagram_model.index(0, 0)
+        assert empty_diagram_model.data(index, empty_diagram_model.TypeRole) == "freetext"
+        assert empty_diagram_model.data(index, empty_diagram_model.TextRole) == ""
+
+    def test_freetext_invalid_preset(self, empty_diagram_model):
+        """Test that invalid preset returns empty string."""
+        item_id = empty_diagram_model.addPresetItem("invalid_type", 50.0, 50.0)
+        assert item_id == ""
+        assert empty_diagram_model.count == 0
+
     def test_add_task(self, diagram_model_with_task_model):
         item_id = diagram_model_with_task_model.addTask(0, 50.0, 100.0)
         assert item_id.startswith("task_")

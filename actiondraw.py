@@ -33,6 +33,7 @@ class DiagramItemType(Enum):
     SERVER = "server"
     CLOUD = "cloud"
     NOTE = "note"
+    FREETEXT = "freetext"
 
 
 @dataclass
@@ -119,6 +120,14 @@ ITEM_PRESETS: Dict[str, Dict[str, Any]] = {
         "color": "#f7e07b",
         "text": "Note",
         "text_color": "#1b2028",
+    },
+    "freetext": {
+        "type": DiagramItemType.FREETEXT,
+        "width": 200.0,
+        "height": 140.0,
+        "color": "#f5f0e6",
+        "text": "",
+        "text_color": "#2d3436",
     },
 }
 
@@ -1074,7 +1083,8 @@ ApplicationWindow {
         "database": { "text": "Database", "title": "Create Database" },
         "server": { "text": "Server", "title": "Create Server" },
         "cloud": { "text": "Cloud", "title": "Create Cloud" },
-        "note": { "text": "Note", "title": "Create Note" }
+        "note": { "text": "Note", "title": "Create Note" },
+        "freetext": { "text": "", "title": "Free Text" }
     })
 
     function clampZoom(value) {
@@ -1126,6 +1136,14 @@ ApplicationWindow {
         if (defaults && defaults.title)
             return defaults.title
         return "Create Item"
+    }
+
+    function openFreeTextDialog(point, itemId, initialText) {
+        freeTextDialog.editingItemId = itemId || ""
+        freeTextDialog.targetX = snapValue(point.x)
+        freeTextDialog.targetY = snapValue(point.y)
+        freeTextDialog.textValue = initialText !== undefined ? initialText : ""
+        freeTextDialog.open()
     }
 
     function setZoomInternal(newZoom, focusX, focusY) {
@@ -1313,6 +1331,70 @@ ApplicationWindow {
             boxDialog.textValue = ""
             boxDialog.editingItemId = ""
             boxDialog.presetName = "box"
+        }
+    }
+
+    Dialog {
+        id: freeTextDialog
+        modal: true
+        property real targetX: 0
+        property real targetY: 0
+        property string editingItemId: ""
+        property string textValue: ""
+        title: freeTextDialog.editingItemId.length === 0 ? "Free Text" : "Edit Free Text"
+
+        onOpened: freeTextArea.forceActiveFocus()
+
+        contentItem: ColumnLayout {
+            width: 360
+            spacing: 12
+
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 160
+
+                TextArea {
+                    id: freeTextArea
+                    text: freeTextDialog.textValue
+                    placeholderText: "Write your text here..."
+                    wrapMode: TextEdit.Wrap
+                    selectByMouse: true
+                    color: "#f5f6f8"
+                    font.pixelSize: 14
+                    background: Rectangle {
+                        color: "#1b2028"
+                        radius: 6
+                        border.color: "#384458"
+                    }
+                    onTextChanged: freeTextDialog.textValue = text
+                }
+            }
+        }
+
+        footer: DialogButtonBox {
+            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+        }
+
+        onAccepted: {
+            if (!diagramModel)
+                return
+            if (freeTextDialog.editingItemId.length === 0) {
+                diagramModel.addPresetItemWithText(
+                    "freetext",
+                    snapValue(freeTextDialog.targetX),
+                    snapValue(freeTextDialog.targetY),
+                    freeTextDialog.textValue
+                )
+            } else {
+                diagramModel.setItemText(freeTextDialog.editingItemId, freeTextDialog.textValue)
+            }
+            freeTextDialog.close()
+        }
+        onRejected: freeTextDialog.close()
+
+        onClosed: {
+            freeTextDialog.textValue = ""
+            freeTextDialog.editingItemId = ""
         }
     }
 
@@ -1868,6 +1950,13 @@ ApplicationWindow {
                                 root.openQuickTaskDialog(snapped)
                             }
                         }
+                        MenuItem {
+                            text: "Free Text"
+                            onTriggered: {
+                                var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
+                                root.openFreeTextDialog(snapped, "", "")
+                            }
+                        }
                     }
 
                     Canvas {
@@ -2379,7 +2468,88 @@ ApplicationWindow {
                                 transformOrigin: Item.Center
                             }
 
+                            Item {
+                                anchors.fill: parent
+                                visible: itemRect.itemType === "freetext"
+
+                                Rectangle {
+                                    id: freeTextHeader
+                                    anchors.top: parent.top
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    height: 8
+                                    color: Qt.darker(model.color, 1.15)
+                                    radius: itemRect.radius
+                                    Rectangle {
+                                        anchors.bottom: parent.bottom
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        height: parent.radius
+                                        color: parent.color
+                                    }
+                                }
+
+                                Rectangle {
+                                    anchors.top: parent.top
+                                    anchors.left: parent.left
+                                    anchors.topMargin: 12
+                                    anchors.leftMargin: 10
+                                    width: 6
+                                    height: 6
+                                    radius: 3
+                                    color: "#e17055"
+                                }
+
+                                Rectangle {
+                                    anchors.top: parent.top
+                                    anchors.left: parent.left
+                                    anchors.topMargin: 12
+                                    anchors.leftMargin: 22
+                                    width: 6
+                                    height: 6
+                                    radius: 3
+                                    color: "#fdcb6e"
+                                }
+
+                                Rectangle {
+                                    anchors.top: parent.top
+                                    anchors.left: parent.left
+                                    anchors.topMargin: 12
+                                    anchors.leftMargin: 34
+                                    width: 6
+                                    height: 6
+                                    radius: 3
+                                    color: "#00b894"
+                                }
+
+                                Rectangle {
+                                    anchors.bottom: parent.bottom
+                                    anchors.right: parent.right
+                                    anchors.bottomMargin: 6
+                                    anchors.rightMargin: 6
+                                    width: 16
+                                    height: 16
+                                    color: "transparent"
+                                    Canvas {
+                                        anchors.fill: parent
+                                        onPaint: {
+                                            var ctx = getContext("2d")
+                                            ctx.clearRect(0, 0, width, height)
+                                            ctx.strokeStyle = Qt.darker(model.color, 1.25)
+                                            ctx.lineWidth = 1.5
+                                            ctx.beginPath()
+                                            ctx.moveTo(0, height)
+                                            ctx.lineTo(width, 0)
+                                            ctx.moveTo(width * 0.4, height)
+                                            ctx.lineTo(width, height * 0.4)
+                                            ctx.stroke()
+                                        }
+                                    }
+                                }
+                            }
+
                             Text {
+                                visible: itemRect.itemType !== "freetext"
                                 anchors.centerIn: parent
                                 width: parent.width - 36
                                 text: model.text
@@ -2389,6 +2559,23 @@ ApplicationWindow {
                                 textFormat: Text.PlainText
                                 font.pixelSize: 14
                                 font.bold: itemRect.itemType === "task"
+                            }
+
+                            Text {
+                                visible: itemRect.itemType === "freetext"
+                                anchors.fill: parent
+                                anchors.topMargin: 24
+                                anchors.leftMargin: 12
+                                anchors.rightMargin: 12
+                                anchors.bottomMargin: 8
+                                text: model.text
+                                color: model.textColor
+                                wrapMode: Text.Wrap
+                                horizontalAlignment: Text.AlignLeft
+                                verticalAlignment: Text.AlignTop
+                                textFormat: Text.PlainText
+                                font.pixelSize: 13
+                                elide: Text.ElideRight
                             }
 
                             DragHandler {
@@ -2449,6 +2636,9 @@ ApplicationWindow {
                                     } else if (itemRect.itemType === "task" && itemRect.taskIndex >= 0) {
                                         // Task linked to task list - rename it (syncs both ways)
                                         taskRenameDialog.openWithItem(itemRect.itemId, model.text)
+                                    } else if (itemRect.itemType === "freetext") {
+                                        // Free text uses dedicated dialog with TextArea
+                                        root.openFreeTextDialog(Qt.point(model.x, model.y), itemRect.itemId, model.text)
                                     } else if (itemRect.itemType !== "task") {
                                         root.openPresetDialog(itemRect.itemType, Qt.point(model.x, model.y), itemRect.itemId, model.text)
                                     }
