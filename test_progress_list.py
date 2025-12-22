@@ -643,3 +643,262 @@ class TestMainFunction:
 
         result = main()
         assert result == 1
+
+
+class TestTaskModelSerialization:
+    """Tests for TaskModel serialization (to_dict/from_dict)."""
+
+    def test_to_dict_empty(self, task_model):
+        """Test serialization of empty task model."""
+        data = task_model.to_dict()
+        assert "tasks" in data
+        assert data["tasks"] == []
+
+    def test_to_dict_with_tasks(self, task_model):
+        """Test serialization with tasks."""
+        task_model.addTask("Task 1")
+        task_model.addTask("Task 2")
+        task_model.toggleComplete(0, True)
+
+        data = task_model.to_dict()
+        assert len(data["tasks"]) == 2
+        assert data["tasks"][0]["title"] == "Task 1"
+        assert data["tasks"][0]["completed"] is True
+        assert data["tasks"][1]["title"] == "Task 2"
+        assert data["tasks"][1]["completed"] is False
+
+    def test_to_dict_preserves_custom_estimate(self, task_model):
+        """Test serialization preserves custom estimates."""
+        task_model.addTask("Task with estimate")
+        task_model.setCustomEstimate(0, "30m")
+
+        data = task_model.to_dict()
+        assert data["tasks"][0]["custom_estimate"] == 30.0
+
+    def test_to_dict_preserves_indent_level(self, task_model):
+        """Test serialization preserves indent levels."""
+        task_model.addTask("Parent Task")
+        task_model.addSubtask(0)
+
+        data = task_model.to_dict()
+        assert data["tasks"][0]["indent_level"] == 0
+        assert data["tasks"][1]["indent_level"] == 1
+
+    def test_from_dict_empty(self, task_model):
+        """Test loading empty data."""
+        task_model.addTask("Existing task")
+        assert task_model.rowCount() == 1
+
+        task_model.from_dict({"tasks": []})
+        assert task_model.rowCount() == 0
+
+    def test_from_dict_with_tasks(self, task_model):
+        """Test loading tasks from dict."""
+        data = {
+            "tasks": [
+                {"title": "Loaded Task 1", "completed": False, "time_spent": 0.0,
+                 "parent_index": -1, "indent_level": 0, "custom_estimate": None},
+                {"title": "Loaded Task 2", "completed": True, "time_spent": 15.5,
+                 "parent_index": -1, "indent_level": 0, "custom_estimate": 30.0},
+            ]
+        }
+        task_model.from_dict(data)
+
+        assert task_model.rowCount() == 2
+        assert task_model._tasks[0].title == "Loaded Task 1"
+        assert task_model._tasks[0].completed is False
+        assert task_model._tasks[1].title == "Loaded Task 2"
+        assert task_model._tasks[1].completed is True
+        assert task_model._tasks[1].time_spent == 15.5
+        assert task_model._tasks[1].custom_estimate == 30.0
+
+    def test_from_dict_clears_existing(self, task_model):
+        """Test that from_dict clears existing tasks."""
+        task_model.addTask("Old Task 1")
+        task_model.addTask("Old Task 2")
+        assert task_model.rowCount() == 2
+
+        data = {"tasks": [{"title": "New Task", "completed": False, "time_spent": 0.0,
+                          "parent_index": -1, "indent_level": 0, "custom_estimate": None}]}
+        task_model.from_dict(data)
+
+        assert task_model.rowCount() == 1
+        assert task_model._tasks[0].title == "New Task"
+
+    def test_roundtrip_serialization(self, task_model):
+        """Test that data survives serialization round-trip."""
+        task_model.addTask("Task A")
+        task_model.addTask("Task B")
+        task_model.toggleComplete(0, True)
+        task_model.setCustomEstimate(1, "45m")
+        task_model.addSubtask(1)
+
+        # Serialize
+        data = task_model.to_dict()
+
+        # Create new model and deserialize
+        new_model = TaskModel()
+        new_model.from_dict(data)
+
+        assert new_model.rowCount() == 3
+        assert new_model._tasks[0].title == "Task A"
+        assert new_model._tasks[0].completed is True
+        assert new_model._tasks[1].title == "Task B"
+        assert new_model._tasks[1].custom_estimate == 45.0
+        assert new_model._tasks[2].indent_level == 1
+
+
+class TestProjectManager:
+    """Tests for ProjectManager save/load functionality."""
+
+    @pytest.fixture
+    def project_manager(self, task_model):
+        """Create a ProjectManager instance."""
+        from progress_list import ActionDrawManager, ProjectManager
+        actiondraw_manager = ActionDrawManager(task_model)
+        return ProjectManager(task_model, actiondraw_manager)
+
+    def test_save_and_load_project(self, project_manager, task_model, tmp_path):
+        """Test saving and loading a project file."""
+        # Add some tasks
+        task_model.addTask("Test Task 1")
+        task_model.addTask("Test Task 2")
+        task_model.toggleComplete(0, True)
+
+        # Save project
+        file_path = str(tmp_path / "test_project.progress")
+        project_manager.saveProject(file_path)
+
+        # Verify file was created
+        import os
+        assert os.path.exists(file_path)
+
+        # Clear tasks
+        task_model.clear()
+        assert task_model.rowCount() == 0
+
+        # Load project
+        project_manager.loadProject(file_path)
+
+        # Verify tasks were restored
+        assert task_model.rowCount() == 2
+        assert task_model._tasks[0].title == "Test Task 1"
+        assert task_model._tasks[0].completed is True
+        assert task_model._tasks[1].title == "Test Task 2"
+
+    def test_save_adds_extension(self, project_manager, task_model, tmp_path):
+        """Test that .progress extension is added if missing."""
+        file_path = str(tmp_path / "test_project")  # No extension
+        project_manager.saveProject(file_path)
+
+        import os
+        assert os.path.exists(file_path + ".progress")
+
+    def test_save_with_file_url(self, project_manager, task_model, tmp_path):
+        """Test saving with file:// URL prefix."""
+        file_path = str(tmp_path / "test_project.progress")
+        project_manager.saveProject(f"file://{file_path}")
+
+        import os
+        assert os.path.exists(file_path)
+
+    def test_load_with_file_url(self, project_manager, task_model, tmp_path):
+        """Test loading with file:// URL prefix."""
+        task_model.addTask("URL Test Task")
+        file_path = str(tmp_path / "test_project.progress")
+        project_manager.saveProject(file_path)
+
+        task_model.clear()
+        project_manager.loadProject(f"file://{file_path}")
+
+        assert task_model.rowCount() == 1
+        assert task_model._tasks[0].title == "URL Test Task"
+
+    def test_load_nonexistent_file(self, project_manager, task_model, tmp_path):
+        """Test loading a file that doesn't exist."""
+        error_received = []
+        project_manager.errorOccurred.connect(lambda msg: error_received.append(msg))
+
+        project_manager.loadProject(str(tmp_path / "nonexistent.progress"))
+
+        assert len(error_received) == 1
+        assert "not found" in error_received[0].lower()
+
+    def test_load_invalid_json(self, project_manager, task_model, tmp_path):
+        """Test loading an invalid JSON file."""
+        file_path = tmp_path / "invalid.progress"
+        file_path.write_text("{ invalid json }")
+
+        error_received = []
+        project_manager.errorOccurred.connect(lambda msg: error_received.append(msg))
+
+        project_manager.loadProject(str(file_path))
+
+        assert len(error_received) == 1
+        assert "invalid" in error_received[0].lower() or "format" in error_received[0].lower()
+
+    def test_save_empty_path(self, project_manager, task_model):
+        """Test saving with empty path."""
+        error_received = []
+        project_manager.errorOccurred.connect(lambda msg: error_received.append(msg))
+
+        project_manager.saveProject("")
+
+        assert len(error_received) == 1
+
+    def test_project_file_format(self, project_manager, task_model, tmp_path):
+        """Test that saved file has correct format."""
+        import json
+
+        task_model.addTask("Format Test")
+        file_path = str(tmp_path / "format_test.progress")
+        project_manager.saveProject(file_path)
+
+        with open(file_path, "r") as f:
+            data = json.load(f)
+
+        assert "version" in data
+        assert "saved_at" in data
+        assert "tasks" in data
+        assert "diagram" in data
+
+    def test_signals_on_save(self, project_manager, task_model, tmp_path):
+        """Test that saveCompleted signal is emitted."""
+        completed_received = []
+        project_manager.saveCompleted.connect(lambda path: completed_received.append(path))
+
+        file_path = str(tmp_path / "signal_test.progress")
+        project_manager.saveProject(file_path)
+
+        assert len(completed_received) == 1
+        assert file_path in completed_received[0]
+
+    def test_signals_on_load(self, project_manager, task_model, tmp_path):
+        """Test that loadCompleted signal is emitted."""
+        task_model.addTask("Signal Test")
+        file_path = str(tmp_path / "signal_test.progress")
+        project_manager.saveProject(file_path)
+
+        completed_received = []
+        project_manager.loadCompleted.connect(lambda path: completed_received.append(path))
+
+        project_manager.loadProject(file_path)
+
+        assert len(completed_received) == 1
+        assert file_path in completed_received[0]
+
+    def test_current_file_path_updated(self, project_manager, task_model, tmp_path):
+        """Test that currentFilePath is updated after save/load."""
+        file_path = str(tmp_path / "path_test.progress")
+
+        assert project_manager.currentFilePath == ""
+
+        task_model.addTask("Path Test")
+        project_manager.saveProject(file_path)
+
+        assert file_path in project_manager.currentFilePath
+
+        task_model.clear()
+        project_manager.loadProject(file_path)
+
+        assert file_path in project_manager.currentFilePath

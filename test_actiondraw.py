@@ -413,5 +413,211 @@ class TestCreateActionDrawWindow:
         assert engine.rootObjects()
 
 
+class TestDiagramModelSerialization:
+    """Tests for DiagramModel serialization (to_dict/from_dict)."""
+
+    def test_to_dict_empty(self, empty_diagram_model):
+        """Test serialization of empty diagram."""
+        data = empty_diagram_model.to_dict()
+        assert "items" in data
+        assert "edges" in data
+        assert data["items"] == []
+        assert data["edges"] == []
+
+    def test_to_dict_with_items(self, empty_diagram_model):
+        """Test serialization with items."""
+        empty_diagram_model.addBox(10.0, 20.0, "Test Box")
+        empty_diagram_model.addPresetItem("database", 100.0, 100.0)
+
+        data = empty_diagram_model.to_dict()
+        assert len(data["items"]) == 2
+        assert data["items"][0]["text"] == "Test Box"
+        assert data["items"][0]["x"] == 10.0
+        assert data["items"][0]["y"] == 20.0
+        assert data["items"][1]["item_type"] == "database"
+
+    def test_to_dict_with_edges(self, empty_diagram_model):
+        """Test serialization with edges."""
+        id1 = empty_diagram_model.addBox(10.0, 20.0, "Box 1")
+        id2 = empty_diagram_model.addBox(100.0, 100.0, "Box 2")
+        empty_diagram_model.addEdge(id1, id2)
+
+        data = empty_diagram_model.to_dict()
+        assert len(data["edges"]) == 1
+        assert data["edges"][0]["from_id"] == id1
+        assert data["edges"][0]["to_id"] == id2
+
+    def test_to_dict_preserves_all_properties(self, empty_diagram_model):
+        """Test that serialization preserves all item properties."""
+        empty_diagram_model.addPresetItem("note", 50.0, 75.0)
+
+        data = empty_diagram_model.to_dict()
+        item = data["items"][0]
+
+        assert "id" in item
+        assert "item_type" in item
+        assert "x" in item
+        assert "y" in item
+        assert "width" in item
+        assert "height" in item
+        assert "text" in item
+        assert "task_index" in item
+        assert "color" in item
+        assert "text_color" in item
+
+    def test_from_dict_empty(self, empty_diagram_model):
+        """Test loading empty data."""
+        empty_diagram_model.addBox(10.0, 20.0, "Existing")
+        assert empty_diagram_model.count == 1
+
+        empty_diagram_model.from_dict({"items": [], "edges": []})
+        assert empty_diagram_model.count == 0
+
+    def test_from_dict_with_items(self, empty_diagram_model):
+        """Test loading items from dict."""
+        data = {
+            "items": [
+                {
+                    "id": "box_0",
+                    "item_type": "box",
+                    "x": 50.0,
+                    "y": 75.0,
+                    "width": 120.0,
+                    "height": 60.0,
+                    "text": "Loaded Box",
+                    "task_index": -1,
+                    "color": "#4a9eff",
+                    "text_color": "#f5f6f8",
+                }
+            ],
+            "edges": [],
+        }
+        empty_diagram_model.from_dict(data)
+
+        assert empty_diagram_model.count == 1
+        index = empty_diagram_model.index(0, 0)
+        assert empty_diagram_model.data(index, empty_diagram_model.TextRole) == "Loaded Box"
+        assert empty_diagram_model.data(index, empty_diagram_model.XRole) == 50.0
+        assert empty_diagram_model.data(index, empty_diagram_model.YRole) == 75.0
+
+    def test_from_dict_with_edges(self, empty_diagram_model):
+        """Test loading edges from dict."""
+        data = {
+            "items": [
+                {
+                    "id": "box_0", "item_type": "box", "x": 10.0, "y": 10.0,
+                    "width": 120.0, "height": 60.0, "text": "A",
+                    "task_index": -1, "color": "#4a9eff", "text_color": "#f5f6f8",
+                },
+                {
+                    "id": "box_1", "item_type": "box", "x": 200.0, "y": 200.0,
+                    "width": 120.0, "height": 60.0, "text": "B",
+                    "task_index": -1, "color": "#4a9eff", "text_color": "#f5f6f8",
+                },
+            ],
+            "edges": [
+                {"id": "edge_0", "from_id": "box_0", "to_id": "box_1"},
+            ],
+        }
+        empty_diagram_model.from_dict(data)
+
+        assert empty_diagram_model.count == 2
+        assert len(empty_diagram_model.edges) == 1
+        assert empty_diagram_model.edges[0]["fromId"] == "box_0"
+        assert empty_diagram_model.edges[0]["toId"] == "box_1"
+
+    def test_from_dict_clears_existing(self, empty_diagram_model):
+        """Test that from_dict clears existing items and edges."""
+        id1 = empty_diagram_model.addBox(10.0, 20.0, "Old Box 1")
+        id2 = empty_diagram_model.addBox(100.0, 100.0, "Old Box 2")
+        empty_diagram_model.addEdge(id1, id2)
+        assert empty_diagram_model.count == 2
+        assert len(empty_diagram_model.edges) == 1
+
+        data = {
+            "items": [
+                {
+                    "id": "new_0", "item_type": "box", "x": 50.0, "y": 50.0,
+                    "width": 120.0, "height": 60.0, "text": "New Box",
+                    "task_index": -1, "color": "#4a9eff", "text_color": "#f5f6f8",
+                }
+            ],
+            "edges": [],
+        }
+        empty_diagram_model.from_dict(data)
+
+        assert empty_diagram_model.count == 1
+        assert len(empty_diagram_model.edges) == 0
+        index = empty_diagram_model.index(0, 0)
+        assert empty_diagram_model.data(index, empty_diagram_model.TextRole) == "New Box"
+
+    def test_roundtrip_serialization(self, empty_diagram_model):
+        """Test that data survives serialization round-trip."""
+        id1 = empty_diagram_model.addBox(10.0, 20.0, "Box A")
+        id2 = empty_diagram_model.addPresetItem("database", 150.0, 100.0)
+        id3 = empty_diagram_model.addPresetItemWithText("note", 200.0, 200.0, "My Note")
+        empty_diagram_model.addEdge(id1, id2)
+        empty_diagram_model.addEdge(id2, id3)
+
+        # Serialize
+        data = empty_diagram_model.to_dict()
+
+        # Create new model and deserialize
+        new_model = DiagramModel()
+        new_model.from_dict(data)
+
+        assert new_model.count == 3
+        assert len(new_model.edges) == 2
+
+        # Check item properties preserved
+        index0 = new_model.index(0, 0)
+        assert new_model.data(index0, new_model.TextRole) == "Box A"
+        assert new_model.data(index0, new_model.XRole) == 10.0
+
+        index1 = new_model.index(1, 0)
+        assert new_model.data(index1, new_model.TypeRole) == "database"
+
+        index2 = new_model.index(2, 0)
+        assert new_model.data(index2, new_model.TextRole) == "My Note"
+
+    def test_from_dict_handles_invalid_type(self, empty_diagram_model):
+        """Test that invalid item types default to box."""
+        data = {
+            "items": [
+                {
+                    "id": "invalid_0", "item_type": "nonexistent", "x": 50.0, "y": 50.0,
+                    "width": 120.0, "height": 60.0, "text": "Unknown Type",
+                    "task_index": -1, "color": "#4a9eff", "text_color": "#f5f6f8",
+                }
+            ],
+            "edges": [],
+        }
+        empty_diagram_model.from_dict(data)
+
+        assert empty_diagram_model.count == 1
+        index = empty_diagram_model.index(0, 0)
+        assert empty_diagram_model.data(index, empty_diagram_model.TypeRole) == "box"
+
+    def test_from_dict_resumes_id_generation(self, empty_diagram_model):
+        """Test that ID generation resumes after loading."""
+        data = {
+            "items": [
+                {
+                    "id": "box_5", "item_type": "box", "x": 50.0, "y": 50.0,
+                    "width": 120.0, "height": 60.0, "text": "Existing",
+                    "task_index": -1, "color": "#4a9eff", "text_color": "#f5f6f8",
+                }
+            ],
+            "edges": [],
+        }
+        empty_diagram_model.from_dict(data)
+
+        # Add a new box - should get ID with number >= 6
+        new_id = empty_diagram_model.addBox(100.0, 100.0, "New Box")
+        # Extract number from ID
+        id_num = int(new_id.split("_")[1])
+        assert id_num >= 6
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

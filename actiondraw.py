@@ -567,6 +567,106 @@ class DiagramModel(QAbstractListModel):
         if changed:
             self.itemsChanged.emit()
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize diagram to a dictionary for saving.
+
+        Returns:
+            Dictionary containing all diagram item and edge data.
+        """
+        items_data = []
+        for item in self._items:
+            items_data.append({
+                "id": item.id,
+                "item_type": item.item_type.value,
+                "x": item.x,
+                "y": item.y,
+                "width": item.width,
+                "height": item.height,
+                "text": item.text,
+                "task_index": item.task_index,
+                "color": item.color,
+                "text_color": item.text_color,
+            })
+
+        edges_data = []
+        for edge in self._edges:
+            edges_data.append({
+                "id": edge.id,
+                "from_id": edge.from_id,
+                "to_id": edge.to_id,
+            })
+
+        return {
+            "items": items_data,
+            "edges": edges_data,
+        }
+
+    def from_dict(self, data: Dict[str, Any]) -> None:
+        """Load diagram from a dictionary.
+
+        Args:
+            data: Dictionary containing diagram data (from to_dict).
+        """
+        # Clear existing items and edges
+        if self._items:
+            self.beginRemoveRows(QModelIndex(), 0, len(self._items) - 1)
+            self._items.clear()
+            self.endRemoveRows()
+        self._edges.clear()
+
+        # Track highest ID number to resume ID generation
+        max_id = 0
+
+        # Load items
+        items_data = data.get("items", [])
+        for item_data in items_data:
+            item_id = item_data.get("id", "")
+            # Extract numeric part from item ID to track max
+            try:
+                id_parts = item_id.rsplit("_", 1)
+                if len(id_parts) == 2:
+                    max_id = max(max_id, int(id_parts[1]) + 1)
+            except (ValueError, IndexError):
+                pass
+
+            item_type_str = item_data.get("item_type", "box")
+            try:
+                item_type = DiagramItemType(item_type_str)
+            except ValueError:
+                item_type = DiagramItemType.BOX
+
+            item = DiagramItem(
+                id=item_id,
+                item_type=item_type,
+                x=float(item_data.get("x", 0.0)),
+                y=float(item_data.get("y", 0.0)),
+                width=float(item_data.get("width", 120.0)),
+                height=float(item_data.get("height", 60.0)),
+                text=item_data.get("text", ""),
+                task_index=int(item_data.get("task_index", -1)),
+                color=item_data.get("color", "#4a9eff"),
+                text_color=item_data.get("text_color", "#f5f6f8"),
+            )
+            self.beginInsertRows(QModelIndex(), len(self._items), len(self._items))
+            self._items.append(item)
+            self.endInsertRows()
+
+        # Update ID source to avoid collisions
+        self._id_source = count(max_id)
+
+        # Load edges
+        edges_data = data.get("edges", [])
+        for edge_data in edges_data:
+            edge = DiagramEdge(
+                id=edge_data.get("id", ""),
+                from_id=edge_data.get("from_id", ""),
+                to_id=edge_data.get("to_id", ""),
+            )
+            self._edges.append(edge)
+
+        self.itemsChanged.emit()
+        self.edgesChanged.emit()
+
 
 ACTIONDRAW_QML = r"""
 import QtQuick 2.15
