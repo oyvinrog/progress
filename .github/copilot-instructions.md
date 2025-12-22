@@ -14,6 +14,7 @@ PROJECT CONTEXT
 Python desktop application
 Python version: 3.10+
 Libraries: standard library, PyQt6, PySide6
+Virtual environment (already created): .venv/
 Assume no other dependencies unless already present.
 
 MEMORY

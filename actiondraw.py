@@ -914,6 +914,149 @@ ApplicationWindow {
     color: "#10141c"
     title: "ActionDraw"
 
+    menuBar: MenuBar {
+        Menu {
+            title: "File"
+
+            MenuItem {
+                text: "Close"
+                onTriggered: root.close()
+            }
+        }
+
+        Menu {
+            title: "Edit"
+
+            MenuItem {
+                text: "Clear All Items"
+                onTriggered: {
+                    if (!diagramModel) return
+                    for (var i = diagramModel.count - 1; i >= 0; --i) {
+                        var idx = diagramModel.index(i, 0)
+                        var itemId = diagramModel.data(idx, diagramModel.IdRole)
+                        diagramModel.removeItem(itemId)
+                    }
+                    root.resetView()
+                }
+            }
+
+            MenuItem {
+                text: "Clear Drawings"
+                onTriggered: diagramModel && diagramModel.clearStrokes()
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
+                text: "Undo Drawing"
+                onTriggered: diagramModel && diagramModel.undoLastStroke()
+            }
+        }
+
+        Menu {
+            title: "Insert"
+
+            MenuItem {
+                text: "Box"
+                onTriggered: root.addPresetAtCenter("box")
+            }
+
+            MenuItem {
+                text: "Database"
+                onTriggered: root.addPresetAtCenter("database")
+            }
+
+            MenuItem {
+                text: "Server"
+                onTriggered: root.addPresetAtCenter("server")
+            }
+
+            MenuItem {
+                text: "Cloud"
+                onTriggered: root.addPresetAtCenter("cloud")
+            }
+
+            MenuItem {
+                text: "Note"
+                onTriggered: root.addPresetAtCenter("note")
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
+                text: "Task from List..."
+                enabled: taskModel !== null
+                onTriggered: {
+                    if (!taskModel) return
+                    var center = root.diagramCenterPoint()
+                    taskDialog.targetX = center.x
+                    taskDialog.targetY = center.y
+                    taskDialog.open()
+                }
+            }
+
+            MenuItem {
+                text: "New Task..."
+                enabled: diagramModel !== null
+                onTriggered: root.addQuickTaskAtCenter()
+            }
+        }
+
+        Menu {
+            title: "View"
+
+            MenuItem {
+                text: "Show Grid"
+                checkable: true
+                checked: root.showGrid
+                onTriggered: root.showGrid = checked
+            }
+
+            MenuItem {
+                text: "Snap to Grid"
+                checkable: true
+                checked: root.snapToGrid
+                onTriggered: root.snapToGrid = checked
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
+                text: "Zoom In"
+                onTriggered: root.applyZoomFactor(1.2, viewport.width / 2, viewport.height / 2)
+            }
+
+            MenuItem {
+                text: "Zoom Out"
+                onTriggered: root.applyZoomFactor(0.8, viewport.width / 2, viewport.height / 2)
+            }
+
+            MenuItem {
+                text: "Reset View"
+                onTriggered: root.resetView()
+            }
+        }
+
+        Menu {
+            title: "Tools"
+
+            MenuItem {
+                text: "Connect All Items"
+                onTriggered: diagramModel && diagramModel.connectAllItems()
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
+                id: drawingModeMenuItem
+                text: diagramModel && diagramModel.drawingMode ? "Exit Drawing Mode" : "Drawing Mode"
+                checkable: true
+                checked: diagramModel && diagramModel.drawingMode
+                onTriggered: diagramModel && diagramModel.setDrawingMode(checked)
+            }
+        }
+    }
+
     function showWindow() {
         root.visible = true
         root.requestActivate()
@@ -1501,78 +1644,6 @@ ApplicationWindow {
                 font.pixelSize: 20
             }
 
-            Button {
-                text: "Add Box"
-                onClicked: root.addBoxAtCenter()
-            }
-
-            Button {
-                id: addNodeButton
-                text: "Add Node"
-                onClicked: nodeMenu.open()
-            }
-
-            Menu {
-                id: nodeMenu
-                parent: addNodeButton
-                y: addNodeButton.height
-
-                MenuItem {
-                    text: "Database"
-                    onTriggered: root.addPresetAtCenter("database")
-                }
-                MenuItem {
-                    text: "Server"
-                    onTriggered: root.addPresetAtCenter("server")
-                }
-                MenuItem {
-                    text: "Cloud"
-                    onTriggered: root.addPresetAtCenter("cloud")
-                }
-                MenuItem {
-                    text: "Note"
-                    onTriggered: root.addPresetAtCenter("note")
-                }
-            }
-
-            Button {
-                text: "Add Task"
-                enabled: taskModel !== null
-                onClicked: {
-                    if (!taskModel)
-                        return
-                    var center = diagramCenterPoint()
-                    taskDialog.targetX = center.x
-                    taskDialog.targetY = center.y
-                    taskDialog.open()
-                }
-            }
-
-            Button {
-                text: "New Task"
-                enabled: diagramModel !== null
-                onClicked: root.addQuickTaskAtCenter()
-            }
-
-            Button {
-                text: "Connect All"
-                onClicked: diagramModel && diagramModel.connectAllItems()
-            }
-
-            Button {
-                text: "Clear"
-                onClicked: {
-                    if (!diagramModel)
-                        return
-                    for (var i = diagramModel.count - 1; i >= 0; --i) {
-                        var idx = diagramModel.index(i, 0)
-                        var itemId = diagramModel.data(idx, diagramModel.IdRole)
-                        diagramModel.removeItem(itemId)
-                    }
-                    resetView()
-                }
-            }
-
             Rectangle {
                 width: 1
                 height: 24
@@ -1684,37 +1755,7 @@ ApplicationWindow {
                 }
             }
 
-            Button {
-                text: "Undo"
-                enabled: diagramModel !== null
-                onClicked: diagramModel && diagramModel.undoLastStroke()
-            }
-
-            Button {
-                text: "Clear Drawings"
-                enabled: diagramModel !== null
-                onClicked: diagramModel && diagramModel.clearStrokes()
-            }
-
             Item { Layout.fillWidth: true }
-
-            CheckBox {
-                text: "Grid"
-                checked: root.showGrid
-                onToggled: root.showGrid = checked
-                indicator.width: 18
-                indicator.height: 18
-                palette.text: "#f5f6f8"
-            }
-
-            CheckBox {
-                text: "Snap"
-                checked: root.snapToGrid
-                onToggled: root.snapToGrid = checked
-                indicator.width: 18
-                indicator.height: 18
-                palette.text: "#f5f6f8"
-            }
 
             RowLayout {
                 spacing: 6

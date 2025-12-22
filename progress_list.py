@@ -883,6 +883,84 @@ ApplicationWindow {
     title: "Progress Tracker"
     color: "#0f1115"
 
+    menuBar: MenuBar {
+        Menu {
+            title: "File"
+
+            MenuItem {
+                text: "Save As..."
+                onTriggered: saveDialog.open()
+            }
+
+            MenuItem {
+                text: "Load..."
+                onTriggered: loadDialog.open()
+            }
+
+            MenuSeparator {}
+
+            Menu {
+                id: recentMenu
+                title: "Recent Projects"
+                enabled: recentRepeater.count > 0
+
+                Repeater {
+                    id: recentRepeater
+                    model: projectManager.recentProjects
+
+                    MenuItem {
+                        property string filePath: modelData
+                        property string fileName: {
+                            var name = filePath.split("/").pop()
+                            if (name.endsWith(".progress"))
+                                name = name.slice(0, -9)
+                            return name
+                        }
+                        text: fileName
+                        onTriggered: projectManager.loadProject(filePath)
+                    }
+                }
+
+                MenuItem {
+                    text: "(No recent projects)"
+                    enabled: false
+                    visible: recentRepeater.count === 0
+                }
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
+                text: "Exit"
+                onTriggered: root.close()
+            }
+        }
+
+        Menu {
+            title: "View"
+
+            MenuItem {
+                text: "ActionDraw"
+                onTriggered: actionDrawManager.showActionDraw()
+            }
+        }
+
+        Menu {
+            title: "Edit"
+
+            MenuItem {
+                text: "Paste Sample Tasks"
+                onTriggered: taskModel.pasteSampleTasks()
+            }
+
+            MenuItem {
+                text: "Clear All"
+                enabled: listView.count > 0
+                onTriggered: taskModel.clear()
+            }
+        }
+    }
+
     function formatTime(minutes) {
         if (minutes === 0) return "N/A"
         if (minutes < 1) return (minutes * 60).toFixed(0) + "s"
@@ -1098,86 +1176,6 @@ ApplicationWindow {
                         visible: !chartImage.source
                     }
                 }
-            }
-        }
-
-        RowLayout {
-            spacing: 8
-
-            Button {
-                id: fileMenuButton
-                text: "File"
-                onClicked: fileMenu.open()
-
-                Menu {
-                    id: fileMenu
-                    y: fileMenuButton.height
-
-                    MenuItem {
-                        text: "Save As..."
-                        onTriggered: saveDialog.open()
-                    }
-
-                    MenuItem {
-                        text: "Load..."
-                        onTriggered: loadDialog.open()
-                    }
-
-                    MenuSeparator {}
-
-                    Menu {
-                        id: recentMenu
-                        title: "Recent Projects"
-                        enabled: recentRepeater.count > 0
-
-                        Repeater {
-                            id: recentRepeater
-                            model: projectManager.recentProjects
-
-                            MenuItem {
-                                property string filePath: modelData
-                                property string fileName: {
-                                    var name = filePath.split("/").pop()
-                                    if (name.endsWith(".progress"))
-                                        name = name.slice(0, -9)
-                                    return name
-                                }
-                                text: fileName
-                                onTriggered: projectManager.loadProject(filePath)
-                            }
-                        }
-
-                        MenuItem {
-                            text: "(No recent projects)"
-                            enabled: false
-                            visible: recentRepeater.count === 0
-                        }
-                    }
-                }
-            }
-
-            Button {
-                text: "ActionDraw"
-                onClicked: {
-                    actionDrawManager.showActionDraw()
-                }
-            }
-
-            Button {
-                text: "Paste sample tasks"
-                onClicked: taskModel.pasteSampleTasks()
-            }
-
-            Button {
-                text: "Clear"
-                enabled: listView.count > 0
-                onClicked: taskModel.clear()
-            }
-
-            Button {
-                text: "Complete"
-                enabled: listView.count > 0
-                onClicked: root.close()
             }
         }
 
