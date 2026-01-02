@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "progress-list"
-version = "0.1.0"
+version = "0.0.3"
 description = "A progress tracking task list with time estimation using PySide6 + QML"
 readme = "README.md"
 authors = [
@@ -43,6 +43,7 @@ Issues = "https://github.com/oyvinrog/progress/issues"
 
 [project.scripts]
 progress-list = "progress_list:main"
+actiondraw = "actiondraw:main"
 
 [tool.setuptools]
-py-modules = ["progress_list"]
+py-modules = ["progress_list", "actiondraw"]
