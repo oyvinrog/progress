@@ -6,11 +6,14 @@ Features:
 - Estimated completion times based on historical average
 - Break down tasks into subtasks
 - Add new tasks dynamically
+- Save and load projects to/from JSON files
 """
 
+import json
+import os
 import sys
 import time
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
@@ -26,9 +29,13 @@ from PySide6.QtCore import (
     Property,
     Signal,
     QUrl,
+    QObject,
+    QSettings,
 )
 from PySide6.QtWidgets import QApplication
 from PySide6.QtQml import QQmlApplicationEngine
+
+from actiondraw import DiagramModel, create_actiondraw_window
 
 
 @dataclass
@@ -64,6 +71,8 @@ class TaskModel(QAbstractListModel):
     avgTimeChanged = Signal()
     totalEstimateChanged = Signal()
     chartImageChanged = Signal()
+    taskCountChanged = Signal()
+    taskRenamed = Signal(int, str, arguments=['taskIndex', 'newTitle'])  # Emitted when a task is renamed
 
     def __init__(self, tasks: List[Task] | None = None):
         super().__init__()
@@ -83,8 +92,14 @@ class TaskModel(QAbstractListModel):
         self._chart_update_timer.timeout.connect(self._updateChartImage)
         self._chart_update_timer.start(2000)  # Update chart every 2 seconds
         self._takeSnapshot()  # Take initial snapshot
+        self.taskCountChanged.emit()
 
     def rowCount(self, parent: QModelIndex | None = QModelIndex()) -> int:  # type: ignore[override]
+        return len(self._tasks)
+
+    @Property(int, notify=taskCountChanged)
+    def taskCount(self) -> int:
+        """Expose the current number of tasks to QML."""
         return len(self._tasks)
 
     def data(self, index: QModelIndex, role: int = Qt.DisplayRole):  # type: ignore[override]
@@ -422,6 +437,7 @@ class TaskModel(QAbstractListModel):
         self._tasks.insert(insert_pos, task)
         self.endInsertRows()
         self._takeSnapshot()  # Update burndown chart
+        self.taskCountChanged.emit()
 
     @Slot(int, bool)
     def toggleComplete(self, row: int, completed: bool) -> None:
@@ -471,9 +487,14 @@ class TaskModel(QAbstractListModel):
         if not new_title:
             return
 
+        old_title = self._tasks[row].title
+        if old_title == new_title:
+            return
+
         self._tasks[row].title = new_title
         idx = self.index(row, 0)
         self.dataChanged.emit(idx, idx, [self.TitleRole])
+        self.taskRenamed.emit(row, new_title)
 
     @Slot(int, str)
     def setCustomEstimate(self, row: int, estimate_str: str) -> None:
@@ -570,6 +591,7 @@ class TaskModel(QAbstractListModel):
 
         self.avgTimeChanged.emit()
         self._takeSnapshot()  # Update burndown chart
+        self.taskCountChanged.emit()
 
     @Slot()
     def clear(self) -> None:
@@ -580,6 +602,7 @@ class TaskModel(QAbstractListModel):
         self.endRemoveRows()
         self.avgTimeChanged.emit()
         self._takeSnapshot()  # Update burndown chart
+        self.taskCountChanged.emit()
 
     @Slot()
     def pasteSampleTasks(self) -> None:
@@ -592,6 +615,258 @@ class TaskModel(QAbstractListModel):
         ]
         for title in sample_tasks:
             self.addTask(title)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize tasks to a dictionary for saving.
+
+        Returns:
+            Dictionary containing all task data.
+        """
+        tasks_data = []
+        for task in self._tasks:
+            tasks_data.append({
+                "title": task.title,
+                "completed": task.completed,
+                "time_spent": task.time_spent,
+                "parent_index": task.parent_index,
+                "indent_level": task.indent_level,
+                "custom_estimate": task.custom_estimate,
+            })
+        return {"tasks": tasks_data}
+
+    def from_dict(self, data: Dict[str, Any]) -> None:
+        """Load tasks from a dictionary.
+
+        Args:
+            data: Dictionary containing task data (from to_dict).
+        """
+        # Clear existing tasks
+        self.clear()
+
+        # Load new tasks
+        tasks_data = data.get("tasks", [])
+        for task_data in tasks_data:
+            task = Task(
+                title=task_data.get("title", ""),
+                completed=task_data.get("completed", False),
+                time_spent=task_data.get("time_spent", 0.0),
+                parent_index=task_data.get("parent_index", -1),
+                indent_level=task_data.get("indent_level", 0),
+                custom_estimate=task_data.get("custom_estimate"),
+            )
+            # Don't auto-start timing for loaded tasks
+            if not task.completed:
+                task.start_time = time.time()
+
+            self.beginInsertRows(QModelIndex(), len(self._tasks), len(self._tasks))
+            self._tasks.append(task)
+            self.endInsertRows()
+
+        self.avgTimeChanged.emit()
+        self.totalEstimateChanged.emit()
+        self._takeSnapshot()
+        self.taskCountChanged.emit()
+
+
+class ActionDrawManager(QObject):
+    """Manager for the ActionDraw window."""
+    
+    def __init__(self, task_model: TaskModel):
+        super().__init__()
+        self._task_model = task_model
+        self._diagram_model = DiagramModel(task_model=task_model)
+        self._actiondraw_engine = None
+        self._actiondraw_window = None
+    
+    @property
+    def diagram_model(self) -> DiagramModel:
+        """Return the diagram model for serialization."""
+        return self._diagram_model
+
+    @Slot()
+    def showActionDraw(self) -> None:
+        """Show the ActionDraw window."""
+        if self._actiondraw_engine is None:
+            self._actiondraw_engine = create_actiondraw_window(self._diagram_model, self._task_model)
+            root_objects = self._actiondraw_engine.rootObjects()
+            if root_objects:
+                self._actiondraw_window = root_objects[0]
+        
+        if self._actiondraw_window:
+            self._actiondraw_window.showWindow()
+
+
+class ProjectManager(QObject):
+    """Manager for saving and loading project files.
+
+    Project files are JSON files containing:
+    - Task list data (titles, completion status, time spent, estimates)
+    - Diagram data (items, edges, positions)
+    """
+
+    PROJECT_VERSION = "1.0"
+    MAX_RECENT_PROJECTS = 8
+    
+    saveCompleted = Signal(str)  # Emitted with file path after successful save
+    loadCompleted = Signal(str)  # Emitted with file path after successful load
+    errorOccurred = Signal(str)  # Emitted with error message on failure
+    recentProjectsChanged = Signal()  # Emitted when recent projects list changes
+
+    def __init__(self, task_model: TaskModel, actiondraw_manager: ActionDrawManager):
+        super().__init__()
+        self._task_model = task_model
+        self._actiondraw_manager = actiondraw_manager
+        self._current_file_path: str = ""
+        self._settings = QSettings("ProgressTracker", "ProgressTracker")
+        self._recent_projects: List[str] = self._load_recent_projects()
+
+    def _load_recent_projects(self) -> List[str]:
+        """Load recent projects list from settings."""
+        stored = self._settings.value("recentProjects", [])
+        # QSettings may return a string if only one item, or None
+        if stored is None:
+            return []
+        if isinstance(stored, str):
+            stored = [stored] if stored else []
+        if isinstance(stored, list):
+            # Filter out non-existent files
+            return [p for p in stored if p and os.path.exists(p)][:self.MAX_RECENT_PROJECTS]
+        return []
+
+    def _save_recent_projects(self) -> None:
+        """Save recent projects list to settings."""
+        self._settings.setValue("recentProjects", self._recent_projects)
+        self._settings.sync()  # Ensure settings are written to disk
+
+    def _add_to_recent(self, file_path: str) -> None:
+        """Add a project to the recent projects list."""
+        if not file_path or not os.path.exists(file_path):
+            return
+        # Remove if already in list
+        if file_path in self._recent_projects:
+            self._recent_projects.remove(file_path)
+        # Add to front
+        self._recent_projects.insert(0, file_path)
+        # Trim to max size
+        self._recent_projects = self._recent_projects[:self.MAX_RECENT_PROJECTS]
+        self._save_recent_projects()
+        self.recentProjectsChanged.emit()
+
+    @Property("QVariantList", notify=recentProjectsChanged)
+    def recentProjects(self) -> List[str]:
+        """Return the list of recent project file paths."""
+        return self._recent_projects
+
+    @Slot(result=list)
+    def getRecentProjectNames(self) -> List[Dict[str, str]]:
+        """Return list of recent projects with display name and path."""
+        result = []
+        for path in self._recent_projects:
+            name = os.path.basename(path)
+            # Remove .progress extension for display
+            if name.endswith(".progress"):
+                name = name[:-9]
+            result.append({"name": name, "path": path})
+        return result
+
+    @Property(str, constant=False)
+    def currentFilePath(self) -> str:
+        """Return the current project file path."""
+        return self._current_file_path
+
+    @Slot(str)
+    def saveProject(self, file_path: str) -> None:
+        """Save the current project to a JSON file.
+
+        Args:
+            file_path: Path to save the project file (should end in .progress)
+        """
+        # Handle QUrl format from file dialogs
+        if file_path.startswith("file://"):
+            file_path = file_path[7:]  # Remove file:// prefix
+
+        if not file_path:
+            self.errorOccurred.emit("No file path specified")
+            return
+
+        # Ensure .progress extension
+        if not file_path.endswith(".progress"):
+            file_path += ".progress"
+
+        try:
+            project_data = {
+                "version": self.PROJECT_VERSION,
+                "saved_at": datetime.now().isoformat(),
+                "tasks": self._task_model.to_dict(),
+                "diagram": self._actiondraw_manager.diagram_model.to_dict(),
+            }
+
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(project_data, f, indent=2, ensure_ascii=False)
+
+            self._current_file_path = file_path
+            self._add_to_recent(file_path)
+            self.saveCompleted.emit(file_path)
+            print(f"Project saved to: {file_path}")
+
+        except (OSError, IOError) as e:
+            error_msg = f"Failed to save project: {e}"
+            self.errorOccurred.emit(error_msg)
+            print(error_msg)
+
+    @Slot(str)
+    def loadProject(self, file_path: str) -> None:
+        """Load a project from a JSON file.
+
+        Args:
+            file_path: Path to the project file
+        """
+        # Handle QUrl format from file dialogs
+        if file_path.startswith("file://"):
+            file_path = file_path[7:]  # Remove file:// prefix
+
+        if not file_path:
+            self.errorOccurred.emit("No file path specified")
+            return
+
+        if not os.path.exists(file_path):
+            self.errorOccurred.emit(f"File not found: {file_path}")
+            return
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                project_data = json.load(f)
+
+            # Validate version
+            version = project_data.get("version", "unknown")
+            if version != self.PROJECT_VERSION:
+                print(f"Warning: Loading project from version {version}, current is {self.PROJECT_VERSION}")
+
+            # Load tasks
+            tasks_data = project_data.get("tasks", {})
+            self._task_model.from_dict(tasks_data)
+
+            # Load diagram
+            diagram_data = project_data.get("diagram", {})
+            self._actiondraw_manager.diagram_model.from_dict(diagram_data)
+
+            self._current_file_path = file_path
+            self._add_to_recent(file_path)
+            self.loadCompleted.emit(file_path)
+            print(f"Project loaded from: {file_path}")
+
+        except json.JSONDecodeError as e:
+            error_msg = f"Invalid project file format: {e}"
+            self.errorOccurred.emit(error_msg)
+            print(error_msg)
+        except (OSError, IOError) as e:
+            error_msg = f"Failed to load project: {e}"
+            self.errorOccurred.emit(error_msg)
+            print(error_msg)
+        except (KeyError, TypeError) as e:
+            error_msg = f"Corrupted project file: {e}"
+            self.errorOccurred.emit(error_msg)
+            print(error_msg)
 
 
 QML_UI = rb"""
@@ -607,6 +882,84 @@ ApplicationWindow {
     height: 1000
     title: "Progress Tracker"
     color: "#0f1115"
+
+    menuBar: MenuBar {
+        Menu {
+            title: "File"
+
+            MenuItem {
+                text: "Save As..."
+                onTriggered: saveDialog.open()
+            }
+
+            MenuItem {
+                text: "Load..."
+                onTriggered: loadDialog.open()
+            }
+
+            MenuSeparator {}
+
+            Menu {
+                id: recentMenu
+                title: "Recent Projects"
+                enabled: recentRepeater.count > 0
+
+                Repeater {
+                    id: recentRepeater
+                    model: projectManager.recentProjects
+
+                    MenuItem {
+                        property string filePath: modelData
+                        property string fileName: {
+                            var name = filePath.split("/").pop()
+                            if (name.endsWith(".progress"))
+                                name = name.slice(0, -9)
+                            return name
+                        }
+                        text: fileName
+                        onTriggered: projectManager.loadProject(filePath)
+                    }
+                }
+
+                MenuItem {
+                    text: "(No recent projects)"
+                    enabled: false
+                    visible: recentRepeater.count === 0
+                }
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
+                text: "Exit"
+                onTriggered: root.close()
+            }
+        }
+
+        Menu {
+            title: "View"
+
+            MenuItem {
+                text: "ActionDraw"
+                onTriggered: actionDrawManager.showActionDraw()
+            }
+        }
+
+        Menu {
+            title: "Edit"
+
+            MenuItem {
+                text: "Paste Sample Tasks"
+                onTriggered: taskModel.pasteSampleTasks()
+            }
+
+            MenuItem {
+                text: "Clear All"
+                enabled: listView.count > 0
+                onTriggered: taskModel.clear()
+            }
+        }
+    }
 
     function formatTime(minutes) {
         if (minutes === 0) return "N/A"
@@ -823,27 +1176,6 @@ ApplicationWindow {
                         visible: !chartImage.source
                     }
                 }
-            }
-        }
-
-        RowLayout {
-            spacing: 8
-
-            Button {
-                text: "Paste sample tasks"
-                onClicked: taskModel.pasteSampleTasks()
-            }
-
-            Button {
-                text: "Clear"
-                enabled: listView.count > 0
-                onClicked: taskModel.clear()
-            }
-
-            Button {
-                text: "Complete"
-                enabled: listView.count > 0
-                onClicked: root.close()
             }
         }
 
@@ -1162,6 +1494,40 @@ ApplicationWindow {
             }
         }
     }
+
+    FileDialog {
+        id: saveDialog
+        title: "Save Project As"
+        fileMode: FileDialog.SaveFile
+        nameFilters: ["Progress files (*.progress)", "All files (*)"]
+        defaultSuffix: "progress"
+        onAccepted: {
+            projectManager.saveProject(selectedFile)
+        }
+    }
+
+    FileDialog {
+        id: loadDialog
+        title: "Load Project"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["Progress files (*.progress)", "All files (*)"]
+        onAccepted: {
+            projectManager.loadProject(selectedFile)
+        }
+    }
+
+    Connections {
+        target: projectManager
+        function onSaveCompleted(filePath) {
+            console.log("Project saved to:", filePath)
+        }
+        function onLoadCompleted(filePath) {
+            console.log("Project loaded from:", filePath)
+        }
+        function onErrorOccurred(message) {
+            console.error("Project error:", message)
+        }
+    }
 }
 """
 
@@ -1176,6 +1542,15 @@ def get_tasks() -> List[Task]:
     engine = QQmlApplicationEngine()
     model = TaskModel()
     engine.rootContext().setContextProperty("taskModel", model)
+    
+    # Create ActionDraw manager
+    actiondraw_manager = ActionDrawManager(model)
+    engine.rootContext().setContextProperty("actionDrawManager", actiondraw_manager)
+    
+    # Create ProjectManager for save/load
+    project_manager = ProjectManager(model, actiondraw_manager)
+    engine.rootContext().setContextProperty("projectManager", project_manager)
+    
     engine.loadData(QML_UI)
 
     if not engine.rootObjects():
@@ -1198,6 +1573,15 @@ def main() -> int:
     engine = QQmlApplicationEngine()
     model = TaskModel()
     engine.rootContext().setContextProperty("taskModel", model)
+    
+    # Create ActionDraw manager
+    actiondraw_manager = ActionDrawManager(model)
+    engine.rootContext().setContextProperty("actionDrawManager", actiondraw_manager)
+    
+    # Create ProjectManager for save/load
+    project_manager = ProjectManager(model, actiondraw_manager)
+    engine.rootContext().setContextProperty("projectManager", project_manager)
+    
     engine.loadData(QML_UI)
 
     if not engine.rootObjects():

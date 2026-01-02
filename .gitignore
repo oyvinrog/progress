@@ -2,9 +2,11 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
+.github/prompts/
 # C extensions
 *.so
+# Memory used for Copilot
+MEMORY.md
 
 # Distribution / packaging
 .Python

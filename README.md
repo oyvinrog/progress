@@ -12,6 +12,24 @@ A progress tracking task list with time estimation using PySide6 + QML.
 - ✓ Break down tasks into subtasks
 - ✓ Add new tasks dynamically
 - ✓ Burndown charts to visualize progress
+- ✓ ActionDraw canvas for system diagrams (database, network, notes)
+
+## ActionDraw Diagramming
+
+Launch the standalone canvas with:
+
+```bash
+python actiondraw.py
+```
+
+Key capabilities:
+
+- Preset shapes for boxes, databases, servers, clouds, and sticky notes
+- Snap-to-grid toggle with optional grid overlay for tidy layouts
+- Smooth zoom controls via toolbar, mouse wheel (Ctrl+Scroll), or touchpad pinch
+- Drag-and-drop connections with live previews and arrowheads
+- Quick resizing gestures (pinch) that respect the grid spacing
+- Inline editing for labels plus task integration with the main progress list
 
 ## Installation
 
