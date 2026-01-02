@@ -75,7 +75,7 @@ class TaskModel(QAbstractListModel):
     taskRenamed = Signal(int, str, arguments=['taskIndex', 'newTitle'])  # Emitted when a task is renamed
     taskCompletionChanged = Signal(int, bool, arguments=['taskIndex', 'completed'])
 
-    def __init__(self, tasks: List[Task] | None = None):
+    def __init__(self, tasks: Optional[List[Task]] = None):
         super().__init__()
         self._tasks: List[Task] = tasks or []
         self._timer = QTimer()
@@ -95,7 +95,7 @@ class TaskModel(QAbstractListModel):
         self._takeSnapshot()  # Take initial snapshot
         self.taskCountChanged.emit()
 
-    def rowCount(self, parent: QModelIndex | None = QModelIndex()) -> int:  # type: ignore[override]
+    def rowCount(self, parent: Optional[QModelIndex] = QModelIndex()) -> int:  # type: ignore[override]
         return len(self._tasks)
 
     @Property(int, notify=taskCountChanged)
