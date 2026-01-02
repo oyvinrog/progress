@@ -34,6 +34,8 @@ class DiagramItemType(Enum):
     CLOUD = "cloud"
     NOTE = "note"
     FREETEXT = "freetext"
+    OBSTACLE = "obstacle"
+    WISH = "wish"
 
 
 @dataclass
@@ -127,6 +129,22 @@ ITEM_PRESETS: Dict[str, Dict[str, Any]] = {
         "height": 140.0,
         "color": "#f5f0e6",
         "text": "",
+        "text_color": "#2d3436",
+    },
+    "obstacle": {
+        "type": DiagramItemType.OBSTACLE,
+        "width": 140.0,
+        "height": 100.0,
+        "color": "#e74c3c",
+        "text": "Obstacle",
+        "text_color": "#ffffff",
+    },
+    "wish": {
+        "type": DiagramItemType.WISH,
+        "width": 140.0,
+        "height": 100.0,
+        "color": "#f1c40f",
+        "text": "Wish",
         "text_color": "#2d3436",
     },
 }
@@ -421,6 +439,22 @@ class DiagramModel(QAbstractListModel):
     @Slot(str, float, float, str, result=str)
     def addPresetItemWithText(self, preset: str, x: float, y: float, text: str) -> str:
         return self._add_preset(preset, x, y, text)
+
+    @Slot(str, str, float, float, str, result=str)
+    def addPresetItemAndConnect(self, source_id: str, preset: str, x: float, y: float, text: str) -> str:
+        """Create a new item of the given preset type and connect it with an edge from source_id."""
+        new_id = self._add_preset(preset, x, y, text)
+        if new_id and source_id:
+            self.addEdge(source_id, new_id)
+        return new_id
+
+    @Slot(str, float, float, str, result=str)
+    def addTaskFromTextAndConnect(self, source_id: str, x: float, y: float, text: str) -> str:
+        """Create a new task in the task list, add it to the diagram, and connect with an edge."""
+        new_id = self.addTaskFromText(text, x, y)
+        if new_id and source_id:
+            self.addEdge(source_id, new_id)
+        return new_id
 
     @Slot(int, float, float, result=str)
     def addTask(self, task_index: int, x: float, y: float) -> str:
@@ -990,6 +1024,16 @@ ApplicationWindow {
                 onTriggered: root.addPresetAtCenter("note")
             }
 
+            MenuItem {
+                text: "Obstacle"
+                onTriggered: root.addPresetAtCenter("obstacle")
+            }
+
+            MenuItem {
+                text: "Wish"
+                onTriggered: root.addPresetAtCenter("wish")
+            }
+
             MenuSeparator {}
 
             MenuItem {
@@ -1084,8 +1128,22 @@ ApplicationWindow {
         "server": { "text": "Server", "title": "Create Server" },
         "cloud": { "text": "Cloud", "title": "Create Cloud" },
         "note": { "text": "Note", "title": "Create Note" },
-        "freetext": { "text": "", "title": "Free Text" }
+        "freetext": { "text": "", "title": "Free Text" },
+        "obstacle": { "text": "Obstacle", "title": "Add Obstacle" },
+        "wish": { "text": "Wish", "title": "Add Wish" }
     })
+
+    // Pending edge drop state (for creating new items when dropping into empty space)
+    property string pendingEdgeSourceId: ""
+    property real pendingEdgeDropX: 0
+    property real pendingEdgeDropY: 0
+
+    function showEdgeDropSuggestions(sourceId, dropX, dropY) {
+        root.pendingEdgeSourceId = sourceId
+        root.pendingEdgeDropX = dropX
+        root.pendingEdgeDropY = dropY
+        edgeDropMenu.popup()
+    }
 
     function clampZoom(value) {
         if (value < root.minZoom)
@@ -1239,6 +1297,22 @@ ApplicationWindow {
                 onClicked: {
                     addDialog.close()
                     root.openPresetDialog("note", Qt.point(addDialog.targetX, addDialog.targetY), "", undefined)
+                }
+            }
+
+            Button {
+                text: "Obstacle"
+                onClicked: {
+                    addDialog.close()
+                    root.openPresetDialog("obstacle", Qt.point(addDialog.targetX, addDialog.targetY), "", undefined)
+                }
+            }
+
+            Button {
+                text: "Wish"
+                onClicked: {
+                    addDialog.close()
+                    root.openPresetDialog("wish", Qt.point(addDialog.targetX, addDialog.targetY), "", undefined)
                 }
             }
 
@@ -1709,6 +1783,214 @@ ApplicationWindow {
 
     function addQuickTaskAtCenter() {
         openQuickTaskDialog(diagramCenterPoint())
+    }
+
+    Menu {
+        id: edgeDropMenu
+        title: "Create & Connect"
+
+        MenuItem {
+            text: "→ Task"
+            onTriggered: {
+                // Copy pending state to dialog before menu closes
+                edgeDropTaskDialog.sourceId = root.pendingEdgeSourceId
+                edgeDropTaskDialog.dropX = root.pendingEdgeDropX
+                edgeDropTaskDialog.dropY = root.pendingEdgeDropY
+                edgeDropTaskDialog.open()
+            }
+        }
+
+        MenuItem {
+            text: "→ Obstacle"
+            onTriggered: {
+                if (diagramModel && root.pendingEdgeSourceId) {
+                    diagramModel.addPresetItemAndConnect(
+                        root.pendingEdgeSourceId,
+                        "obstacle",
+                        snapValue(root.pendingEdgeDropX),
+                        snapValue(root.pendingEdgeDropY),
+                        "Obstacle"
+                    )
+                }
+                root.pendingEdgeSourceId = ""
+            }
+        }
+
+        MenuItem {
+            text: "→ Wish"
+            onTriggered: {
+                if (diagramModel && root.pendingEdgeSourceId) {
+                    diagramModel.addPresetItemAndConnect(
+                        root.pendingEdgeSourceId,
+                        "wish",
+                        snapValue(root.pendingEdgeDropX),
+                        snapValue(root.pendingEdgeDropY),
+                        "Wish"
+                    )
+                }
+                root.pendingEdgeSourceId = ""
+            }
+        }
+
+        MenuSeparator {}
+
+        MenuItem {
+            text: "→ Box"
+            onTriggered: {
+                if (diagramModel && root.pendingEdgeSourceId) {
+                    diagramModel.addPresetItemAndConnect(
+                        root.pendingEdgeSourceId,
+                        "box",
+                        snapValue(root.pendingEdgeDropX),
+                        snapValue(root.pendingEdgeDropY),
+                        "Box"
+                    )
+                }
+                root.pendingEdgeSourceId = ""
+            }
+        }
+
+        MenuItem {
+            text: "→ Note"
+            onTriggered: {
+                if (diagramModel && root.pendingEdgeSourceId) {
+                    diagramModel.addPresetItemAndConnect(
+                        root.pendingEdgeSourceId,
+                        "note",
+                        snapValue(root.pendingEdgeDropX),
+                        snapValue(root.pendingEdgeDropY),
+                        "Note"
+                    )
+                }
+                root.pendingEdgeSourceId = ""
+            }
+        }
+
+        MenuItem {
+            text: "→ Database"
+            onTriggered: {
+                if (diagramModel && root.pendingEdgeSourceId) {
+                    diagramModel.addPresetItemAndConnect(
+                        root.pendingEdgeSourceId,
+                        "database",
+                        snapValue(root.pendingEdgeDropX),
+                        snapValue(root.pendingEdgeDropY),
+                        "Database"
+                    )
+                }
+                root.pendingEdgeSourceId = ""
+            }
+        }
+
+        MenuItem {
+            text: "→ Server"
+            onTriggered: {
+                if (diagramModel && root.pendingEdgeSourceId) {
+                    diagramModel.addPresetItemAndConnect(
+                        root.pendingEdgeSourceId,
+                        "server",
+                        snapValue(root.pendingEdgeDropX),
+                        snapValue(root.pendingEdgeDropY),
+                        "Server"
+                    )
+                }
+                root.pendingEdgeSourceId = ""
+            }
+        }
+
+        MenuItem {
+            text: "→ Cloud"
+            onTriggered: {
+                if (diagramModel && root.pendingEdgeSourceId) {
+                    diagramModel.addPresetItemAndConnect(
+                        root.pendingEdgeSourceId,
+                        "cloud",
+                        snapValue(root.pendingEdgeDropX),
+                        snapValue(root.pendingEdgeDropY),
+                        "Cloud"
+                    )
+                }
+                root.pendingEdgeSourceId = ""
+            }
+        }
+
+        onClosed: {
+            // Clear pending state if menu closed without action
+            root.pendingEdgeSourceId = ""
+        }
+    }
+
+    Dialog {
+        id: edgeDropTaskDialog
+        modal: true
+        title: "Create Connected Task"
+
+        // Store our own copy of pending state (menu clears root state on close)
+        property string sourceId: ""
+        property real dropX: 0
+        property real dropY: 0
+
+        onOpened: edgeDropTaskField.forceActiveFocus()
+
+        contentItem: ColumnLayout {
+            width: 320
+            spacing: 12
+
+            Label {
+                text: taskModel ? "Create a new task connected from the source item." : "Create a box connected from the source item (no task list available)."
+                color: "#8a93a5"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            TextField {
+                id: edgeDropTaskField
+                Layout.fillWidth: true
+                placeholderText: taskModel ? "Task name" : "Box label"
+                selectByMouse: true
+                color: "#f5f6f8"
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#384458"
+                }
+                Keys.onReturnPressed: edgeDropTaskDialog.accept()
+                Keys.onEnterPressed: edgeDropTaskDialog.accept()
+            }
+        }
+
+        footer: DialogButtonBox {
+            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+        }
+
+        onAccepted: {
+            if (diagramModel && edgeDropTaskDialog.sourceId && edgeDropTaskField.text.trim().length > 0) {
+                if (taskModel) {
+                    diagramModel.addTaskFromTextAndConnect(
+                        edgeDropTaskDialog.sourceId,
+                        snapValue(edgeDropTaskDialog.dropX),
+                        snapValue(edgeDropTaskDialog.dropY),
+                        edgeDropTaskField.text
+                    )
+                } else {
+                    // Fallback to box when no task model
+                    diagramModel.addPresetItemAndConnect(
+                        edgeDropTaskDialog.sourceId,
+                        "box",
+                        snapValue(edgeDropTaskDialog.dropX),
+                        snapValue(edgeDropTaskDialog.dropY),
+                        edgeDropTaskField.text
+                    )
+                }
+            }
+            edgeDropTaskDialog.close()
+        }
+        onRejected: edgeDropTaskDialog.close()
+
+        onClosed: {
+            edgeDropTaskField.text = ""
+            edgeDropTaskDialog.sourceId = ""
+        }
     }
 
     ColumnLayout {
@@ -2470,6 +2752,109 @@ ApplicationWindow {
 
                             Item {
                                 anchors.fill: parent
+                                visible: itemRect.itemType === "obstacle"
+
+                                Rectangle {
+                                    id: flagPole
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 16
+                                    anchors.top: parent.top
+                                    anchors.topMargin: 10
+                                    anchors.bottom: parent.bottom
+                                    anchors.bottomMargin: 10
+                                    width: 4
+                                    radius: 2
+                                    color: Qt.darker(model.color, 1.5)
+                                }
+
+                                Rectangle {
+                                    anchors.left: flagPole.right
+                                    anchors.top: parent.top
+                                    anchors.topMargin: 12
+                                    width: parent.width * 0.55
+                                    height: parent.height * 0.45
+                                    color: Qt.lighter(model.color, 1.15)
+                                    border.color: Qt.darker(model.color, 1.2)
+                                    border.width: 1
+                                    radius: 4
+
+                                    Canvas {
+                                        anchors.fill: parent
+                                        onPaint: {
+                                            var ctx = getContext("2d")
+                                            ctx.clearRect(0, 0, width, height)
+                                            ctx.strokeStyle = Qt.darker(model.color, 1.3)
+                                            ctx.lineWidth = 1.5
+                                            ctx.beginPath()
+                                            ctx.moveTo(6, height * 0.3)
+                                            ctx.lineTo(width - 6, height * 0.3)
+                                            ctx.moveTo(6, height * 0.55)
+                                            ctx.lineTo(width - 6, height * 0.55)
+                                            ctx.moveTo(6, height * 0.8)
+                                            ctx.lineTo(width * 0.6, height * 0.8)
+                                            ctx.stroke()
+                                        }
+                                    }
+                                }
+                            }
+
+                            Item {
+                                anchors.fill: parent
+                                visible: itemRect.itemType === "wish"
+
+                                Item {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    anchors.top: parent.top
+                                    anchors.topMargin: 8
+                                    width: Math.min(parent.width, parent.height) * 0.5
+                                    height: width
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: width / 2
+                                        color: Qt.lighter(model.color, 1.2)
+                                        border.color: Qt.darker(model.color, 1.3)
+                                        border.width: 2
+
+                                        Rectangle {
+                                            x: parent.width * 0.28
+                                            y: parent.height * 0.32
+                                            width: parent.width * 0.12
+                                            height: parent.height * 0.12
+                                            radius: width / 2
+                                            color: "#2d3436"
+                                        }
+
+                                        Rectangle {
+                                            x: parent.width * 0.60
+                                            y: parent.height * 0.32
+                                            width: parent.width * 0.12
+                                            height: parent.height * 0.12
+                                            radius: width / 2
+                                            color: "#2d3436"
+                                        }
+
+                                        Canvas {
+                                            anchors.fill: parent
+                                            onPaint: {
+                                                var ctx = getContext("2d")
+                                                ctx.clearRect(0, 0, width, height)
+                                                ctx.strokeStyle = "#2d3436"
+                                                ctx.lineWidth = 2.5
+                                                ctx.lineCap = "round"
+                                                ctx.beginPath()
+                                                var smileY = height * 0.58
+                                                var smileRadius = width * 0.25
+                                                ctx.arc(width / 2, smileY, smileRadius, 0.15 * Math.PI, 0.85 * Math.PI, false)
+                                                ctx.stroke()
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Item {
+                                anchors.fill: parent
                                 visible: itemRect.itemType === "freetext"
 
                                 Rectangle {
@@ -2549,7 +2934,7 @@ ApplicationWindow {
                             }
 
                             Text {
-                                visible: itemRect.itemType !== "freetext"
+                                visible: itemRect.itemType !== "freetext" && itemRect.itemType !== "obstacle" && itemRect.itemType !== "wish"
                                 anchors.centerIn: parent
                                 width: parent.width - 36
                                 text: model.text
@@ -2559,6 +2944,42 @@ ApplicationWindow {
                                 textFormat: Text.PlainText
                                 font.pixelSize: 14
                                 font.bold: itemRect.itemType === "task"
+                            }
+
+                            Text {
+                                visible: itemRect.itemType === "obstacle"
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                anchors.rightMargin: 8
+                                anchors.bottomMargin: 8
+                                anchors.left: parent.left
+                                anchors.leftMargin: 28
+                                text: model.text
+                                color: model.textColor
+                                wrapMode: Text.WordWrap
+                                horizontalAlignment: Text.AlignLeft
+                                verticalAlignment: Text.AlignBottom
+                                textFormat: Text.PlainText
+                                font.pixelSize: 12
+                                font.bold: true
+                            }
+
+                            Text {
+                                visible: itemRect.itemType === "wish"
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 8
+                                anchors.bottomMargin: 8
+                                text: model.text
+                                color: model.textColor
+                                wrapMode: Text.WordWrap
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignBottom
+                                textFormat: Text.PlainText
+                                font.pixelSize: 12
+                                font.bold: true
                             }
 
                             Text {
@@ -2684,6 +3105,12 @@ ApplicationWindow {
                                             if (dropId && dropId !== itemRect.itemId) {
                                                 diagramModel.finishEdgeDrawing(dropId)
                                             } else {
+                                                // Dropped into empty space - show suggestion menu
+                                                root.showEdgeDropSuggestions(
+                                                    itemRect.itemId,
+                                                    edgeHandle.dragPoint.x,
+                                                    edgeHandle.dragPoint.y
+                                                )
                                                 diagramModel.cancelEdgeDrawing()
                                             }
                                             edgeCanvas.requestPaint()

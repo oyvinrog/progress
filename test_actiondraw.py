@@ -353,6 +353,26 @@ class TestEdges:
         """Getting description from nonexistent edge returns empty string."""
         assert empty_diagram_model.getEdgeDescription("nonexistent_edge") == ""
 
+    def test_add_preset_item_and_connect(self, empty_diagram_model):
+        """Creating a preset item with connection creates both item and edge."""
+        source = empty_diagram_model.addBox(0.0, 0.0, "Source")
+        target = empty_diagram_model.addPresetItemAndConnect(
+            source, "obstacle", 200.0, 0.0, "New Obstacle"
+        )
+        assert target != ""
+        assert len(empty_diagram_model.edges) == 1
+        edge = empty_diagram_model.edges[0]
+        assert edge["fromId"] == source
+        assert edge["toId"] == target
+
+    def test_add_preset_item_and_connect_no_source(self, empty_diagram_model):
+        """Creating connected item with empty source still creates item but no edge."""
+        target = empty_diagram_model.addPresetItemAndConnect(
+            "", "box", 100.0, 100.0, "Orphan Box"
+        )
+        assert target != ""
+        assert len(empty_diagram_model.edges) == 0
+
 
 class TestQueries:
     def test_get_item(self, empty_diagram_model):
@@ -427,6 +447,22 @@ class TestTaskIntegration:
     def test_add_task_from_text_no_task_model(self, empty_diagram_model):
         item_id = empty_diagram_model.addTaskFromText("Should Fail", 0.0, 0.0)
         assert item_id == ""
+
+    def test_add_task_from_text_and_connect(self, diagram_model_with_task_model):
+        """Creating a task with connection creates task, diagram item, and edge."""
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        task_count_before = diagram_model_with_task_model._task_model.rowCount()
+        target = diagram_model_with_task_model.addTaskFromTextAndConnect(
+            source, 200.0, 0.0, "Connected Task"
+        )
+        assert target != ""
+        assert len(diagram_model_with_task_model.edges) == 1
+        edge = diagram_model_with_task_model.edges[0]
+        assert edge["fromId"] == source
+        assert edge["toId"] == target
+        # Verify task was added to task model
+        task_count_after = diagram_model_with_task_model._task_model.rowCount()
+        assert task_count_after == task_count_before + 1
 
     def test_add_task_uses_title(self, diagram_model_with_task_model):
         item_id = diagram_model_with_task_model.addTask(1, 25.0, 35.0)
