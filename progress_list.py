@@ -681,17 +681,26 @@ class ActionDrawManager(QObject):
         self._diagram_model = DiagramModel(task_model=task_model)
         self._actiondraw_engine = None
         self._actiondraw_window = None
+        self._project_manager = None
     
     @property
     def diagram_model(self) -> DiagramModel:
         """Return the diagram model for serialization."""
         return self._diagram_model
 
+    def set_project_manager(self, project_manager: "ProjectManager") -> None:
+        """Provide a project manager for save/load actions."""
+        self._project_manager = project_manager
+
     @Slot()
     def showActionDraw(self) -> None:
         """Show the ActionDraw window."""
         if self._actiondraw_engine is None:
-            self._actiondraw_engine = create_actiondraw_window(self._diagram_model, self._task_model)
+            self._actiondraw_engine = create_actiondraw_window(
+                self._diagram_model,
+                self._task_model,
+                self._project_manager,
+            )
             root_objects = self._actiondraw_engine.rootObjects()
             if root_objects:
                 self._actiondraw_window = root_objects[0]
@@ -715,6 +724,7 @@ class ProjectManager(QObject):
     loadCompleted = Signal(str)  # Emitted with file path after successful load
     errorOccurred = Signal(str)  # Emitted with error message on failure
     recentProjectsChanged = Signal()  # Emitted when recent projects list changes
+    currentFilePathChanged = Signal()  # Emitted when current file path changes
 
     def __init__(self, task_model: TaskModel, actiondraw_manager: ActionDrawManager):
         super().__init__()
@@ -773,7 +783,7 @@ class ProjectManager(QObject):
             result.append({"name": name, "path": path})
         return result
 
-    @Property(str, constant=False)
+    @Property(str, notify=currentFilePathChanged)
     def currentFilePath(self) -> str:
         """Return the current project file path."""
         return self._current_file_path
@@ -789,6 +799,19 @@ class ProjectManager(QObject):
         if os.name == "nt" and file_path.startswith("/") and len(file_path) > 2 and file_path[2] == ":":
             file_path = file_path[1:]
         return file_path
+
+    @Slot(result=bool)
+    def hasCurrentFile(self) -> bool:
+        """Return True if a current project file is set."""
+        return bool(self._current_file_path)
+
+    @Slot()
+    def saveCurrentProject(self) -> None:
+        """Save the current project to the existing file path."""
+        if not self._current_file_path:
+            self.errorOccurred.emit("No current project file selected")
+            return
+        self.saveProject(self._current_file_path)
 
     @Slot(str)
     def saveProject(self, file_path: str) -> None:
@@ -819,6 +842,7 @@ class ProjectManager(QObject):
                 json.dump(project_data, f, indent=2, ensure_ascii=False)
 
             self._current_file_path = file_path
+            self.currentFilePathChanged.emit()
             self._add_to_recent(file_path)
             self.saveCompleted.emit(file_path)
             print(f"Project saved to: {file_path}")
@@ -863,6 +887,7 @@ class ProjectManager(QObject):
             self._actiondraw_manager.diagram_model.from_dict(diagram_data)
 
             self._current_file_path = file_path
+            self.currentFilePathChanged.emit()
             self._add_to_recent(file_path)
             self.loadCompleted.emit(file_path)
             print(f"Project loaded from: {file_path}")
@@ -898,6 +923,11 @@ ApplicationWindow {
     menuBar: MenuBar {
         Menu {
             title: "File"
+
+            MenuItem {
+                text: "Save"
+                onTriggered: root.performSave()
+            }
 
             MenuItem {
                 text: "Save As..."
@@ -977,6 +1007,19 @@ ApplicationWindow {
         if (minutes === 0) return "N/A"
         if (minutes < 1) return (minutes * 60).toFixed(0) + "s"
         return minutes.toFixed(1) + "m"
+    }
+
+    function performSave() {
+        if (projectManager && projectManager.hasCurrentFile()) {
+            projectManager.saveCurrentProject()
+        } else {
+            saveDialog.open()
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+S"
+        onActivated: root.performSave()
     }
 
     ColumnLayout {
@@ -1565,6 +1608,7 @@ def get_tasks() -> List[Task]:
     # Create ProjectManager for save/load
     project_manager = ProjectManager(model, actiondraw_manager)
     engine.rootContext().setContextProperty("projectManager", project_manager)
+    actiondraw_manager.set_project_manager(project_manager)
     
     engine.loadData(QML_UI)
 
@@ -1596,6 +1640,7 @@ def main() -> int:
     # Create ProjectManager for save/load
     project_manager = ProjectManager(model, actiondraw_manager)
     engine.rootContext().setContextProperty("projectManager", project_manager)
+    actiondraw_manager.set_project_manager(project_manager)
     
     engine.loadData(QML_UI)
 

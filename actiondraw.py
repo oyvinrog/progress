@@ -979,6 +979,7 @@ ACTIONDRAW_QML = r"""
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import QtQuick.Dialogs
 ApplicationWindow {
     id: root
     visible: false
@@ -990,6 +991,20 @@ ApplicationWindow {
     menuBar: MenuBar {
         Menu {
             title: "File"
+
+            MenuItem {
+                text: "Save"
+                enabled: projectManager !== null
+                onTriggered: root.performSave()
+            }
+
+            MenuItem {
+                text: "Save As..."
+                enabled: projectManager !== null
+                onTriggered: saveDialog.open()
+            }
+
+            MenuSeparator {}
 
             MenuItem {
                 text: "Close"
@@ -1145,6 +1160,17 @@ ApplicationWindow {
         root.requestActivate()
     }
 
+    function performSave() {
+        if (!projectManager) {
+            return
+        }
+        if (projectManager.hasCurrentFile()) {
+            projectManager.saveCurrentProject()
+        } else {
+            saveDialog.open()
+        }
+    }
+
     property int boardSize: 2000
     property bool showGrid: true
     property bool snapToGrid: true
@@ -1167,6 +1193,12 @@ ApplicationWindow {
     property string pendingEdgeSourceId: ""
     property real pendingEdgeDropX: 0
     property real pendingEdgeDropY: 0
+
+    Shortcut {
+        sequence: "Ctrl+S"
+        enabled: projectManager !== null
+        onActivated: root.performSave()
+    }
 
     function showEdgeDropSuggestions(sourceId, dropX, dropY) {
         root.pendingEdgeSourceId = sourceId
@@ -2020,6 +2052,19 @@ ApplicationWindow {
         onClosed: {
             edgeDropTaskField.text = ""
             edgeDropTaskDialog.sourceId = ""
+        }
+    }
+
+    FileDialog {
+        id: saveDialog
+        title: "Save Project As"
+        fileMode: FileDialog.SaveFile
+        nameFilters: ["Progress files (*.progress)", "All files (*)"]
+        defaultSuffix: "progress"
+        onAccepted: {
+            if (projectManager) {
+                projectManager.saveProject(selectedFile)
+            }
         }
     }
 
@@ -3232,12 +3277,17 @@ ApplicationWindow {
 """
 
 
-def create_actiondraw_window(diagram_model: DiagramModel, task_model) -> QQmlApplicationEngine:
+def create_actiondraw_window(
+    diagram_model: DiagramModel,
+    task_model,
+    project_manager=None,
+) -> QQmlApplicationEngine:
     """Create and return a QQmlApplicationEngine hosting the ActionDraw UI."""
 
     engine = QQmlApplicationEngine()
     engine.rootContext().setContextProperty("diagramModel", diagram_model)
     engine.rootContext().setContextProperty("taskModel", task_model)
+    engine.rootContext().setContextProperty("projectManager", project_manager)
     engine.loadData(ACTIONDRAW_QML.encode("utf-8"))
     return engine
 
