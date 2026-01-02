@@ -33,24 +33,43 @@ Key capabilities:
 
 ## Installation
 
+
+Latest:
+
+```bash
+pip install git+https://github.com/oyvinrog/progress.git
+```
+
+Latest stable release:
+
 ```bash
 pip install progress-list
 ```
 
-## Usage
+Or install from the repo:
 
-```python
-from progress_list import ProgressListApp
-
-# Run the application
-app = ProgressListApp()
-app.run()
+```bash
+pip install .
 ```
 
-Or run directly from the command line:
+## Usage
+
+Run directly from the command line:
+
+```bash
+progress-list
+```
+
+Or run the module:
 
 ```bash
 python -m progress_list
+```
+
+Launch the ActionDraw canvas:
+
+```bash
+actiondraw
 ```
 
 ## Requirements

@@ -903,6 +903,31 @@ class TestProjectManager:
 
         assert file_path in project_manager.currentFilePath
 
+    def test_save_current_project_uses_existing_path(self, project_manager, task_model, tmp_path):
+        """Test saveCurrentProject writes to the existing file path."""
+        import json
+
+        file_path = str(tmp_path / "current_path.progress")
+        task_model.addTask("Initial Task")
+        project_manager.saveProject(file_path)
+
+        task_model.addTask("Second Task")
+        project_manager.saveCurrentProject()
+
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        assert len(data["tasks"]["tasks"]) == 2
+
+    def test_save_current_project_without_path_emits_error(self, project_manager):
+        """Test saveCurrentProject errors when no file path is set."""
+        error_received = []
+        project_manager.errorOccurred.connect(lambda msg: error_received.append(msg))
+
+        project_manager.saveCurrentProject()
+
+        assert len(error_received) == 1
+
 
 class TestRecentProjects:
     """Tests for recent projects functionality."""

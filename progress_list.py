@@ -73,8 +73,9 @@ class TaskModel(QAbstractListModel):
     chartImageChanged = Signal()
     taskCountChanged = Signal()
     taskRenamed = Signal(int, str, arguments=['taskIndex', 'newTitle'])  # Emitted when a task is renamed
+    taskCompletionChanged = Signal(int, bool, arguments=['taskIndex', 'completed'])
 
-    def __init__(self, tasks: List[Task] | None = None):
+    def __init__(self, tasks: Optional[List[Task]] = None):
         super().__init__()
         self._tasks: List[Task] = tasks or []
         self._timer = QTimer()
@@ -94,7 +95,7 @@ class TaskModel(QAbstractListModel):
         self._takeSnapshot()  # Take initial snapshot
         self.taskCountChanged.emit()
 
-    def rowCount(self, parent: QModelIndex | None = QModelIndex()) -> int:  # type: ignore[override]
+    def rowCount(self, parent: Optional[QModelIndex] = QModelIndex()) -> int:  # type: ignore[override]
         return len(self._tasks)
 
     @Property(int, notify=taskCountChanged)
@@ -178,8 +179,10 @@ class TaskModel(QAbstractListModel):
 
     @Property(str, notify=chartImageChanged)
     def chartImagePath(self) -> str:
-        """Get the path to the burndown chart image."""
-        return self._chart_image_path
+        """Get the file URL for the burndown chart image."""
+        if not self._chart_image_path:
+            return ""
+        return QUrl.fromLocalFile(self._chart_image_path).toString()
 
     def _estimateTaskTime(self, row: int) -> float:
         """Estimate time for a single task to complete."""
@@ -459,6 +462,7 @@ class TaskModel(QAbstractListModel):
 
         idx = self.index(row, 0)
         self.dataChanged.emit(idx, idx)
+        self.taskCompletionChanged.emit(row, completed)
         self.avgTimeChanged.emit()
         self.totalEstimateChanged.emit()
         self._takeSnapshot()  # Update burndown chart
@@ -677,17 +681,26 @@ class ActionDrawManager(QObject):
         self._diagram_model = DiagramModel(task_model=task_model)
         self._actiondraw_engine = None
         self._actiondraw_window = None
+        self._project_manager = None
     
     @property
     def diagram_model(self) -> DiagramModel:
         """Return the diagram model for serialization."""
         return self._diagram_model
 
+    def set_project_manager(self, project_manager: "ProjectManager") -> None:
+        """Provide a project manager for save/load actions."""
+        self._project_manager = project_manager
+
     @Slot()
     def showActionDraw(self) -> None:
         """Show the ActionDraw window."""
         if self._actiondraw_engine is None:
-            self._actiondraw_engine = create_actiondraw_window(self._diagram_model, self._task_model)
+            self._actiondraw_engine = create_actiondraw_window(
+                self._diagram_model,
+                self._task_model,
+                self._project_manager,
+            )
             root_objects = self._actiondraw_engine.rootObjects()
             if root_objects:
                 self._actiondraw_window = root_objects[0]
@@ -711,6 +724,7 @@ class ProjectManager(QObject):
     loadCompleted = Signal(str)  # Emitted with file path after successful load
     errorOccurred = Signal(str)  # Emitted with error message on failure
     recentProjectsChanged = Signal()  # Emitted when recent projects list changes
+    currentFilePathChanged = Signal()  # Emitted when current file path changes
 
     def __init__(self, task_model: TaskModel, actiondraw_manager: ActionDrawManager):
         super().__init__()
@@ -769,10 +783,35 @@ class ProjectManager(QObject):
             result.append({"name": name, "path": path})
         return result
 
-    @Property(str, constant=False)
+    @Property(str, notify=currentFilePathChanged)
     def currentFilePath(self) -> str:
         """Return the current project file path."""
         return self._current_file_path
+
+    def _normalize_file_path(self, file_path: str) -> str:
+        """Convert file URLs into local paths, including Windows file URLs."""
+        if file_path.startswith("file:"):
+            url = QUrl(file_path)
+            if url.isLocalFile():
+                file_path = url.toLocalFile()
+            else:
+                file_path = url.path()
+        if os.name == "nt" and file_path.startswith("/") and len(file_path) > 2 and file_path[2] == ":":
+            file_path = file_path[1:]
+        return file_path
+
+    @Slot(result=bool)
+    def hasCurrentFile(self) -> bool:
+        """Return True if a current project file is set."""
+        return bool(self._current_file_path)
+
+    @Slot()
+    def saveCurrentProject(self) -> None:
+        """Save the current project to the existing file path."""
+        if not self._current_file_path:
+            self.errorOccurred.emit("No current project file selected")
+            return
+        self.saveProject(self._current_file_path)
 
     @Slot(str)
     def saveProject(self, file_path: str) -> None:
@@ -781,9 +820,7 @@ class ProjectManager(QObject):
         Args:
             file_path: Path to save the project file (should end in .progress)
         """
-        # Handle QUrl format from file dialogs
-        if file_path.startswith("file://"):
-            file_path = file_path[7:]  # Remove file:// prefix
+        file_path = self._normalize_file_path(file_path)
 
         if not file_path:
             self.errorOccurred.emit("No file path specified")
@@ -805,6 +842,7 @@ class ProjectManager(QObject):
                 json.dump(project_data, f, indent=2, ensure_ascii=False)
 
             self._current_file_path = file_path
+            self.currentFilePathChanged.emit()
             self._add_to_recent(file_path)
             self.saveCompleted.emit(file_path)
             print(f"Project saved to: {file_path}")
@@ -821,9 +859,7 @@ class ProjectManager(QObject):
         Args:
             file_path: Path to the project file
         """
-        # Handle QUrl format from file dialogs
-        if file_path.startswith("file://"):
-            file_path = file_path[7:]  # Remove file:// prefix
+        file_path = self._normalize_file_path(file_path)
 
         if not file_path:
             self.errorOccurred.emit("No file path specified")
@@ -851,6 +887,7 @@ class ProjectManager(QObject):
             self._actiondraw_manager.diagram_model.from_dict(diagram_data)
 
             self._current_file_path = file_path
+            self.currentFilePathChanged.emit()
             self._add_to_recent(file_path)
             self.loadCompleted.emit(file_path)
             print(f"Project loaded from: {file_path}")
@@ -886,6 +923,11 @@ ApplicationWindow {
     menuBar: MenuBar {
         Menu {
             title: "File"
+
+            MenuItem {
+                text: "Save"
+                onTriggered: root.performSave()
+            }
 
             MenuItem {
                 text: "Save As..."
@@ -965,6 +1007,19 @@ ApplicationWindow {
         if (minutes === 0) return "N/A"
         if (minutes < 1) return (minutes * 60).toFixed(0) + "s"
         return minutes.toFixed(1) + "m"
+    }
+
+    function performSave() {
+        if (projectManager && projectManager.hasCurrentFile()) {
+            projectManager.saveCurrentProject()
+        } else {
+            saveDialog.open()
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+S"
+        onActivated: root.performSave()
     }
 
     ColumnLayout {
@@ -1155,7 +1210,7 @@ ApplicationWindow {
                     id: chartImage
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    source: taskModel.chartImagePath ? "file://" + taskModel.chartImagePath : ""
+                    source: taskModel.chartImagePath ? taskModel.chartImagePath : ""
                     fillMode: Image.PreserveAspectFit
                     cache: false
                     asynchronous: true
@@ -1164,7 +1219,7 @@ ApplicationWindow {
                         target: taskModel
                         function onChartImageChanged() {
                             chartImage.source = ""
-                            chartImage.source = "file://" + taskModel.chartImagePath
+                            chartImage.source = taskModel.chartImagePath
                         }
                     }
 
@@ -1195,6 +1250,9 @@ ApplicationWindow {
                 interactive: true
                 boundsBehavior: Flickable.StopAtBounds
                 model: taskModel
+                ScrollBar.vertical: ScrollBar {
+                    policy: ScrollBar.AsNeeded
+                }
 
                 delegate: Item {
                     id: delegateRoot
@@ -1550,6 +1608,7 @@ def get_tasks() -> List[Task]:
     # Create ProjectManager for save/load
     project_manager = ProjectManager(model, actiondraw_manager)
     engine.rootContext().setContextProperty("projectManager", project_manager)
+    actiondraw_manager.set_project_manager(project_manager)
     
     engine.loadData(QML_UI)
 
@@ -1581,6 +1640,7 @@ def main() -> int:
     # Create ProjectManager for save/load
     project_manager = ProjectManager(model, actiondraw_manager)
     engine.rootContext().setContextProperty("projectManager", project_manager)
+    actiondraw_manager.set_project_manager(project_manager)
     
     engine.loadData(QML_UI)
 
