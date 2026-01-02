@@ -36,6 +36,16 @@ def check_syntax(filename):
         return False
 
 
+def _is_missing_gui_dependency(error_msg):
+    """Return True when an import fails due to optional GUI deps in CI."""
+    return (
+        "PySide6" in error_msg
+        or "matplotlib" in error_msg
+        or "libEGL" in error_msg
+        or "libGL" in error_msg
+    )
+
+
 def check_imports():
     """Check if modules can be imported."""
     modules = [
@@ -69,7 +79,7 @@ def check_imports():
                     all_ok = False
         except ImportError as e:
             error_msg = str(e)
-            if 'PySide6' in error_msg or 'matplotlib' in error_msg:
+            if _is_missing_gui_dependency(error_msg):
                 missing_deps.append(error_msg.split("'")[1] if "'" in error_msg else error_msg)
                 print(f"⚠ {module_name}: Missing dependency (expected if .venv not activated)")
             else:
@@ -112,8 +122,8 @@ def check_basic_functionality():
         return True
     except ImportError as e:
         error_msg = str(e)
-        if 'PySide6' in error_msg:
-            print("⚠ Basic functionality check skipped (PySide6 not available)")
+        if _is_missing_gui_dependency(error_msg):
+            print("⚠ Basic functionality check skipped (GUI dependencies not available)")
             print("   Activate .venv to run full checks")
             return True  # Don't fail on missing deps
         print(f"✗ Basic functionality check failed: {e}")
@@ -161,4 +171,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-

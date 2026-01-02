@@ -21,7 +21,6 @@ from PySide6.QtCore import (
     Slot,
 )
 from PySide6.QtQml import QQmlApplicationEngine
-from PySide6.QtWidgets import QApplication
 
 
 class DiagramItemType(Enum):
@@ -3293,6 +3292,8 @@ def create_actiondraw_window(
 
 
 def main() -> int:
+    from PySide6.QtWidgets import QApplication
+
     app = QApplication.instance()
     if app is None:
         app = QApplication(sys.argv)
