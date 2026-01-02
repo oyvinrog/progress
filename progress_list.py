@@ -178,8 +178,10 @@ class TaskModel(QAbstractListModel):
 
     @Property(str, notify=chartImageChanged)
     def chartImagePath(self) -> str:
-        """Get the path to the burndown chart image."""
-        return self._chart_image_path
+        """Get the file URL for the burndown chart image."""
+        if not self._chart_image_path:
+            return ""
+        return QUrl.fromLocalFile(self._chart_image_path).toString()
 
     def _estimateTaskTime(self, row: int) -> float:
         """Estimate time for a single task to complete."""
@@ -774,6 +776,18 @@ class ProjectManager(QObject):
         """Return the current project file path."""
         return self._current_file_path
 
+    def _normalize_file_path(self, file_path: str) -> str:
+        """Convert file URLs into local paths, including Windows file URLs."""
+        if file_path.startswith("file:"):
+            url = QUrl(file_path)
+            if url.isLocalFile():
+                file_path = url.toLocalFile()
+            else:
+                file_path = url.path()
+        if os.name == "nt" and file_path.startswith("/") and len(file_path) > 2 and file_path[2] == ":":
+            file_path = file_path[1:]
+        return file_path
+
     @Slot(str)
     def saveProject(self, file_path: str) -> None:
         """Save the current project to a JSON file.
@@ -781,9 +795,7 @@ class ProjectManager(QObject):
         Args:
             file_path: Path to save the project file (should end in .progress)
         """
-        # Handle QUrl format from file dialogs
-        if file_path.startswith("file://"):
-            file_path = file_path[7:]  # Remove file:// prefix
+        file_path = self._normalize_file_path(file_path)
 
         if not file_path:
             self.errorOccurred.emit("No file path specified")
@@ -821,9 +833,7 @@ class ProjectManager(QObject):
         Args:
             file_path: Path to the project file
         """
-        # Handle QUrl format from file dialogs
-        if file_path.startswith("file://"):
-            file_path = file_path[7:]  # Remove file:// prefix
+        file_path = self._normalize_file_path(file_path)
 
         if not file_path:
             self.errorOccurred.emit("No file path specified")
@@ -1155,7 +1165,7 @@ ApplicationWindow {
                     id: chartImage
                     Layout.fillWidth: true
                     Layout.fillHeight: true
-                    source: taskModel.chartImagePath ? "file://" + taskModel.chartImagePath : ""
+                    source: taskModel.chartImagePath ? taskModel.chartImagePath : ""
                     fillMode: Image.PreserveAspectFit
                     cache: false
                     asynchronous: true
@@ -1164,7 +1174,7 @@ ApplicationWindow {
                         target: taskModel
                         function onChartImageChanged() {
                             chartImage.source = ""
-                            chartImage.source = "file://" + taskModel.chartImagePath
+                            chartImage.source = taskModel.chartImagePath
                         }
                     }
 
