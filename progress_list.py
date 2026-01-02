@@ -1207,6 +1207,9 @@ ApplicationWindow {
                 interactive: true
                 boundsBehavior: Flickable.StopAtBounds
                 model: taskModel
+                ScrollBar.vertical: ScrollBar {
+                    policy: ScrollBar.AsNeeded
+                }
 
                 delegate: Item {
                     id: delegateRoot
