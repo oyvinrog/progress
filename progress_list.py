@@ -73,6 +73,7 @@ class TaskModel(QAbstractListModel):
     chartImageChanged = Signal()
     taskCountChanged = Signal()
     taskRenamed = Signal(int, str, arguments=['taskIndex', 'newTitle'])  # Emitted when a task is renamed
+    taskCompletionChanged = Signal(int, bool, arguments=['taskIndex', 'completed'])
 
     def __init__(self, tasks: List[Task] | None = None):
         super().__init__()
@@ -461,6 +462,7 @@ class TaskModel(QAbstractListModel):
 
         idx = self.index(row, 0)
         self.dataChanged.emit(idx, idx)
+        self.taskCompletionChanged.emit(row, completed)
         self.avgTimeChanged.emit()
         self.totalEstimateChanged.emit()
         self._takeSnapshot()  # Update burndown chart

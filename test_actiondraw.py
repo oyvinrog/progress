@@ -414,6 +414,7 @@ class TestQueries:
         assert roles[empty_diagram_model.TextRole] == b"text"
         assert roles[empty_diagram_model.ColorRole] == b"color"
         assert roles[empty_diagram_model.TextColorRole] == b"textColor"
+        assert roles[empty_diagram_model.TaskCompletedRole] == b"taskCompleted"
 
     def test_data_invalid_index(self, empty_diagram_model):
         assert empty_diagram_model.data(empty_diagram_model.index(10, 0), empty_diagram_model.IdRole) is None
@@ -472,6 +473,17 @@ class TestTaskIntegration:
             diagram_model_with_task_model._task_model.TitleRole,
         )
         assert item_id
+
+    def test_task_completion_syncs_to_task_model(self, diagram_model_with_task_model):
+        item_id = diagram_model_with_task_model.addTask(0, 50.0, 60.0)
+        assert item_id
+        index = diagram_model_with_task_model.index(0, 0)
+        assert diagram_model_with_task_model.data(index, diagram_model_with_task_model.TaskCompletedRole) is False
+
+        diagram_model_with_task_model.setTaskCompleted(0, True)
+        task_model = diagram_model_with_task_model._task_model
+        assert task_model.data(task_model.index(0, 0), task_model.CompletedRole) is True
+        assert diagram_model_with_task_model.data(index, diagram_model_with_task_model.TaskCompletedRole) is True
 
 
 class TestBidirectionalRename:

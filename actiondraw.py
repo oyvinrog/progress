@@ -163,6 +163,7 @@ class DiagramModel(QAbstractListModel):
     TaskIndexRole = Qt.UserRole + 8
     ColorRole = Qt.UserRole + 9
     TextColorRole = Qt.UserRole + 10
+    TaskCompletedRole = Qt.UserRole + 11
 
     itemsChanged = Signal()
     edgesChanged = Signal()
@@ -190,6 +191,7 @@ class DiagramModel(QAbstractListModel):
         # Connect to task model's taskRenamed signal for bidirectional sync
         if self._task_model is not None:
             self._task_model.taskRenamed.connect(self.onTaskRenamed)
+            self._task_model.taskCompletionChanged.connect(self.onTaskCompletionChanged)
         self._edge_drag_x: float = 0.0
         self._edge_drag_y: float = 0.0
         self._is_dragging_edge: bool = False
@@ -257,6 +259,8 @@ class DiagramModel(QAbstractListModel):
             return item.color
         if role == self.TextColorRole:
             return item.text_color
+        if role == self.TaskCompletedRole:
+            return self._is_task_completed(item.task_index)
         return None
 
     def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
@@ -271,6 +275,7 @@ class DiagramModel(QAbstractListModel):
             self.TaskIndexRole: b"taskIndex",
             self.ColorRole: b"color",
             self.TextColorRole: b"textColor",
+            self.TaskCompletedRole: b"taskCompleted",
         }
 
     # --- Properties exposed to QML -----------------------------------------
@@ -546,6 +551,14 @@ class DiagramModel(QAbstractListModel):
                 self.dataChanged.emit(index, index, [self.TextRole])
         self.itemsChanged.emit()
 
+    @Slot(int, bool)
+    def onTaskCompletionChanged(self, task_index: int, completed: bool) -> None:
+        """Handle task completion updates from the task list."""
+        for row, item in enumerate(self._items):
+            if item.task_index == task_index:
+                index = self.index(row, 0)
+                self.dataChanged.emit(index, index, [self.TaskCompletedRole])
+
     @Slot(str, float, float)
     def resizeItem(self, item_id: str, width: float, height: float) -> None:
         new_width = max(40.0, width)
@@ -731,12 +744,29 @@ class DiagramModel(QAbstractListModel):
         self._append_item(item)
         return item_id
 
+    @Slot(int, bool)
+    def setTaskCompleted(self, task_index: int, completed: bool) -> None:
+        """Set a task's completion state via the task model."""
+        if self._task_model is None:
+            return
+        if task_index < 0 or task_index >= self._task_model.rowCount():
+            return
+        self._task_model.toggleComplete(task_index, completed)
+
     # --- Utilities ----------------------------------------------------------
     def getItem(self, item_id: str) -> Optional[DiagramItem]:
         for item in self._items:
             if item.id == item_id:
                 return item
         return None
+
+    def _is_task_completed(self, task_index: int) -> bool:
+        if self._task_model is None:
+            return False
+        if task_index < 0 or task_index >= self._task_model.rowCount():
+            return False
+        idx = self._task_model.index(task_index, 0)
+        return bool(self._task_model.data(idx, self._task_model.CompletedRole))
 
     @Slot(str, result="QVariant")
     def getItemSnapshot(self, item_id: str) -> Dict[str, Any]:
@@ -2593,6 +2623,8 @@ ApplicationWindow {
                             property string itemId: model.itemId
                             property string itemType: model.itemType
                             property int taskIndex: model.taskIndex
+                            property bool taskCompleted: model.taskCompleted
+                            property bool isTask: itemRect.itemType === "task" && itemRect.taskIndex >= 0
                             property real dragStartX: 0
                             property real dragStartY: 0
                             property real pinchStartWidth: model.width
@@ -2603,7 +2635,7 @@ ApplicationWindow {
                             width: model.width
                             height: model.height
                             radius: itemRect.itemType === "cloud" ? Math.min(width, height) / 2 : 12
-                            color: model.color
+                            color: itemRect.isTask && itemRect.taskCompleted ? Qt.darker(model.color, 1.5) : model.color
                             border.width: isEdgeDropTarget ? 3 : 1
                             border.color: isEdgeDropTarget ? "#74d9a0" : (itemDrag.active ? Qt.lighter(model.color, 1.4) : Qt.darker(model.color, 1.6))
                             z: isEdgeDropTarget ? 10 : 5
@@ -2619,6 +2651,38 @@ ApplicationWindow {
                                 anchors.fill: parent
                                 color: Qt.rgba(0, 0, 0, itemDrag.active ? 0.08 : 0)
                                 radius: itemRect.radius
+                            }
+
+                            Rectangle {
+                                id: taskCheck
+                                visible: itemRect.isTask
+                                width: 20
+                                height: 20
+                                radius: 10
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.leftMargin: 8
+                                anchors.topMargin: 8
+                                color: itemRect.taskCompleted ? "#82c3a5" : "#1a2230"
+                                border.color: itemRect.taskCompleted ? "#6fbf9a" : "#4b5b72"
+                                border.width: 2
+                                z: 20
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: itemRect.taskCompleted ? "✓" : ""
+                                    color: itemRect.taskCompleted ? "#1b2028" : "#8a93a5"
+                                    font.pixelSize: 12
+                                    font.bold: true
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        if (diagramModel)
+                                            diagramModel.setTaskCompleted(itemRect.taskIndex, !itemRect.taskCompleted)
+                                    }
+                                }
                             }
 
                             Item {
@@ -2938,12 +3002,13 @@ ApplicationWindow {
                                 anchors.centerIn: parent
                                 width: parent.width - 36
                                 text: model.text
-                                color: model.textColor
+                                color: itemRect.isTask && itemRect.taskCompleted ? "#c9d7ce" : model.textColor
                                 wrapMode: Text.WordWrap
                                 horizontalAlignment: Text.AlignHCenter
                                 textFormat: Text.PlainText
                                 font.pixelSize: 14
                                 font.bold: itemRect.itemType === "task"
+                                font.strikeout: itemRect.isTask && itemRect.taskCompleted
                             }
 
                             Text {
@@ -3191,4 +3256,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-
