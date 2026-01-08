@@ -309,6 +309,34 @@ class DiagramModel(QAbstractListModel):
     def count(self) -> int:
         return len(self._items)
 
+    @Property(float, notify=itemsChanged)
+    def minItemX(self) -> float:
+        """Return the leftmost x position of all items."""
+        if not self._items:
+            return 0.0
+        return min(item.x for item in self._items)
+
+    @Property(float, notify=itemsChanged)
+    def minItemY(self) -> float:
+        """Return the topmost y position of all items."""
+        if not self._items:
+            return 0.0
+        return min(item.y for item in self._items)
+
+    @Property(float, notify=itemsChanged)
+    def maxItemX(self) -> float:
+        """Return the rightmost edge of all items (x + width)."""
+        if not self._items:
+            return 0.0
+        return max(item.x + item.width for item in self._items)
+
+    @Property(float, notify=itemsChanged)
+    def maxItemY(self) -> float:
+        """Return the bottommost edge of all items (y + height)."""
+        if not self._items:
+            return 0.0
+        return max(item.y + item.height for item in self._items)
+
     # --- Drawing properties exposed to QML ---------------------------------
     @Property(bool, notify=drawingModeChanged)
     def drawingMode(self) -> bool:
@@ -1219,7 +1247,35 @@ ApplicationWindow {
         saveNotificationTimer.restart()
     }
 
-    property int boardSize: 2000
+    property int minBoardSize: 2000
+    property int boardMargin: 500
+    property real currentMaxItemX: 0
+    property real currentMaxItemY: 0
+    property int boardWidth: Math.max(minBoardSize, currentMaxItemX + boardMargin)
+    property int boardHeight: Math.max(minBoardSize, currentMaxItemY + boardMargin)
+
+    function updateBoardBounds() {
+        if (diagramModel) {
+            currentMaxItemX = diagramModel.maxItemX
+            currentMaxItemY = diagramModel.maxItemY
+        } else {
+            currentMaxItemX = 0
+            currentMaxItemY = 0
+        }
+    }
+
+    function scrollToContent() {
+        if (!diagramModel || diagramModel.count === 0) return
+        // Scroll to show content with some padding
+        var minX = diagramModel.minItemX
+        var minY = diagramModel.minItemY
+        var padding = 50
+        var targetX = Math.max(0, (minX - padding) * root.zoomLevel)
+        var targetY = Math.max(0, (minY - padding) * root.zoomLevel)
+        viewport.contentX = targetX
+        viewport.contentY = targetY
+    }
+
     property bool showGrid: true
     property bool snapToGrid: true
     property real gridSpacing: 60
@@ -2429,8 +2485,8 @@ ApplicationWindow {
             Flickable {
                 id: viewport
                 anchors.fill: parent
-                contentWidth: root.boardSize * root.zoomLevel
-                contentHeight: root.boardSize * root.zoomLevel
+                contentWidth: root.boardWidth * root.zoomLevel
+                contentHeight: root.boardHeight * root.zoomLevel
                 clip: true
                 interactive: !diagramModel || !diagramModel.drawingMode
 
@@ -2465,8 +2521,8 @@ ApplicationWindow {
 
                 Item {
                     id: diagramLayer
-                    width: root.boardSize
-                    height: root.boardSize
+                    width: root.boardWidth
+                    height: root.boardHeight
                     transformOrigin: Item.TopLeft
                     scale: root.zoomLevel
 
@@ -2724,7 +2780,7 @@ ApplicationWindow {
                     Connections {
                         target: diagramModel
                         function onEdgesChanged() { edgeCanvas.requestPaint() }
-                        function onItemsChanged() { edgeCanvas.requestPaint() }
+                        function onItemsChanged() { edgeCanvas.requestPaint(); root.updateBoardBounds() }
                         function onDrawingChanged() { drawingCanvas.requestPaint() }
                     }
 
@@ -3495,9 +3551,13 @@ ApplicationWindow {
         function onSaveCompleted(filePath) {
             root.showSaveNotification("Project saved")
         }
+        function onLoadCompleted(filePath) {
+            root.updateBoardBounds()
+            Qt.callLater(root.scrollToContent)
+        }
     }
 
-    Component.onCompleted: Qt.callLater(resetView)
+    Component.onCompleted: { updateBoardBounds(); Qt.callLater(resetView) }
 }
 """
 

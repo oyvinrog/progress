@@ -421,6 +421,83 @@ class TestQueries:
         assert empty_diagram_model.data(QModelIndex(), empty_diagram_model.IdRole) is None
 
 
+class TestUnlimitedBoardSize:
+    """Tests for unlimited board size (maxItemX, maxItemY properties)."""
+
+    def test_max_item_x_empty(self, empty_diagram_model):
+        """Empty model returns 0 for maxItemX."""
+        assert empty_diagram_model.maxItemX == 0.0
+
+    def test_max_item_y_empty(self, empty_diagram_model):
+        """Empty model returns 0 for maxItemY."""
+        assert empty_diagram_model.maxItemY == 0.0
+
+    def test_max_item_x_single_item(self, empty_diagram_model):
+        """maxItemX is x + width of the single item."""
+        # Box default is 120x60
+        empty_diagram_model.addBox(100.0, 50.0, "Box")
+        assert empty_diagram_model.maxItemX == 100.0 + 120.0
+
+    def test_max_item_y_single_item(self, empty_diagram_model):
+        """maxItemY is y + height of the single item."""
+        # Box default is 120x60
+        empty_diagram_model.addBox(100.0, 50.0, "Box")
+        assert empty_diagram_model.maxItemY == 50.0 + 60.0
+
+    def test_max_item_x_multiple_items(self, empty_diagram_model):
+        """maxItemX returns the rightmost edge among all items."""
+        empty_diagram_model.addBox(0.0, 0.0, "Box1")  # rightmost: 0 + 120 = 120
+        empty_diagram_model.addBox(500.0, 0.0, "Box2")  # rightmost: 500 + 120 = 620
+        empty_diagram_model.addBox(200.0, 0.0, "Box3")  # rightmost: 200 + 120 = 320
+        assert empty_diagram_model.maxItemX == 620.0
+
+    def test_max_item_y_multiple_items(self, empty_diagram_model):
+        """maxItemY returns the bottommost edge among all items."""
+        empty_diagram_model.addBox(0.0, 0.0, "Box1")  # bottom: 0 + 60 = 60
+        empty_diagram_model.addBox(0.0, 800.0, "Box2")  # bottom: 800 + 60 = 860
+        empty_diagram_model.addBox(0.0, 300.0, "Box3")  # bottom: 300 + 60 = 360
+        assert empty_diagram_model.maxItemY == 860.0
+
+    def test_max_values_update_on_move(self, empty_diagram_model):
+        """Moving an item updates max values."""
+        item_id = empty_diagram_model.addBox(100.0, 100.0, "Box")
+        assert empty_diagram_model.maxItemX == 220.0
+        assert empty_diagram_model.maxItemY == 160.0
+        # Move item far right and down
+        empty_diagram_model.moveItem(item_id, 5000.0, 3000.0)
+        assert empty_diagram_model.maxItemX == 5120.0
+        assert empty_diagram_model.maxItemY == 3060.0
+
+    def test_max_values_with_different_sized_items(self, empty_diagram_model):
+        """Items with different sizes are handled correctly."""
+        # Add a database (160x90) at position (100, 100)
+        empty_diagram_model.addPresetItem("database", 100.0, 100.0)
+        assert empty_diagram_model.maxItemX == 100.0 + 160.0
+        assert empty_diagram_model.maxItemY == 100.0 + 90.0
+
+    def test_min_item_x_empty(self, empty_diagram_model):
+        """Empty model returns 0 for minItemX."""
+        assert empty_diagram_model.minItemX == 0.0
+
+    def test_min_item_y_empty(self, empty_diagram_model):
+        """Empty model returns 0 for minItemY."""
+        assert empty_diagram_model.minItemY == 0.0
+
+    def test_min_item_x_multiple_items(self, empty_diagram_model):
+        """minItemX returns the leftmost x position among all items."""
+        empty_diagram_model.addBox(500.0, 0.0, "Box1")
+        empty_diagram_model.addBox(100.0, 0.0, "Box2")
+        empty_diagram_model.addBox(300.0, 0.0, "Box3")
+        assert empty_diagram_model.minItemX == 100.0
+
+    def test_min_item_y_multiple_items(self, empty_diagram_model):
+        """minItemY returns the topmost y position among all items."""
+        empty_diagram_model.addBox(0.0, 800.0, "Box1")
+        empty_diagram_model.addBox(0.0, 200.0, "Box2")
+        empty_diagram_model.addBox(0.0, 500.0, "Box3")
+        assert empty_diagram_model.minItemY == 200.0
+
+
 class TestTaskIntegration:
     def test_create_task_from_text(self, diagram_model_with_task_model):
         box_id = diagram_model_with_task_model.addBox(0.0, 0.0, "Temp")
