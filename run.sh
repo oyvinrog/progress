@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Activate the virtual environment and run Progress List
+# Activate the virtual environment and run ActionDraw
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
@@ -12,4 +12,4 @@ if [ ! -d ".venv" ]; then
 fi
 
 source .venv/bin/activate
-python -m progress_list "$@"
+python -m actiondraw "$@"

@@ -11,7 +11,6 @@ A progress tracking task list with time estimation using PySide6 + QML.
 - ✓ Estimated completion times based on historical average
 - ✓ Break down tasks into subtasks
 - ✓ Add new tasks dynamically
-- ✓ Burndown charts to visualize progress
 - ✓ ActionDraw canvas for system diagrams (database, network, notes)
 
 ## ActionDraw Diagramming
@@ -54,22 +53,18 @@ pip install .
 
 ## Usage
 
-Run directly from the command line:
+After installation, run from anywhere:
 
 ```bash
-progress-list
+progress-list    # Main progress tracking app
+actiondraw       # Standalone diagramming canvas
 ```
 
-Or run the module:
+For local development (from the repo directory):
 
 ```bash
 python -m progress_list
-```
-
-Launch the ActionDraw canvas:
-
-```bash
-actiondraw
+python -m actiondraw
 ```
 
 ## Requirements

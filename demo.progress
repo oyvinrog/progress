@@ -1,0 +1,307 @@
+{
+  "version": "1.0",
+  "saved_at": "2026-01-08T10:00:00",
+  "tasks": {
+    "tasks": [
+      {
+        "title": "Project Setup",
+        "completed": true,
+        "time_spent": 1800.0,
+        "parent_index": -1,
+        "indent_level": 0,
+        "custom_estimate": null
+      },
+      {
+        "title": "Initialize repository",
+        "completed": true,
+        "time_spent": 300.0,
+        "parent_index": 0,
+        "indent_level": 1,
+        "custom_estimate": null
+      },
+      {
+        "title": "Set up virtual environment",
+        "completed": true,
+        "time_spent": 180.0,
+        "parent_index": 0,
+        "indent_level": 1,
+        "custom_estimate": null
+      },
+      {
+        "title": "Install dependencies",
+        "completed": true,
+        "time_spent": 420.0,
+        "parent_index": 0,
+        "indent_level": 1,
+        "custom_estimate": null
+      },
+      {
+        "title": "Core Features",
+        "completed": false,
+        "time_spent": 0.0,
+        "parent_index": -1,
+        "indent_level": 0,
+        "custom_estimate": 7200.0
+      },
+      {
+        "title": "Implement task model",
+        "completed": true,
+        "time_spent": 2400.0,
+        "parent_index": 4,
+        "indent_level": 1,
+        "custom_estimate": null
+      },
+      {
+        "title": "Create diagram editor",
+        "completed": true,
+        "time_spent": 3600.0,
+        "parent_index": 4,
+        "indent_level": 1,
+        "custom_estimate": null
+      },
+      {
+        "title": "Add save/load functionality",
+        "completed": false,
+        "time_spent": 1200.0,
+        "parent_index": 4,
+        "indent_level": 1,
+        "custom_estimate": 1800.0
+      },
+      {
+        "title": "UI Polish",
+        "completed": false,
+        "time_spent": 0.0,
+        "parent_index": -1,
+        "indent_level": 0,
+        "custom_estimate": 3600.0
+      },
+      {
+        "title": "Improve styling",
+        "completed": false,
+        "time_spent": 0.0,
+        "parent_index": 8,
+        "indent_level": 1,
+        "custom_estimate": null
+      },
+      {
+        "title": "Add keyboard shortcuts",
+        "completed": false,
+        "time_spent": 0.0,
+        "parent_index": 8,
+        "indent_level": 1,
+        "custom_estimate": null
+      },
+      {
+        "title": "Testing & Documentation",
+        "completed": false,
+        "time_spent": 0.0,
+        "parent_index": -1,
+        "indent_level": 0,
+        "custom_estimate": 5400.0
+      },
+      {
+        "title": "Write unit tests",
+        "completed": false,
+        "time_spent": 0.0,
+        "parent_index": 11,
+        "indent_level": 1,
+        "custom_estimate": null
+      },
+      {
+        "title": "Create user documentation",
+        "completed": false,
+        "time_spent": 0.0,
+        "parent_index": 11,
+        "indent_level": 1,
+        "custom_estimate": null
+      }
+    ]
+  },
+  "diagram": {
+    "items": [
+      {
+        "id": "item_0",
+        "item_type": "box",
+        "x": 50.0,
+        "y": 50.0,
+        "width": 140.0,
+        "height": 60.0,
+        "text": "Start",
+        "task_index": -1,
+        "color": "#2ecc71",
+        "text_color": "#ffffff"
+      },
+      {
+        "id": "item_1",
+        "item_type": "box",
+        "x": 250.0,
+        "y": 50.0,
+        "width": 160.0,
+        "height": 60.0,
+        "text": "Project Setup",
+        "task_index": 0,
+        "color": "#27ae60",
+        "text_color": "#ffffff"
+      },
+      {
+        "id": "item_2",
+        "item_type": "box",
+        "x": 470.0,
+        "y": 50.0,
+        "width": 160.0,
+        "height": 60.0,
+        "text": "Core Features",
+        "task_index": 4,
+        "color": "#3498db",
+        "text_color": "#ffffff"
+      },
+      {
+        "id": "item_3",
+        "item_type": "box",
+        "x": 350.0,
+        "y": 160.0,
+        "width": 180.0,
+        "height": 60.0,
+        "text": "Implement task model",
+        "task_index": 5,
+        "color": "#27ae60",
+        "text_color": "#ffffff"
+      },
+      {
+        "id": "item_4",
+        "item_type": "box",
+        "x": 580.0,
+        "y": 160.0,
+        "width": 180.0,
+        "height": 60.0,
+        "text": "Create diagram editor",
+        "task_index": 6,
+        "color": "#27ae60",
+        "text_color": "#ffffff"
+      },
+      {
+        "id": "item_5",
+        "item_type": "box",
+        "x": 470.0,
+        "y": 270.0,
+        "width": 180.0,
+        "height": 60.0,
+        "text": "Save/Load functionality",
+        "task_index": 7,
+        "color": "#f39c12",
+        "text_color": "#ffffff"
+      },
+      {
+        "id": "item_6",
+        "item_type": "box",
+        "x": 690.0,
+        "y": 50.0,
+        "width": 140.0,
+        "height": 60.0,
+        "text": "UI Polish",
+        "task_index": 8,
+        "color": "#9b59b6",
+        "text_color": "#ffffff"
+      },
+      {
+        "id": "item_7",
+        "item_type": "box",
+        "x": 690.0,
+        "y": 160.0,
+        "width": 140.0,
+        "height": 60.0,
+        "text": "Testing & Docs",
+        "task_index": 11,
+        "color": "#e74c3c",
+        "text_color": "#ffffff"
+      },
+      {
+        "id": "item_8",
+        "item_type": "box",
+        "x": 690.0,
+        "y": 270.0,
+        "width": 140.0,
+        "height": 60.0,
+        "text": "Done!",
+        "task_index": -1,
+        "color": "#2ecc71",
+        "text_color": "#ffffff"
+      },
+      {
+        "id": "item_9",
+        "item_type": "text",
+        "x": 50.0,
+        "y": 350.0,
+        "width": 300.0,
+        "height": 40.0,
+        "text": "Demo project workflow",
+        "task_index": -1,
+        "color": "#34495e",
+        "text_color": "#ecf0f1"
+      }
+    ],
+    "edges": [
+      {
+        "id": "edge_0",
+        "from_id": "item_0",
+        "to_id": "item_1",
+        "description": ""
+      },
+      {
+        "id": "edge_1",
+        "from_id": "item_1",
+        "to_id": "item_2",
+        "description": ""
+      },
+      {
+        "id": "edge_2",
+        "from_id": "item_2",
+        "to_id": "item_3",
+        "description": "subtask"
+      },
+      {
+        "id": "edge_3",
+        "from_id": "item_2",
+        "to_id": "item_4",
+        "description": "subtask"
+      },
+      {
+        "id": "edge_4",
+        "from_id": "item_3",
+        "to_id": "item_5",
+        "description": ""
+      },
+      {
+        "id": "edge_5",
+        "from_id": "item_4",
+        "to_id": "item_5",
+        "description": ""
+      },
+      {
+        "id": "edge_6",
+        "from_id": "item_2",
+        "to_id": "item_6",
+        "description": ""
+      },
+      {
+        "id": "edge_7",
+        "from_id": "item_6",
+        "to_id": "item_7",
+        "description": ""
+      },
+      {
+        "id": "edge_8",
+        "from_id": "item_5",
+        "to_id": "item_8",
+        "description": ""
+      },
+      {
+        "id": "edge_9",
+        "from_id": "item_7",
+        "to_id": "item_8",
+        "description": ""
+      }
+    ],
+    "strokes": []
+  }
+}
