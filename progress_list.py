@@ -11,6 +11,7 @@ Features:
 
 import json
 import os
+import subprocess
 import sys
 import time
 from typing import Any, Dict, List, Optional
@@ -606,6 +607,28 @@ class ProjectManager(QObject):
         """Return the list of recent project file paths."""
         return self._recent_projects
 
+    @Slot()
+    def newInstance(self) -> None:
+        """Open a new instance of progress_list."""
+        self._launchScript(__file__)
+
+    @Slot()
+    def newInstanceActionDraw(self) -> None:
+        """Open a new instance of ActionDraw."""
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        actiondraw_path = os.path.join(script_dir, "actiondraw.py")
+        self._launchScript(actiondraw_path)
+
+    def _launchScript(self, script_path: str) -> None:
+        """Launch a Python script as a new process."""
+        try:
+            subprocess.Popen(
+                [sys.executable, os.path.abspath(script_path)],
+                start_new_session=True,
+            )
+        except OSError as e:
+            self.errorOccurred.emit(f"Failed to open new instance: {e}")
+
     @Slot(result=list)
     def getRecentProjectNames(self) -> List[Dict[str, str]]:
         """Return list of recent projects with display name and path."""
@@ -758,6 +781,13 @@ ApplicationWindow {
     menuBar: MenuBar {
         Menu {
             title: "File"
+
+            MenuItem {
+                text: "New Instance"
+                onTriggered: projectManager.newInstance()
+            }
+
+            MenuSeparator {}
 
             MenuItem {
                 text: "Save"

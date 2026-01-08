@@ -1020,6 +1020,14 @@ ApplicationWindow {
             title: "File"
 
             MenuItem {
+                text: "New Instance"
+                enabled: projectManager !== null
+                onTriggered: projectManager.newInstanceActionDraw()
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
                 text: "Save"
                 enabled: projectManager !== null
                 onTriggered: root.performSave()

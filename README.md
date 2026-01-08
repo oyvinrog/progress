@@ -11,7 +11,6 @@ A progress tracking task list with time estimation using PySide6 + QML.
 - ✓ Estimated completion times based on historical average
 - ✓ Break down tasks into subtasks
 - ✓ Add new tasks dynamically
-- ✓ Burndown charts to visualize progress
 - ✓ ActionDraw canvas for system diagrams (database, network, notes)
 
 ## ActionDraw Diagramming
