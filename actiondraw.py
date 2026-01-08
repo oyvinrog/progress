@@ -1213,6 +1213,12 @@ ApplicationWindow {
         }
     }
 
+    function showSaveNotification(message) {
+        saveNotification.text = message
+        saveNotification.opacity = 1
+        saveNotificationTimer.restart()
+    }
+
     property int boardSize: 2000
     property bool showGrid: true
     property bool snapToGrid: true
@@ -3446,6 +3452,48 @@ ApplicationWindow {
                     }
                 }
             }
+        }
+    }
+
+    // Save notification toast
+    Rectangle {
+        id: saveNotification
+        property alias text: saveNotificationText.text
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 40
+        width: saveNotificationText.width + 32
+        height: 40
+        radius: 20
+        color: "#2d7a4d"
+        opacity: 0
+        z: 1000
+
+        Text {
+            id: saveNotificationText
+            anchors.centerIn: parent
+            text: ""
+            color: "#ffffff"
+            font.pixelSize: 14
+            font.bold: true
+        }
+
+        Behavior on opacity {
+            NumberAnimation { duration: 200 }
+        }
+    }
+
+    Timer {
+        id: saveNotificationTimer
+        interval: 2000
+        onTriggered: saveNotification.opacity = 0
+    }
+
+    Connections {
+        target: projectManager
+        enabled: projectManager !== null
+        function onSaveCompleted(filePath) {
+            root.showSaveNotification("Project saved")
         }
     }
 
