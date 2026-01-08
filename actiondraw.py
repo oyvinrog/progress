@@ -981,11 +981,11 @@ import QtQuick.Layouts 1.15
 import QtQuick.Dialogs
 ApplicationWindow {
     id: root
-    visible: false
-    width: 960
-    height: 700
+    visible: true
+    width: 1100
+    height: 800
     color: "#10141c"
-    title: "ActionDraw"
+    title: "ActionDraw - Progress Tracker"
 
     menuBar: MenuBar {
         Menu {
@@ -1003,10 +1003,47 @@ ApplicationWindow {
                 onTriggered: saveDialog.open()
             }
 
+            MenuItem {
+                text: "Load..."
+                enabled: projectManager !== null
+                onTriggered: loadDialog.open()
+            }
+
+            MenuSeparator {}
+
+            Menu {
+                id: recentMenu
+                title: "Recent Projects"
+                enabled: projectManager !== null && recentRepeater.count > 0
+
+                Repeater {
+                    id: recentRepeater
+                    model: projectManager ? projectManager.recentProjects : []
+
+                    MenuItem {
+                        property string filePath: modelData
+                        property string fileName: {
+                            var name = filePath.split("/").pop()
+                            if (name.endsWith(".progress"))
+                                name = name.slice(0, -9)
+                            return name
+                        }
+                        text: fileName
+                        onTriggered: projectManager.loadProject(filePath)
+                    }
+                }
+
+                MenuItem {
+                    text: "(No recent projects)"
+                    enabled: false
+                    visible: recentRepeater.count === 0
+                }
+            }
+
             MenuSeparator {}
 
             MenuItem {
-                text: "Close"
+                text: "Exit"
                 onTriggered: root.close()
             }
         }
@@ -1157,6 +1194,12 @@ ApplicationWindow {
     function showWindow() {
         root.visible = true
         root.requestActivate()
+    }
+
+    function formatTime(minutes) {
+        if (minutes === 0) return "N/A"
+        if (minutes < 1) return (minutes * 60).toFixed(0) + "s"
+        return minutes.toFixed(1) + "m"
     }
 
     function performSave() {
@@ -2067,10 +2110,145 @@ ApplicationWindow {
         }
     }
 
+    FileDialog {
+        id: loadDialog
+        title: "Load Project"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["Progress files (*.progress)", "All files (*)"]
+        onAccepted: {
+            if (projectManager) {
+                projectManager.loadProject(selectedFile)
+            }
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 16
         spacing: 12
+
+        // Progress measurement tiles
+        RowLayout {
+            spacing: 12
+            Layout.alignment: Qt.AlignHCenter
+            visible: taskModel !== null
+
+            Rectangle {
+                width: 120
+                height: 54
+                radius: 8
+                color: "#1b2028"
+                border.color: "#2e3744"
+
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    spacing: 2
+
+                    Label {
+                        property real percentage: taskModel ? taskModel.percentageComplete : 0
+                        text: percentage.toFixed(0) + "%"
+                        font.pixelSize: 18
+                        font.bold: true
+                        color: "#4a9eff"
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+
+                    Label {
+                        text: "Complete"
+                        font.pixelSize: 10
+                        color: "#8a93a5"
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+                }
+            }
+
+            Rectangle {
+                width: 120
+                height: 54
+                radius: 8
+                color: "#1b2028"
+                border.color: "#2e3744"
+
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    spacing: 2
+
+                    Label {
+                        property real totalTime: taskModel ? taskModel.totalEstimatedTime : 0
+                        text: formatTime(totalTime)
+                        font.pixelSize: 18
+                        font.bold: true
+                        color: "#ffa94d"
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+
+                    Label {
+                        text: "Time Left"
+                        font.pixelSize: 10
+                        color: "#8a93a5"
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+                }
+            }
+
+            Rectangle {
+                width: 120
+                height: 54
+                radius: 8
+                color: "#1b2028"
+                border.color: "#2e3744"
+
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    spacing: 2
+
+                    Label {
+                        property real avgTime: taskModel ? taskModel.averageTaskTime : 0
+                        text: formatTime(avgTime)
+                        font.pixelSize: 18
+                        font.bold: true
+                        color: "#9aa6b8"
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+
+                    Label {
+                        text: "Avg Time"
+                        font.pixelSize: 10
+                        color: "#8a93a5"
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+                }
+            }
+
+            Rectangle {
+                width: 120
+                height: 54
+                radius: 8
+                color: "#1b2028"
+                border.color: "#2e3744"
+
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    spacing: 2
+
+                    Label {
+                        property string completionTime: taskModel ? taskModel.estimatedCompletionTimeOfDay : ""
+                        text: completionTime !== "" ? completionTime : "N/A"
+                        font.pixelSize: 18
+                        font.bold: true
+                        color: "#82c3a5"
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+
+                    Label {
+                        text: "Done By"
+                        font.pixelSize: 10
+                        color: "#8a93a5"
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+                }
+            }
+        }
 
         RowLayout {
             Layout.fillWidth: true
@@ -3293,15 +3471,19 @@ def create_actiondraw_window(
 
 def main() -> int:
     from PySide6.QtWidgets import QApplication
+    from progress_list import TaskModel, ProjectManager
 
     app = QApplication.instance()
     if app is None:
         app = QApplication(sys.argv)
 
-    model = DiagramModel()
-    engine = create_actiondraw_window(model, None)
-    if engine.rootObjects():
-        engine.rootObjects()[0].showWindow()
+    task_model = TaskModel()
+    diagram_model = DiagramModel(task_model=task_model)
+    project_manager = ProjectManager(task_model, diagram_model)
+    
+    engine = create_actiondraw_window(diagram_model, task_model, project_manager)
+    if not engine.rootObjects():
+        return 1
     return app.exec()
 
 

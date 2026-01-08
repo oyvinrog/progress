@@ -1,5 +1,5 @@
 @echo off
-REM Activate the virtual environment and run Progress List
+REM Activate the virtual environment and run ActionDraw
 
 cd /d "%~dp0"
 
@@ -10,4 +10,4 @@ if not exist ".venv" (
 )
 
 call .venv\Scripts\activate.bat
-python -m progress_list %*
+python -m actiondraw %*
