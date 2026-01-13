@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "progress-list"
-version = "0.0.4"
+version = "0.0.5"
 description = "A progress tracking task list with time estimation using PySide6 + QML"
 readme = "README.md"
 authors = [
