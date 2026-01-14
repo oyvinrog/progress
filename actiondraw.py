@@ -6,20 +6,25 @@ connections between items works reliably when dragging across the canvas.
 
 from __future__ import annotations
 
+import base64
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from itertools import count
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import (
     QAbstractListModel,
+    QByteArray,
+    QBuffer,
+    QIODevice,
     QModelIndex,
     Property,
     Qt,
     Signal,
     Slot,
 )
+from PySide6.QtGui import QGuiApplication, QImage
 from PySide6.QtQml import QQmlApplicationEngine
 
 
@@ -35,6 +40,7 @@ class DiagramItemType(Enum):
     FREETEXT = "freetext"
     OBSTACLE = "obstacle"
     WISH = "wish"
+    IMAGE = "image"
 
 
 @dataclass
@@ -51,6 +57,7 @@ class DiagramItem:
     task_index: int = -1
     color: str = "#4a9eff"
     text_color: str = "#f5f6f8"
+    image_data: str = ""  # Base64-encoded PNG data for IMAGE type
 
 
 @dataclass
@@ -163,6 +170,7 @@ class DiagramModel(QAbstractListModel):
     ColorRole = Qt.UserRole + 9
     TextColorRole = Qt.UserRole + 10
     TaskCompletedRole = Qt.UserRole + 11
+    ImageDataRole = Qt.UserRole + 12
 
     itemsChanged = Signal()
     edgesChanged = Signal()
@@ -260,6 +268,8 @@ class DiagramModel(QAbstractListModel):
             return item.text_color
         if role == self.TaskCompletedRole:
             return self._is_task_completed(item.task_index)
+        if role == self.ImageDataRole:
+            return item.image_data
         return None
 
     def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
@@ -275,6 +285,7 @@ class DiagramModel(QAbstractListModel):
             self.ColorRole: b"color",
             self.TextColorRole: b"textColor",
             self.TaskCompletedRole: b"taskCompleted",
+            self.ImageDataRole: b"imageData",
         }
 
     # --- Properties exposed to QML -----------------------------------------
@@ -513,6 +524,80 @@ class DiagramModel(QAbstractListModel):
         )
         self._append_item(item)
         return item_id
+
+    @Slot(float, float, result=str)
+    def pasteImageFromClipboard(self, x: float, y: float) -> str:
+        """Paste an image from the clipboard at the specified position.
+
+        Args:
+            x: X coordinate for the new image item.
+            y: Y coordinate for the new image item.
+
+        Returns:
+            The ID of the created image item, or empty string on failure.
+        """
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is None:
+            return ""
+
+        mime_data = clipboard.mimeData()
+        if mime_data is None or not mime_data.hasImage():
+            return ""
+
+        image = clipboard.image()
+        if image.isNull():
+            return ""
+
+        # Convert QImage to base64-encoded PNG
+        byte_array = QByteArray()
+        buffer = QBuffer(byte_array)
+        buffer.open(QIODevice.WriteOnly)
+        image.save(buffer, "PNG")
+        buffer.close()
+
+        image_data = base64.b64encode(byte_array.data()).decode("ascii")
+        if not image_data:
+            return ""
+
+        # Calculate appropriate size (limit max dimension to 400px while preserving aspect ratio)
+        max_dim = 400.0
+        width = float(image.width())
+        height = float(image.height())
+        if width > max_dim or height > max_dim:
+            scale = max_dim / max(width, height)
+            width = width * scale
+            height = height * scale
+
+        item_id = self._next_id("image")
+        item = DiagramItem(
+            id=item_id,
+            item_type=DiagramItemType.IMAGE,
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            text="",
+            color="#2a3444",
+            text_color="#f5f6f8",
+            image_data=image_data,
+        )
+        self._append_item(item)
+        return item_id
+
+    @Slot(result=bool)
+    def hasClipboardImage(self) -> bool:
+        """Check if the clipboard contains an image.
+
+        Returns:
+            True if clipboard has an image, False otherwise.
+        """
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is None:
+            return False
+        mime_data = clipboard.mimeData()
+        if mime_data is None:
+            return False
+        return mime_data.hasImage()
 
     @Slot(str, float, float)
     def moveItem(self, item_id: str, x: float, y: float) -> None:
@@ -863,7 +948,7 @@ class DiagramModel(QAbstractListModel):
         """
         items_data = []
         for item in self._items:
-            items_data.append({
+            item_dict = {
                 "id": item.id,
                 "item_type": item.item_type.value,
                 "x": item.x,
@@ -874,7 +959,11 @@ class DiagramModel(QAbstractListModel):
                 "task_index": item.task_index,
                 "color": item.color,
                 "text_color": item.text_color,
-            })
+            }
+            # Only store image_data if it's an image item (to avoid bloating files)
+            if item.item_type == DiagramItemType.IMAGE and item.image_data:
+                item_dict["image_data"] = item.image_data
+            items_data.append(item_dict)
 
         edges_data = []
         for edge in self._edges:
@@ -947,6 +1036,7 @@ class DiagramModel(QAbstractListModel):
                 task_index=int(item_data.get("task_index", -1)),
                 color=item_data.get("color", "#4a9eff"),
                 text_color=item_data.get("text_color", "#f5f6f8"),
+                image_data=item_data.get("image_data", ""),
             )
             self.beginInsertRows(QModelIndex(), len(self._items), len(self._items))
             self._items.append(item)
@@ -1154,6 +1244,19 @@ ApplicationWindow {
             MenuSeparator {}
 
             MenuItem {
+                text: "Paste Image from Clipboard (Ctrl+V)"
+                enabled: diagramModel !== null && diagramModel.hasClipboardImage()
+                onTriggered: {
+                    if (diagramModel && diagramModel.hasClipboardImage()) {
+                        var center = root.diagramCenterPoint()
+                        diagramModel.pasteImageFromClipboard(center.x, center.y)
+                    }
+                }
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
                 text: "Task from List..."
                 enabled: taskModel !== null
                 onTriggered: {
@@ -1310,6 +1413,17 @@ ApplicationWindow {
         sequence: "Ctrl+S"
         enabled: projectManager !== null
         onActivated: root.performSave()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+V"
+        enabled: diagramModel !== null
+        onActivated: {
+            if (diagramModel && diagramModel.hasClipboardImage()) {
+                var center = root.diagramCenterPoint()
+                diagramModel.pasteImageFromClipboard(center.x, center.y)
+            }
+        }
     }
 
     function showEdgeDropSuggestions(sourceId, dropX, dropY) {
@@ -3289,8 +3403,85 @@ ApplicationWindow {
                                 }
                             }
 
+                            Item {
+                                anchors.fill: parent
+                                visible: itemRect.itemType === "image" && model.imageData.length > 0
+
+                                Image {
+                                    id: pastedImage
+                                    anchors.fill: parent
+                                    anchors.margins: 4
+                                    source: model.imageData.length > 0 ? "data:image/png;base64," + model.imageData : ""
+                                    fillMode: Image.PreserveAspectFit
+                                    smooth: true
+                                    mipmap: true
+                                }
+
+                                // Resize handle for images
+                                Rectangle {
+                                    id: imageResizeHandle
+                                    width: 16
+                                    height: 16
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    anchors.rightMargin: 2
+                                    anchors.bottomMargin: 2
+                                    color: "#3a4555"
+                                    border.color: "#5a6575"
+                                    radius: 3
+                                    visible: itemRect.itemType === "image"
+
+                                    Canvas {
+                                        anchors.fill: parent
+                                        onPaint: {
+                                            var ctx = getContext("2d")
+                                            ctx.clearRect(0, 0, width, height)
+                                            ctx.strokeStyle = "#8a93a5"
+                                            ctx.lineWidth = 1.5
+                                            ctx.beginPath()
+                                            ctx.moveTo(4, height - 4)
+                                            ctx.lineTo(width - 4, 4)
+                                            ctx.moveTo(8, height - 4)
+                                            ctx.lineTo(width - 4, 8)
+                                            ctx.stroke()
+                                        }
+                                    }
+
+                                    property real resizeStartWidth: 0
+                                    property real resizeStartHeight: 0
+                                    property point resizeStartPos: Qt.point(0, 0)
+
+                                    DragHandler {
+                                        id: imageResizeDrag
+                                        target: null
+                                        acceptedButtons: Qt.LeftButton
+                                        cursorShape: Qt.SizeFDiagCursor
+                                        onActiveChanged: {
+                                            if (active) {
+                                                imageResizeHandle.resizeStartWidth = model.width
+                                                imageResizeHandle.resizeStartHeight = model.height
+                                            }
+                                        }
+                                        onTranslationChanged: {
+                                            if (!active || !diagramModel)
+                                                return
+                                            var deltaX = translation.x / root.zoomLevel
+                                            var deltaY = translation.y / root.zoomLevel
+                                            var newWidth = Math.max(60, imageResizeHandle.resizeStartWidth + deltaX)
+                                            var newHeight = Math.max(40, imageResizeHandle.resizeStartHeight + deltaY)
+                                            if (root.snapToGrid) {
+                                                newWidth = Math.max(root.gridSpacing, Math.round(newWidth / root.gridSpacing) * root.gridSpacing)
+                                                newHeight = Math.max(root.gridSpacing, Math.round(newHeight / root.gridSpacing) * root.gridSpacing)
+                                            }
+                                            diagramModel.resizeItem(itemRect.itemId, newWidth, newHeight)
+                                            edgeCanvas.requestPaint()
+                                        }
+                                    }
+                                }
+                            }
+
                             Text {
-                                visible: itemRect.itemType !== "freetext" && itemRect.itemType !== "obstacle" && itemRect.itemType !== "wish"
+                                visible: itemRect.itemType !== "freetext" && itemRect.itemType !== "obstacle" && itemRect.itemType !== "wish" && itemRect.itemType !== "image"
                                 anchors.centerIn: parent
                                 width: parent.width - 36
                                 text: model.text

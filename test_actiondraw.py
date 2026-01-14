@@ -1125,5 +1125,206 @@ class TestDrawingFeature:
             assert stroke["color"] == colors[i]
 
 
+class TestImagePaste:
+    """Tests for image paste functionality."""
+
+    def test_diagram_item_image_data_field(self):
+        """Test that DiagramItem has image_data field with default."""
+        item = DiagramItem(
+            id="image_1",
+            item_type=DiagramItemType.IMAGE,
+            x=100.0,
+            y=200.0,
+        )
+        assert item.image_data == ""
+
+    def test_diagram_item_image_with_data(self):
+        """Test DiagramItem with image_data set."""
+        item = DiagramItem(
+            id="image_1",
+            item_type=DiagramItemType.IMAGE,
+            x=100.0,
+            y=200.0,
+            width=300.0,
+            height=200.0,
+            image_data="iVBORw0KGgoAAAANSUhEUg==",  # Minimal base64 PNG header
+        )
+        assert item.image_data == "iVBORw0KGgoAAAANSUhEUg=="
+        assert item.item_type == DiagramItemType.IMAGE
+        assert item.width == 300.0
+        assert item.height == 200.0
+
+    def test_image_type_exists(self):
+        """Test that IMAGE type exists in DiagramItemType enum."""
+        assert hasattr(DiagramItemType, "IMAGE")
+        assert DiagramItemType.IMAGE.value == "image"
+
+    def test_has_clipboard_image_empty(self, empty_diagram_model):
+        """Test hasClipboardImage returns False when clipboard has no image."""
+        # Clipboard should be empty or have non-image content
+        result = empty_diagram_model.hasClipboardImage()
+        assert isinstance(result, bool)
+        # We can't guarantee clipboard state in tests, just check it doesn't crash
+
+    def test_paste_image_empty_clipboard(self, empty_diagram_model):
+        """Test pasteImageFromClipboard returns empty string with no image in clipboard."""
+        # With no image in clipboard, should return empty string
+        result = empty_diagram_model.pasteImageFromClipboard(100.0, 100.0)
+        # Either returns empty string (no image) or a valid ID (if clipboard has image)
+        assert isinstance(result, str)
+
+    def test_image_data_role_exists(self, empty_diagram_model):
+        """Test ImageDataRole exists in model."""
+        assert hasattr(empty_diagram_model, "ImageDataRole")
+
+    def test_model_returns_image_data(self, empty_diagram_model):
+        """Test model data() returns image_data for ImageDataRole."""
+        # Manually add an image item to test role retrieval
+        from actiondraw import DiagramItem, DiagramItemType
+
+        item = DiagramItem(
+            id="image_test",
+            item_type=DiagramItemType.IMAGE,
+            x=50.0,
+            y=50.0,
+            width=200.0,
+            height=150.0,
+            image_data="test_base64_data",
+        )
+        empty_diagram_model._append_item(item)
+
+        index = empty_diagram_model.index(0, 0)
+        assert empty_diagram_model.data(index, empty_diagram_model.ImageDataRole) == "test_base64_data"
+        assert empty_diagram_model.data(index, empty_diagram_model.TypeRole) == "image"
+
+    def test_to_dict_includes_image_data(self, empty_diagram_model):
+        """Test to_dict includes image_data for image items."""
+        from actiondraw import DiagramItem, DiagramItemType
+
+        item = DiagramItem(
+            id="image_save",
+            item_type=DiagramItemType.IMAGE,
+            x=100.0,
+            y=100.0,
+            width=250.0,
+            height=200.0,
+            image_data="base64_image_content",
+        )
+        empty_diagram_model._append_item(item)
+
+        data = empty_diagram_model.to_dict()
+        assert len(data["items"]) == 1
+        assert data["items"][0]["image_data"] == "base64_image_content"
+        assert data["items"][0]["item_type"] == "image"
+
+    def test_to_dict_excludes_image_data_for_non_images(self, empty_diagram_model):
+        """Test to_dict does not include image_data for non-image items."""
+        empty_diagram_model.addBox(10.0, 10.0, "Test Box")
+
+        data = empty_diagram_model.to_dict()
+        assert len(data["items"]) == 1
+        assert "image_data" not in data["items"][0]
+
+    def test_from_dict_loads_image_data(self, empty_diagram_model):
+        """Test from_dict correctly loads image_data."""
+        data = {
+            "items": [
+                {
+                    "id": "image_load",
+                    "item_type": "image",
+                    "x": 150.0,
+                    "y": 150.0,
+                    "width": 300.0,
+                    "height": 225.0,
+                    "text": "",
+                    "task_index": -1,
+                    "color": "#2a3444",
+                    "text_color": "#f5f6f8",
+                    "image_data": "loaded_base64_data",
+                }
+            ],
+            "edges": [],
+        }
+
+        empty_diagram_model.from_dict(data)
+
+        assert empty_diagram_model.count == 1
+        index = empty_diagram_model.index(0, 0)
+        assert empty_diagram_model.data(index, empty_diagram_model.TypeRole) == "image"
+        assert empty_diagram_model.data(index, empty_diagram_model.ImageDataRole) == "loaded_base64_data"
+        assert empty_diagram_model.data(index, empty_diagram_model.WidthRole) == 300.0
+
+    def test_from_dict_handles_missing_image_data(self, empty_diagram_model):
+        """Test from_dict handles items without image_data field."""
+        data = {
+            "items": [
+                {
+                    "id": "box_old",
+                    "item_type": "box",
+                    "x": 50.0,
+                    "y": 50.0,
+                    "width": 120.0,
+                    "height": 60.0,
+                    "text": "Old Box",
+                    "task_index": -1,
+                    "color": "#4a9eff",
+                    "text_color": "#f5f6f8",
+                    # No image_data field - simulates old saved files
+                }
+            ],
+            "edges": [],
+        }
+
+        empty_diagram_model.from_dict(data)
+
+        assert empty_diagram_model.count == 1
+        index = empty_diagram_model.index(0, 0)
+        assert empty_diagram_model.data(index, empty_diagram_model.ImageDataRole) == ""
+
+    def test_image_item_resize(self, empty_diagram_model):
+        """Test that image items can be resized."""
+        from actiondraw import DiagramItem, DiagramItemType
+
+        item = DiagramItem(
+            id="image_resize",
+            item_type=DiagramItemType.IMAGE,
+            x=0.0,
+            y=0.0,
+            width=200.0,
+            height=150.0,
+            image_data="test",
+        )
+        empty_diagram_model._append_item(item)
+
+        empty_diagram_model.resizeItem("image_resize", 400.0, 300.0)
+
+        index = empty_diagram_model.index(0, 0)
+        assert empty_diagram_model.data(index, empty_diagram_model.WidthRole) == 400.0
+        assert empty_diagram_model.data(index, empty_diagram_model.HeightRole) == 300.0
+
+    def test_image_item_resize_respects_minimum(self, empty_diagram_model):
+        """Test that image resize respects minimum dimensions."""
+        from actiondraw import DiagramItem, DiagramItemType
+
+        item = DiagramItem(
+            id="image_min",
+            item_type=DiagramItemType.IMAGE,
+            x=0.0,
+            y=0.0,
+            width=200.0,
+            height=150.0,
+            image_data="test",
+        )
+        empty_diagram_model._append_item(item)
+
+        # Try to resize below minimum
+        empty_diagram_model.resizeItem("image_min", 10.0, 5.0)
+
+        index = empty_diagram_model.index(0, 0)
+        # Should be clamped to minimum (40.0 width, 30.0 height)
+        assert empty_diagram_model.data(index, empty_diagram_model.WidthRole) >= 40.0
+        assert empty_diagram_model.data(index, empty_diagram_model.HeightRole) >= 30.0
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
