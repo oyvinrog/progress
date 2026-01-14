@@ -6,20 +6,25 @@ connections between items works reliably when dragging across the canvas.
 
 from __future__ import annotations
 
+import base64
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from itertools import count
 from typing import Any, Dict, List, Optional
 
 from PySide6.QtCore import (
     QAbstractListModel,
+    QByteArray,
+    QBuffer,
+    QIODevice,
     QModelIndex,
     Property,
     Qt,
     Signal,
     Slot,
 )
+from PySide6.QtGui import QGuiApplication, QImage
 from PySide6.QtQml import QQmlApplicationEngine
 
 
@@ -35,6 +40,7 @@ class DiagramItemType(Enum):
     FREETEXT = "freetext"
     OBSTACLE = "obstacle"
     WISH = "wish"
+    IMAGE = "image"
 
 
 @dataclass
@@ -51,6 +57,7 @@ class DiagramItem:
     task_index: int = -1
     color: str = "#4a9eff"
     text_color: str = "#f5f6f8"
+    image_data: str = ""  # Base64-encoded PNG data for IMAGE type
 
 
 @dataclass
@@ -163,6 +170,8 @@ class DiagramModel(QAbstractListModel):
     ColorRole = Qt.UserRole + 9
     TextColorRole = Qt.UserRole + 10
     TaskCompletedRole = Qt.UserRole + 11
+    ImageDataRole = Qt.UserRole + 12
+    TaskCurrentRole = Qt.UserRole + 13
 
     itemsChanged = Signal()
     edgesChanged = Signal()
@@ -170,12 +179,14 @@ class DiagramModel(QAbstractListModel):
     drawingModeChanged = Signal()
     brushColorChanged = Signal()
     brushWidthChanged = Signal()
+    currentTaskChanged = Signal()
 
     def __init__(self, task_model=None):
         super().__init__()
         self._items: List[DiagramItem] = []
         self._edges: List[DiagramEdge] = []
         self._strokes: List[DrawingStroke] = []
+        self._current_task_index: int = -1
         self._edge_hover_target_id: str = ""
         self._stroke_id_source = count()
         self._drawing_mode: bool = False
@@ -260,6 +271,10 @@ class DiagramModel(QAbstractListModel):
             return item.text_color
         if role == self.TaskCompletedRole:
             return self._is_task_completed(item.task_index)
+        if role == self.ImageDataRole:
+            return item.image_data
+        if role == self.TaskCurrentRole:
+            return item.task_index >= 0 and item.task_index == self._current_task_index
         return None
 
     def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
@@ -275,6 +290,8 @@ class DiagramModel(QAbstractListModel):
             self.ColorRole: b"color",
             self.TextColorRole: b"textColor",
             self.TaskCompletedRole: b"taskCompleted",
+            self.ImageDataRole: b"imageData",
+            self.TaskCurrentRole: b"taskCurrent",
         }
 
     # --- Properties exposed to QML -----------------------------------------
@@ -513,6 +530,80 @@ class DiagramModel(QAbstractListModel):
         )
         self._append_item(item)
         return item_id
+
+    @Slot(float, float, result=str)
+    def pasteImageFromClipboard(self, x: float, y: float) -> str:
+        """Paste an image from the clipboard at the specified position.
+
+        Args:
+            x: X coordinate for the new image item.
+            y: Y coordinate for the new image item.
+
+        Returns:
+            The ID of the created image item, or empty string on failure.
+        """
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is None:
+            return ""
+
+        mime_data = clipboard.mimeData()
+        if mime_data is None or not mime_data.hasImage():
+            return ""
+
+        image = clipboard.image()
+        if image.isNull():
+            return ""
+
+        # Convert QImage to base64-encoded PNG
+        byte_array = QByteArray()
+        buffer = QBuffer(byte_array)
+        buffer.open(QIODevice.WriteOnly)
+        image.save(buffer, "PNG")
+        buffer.close()
+
+        image_data = base64.b64encode(byte_array.data()).decode("ascii")
+        if not image_data:
+            return ""
+
+        # Calculate appropriate size (limit max dimension to 400px while preserving aspect ratio)
+        max_dim = 400.0
+        width = float(image.width())
+        height = float(image.height())
+        if width > max_dim or height > max_dim:
+            scale = max_dim / max(width, height)
+            width = width * scale
+            height = height * scale
+
+        item_id = self._next_id("image")
+        item = DiagramItem(
+            id=item_id,
+            item_type=DiagramItemType.IMAGE,
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            text="",
+            color="#2a3444",
+            text_color="#f5f6f8",
+            image_data=image_data,
+        )
+        self._append_item(item)
+        return item_id
+
+    @Slot(result=bool)
+    def hasClipboardImage(self) -> bool:
+        """Check if the clipboard contains an image.
+
+        Returns:
+            True if clipboard has an image, False otherwise.
+        """
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is None:
+            return False
+        mime_data = clipboard.mimeData()
+        if mime_data is None:
+            return False
+        return mime_data.hasImage()
 
     @Slot(str, float, float)
     def moveItem(self, item_id: str, x: float, y: float) -> None:
@@ -780,6 +871,27 @@ class DiagramModel(QAbstractListModel):
             return
         self._task_model.toggleComplete(task_index, completed)
 
+    @Slot(int)
+    def setCurrentTask(self, task_index: int) -> None:
+        """Set the current (focused) task, clearing any previous."""
+        old_index = self._current_task_index
+        # Toggle off if same task
+        if task_index == old_index:
+            self._current_task_index = -1
+        else:
+            self._current_task_index = task_index
+        self.currentTaskChanged.emit()
+        # Notify all task items that their current state may have changed
+        for row, item in enumerate(self._items):
+            if item.task_index >= 0 and (item.task_index == old_index or item.task_index == self._current_task_index):
+                index = self.index(row, 0)
+                self.dataChanged.emit(index, index, [self.TaskCurrentRole])
+
+    @Property(int, notify=currentTaskChanged)
+    def currentTaskIndex(self) -> int:
+        """Return the currently focused task index, or -1 if none."""
+        return self._current_task_index
+
     # --- Utilities ----------------------------------------------------------
     def getItem(self, item_id: str) -> Optional[DiagramItem]:
         for item in self._items:
@@ -863,7 +975,7 @@ class DiagramModel(QAbstractListModel):
         """
         items_data = []
         for item in self._items:
-            items_data.append({
+            item_dict = {
                 "id": item.id,
                 "item_type": item.item_type.value,
                 "x": item.x,
@@ -874,7 +986,11 @@ class DiagramModel(QAbstractListModel):
                 "task_index": item.task_index,
                 "color": item.color,
                 "text_color": item.text_color,
-            })
+            }
+            # Only store image_data if it's an image item (to avoid bloating files)
+            if item.item_type == DiagramItemType.IMAGE and item.image_data:
+                item_dict["image_data"] = item.image_data
+            items_data.append(item_dict)
 
         edges_data = []
         for edge in self._edges:
@@ -898,6 +1014,7 @@ class DiagramModel(QAbstractListModel):
             "items": items_data,
             "edges": edges_data,
             "strokes": strokes_data,
+            "current_task_index": self._current_task_index,
         }
 
     def from_dict(self, data: Dict[str, Any]) -> None:
@@ -947,6 +1064,7 @@ class DiagramModel(QAbstractListModel):
                 task_index=int(item_data.get("task_index", -1)),
                 color=item_data.get("color", "#4a9eff"),
                 text_color=item_data.get("text_color", "#f5f6f8"),
+                image_data=item_data.get("image_data", ""),
             )
             self.beginInsertRows(QModelIndex(), len(self._items), len(self._items))
             self._items.append(item)
@@ -997,9 +1115,13 @@ class DiagramModel(QAbstractListModel):
 
         self._stroke_id_source = count(max_stroke_id)
 
+        # Load current task
+        self._current_task_index = int(data.get("current_task_index", -1))
+
         self.itemsChanged.emit()
         self.edgesChanged.emit()
         self.drawingChanged.emit()
+        self.currentTaskChanged.emit()
 
 
 ACTIONDRAW_QML = r"""
@@ -1013,7 +1135,15 @@ ApplicationWindow {
     width: 1100
     height: 800
     color: "#10141c"
-    title: "ActionDraw - Progress Tracker"
+    title: {
+        if (projectManager && projectManager.currentFilePath) {
+            var name = projectManager.currentFilePath.split("/").pop()
+            if (name.endsWith(".progress"))
+                name = name.slice(0, -9)
+            return name
+        }
+        return "ActionDraw - Progress Tracker"
+    }
 
     menuBar: MenuBar {
         Menu {
@@ -1149,6 +1279,19 @@ ApplicationWindow {
             MenuItem {
                 text: "Wish"
                 onTriggered: root.addPresetAtCenter("wish")
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
+                text: "Paste Image from Clipboard (Ctrl+V)"
+                enabled: diagramModel !== null && diagramModel.hasClipboardImage()
+                onTriggered: {
+                    if (diagramModel && diagramModel.hasClipboardImage()) {
+                        var center = root.diagramCenterPoint()
+                        diagramModel.pasteImageFromClipboard(center.x, center.y)
+                    }
+                }
             }
 
             MenuSeparator {}
@@ -1310,6 +1453,17 @@ ApplicationWindow {
         sequence: "Ctrl+S"
         enabled: projectManager !== null
         onActivated: root.performSave()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+V"
+        enabled: diagramModel !== null
+        onActivated: {
+            if (diagramModel && diagramModel.hasClipboardImage()) {
+                var center = root.diagramCenterPoint()
+                diagramModel.pasteImageFromClipboard(center.x, center.y)
+            }
+        }
     }
 
     function showEdgeDropSuggestions(sourceId, dropX, dropY) {
@@ -2916,6 +3070,7 @@ ApplicationWindow {
                             property string itemType: model.itemType
                             property int taskIndex: model.taskIndex
                             property bool taskCompleted: model.taskCompleted
+                            property bool taskCurrent: model.taskCurrent
                             property bool isTask: itemRect.itemType === "task" && itemRect.taskIndex >= 0
                             property real dragStartX: 0
                             property real dragStartY: 0
@@ -2928,11 +3083,25 @@ ApplicationWindow {
                             height: model.height
                             radius: itemRect.itemType === "cloud" ? Math.min(width, height) / 2 : 12
                             color: itemRect.isTask && itemRect.taskCompleted ? Qt.darker(model.color, 1.5) : model.color
-                            border.width: isEdgeDropTarget ? 3 : 1
-                            border.color: isEdgeDropTarget ? "#74d9a0" : (itemDrag.active ? Qt.lighter(model.color, 1.4) : Qt.darker(model.color, 1.6))
-                            z: isEdgeDropTarget ? 10 : 5
+                            border.width: itemRect.taskCurrent ? 4 : (isEdgeDropTarget ? 3 : 1)
+                            border.color: itemRect.taskCurrent ? "#ffcc00" : (isEdgeDropTarget ? "#74d9a0" : (itemDrag.active ? Qt.lighter(model.color, 1.4) : Qt.darker(model.color, 1.6)))
+                            z: itemRect.taskCurrent ? 15 : (isEdgeDropTarget ? 10 : 5)
                             scale: isEdgeDropTarget ? 1.08 : 1.0
                             transformOrigin: Item.Center
+
+                            // Glow effect for current task
+                            Rectangle {
+                                visible: itemRect.taskCurrent
+                                anchors.centerIn: parent
+                                width: parent.width + 12
+                                height: parent.height + 12
+                                radius: parent.radius + 6
+                                color: "transparent"
+                                border.width: 3
+                                border.color: "#ffcc00"
+                                opacity: 0.5
+                                z: -1
+                            }
 
                             Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
                             Behavior on border.width { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
@@ -2973,6 +3142,39 @@ ApplicationWindow {
                                     onClicked: {
                                         if (diagramModel)
                                             diagramModel.setTaskCompleted(itemRect.taskIndex, !itemRect.taskCompleted)
+                                    }
+                                }
+                            }
+
+                            // "Current" button - star icon to mark as current task
+                            Rectangle {
+                                id: currentButton
+                                visible: itemRect.isTask
+                                width: 20
+                                height: 20
+                                radius: 10
+                                anchors.left: taskCheck.right
+                                anchors.top: parent.top
+                                anchors.leftMargin: 4
+                                anchors.topMargin: 8
+                                color: itemRect.taskCurrent ? "#ffcc00" : "#1a2230"
+                                border.color: itemRect.taskCurrent ? "#e6b800" : "#4b5b72"
+                                border.width: 2
+                                z: 20
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "★"
+                                    color: itemRect.taskCurrent ? "#1b2028" : "#8a93a5"
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        if (diagramModel)
+                                            diagramModel.setCurrentTask(itemRect.taskIndex)
                                     }
                                 }
                             }
@@ -3289,8 +3491,85 @@ ApplicationWindow {
                                 }
                             }
 
+                            Item {
+                                anchors.fill: parent
+                                visible: itemRect.itemType === "image" && model.imageData.length > 0
+
+                                Image {
+                                    id: pastedImage
+                                    anchors.fill: parent
+                                    anchors.margins: 4
+                                    source: model.imageData.length > 0 ? "data:image/png;base64," + model.imageData : ""
+                                    fillMode: Image.PreserveAspectFit
+                                    smooth: true
+                                    mipmap: true
+                                }
+
+                                // Resize handle for images
+                                Rectangle {
+                                    id: imageResizeHandle
+                                    width: 16
+                                    height: 16
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    anchors.rightMargin: 2
+                                    anchors.bottomMargin: 2
+                                    color: "#3a4555"
+                                    border.color: "#5a6575"
+                                    radius: 3
+                                    visible: itemRect.itemType === "image"
+
+                                    Canvas {
+                                        anchors.fill: parent
+                                        onPaint: {
+                                            var ctx = getContext("2d")
+                                            ctx.clearRect(0, 0, width, height)
+                                            ctx.strokeStyle = "#8a93a5"
+                                            ctx.lineWidth = 1.5
+                                            ctx.beginPath()
+                                            ctx.moveTo(4, height - 4)
+                                            ctx.lineTo(width - 4, 4)
+                                            ctx.moveTo(8, height - 4)
+                                            ctx.lineTo(width - 4, 8)
+                                            ctx.stroke()
+                                        }
+                                    }
+
+                                    property real resizeStartWidth: 0
+                                    property real resizeStartHeight: 0
+                                    property point resizeStartPos: Qt.point(0, 0)
+
+                                    DragHandler {
+                                        id: imageResizeDrag
+                                        target: null
+                                        acceptedButtons: Qt.LeftButton
+                                        cursorShape: Qt.SizeFDiagCursor
+                                        onActiveChanged: {
+                                            if (active) {
+                                                imageResizeHandle.resizeStartWidth = model.width
+                                                imageResizeHandle.resizeStartHeight = model.height
+                                            }
+                                        }
+                                        onTranslationChanged: {
+                                            if (!active || !diagramModel)
+                                                return
+                                            var deltaX = translation.x / root.zoomLevel
+                                            var deltaY = translation.y / root.zoomLevel
+                                            var newWidth = Math.max(60, imageResizeHandle.resizeStartWidth + deltaX)
+                                            var newHeight = Math.max(40, imageResizeHandle.resizeStartHeight + deltaY)
+                                            if (root.snapToGrid) {
+                                                newWidth = Math.max(root.gridSpacing, Math.round(newWidth / root.gridSpacing) * root.gridSpacing)
+                                                newHeight = Math.max(root.gridSpacing, Math.round(newHeight / root.gridSpacing) * root.gridSpacing)
+                                            }
+                                            diagramModel.resizeItem(itemRect.itemId, newWidth, newHeight)
+                                            edgeCanvas.requestPaint()
+                                        }
+                                    }
+                                }
+                            }
+
                             Text {
-                                visible: itemRect.itemType !== "freetext" && itemRect.itemType !== "obstacle" && itemRect.itemType !== "wish"
+                                visible: itemRect.itemType !== "freetext" && itemRect.itemType !== "obstacle" && itemRect.itemType !== "wish" && itemRect.itemType !== "image"
                                 anchors.centerIn: parent
                                 width: parent.width - 36
                                 text: model.text
