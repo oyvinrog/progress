@@ -1103,7 +1103,15 @@ ApplicationWindow {
     width: 1100
     height: 800
     color: "#10141c"
-    title: "ActionDraw - Progress Tracker"
+    title: {
+        if (projectManager && projectManager.currentFilePath) {
+            var name = projectManager.currentFilePath.split("/").pop()
+            if (name.endsWith(".progress"))
+                name = name.slice(0, -9)
+            return name
+        }
+        return "ActionDraw - Progress Tracker"
+    }
 
     menuBar: MenuBar {
         Menu {
