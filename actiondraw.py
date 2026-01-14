@@ -171,6 +171,7 @@ class DiagramModel(QAbstractListModel):
     TextColorRole = Qt.UserRole + 10
     TaskCompletedRole = Qt.UserRole + 11
     ImageDataRole = Qt.UserRole + 12
+    TaskCurrentRole = Qt.UserRole + 13
 
     itemsChanged = Signal()
     edgesChanged = Signal()
@@ -178,12 +179,14 @@ class DiagramModel(QAbstractListModel):
     drawingModeChanged = Signal()
     brushColorChanged = Signal()
     brushWidthChanged = Signal()
+    currentTaskChanged = Signal()
 
     def __init__(self, task_model=None):
         super().__init__()
         self._items: List[DiagramItem] = []
         self._edges: List[DiagramEdge] = []
         self._strokes: List[DrawingStroke] = []
+        self._current_task_index: int = -1
         self._edge_hover_target_id: str = ""
         self._stroke_id_source = count()
         self._drawing_mode: bool = False
@@ -270,6 +273,8 @@ class DiagramModel(QAbstractListModel):
             return self._is_task_completed(item.task_index)
         if role == self.ImageDataRole:
             return item.image_data
+        if role == self.TaskCurrentRole:
+            return item.task_index >= 0 and item.task_index == self._current_task_index
         return None
 
     def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
@@ -286,6 +291,7 @@ class DiagramModel(QAbstractListModel):
             self.TextColorRole: b"textColor",
             self.TaskCompletedRole: b"taskCompleted",
             self.ImageDataRole: b"imageData",
+            self.TaskCurrentRole: b"taskCurrent",
         }
 
     # --- Properties exposed to QML -----------------------------------------
@@ -865,6 +871,27 @@ class DiagramModel(QAbstractListModel):
             return
         self._task_model.toggleComplete(task_index, completed)
 
+    @Slot(int)
+    def setCurrentTask(self, task_index: int) -> None:
+        """Set the current (focused) task, clearing any previous."""
+        old_index = self._current_task_index
+        # Toggle off if same task
+        if task_index == old_index:
+            self._current_task_index = -1
+        else:
+            self._current_task_index = task_index
+        self.currentTaskChanged.emit()
+        # Notify all task items that their current state may have changed
+        for row, item in enumerate(self._items):
+            if item.task_index >= 0 and (item.task_index == old_index or item.task_index == self._current_task_index):
+                index = self.index(row, 0)
+                self.dataChanged.emit(index, index, [self.TaskCurrentRole])
+
+    @Property(int, notify=currentTaskChanged)
+    def currentTaskIndex(self) -> int:
+        """Return the currently focused task index, or -1 if none."""
+        return self._current_task_index
+
     # --- Utilities ----------------------------------------------------------
     def getItem(self, item_id: str) -> Optional[DiagramItem]:
         for item in self._items:
@@ -987,6 +1014,7 @@ class DiagramModel(QAbstractListModel):
             "items": items_data,
             "edges": edges_data,
             "strokes": strokes_data,
+            "current_task_index": self._current_task_index,
         }
 
     def from_dict(self, data: Dict[str, Any]) -> None:
@@ -1087,9 +1115,13 @@ class DiagramModel(QAbstractListModel):
 
         self._stroke_id_source = count(max_stroke_id)
 
+        # Load current task
+        self._current_task_index = int(data.get("current_task_index", -1))
+
         self.itemsChanged.emit()
         self.edgesChanged.emit()
         self.drawingChanged.emit()
+        self.currentTaskChanged.emit()
 
 
 ACTIONDRAW_QML = r"""
@@ -3038,6 +3070,7 @@ ApplicationWindow {
                             property string itemType: model.itemType
                             property int taskIndex: model.taskIndex
                             property bool taskCompleted: model.taskCompleted
+                            property bool taskCurrent: model.taskCurrent
                             property bool isTask: itemRect.itemType === "task" && itemRect.taskIndex >= 0
                             property real dragStartX: 0
                             property real dragStartY: 0
@@ -3050,11 +3083,25 @@ ApplicationWindow {
                             height: model.height
                             radius: itemRect.itemType === "cloud" ? Math.min(width, height) / 2 : 12
                             color: itemRect.isTask && itemRect.taskCompleted ? Qt.darker(model.color, 1.5) : model.color
-                            border.width: isEdgeDropTarget ? 3 : 1
-                            border.color: isEdgeDropTarget ? "#74d9a0" : (itemDrag.active ? Qt.lighter(model.color, 1.4) : Qt.darker(model.color, 1.6))
-                            z: isEdgeDropTarget ? 10 : 5
+                            border.width: itemRect.taskCurrent ? 4 : (isEdgeDropTarget ? 3 : 1)
+                            border.color: itemRect.taskCurrent ? "#ffcc00" : (isEdgeDropTarget ? "#74d9a0" : (itemDrag.active ? Qt.lighter(model.color, 1.4) : Qt.darker(model.color, 1.6)))
+                            z: itemRect.taskCurrent ? 15 : (isEdgeDropTarget ? 10 : 5)
                             scale: isEdgeDropTarget ? 1.08 : 1.0
                             transformOrigin: Item.Center
+
+                            // Glow effect for current task
+                            Rectangle {
+                                visible: itemRect.taskCurrent
+                                anchors.centerIn: parent
+                                width: parent.width + 12
+                                height: parent.height + 12
+                                radius: parent.radius + 6
+                                color: "transparent"
+                                border.width: 3
+                                border.color: "#ffcc00"
+                                opacity: 0.5
+                                z: -1
+                            }
 
                             Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
                             Behavior on border.width { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
@@ -3095,6 +3142,39 @@ ApplicationWindow {
                                     onClicked: {
                                         if (diagramModel)
                                             diagramModel.setTaskCompleted(itemRect.taskIndex, !itemRect.taskCompleted)
+                                    }
+                                }
+                            }
+
+                            // "Current" button - star icon to mark as current task
+                            Rectangle {
+                                id: currentButton
+                                visible: itemRect.isTask
+                                width: 20
+                                height: 20
+                                radius: 10
+                                anchors.left: taskCheck.right
+                                anchors.top: parent.top
+                                anchors.leftMargin: 4
+                                anchors.topMargin: 8
+                                color: itemRect.taskCurrent ? "#ffcc00" : "#1a2230"
+                                border.color: itemRect.taskCurrent ? "#e6b800" : "#4b5b72"
+                                border.width: 2
+                                z: 20
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "★"
+                                    color: itemRect.taskCurrent ? "#1b2028" : "#8a93a5"
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        if (diagramModel)
+                                            diagramModel.setCurrentTask(itemRect.taskIndex)
                                     }
                                 }
                             }
