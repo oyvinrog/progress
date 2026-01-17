@@ -2154,21 +2154,22 @@ ApplicationWindow {
                     border.color: "#384458"
                 }
                 onTextChanged: newTaskDialog.textValue = text
-                onAccepted: newTaskButtons.accept()
+                Keys.onReturnPressed: newTaskDialog.accept()
+                Keys.onEnterPressed: newTaskDialog.accept()
             }
         }
 
         footer: DialogButtonBox {
             id: newTaskButtons
             standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
-            onAccepted: {
-                if (diagramModel && newTaskDialog.pendingItemId.length > 0) {
-                    diagramModel.createTaskFromText(newTaskDialog.textValue, newTaskDialog.pendingItemId)
-                }
-                newTaskDialog.close()
-            }
-            onRejected: newTaskDialog.close()
         }
+
+        onAccepted: {
+            if (diagramModel && newTaskDialog.pendingItemId.length > 0) {
+                diagramModel.createTaskFromText(newTaskDialog.textValue, newTaskDialog.pendingItemId)
+            }
+        }
+        onRejected: newTaskDialog.close()
 
         onClosed: {
             newTaskDialog.pendingItemId = ""
@@ -2273,21 +2274,22 @@ ApplicationWindow {
                     border.color: "#384458"
                 }
                 onTextChanged: taskRenameDialog.textValue = text
-                onAccepted: taskRenameButtons.accept()
+                Keys.onReturnPressed: taskRenameDialog.accept()
+                Keys.onEnterPressed: taskRenameDialog.accept()
             }
         }
 
         footer: DialogButtonBox {
             id: taskRenameButtons
             standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
-            onAccepted: {
-                if (diagramModel && taskRenameDialog.editingItemId.length > 0 && taskRenameDialog.textValue.trim().length > 0) {
-                    diagramModel.renameTaskItem(taskRenameDialog.editingItemId, taskRenameDialog.textValue)
-                }
-                taskRenameDialog.close()
-            }
-            onRejected: taskRenameDialog.close()
         }
+
+        onAccepted: {
+            if (diagramModel && taskRenameDialog.editingItemId.length > 0 && taskRenameDialog.textValue.trim().length > 0) {
+                diagramModel.renameTaskItem(taskRenameDialog.editingItemId, taskRenameDialog.textValue)
+            }
+        }
+        onRejected: taskRenameDialog.close()
 
         onClosed: {
             taskRenameDialog.editingItemId = ""
@@ -2314,6 +2316,7 @@ ApplicationWindow {
             onTriggered: {
                 // Copy pending state to dialog before menu closes
                 edgeDropTaskDialog.sourceId = root.pendingEdgeSourceId
+                edgeDropTaskDialog.sourceType = "task"
                 edgeDropTaskDialog.dropX = root.pendingEdgeDropX
                 edgeDropTaskDialog.dropY = root.pendingEdgeDropY
                 edgeDropTaskDialog.open()
@@ -2443,10 +2446,11 @@ ApplicationWindow {
     Dialog {
         id: edgeDropTaskDialog
         modal: true
-        title: "Create Connected Task"
+        title: sourceType === "task" ? "Create Connected Task" : ("Create Connected " + sourceType.charAt(0).toUpperCase() + sourceType.slice(1))
 
         // Store our own copy of pending state (menu clears root state on close)
         property string sourceId: ""
+        property string sourceType: "task"  // Type of item to create
         property real dropX: 0
         property real dropY: 0
 
@@ -2457,7 +2461,12 @@ ApplicationWindow {
             spacing: 12
 
             Label {
-                text: taskModel ? "Create a new task connected from the source item." : "Create a box connected from the source item (no task list available)."
+                text: {
+                    if (edgeDropTaskDialog.sourceType === "task" && taskModel)
+                        return "Create a new task connected from the source item."
+                    else
+                        return "Create a new " + edgeDropTaskDialog.sourceType + " connected from the source item."
+                }
                 color: "#8a93a5"
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
@@ -2466,7 +2475,7 @@ ApplicationWindow {
             TextField {
                 id: edgeDropTaskField
                 Layout.fillWidth: true
-                placeholderText: taskModel ? "Task name" : "Box label"
+                placeholderText: edgeDropTaskDialog.sourceType === "task" ? "Task name" : (edgeDropTaskDialog.sourceType.charAt(0).toUpperCase() + edgeDropTaskDialog.sourceType.slice(1) + " label")
                 selectByMouse: true
                 color: "#f5f6f8"
                 background: Rectangle {
@@ -2485,7 +2494,7 @@ ApplicationWindow {
 
         onAccepted: {
             if (diagramModel && edgeDropTaskDialog.sourceId && edgeDropTaskField.text.trim().length > 0) {
-                if (taskModel) {
+                if (edgeDropTaskDialog.sourceType === "task" && taskModel) {
                     diagramModel.addTaskFromTextAndConnect(
                         edgeDropTaskDialog.sourceId,
                         snapValue(edgeDropTaskDialog.dropX),
@@ -2493,10 +2502,10 @@ ApplicationWindow {
                         edgeDropTaskField.text
                     )
                 } else {
-                    // Fallback to box when no task model
+                    // Create item of the same type as source
                     diagramModel.addPresetItemAndConnect(
                         edgeDropTaskDialog.sourceId,
-                        "box",
+                        edgeDropTaskDialog.sourceType === "task" ? "box" : edgeDropTaskDialog.sourceType,
                         snapValue(edgeDropTaskDialog.dropX),
                         snapValue(edgeDropTaskDialog.dropY),
                         edgeDropTaskField.text
@@ -2510,6 +2519,7 @@ ApplicationWindow {
         onClosed: {
             edgeDropTaskField.text = ""
             edgeDropTaskDialog.sourceId = ""
+            edgeDropTaskDialog.sourceType = "task"
         }
     }
 
@@ -3959,8 +3969,26 @@ ApplicationWindow {
                             TapHandler {
                                 acceptedButtons: Qt.LeftButton
                                 gesturePolicy: TapHandler.DragThreshold
-                                onDoubleTapped: {
-                                    if (itemRect.itemType === "task" && itemRect.taskIndex < 0) {
+                                onDoubleTapped: function(eventPoint) {
+                                    // Check if double-click is on the edge handle (26x26 button, 6px from top-right)
+                                    var localPos = eventPoint.position
+                                    var handleLeft = itemRect.width - 6 - 26
+                                    var handleRight = itemRect.width - 6
+                                    var handleTop = 6
+                                    var handleBottom = 6 + 26
+                                    var onEdgeHandle = (localPos.x >= handleLeft) && (localPos.x <= handleRight) &&
+                                                       (localPos.y >= handleTop) && (localPos.y <= handleBottom)
+
+                                    if (onEdgeHandle) {
+                                        // Double-click on edge handle - create connected item of same type
+                                        var newX = model.x + model.width + 40
+                                        var newY = model.y
+                                        edgeDropTaskDialog.sourceId = itemRect.itemId
+                                        edgeDropTaskDialog.sourceType = itemRect.itemType
+                                        edgeDropTaskDialog.dropX = newX
+                                        edgeDropTaskDialog.dropY = newY
+                                        edgeDropTaskDialog.open()
+                                    } else if (itemRect.itemType === "task" && itemRect.taskIndex < 0) {
                                         // Task not yet linked to task list - create new task
                                         newTaskDialog.openWithItem(itemRect.itemId, model.text)
                                     } else if (itemRect.itemType === "task" && itemRect.taskIndex >= 0) {
@@ -4042,6 +4070,7 @@ ApplicationWindow {
                                         edgeCanvas.requestPaint()
                                     }
                                 }
+
                             }
 
                             Rectangle {
