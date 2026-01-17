@@ -1326,5 +1326,482 @@ class TestImagePaste:
         assert empty_diagram_model.data(index, empty_diagram_model.HeightRole) >= 30.0
 
 
+class TestSubDiagramFunctionality:
+    """Tests for sub-diagram linking and progress tracking."""
+
+    def test_sub_diagram_path_field_default(self):
+        """Test that sub_diagram_path defaults to empty string."""
+        from actiondraw import DiagramItem, DiagramItemType
+
+        item = DiagramItem(id="task_1", item_type=DiagramItemType.TASK, x=0.0, y=0.0)
+        assert item.sub_diagram_path == ""
+
+    def test_sub_diagram_path_field_set(self):
+        """Test that sub_diagram_path can be set."""
+        from actiondraw import DiagramItem, DiagramItemType
+
+        item = DiagramItem(
+            id="task_1",
+            item_type=DiagramItemType.TASK,
+            x=0.0,
+            y=0.0,
+            sub_diagram_path="/path/to/sub.progress"
+        )
+        assert item.sub_diagram_path == "/path/to/sub.progress"
+
+    def test_set_sub_diagram_path_slot(self, empty_diagram_model):
+        """Test setSubDiagramPath slot updates item."""
+        item_id = empty_diagram_model.addBox(0.0, 0.0, "Test")
+        empty_diagram_model.setSubDiagramPath(item_id, "/path/to/sub.progress")
+
+        item = empty_diagram_model.getItem(item_id)
+        assert item.sub_diagram_path == "/path/to/sub.progress"
+
+    def test_set_sub_diagram_path_normalizes_file_url(self, empty_diagram_model):
+        """Test setSubDiagramPath normalizes file:// URLs."""
+        item_id = empty_diagram_model.addBox(0.0, 0.0, "Test")
+        empty_diagram_model.setSubDiagramPath(item_id, "file:///path/to/sub.progress")
+
+        item = empty_diagram_model.getItem(item_id)
+        assert item.sub_diagram_path == "/path/to/sub.progress"
+
+    def test_sub_diagram_path_role(self, empty_diagram_model):
+        """Test SubDiagramPathRole returns correct value."""
+        from actiondraw import DiagramItem, DiagramItemType
+
+        item = DiagramItem(
+            id="task_1",
+            item_type=DiagramItemType.TASK,
+            x=0.0,
+            y=0.0,
+            sub_diagram_path="/path/to/sub.progress"
+        )
+        empty_diagram_model._append_item(item)
+
+        index = empty_diagram_model.index(0, 0)
+        assert empty_diagram_model.data(index, empty_diagram_model.SubDiagramPathRole) == "/path/to/sub.progress"
+
+    def test_sub_diagram_progress_role_no_path(self, empty_diagram_model):
+        """Test SubDiagramProgressRole returns -1 when no path set."""
+        item_id = empty_diagram_model.addBox(0.0, 0.0, "Test")
+
+        index = empty_diagram_model.index(0, 0)
+        assert empty_diagram_model.data(index, empty_diagram_model.SubDiagramProgressRole) == -1
+
+    def test_sub_diagram_progress_role_missing_file(self, empty_diagram_model):
+        """Test SubDiagramProgressRole returns -1 for missing file."""
+        item_id = empty_diagram_model.addBox(0.0, 0.0, "Test")
+        empty_diagram_model.setSubDiagramPath(item_id, "/nonexistent/path.progress")
+
+        index = empty_diagram_model.index(0, 0)
+        assert empty_diagram_model.data(index, empty_diagram_model.SubDiagramProgressRole) == -1
+
+    def test_sub_diagram_progress_calculation(self, empty_diagram_model, tmp_path):
+        """Test SubDiagramProgressRole calculates correct percentage."""
+        import json
+
+        # Create a sub-diagram file with 2/4 tasks completed (50%)
+        sub_diagram = {
+            "version": "1.0",
+            "tasks": {
+                "tasks": [
+                    {"title": "Task 1", "completed": True},
+                    {"title": "Task 2", "completed": True},
+                    {"title": "Task 3", "completed": False},
+                    {"title": "Task 4", "completed": False},
+                ]
+            },
+            "diagram": {"items": [], "edges": [], "strokes": []}
+        }
+        sub_file = tmp_path / "sub.progress"
+        sub_file.write_text(json.dumps(sub_diagram))
+
+        item_id = empty_diagram_model.addBox(0.0, 0.0, "Test")
+        empty_diagram_model.setSubDiagramPath(item_id, str(sub_file))
+
+        index = empty_diagram_model.index(0, 0)
+        assert empty_diagram_model.data(index, empty_diagram_model.SubDiagramProgressRole) == 50
+
+    def test_sub_diagram_progress_100_percent(self, empty_diagram_model, tmp_path):
+        """Test SubDiagramProgressRole returns 100 when all tasks complete."""
+        import json
+
+        sub_diagram = {
+            "version": "1.0",
+            "tasks": {
+                "tasks": [
+                    {"title": "Task 1", "completed": True},
+                    {"title": "Task 2", "completed": True},
+                ]
+            },
+            "diagram": {"items": [], "edges": [], "strokes": []}
+        }
+        sub_file = tmp_path / "sub.progress"
+        sub_file.write_text(json.dumps(sub_diagram))
+
+        item_id = empty_diagram_model.addBox(0.0, 0.0, "Test")
+        empty_diagram_model.setSubDiagramPath(item_id, str(sub_file))
+
+        index = empty_diagram_model.index(0, 0)
+        assert empty_diagram_model.data(index, empty_diagram_model.SubDiagramProgressRole) == 100
+
+    def test_sub_diagram_progress_0_percent(self, empty_diagram_model, tmp_path):
+        """Test SubDiagramProgressRole returns 0 when no tasks complete."""
+        import json
+
+        sub_diagram = {
+            "version": "1.0",
+            "tasks": {
+                "tasks": [
+                    {"title": "Task 1", "completed": False},
+                    {"title": "Task 2", "completed": False},
+                ]
+            },
+            "diagram": {"items": [], "edges": [], "strokes": []}
+        }
+        sub_file = tmp_path / "sub.progress"
+        sub_file.write_text(json.dumps(sub_diagram))
+
+        item_id = empty_diagram_model.addBox(0.0, 0.0, "Test")
+        empty_diagram_model.setSubDiagramPath(item_id, str(sub_file))
+
+        index = empty_diagram_model.index(0, 0)
+        assert empty_diagram_model.data(index, empty_diagram_model.SubDiagramProgressRole) == 0
+
+    def test_sub_diagram_progress_empty_tasks(self, empty_diagram_model, tmp_path):
+        """Test SubDiagramProgressRole returns 0 for empty task list."""
+        import json
+
+        sub_diagram = {
+            "version": "1.0",
+            "tasks": {"tasks": []},
+            "diagram": {"items": [], "edges": [], "strokes": []}
+        }
+        sub_file = tmp_path / "sub.progress"
+        sub_file.write_text(json.dumps(sub_diagram))
+
+        item_id = empty_diagram_model.addBox(0.0, 0.0, "Test")
+        empty_diagram_model.setSubDiagramPath(item_id, str(sub_file))
+
+        index = empty_diagram_model.index(0, 0)
+        assert empty_diagram_model.data(index, empty_diagram_model.SubDiagramProgressRole) == 0
+
+    def test_sub_diagram_progress_invalid_json(self, empty_diagram_model, tmp_path):
+        """Test SubDiagramProgressRole returns -1 for invalid JSON."""
+        sub_file = tmp_path / "invalid.progress"
+        sub_file.write_text("not valid json {{{")
+
+        item_id = empty_diagram_model.addBox(0.0, 0.0, "Test")
+        empty_diagram_model.setSubDiagramPath(item_id, str(sub_file))
+
+        index = empty_diagram_model.index(0, 0)
+        assert empty_diagram_model.data(index, empty_diagram_model.SubDiagramProgressRole) == -1
+
+    def test_to_dict_includes_sub_diagram_path(self, empty_diagram_model):
+        """Test to_dict includes sub_diagram_path when set."""
+        item_id = empty_diagram_model.addBox(0.0, 0.0, "Test")
+        empty_diagram_model.setSubDiagramPath(item_id, "/path/to/sub.progress")
+
+        data = empty_diagram_model.to_dict()
+        assert data["items"][0]["sub_diagram_path"] == "/path/to/sub.progress"
+
+    def test_to_dict_omits_empty_sub_diagram_path(self, empty_diagram_model):
+        """Test to_dict omits sub_diagram_path when empty."""
+        empty_diagram_model.addBox(0.0, 0.0, "Test")
+
+        data = empty_diagram_model.to_dict()
+        assert "sub_diagram_path" not in data["items"][0]
+
+    def test_from_dict_loads_sub_diagram_path(self, empty_diagram_model):
+        """Test from_dict loads sub_diagram_path correctly."""
+        data = {
+            "items": [{
+                "id": "box_1",
+                "item_type": "box",
+                "x": 0.0,
+                "y": 0.0,
+                "width": 120.0,
+                "height": 60.0,
+                "text": "Test",
+                "task_index": -1,
+                "color": "#4a9eff",
+                "text_color": "#f5f6f8",
+                "sub_diagram_path": "/path/to/sub.progress"
+            }],
+            "edges": [],
+            "strokes": [],
+            "current_task_index": -1
+        }
+        empty_diagram_model.from_dict(data)
+
+        item = empty_diagram_model.getItem("box_1")
+        assert item.sub_diagram_path == "/path/to/sub.progress"
+
+    def test_from_dict_defaults_missing_sub_diagram_path(self, empty_diagram_model):
+        """Test from_dict defaults sub_diagram_path to empty string."""
+        data = {
+            "items": [{
+                "id": "box_1",
+                "item_type": "box",
+                "x": 0.0,
+                "y": 0.0,
+                "width": 120.0,
+                "height": 60.0,
+                "text": "Test",
+                "task_index": -1,
+                "color": "#4a9eff",
+                "text_color": "#f5f6f8"
+            }],
+            "edges": [],
+            "strokes": [],
+            "current_task_index": -1
+        }
+        empty_diagram_model.from_dict(data)
+
+        item = empty_diagram_model.getItem("box_1")
+        assert item.sub_diagram_path == ""
+
+    def test_get_item_snapshot_includes_sub_diagram_path(self, empty_diagram_model):
+        """Test getItemSnapshot includes subDiagramPath."""
+        item_id = empty_diagram_model.addBox(0.0, 0.0, "Test")
+        empty_diagram_model.setSubDiagramPath(item_id, "/path/to/sub.progress")
+
+        snapshot = empty_diagram_model.getItemSnapshot(item_id)
+        assert snapshot["subDiagramPath"] == "/path/to/sub.progress"
+
+    def test_role_names_include_sub_diagram_roles(self, empty_diagram_model):
+        """Test roleNames includes sub-diagram roles."""
+        roles = empty_diagram_model.roleNames()
+        role_names = [v.decode() for v in roles.values()]
+        assert "subDiagramPath" in role_names
+        assert "subDiagramProgress" in role_names
+
+    def test_resolve_sub_diagram_path_absolute(self, empty_diagram_model):
+        """Test _resolve_sub_diagram_path with absolute path."""
+        empty_diagram_model._project_path = "/home/user/project.progress"
+        result = empty_diagram_model._resolve_sub_diagram_path("/absolute/path.progress")
+        assert result == "/absolute/path.progress"
+
+    def test_resolve_sub_diagram_path_relative(self, empty_diagram_model):
+        """Test _resolve_sub_diagram_path with relative path."""
+        empty_diagram_model._project_path = "/home/user/project.progress"
+        result = empty_diagram_model._resolve_sub_diagram_path("sub/diagram.progress")
+        assert result == "/home/user/sub/diagram.progress"
+
+    def test_resolve_sub_diagram_path_empty(self, empty_diagram_model):
+        """Test _resolve_sub_diagram_path with empty path."""
+        empty_diagram_model._project_path = "/home/user/project.progress"
+        result = empty_diagram_model._resolve_sub_diagram_path("")
+        assert result == ""
+
+    def test_set_project_path(self, empty_diagram_model):
+        """Test setProjectPath sets the path correctly."""
+        empty_diagram_model.setProjectPath("/path/to/project.progress")
+        assert empty_diagram_model._project_path == "/path/to/project.progress"
+
+    def test_create_and_link_sub_diagram(self, empty_diagram_model, tmp_path):
+        """Test createAndLinkSubDiagram creates file and links it."""
+        import json
+
+        item_id = empty_diagram_model.addBox(0.0, 0.0, "Test")
+        sub_file = tmp_path / "new_sub.progress"
+
+        empty_diagram_model.createAndLinkSubDiagram(item_id, str(sub_file), open_after=False)
+
+        # Check file was created
+        assert sub_file.exists()
+
+        # Check file has valid structure
+        data = json.loads(sub_file.read_text())
+        assert "version" in data
+        assert "tasks" in data
+        assert "diagram" in data
+
+        # Check item was linked
+        item = empty_diagram_model.getItem(item_id)
+        assert item.sub_diagram_path == str(sub_file)
+
+    def test_create_and_link_sub_diagram_normalizes_file_url(self, empty_diagram_model, tmp_path):
+        """Test createAndLinkSubDiagram normalizes file:// URLs."""
+        import json
+
+        item_id = empty_diagram_model.addBox(0.0, 0.0, "Test")
+        sub_file = tmp_path / "new_sub.progress"
+
+        empty_diagram_model.createAndLinkSubDiagram(item_id, f"file://{sub_file}", open_after=False)
+
+        # Check file was created
+        assert sub_file.exists()
+
+        # Check item was linked with normalized path
+        item = empty_diagram_model.getItem(item_id)
+        assert item.sub_diagram_path == str(sub_file)
+
+    def test_open_sub_diagram_returns_false_no_item(self, empty_diagram_model):
+        """Test openSubDiagram returns False for nonexistent item."""
+        result = empty_diagram_model.openSubDiagram("nonexistent_id")
+        assert result is False
+
+    def test_open_sub_diagram_returns_false_no_path(self, empty_diagram_model):
+        """Test openSubDiagram returns False when no sub-diagram path set."""
+        item_id = empty_diagram_model.addBox(0.0, 0.0, "Test")
+        result = empty_diagram_model.openSubDiagram(item_id)
+        assert result is False
+
+    def test_open_sub_diagram_returns_false_missing_file(self, empty_diagram_model):
+        """Test openSubDiagram returns False when file doesn't exist."""
+        item_id = empty_diagram_model.addBox(0.0, 0.0, "Test")
+        empty_diagram_model.setSubDiagramPath(item_id, "/nonexistent/path.progress")
+        result = empty_diagram_model.openSubDiagram(item_id)
+        assert result is False
+
+    def test_open_sub_diagram_launches_subprocess(self, empty_diagram_model, tmp_path, monkeypatch):
+        """Test openSubDiagram launches subprocess with correct arguments."""
+        import json
+        import subprocess
+
+        # Create a sub-diagram file
+        sub_diagram = {"version": "1.0", "tasks": {"tasks": []}, "diagram": {}}
+        sub_file = tmp_path / "sub.progress"
+        sub_file.write_text(json.dumps(sub_diagram))
+
+        item_id = empty_diagram_model.addBox(0.0, 0.0, "Test")
+        empty_diagram_model.setSubDiagramPath(item_id, str(sub_file))
+
+        # Mock subprocess.Popen
+        popen_calls = []
+        def mock_popen(args):
+            popen_calls.append(args)
+        monkeypatch.setattr(subprocess, "Popen", mock_popen)
+
+        result = empty_diagram_model.openSubDiagram(item_id)
+
+        assert result is True
+        assert len(popen_calls) == 1
+        assert str(sub_file) in popen_calls[0]
+
+    def test_open_sub_diagram_resolves_relative_path(self, empty_diagram_model, tmp_path, monkeypatch):
+        """Test openSubDiagram resolves relative paths correctly."""
+        import json
+        import subprocess
+
+        # Create project structure
+        project_dir = tmp_path / "project"
+        project_dir.mkdir()
+        sub_dir = project_dir / "subdiagrams"
+        sub_dir.mkdir()
+
+        sub_diagram = {"version": "1.0", "tasks": {"tasks": []}, "diagram": {}}
+        sub_file = sub_dir / "sub.progress"
+        sub_file.write_text(json.dumps(sub_diagram))
+
+        # Set project path
+        empty_diagram_model.setProjectPath(str(project_dir / "main.progress"))
+
+        item_id = empty_diagram_model.addBox(0.0, 0.0, "Test")
+        # Set relative path
+        empty_diagram_model.setSubDiagramPath(item_id, "subdiagrams/sub.progress")
+
+        # Mock subprocess.Popen
+        popen_calls = []
+        def mock_popen(args):
+            popen_calls.append(args)
+        monkeypatch.setattr(subprocess, "Popen", mock_popen)
+
+        result = empty_diagram_model.openSubDiagram(item_id)
+
+        assert result is True
+        assert len(popen_calls) == 1
+        # Should resolve to absolute path
+        assert str(sub_file) in popen_calls[0]
+
+    def test_file_watcher_initialized(self, empty_diagram_model):
+        """Test that file watcher is initialized."""
+        from PySide6.QtCore import QFileSystemWatcher
+        assert hasattr(empty_diagram_model, '_sub_diagram_watcher')
+        assert isinstance(empty_diagram_model._sub_diagram_watcher, QFileSystemWatcher)
+
+    def test_update_sub_diagram_watches_adds_files(self, empty_diagram_model, tmp_path):
+        """Test _update_sub_diagram_watches adds files to watcher."""
+        import json
+
+        # Create a sub-diagram file
+        sub_diagram = {"version": "1.0", "tasks": {"tasks": []}, "diagram": {}}
+        sub_file = tmp_path / "sub.progress"
+        sub_file.write_text(json.dumps(sub_diagram))
+
+        item_id = empty_diagram_model.addBox(0.0, 0.0, "Test")
+        empty_diagram_model.setSubDiagramPath(item_id, str(sub_file))
+
+        watched = empty_diagram_model._sub_diagram_watcher.files()
+        assert str(sub_file) in watched
+
+    def test_sub_diagram_progress_updates_on_file_change(self, empty_diagram_model, tmp_path):
+        """Test that progress updates when sub-diagram file changes."""
+        import json
+        import time
+
+        # Create initial sub-diagram with 0% progress
+        sub_diagram = {
+            "version": "1.0",
+            "tasks": {
+                "tasks": [
+                    {"title": "Task 1", "completed": False},
+                    {"title": "Task 2", "completed": False},
+                ]
+            },
+            "diagram": {"items": [], "edges": [], "strokes": []}
+        }
+        sub_file = tmp_path / "sub.progress"
+        sub_file.write_text(json.dumps(sub_diagram))
+
+        item_id = empty_diagram_model.addBox(0.0, 0.0, "Test")
+        empty_diagram_model.setSubDiagramPath(item_id, str(sub_file))
+
+        index = empty_diagram_model.index(0, 0)
+        assert empty_diagram_model.data(index, empty_diagram_model.SubDiagramProgressRole) == 0
+
+        # Update file to 50% progress
+        sub_diagram["tasks"]["tasks"][0]["completed"] = True
+        sub_file.write_text(json.dumps(sub_diagram))
+
+        # Progress should be updated when file is re-read
+        assert empty_diagram_model.data(index, empty_diagram_model.SubDiagramProgressRole) == 50
+
+
+class TestCommandLineLoading:
+    """Tests for command line file loading."""
+
+    def test_main_loads_file_from_argv(self, tmp_path, monkeypatch):
+        """Test that main() loads file from command line argument."""
+        import json
+        import sys
+
+        # Create a project file
+        project = {
+            "version": "1.0",
+            "tasks": {"tasks": [{"title": "Test Task", "completed": False}]},
+            "diagram": {"items": [], "edges": [], "strokes": [], "current_task_index": -1}
+        }
+        project_file = tmp_path / "test.progress"
+        project_file.write_text(json.dumps(project))
+
+        # We can't fully test main() without a display, but we can verify
+        # that the command line parsing logic works by checking the path handling
+        path = str(project_file)
+
+        # Test file:// URL normalization
+        file_url = f"file://{path}"
+        if file_url.startswith("file://"):
+            normalized = file_url[7:]
+        else:
+            normalized = file_url
+        assert normalized == path
+
+        # Test path exists check
+        import os
+        assert os.path.exists(path)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -7,6 +7,9 @@ connections between items works reliably when dragging across the canvas.
 from __future__ import annotations
 
 import base64
+import json
+import os
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from enum import Enum
@@ -17,6 +20,7 @@ from PySide6.QtCore import (
     QAbstractListModel,
     QByteArray,
     QBuffer,
+    QFileSystemWatcher,
     QIODevice,
     QModelIndex,
     Property,
@@ -58,6 +62,7 @@ class DiagramItem:
     color: str = "#4a9eff"
     text_color: str = "#f5f6f8"
     image_data: str = ""  # Base64-encoded PNG data for IMAGE type
+    sub_diagram_path: str = ""  # Path to linked sub-diagram .progress file
 
 
 @dataclass
@@ -172,6 +177,8 @@ class DiagramModel(QAbstractListModel):
     TaskCompletedRole = Qt.UserRole + 11
     ImageDataRole = Qt.UserRole + 12
     TaskCurrentRole = Qt.UserRole + 13
+    SubDiagramPathRole = Qt.UserRole + 14
+    SubDiagramProgressRole = Qt.UserRole + 15
 
     itemsChanged = Signal()
     edgesChanged = Signal()
@@ -205,6 +212,9 @@ class DiagramModel(QAbstractListModel):
         self._edge_drag_x: float = 0.0
         self._edge_drag_y: float = 0.0
         self._is_dragging_edge: bool = False
+        self._project_path: str = ""  # Path to current project file for resolving relative sub-diagram paths
+        self._sub_diagram_watcher = QFileSystemWatcher()
+        self._sub_diagram_watcher.fileChanged.connect(self._on_sub_diagram_changed)
 
     def _next_id(self, prefix: str) -> str:
         return f"{prefix}_{next(self._id_source)}"
@@ -275,6 +285,10 @@ class DiagramModel(QAbstractListModel):
             return item.image_data
         if role == self.TaskCurrentRole:
             return item.task_index >= 0 and item.task_index == self._current_task_index
+        if role == self.SubDiagramPathRole:
+            return item.sub_diagram_path
+        if role == self.SubDiagramProgressRole:
+            return self._calculate_sub_diagram_progress(item.sub_diagram_path)
         return None
 
     def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
@@ -292,6 +306,8 @@ class DiagramModel(QAbstractListModel):
             self.TaskCompletedRole: b"taskCompleted",
             self.ImageDataRole: b"imageData",
             self.TaskCurrentRole: b"taskCurrent",
+            self.SubDiagramPathRole: b"subDiagramPath",
+            self.SubDiagramProgressRole: b"subDiagramProgress",
         }
 
     # --- Properties exposed to QML -----------------------------------------
@@ -630,6 +646,105 @@ class DiagramModel(QAbstractListModel):
                 self.itemsChanged.emit()
                 return
 
+    def setProjectPath(self, path: str) -> None:
+        """Set the current project file path for resolving relative sub-diagram paths.
+
+        Args:
+            path: Path to the current project file.
+        """
+        self._project_path = path
+
+    @Slot(str, str)
+    def setSubDiagramPath(self, item_id: str, path: str) -> None:
+        """Set the sub-diagram path for an item.
+
+        Args:
+            item_id: ID of the item to update.
+            path: Path to the .progress file, or empty string to clear.
+        """
+        # Normalize file:// URL to path
+        if path.startswith("file://"):
+            path = path[7:]
+
+        for row, item in enumerate(self._items):
+            if item.id == item_id:
+                if item.sub_diagram_path == path:
+                    return
+                item.sub_diagram_path = path
+                index = self.index(row, 0)
+                self.dataChanged.emit(index, index, [self.SubDiagramPathRole, self.SubDiagramProgressRole])
+                self.itemsChanged.emit()
+                # Update file watcher
+                self._update_sub_diagram_watches()
+                return
+
+    @Slot(str)
+    def openSubDiagram(self, item_id: str) -> bool:
+        """Open the sub-diagram linked to an item in a new window.
+
+        Args:
+            item_id: ID of the item with the sub-diagram link.
+
+        Returns:
+            True if subprocess was launched, False otherwise.
+        """
+        item = self.getItem(item_id)
+        if not item or not item.sub_diagram_path:
+            return False
+
+        # Normalize file:// URL to path (in case it wasn't normalized when set)
+        path = item.sub_diagram_path
+        if path.startswith("file://"):
+            path = path[7:]
+
+        # Resolve relative paths against current project directory
+        if self._project_path and not os.path.isabs(path):
+            base_dir = os.path.dirname(self._project_path)
+            path = os.path.join(base_dir, path)
+
+        if not os.path.exists(path):
+            print(f"Sub-diagram file not found: {path}")
+            return False
+
+        # Launch new process with the sub-diagram file
+        script_path = os.path.abspath(__file__)
+        subprocess.Popen([sys.executable, script_path, path])
+        return True
+
+    @Slot(str, str)
+    def createAndLinkSubDiagram(self, item_id: str, file_path: str, open_after: bool = True) -> None:
+        """Create a new empty sub-diagram file and link it to an item.
+
+        Args:
+            item_id: ID of the item to link.
+            file_path: Path where to create the new .progress file.
+            open_after: Whether to open the sub-diagram in a new window after creating.
+        """
+        # Normalize file:// URL to path
+        if file_path.startswith("file://"):
+            file_path = file_path[7:]
+
+        # Create empty project structure
+        empty_project = {
+            "version": "1.0",
+            "saved_at": "",
+            "tasks": {"tasks": []},
+            "diagram": {"items": [], "edges": [], "strokes": [], "current_task_index": -1}
+        }
+
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(empty_project, f, indent=2)
+
+            # Link the new file to the item
+            self.setSubDiagramPath(item_id, file_path)
+
+            # Open it in a new window
+            if open_after:
+                self.openSubDiagram(item_id)
+        except (OSError, IOError) as e:
+            print(f"Failed to create sub-diagram: {e}")
+
     @Slot(str, str)
     def renameTaskItem(self, item_id: str, new_text: str) -> None:
         """Rename a task item and sync to the task list."""
@@ -907,6 +1022,75 @@ class DiagramModel(QAbstractListModel):
         idx = self._task_model.index(task_index, 0)
         return bool(self._task_model.data(idx, self._task_model.CompletedRole))
 
+    def _calculate_sub_diagram_progress(self, sub_diagram_path: str) -> int:
+        """Calculate completion percentage of a linked sub-diagram.
+
+        Args:
+            sub_diagram_path: Path to the .progress file.
+
+        Returns:
+            Percentage (0-100) of completed tasks, or -1 if no sub-diagram or error.
+        """
+        if not sub_diagram_path:
+            return -1
+
+        # Resolve relative paths against current project directory
+        if hasattr(self, '_project_path') and self._project_path and not os.path.isabs(sub_diagram_path):
+            base_dir = os.path.dirname(self._project_path)
+            sub_diagram_path = os.path.join(base_dir, sub_diagram_path)
+
+        if not os.path.exists(sub_diagram_path):
+            return -1
+
+        try:
+            with open(sub_diagram_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            tasks = data.get("tasks", {}).get("tasks", [])
+            if not tasks:
+                return 0
+
+            completed = sum(1 for t in tasks if t.get("completed", False))
+            return int((completed / len(tasks)) * 100)
+        except (json.JSONDecodeError, OSError, KeyError):
+            return -1
+
+    def _resolve_sub_diagram_path(self, sub_diagram_path: str) -> str:
+        """Resolve a sub-diagram path to an absolute path."""
+        if not sub_diagram_path:
+            return ""
+        if self._project_path and not os.path.isabs(sub_diagram_path):
+            base_dir = os.path.dirname(self._project_path)
+            return os.path.join(base_dir, sub_diagram_path)
+        return sub_diagram_path
+
+    def _on_sub_diagram_changed(self, path: str) -> None:
+        """Handle sub-diagram file changes - refresh progress for affected items."""
+        # Re-add the file to the watcher (some systems remove it after modification)
+        if os.path.exists(path) and path not in self._sub_diagram_watcher.files():
+            self._sub_diagram_watcher.addPath(path)
+
+        # Find items that reference this path and emit dataChanged
+        for row, item in enumerate(self._items):
+            resolved = self._resolve_sub_diagram_path(item.sub_diagram_path)
+            if resolved == path:
+                index = self.index(row, 0)
+                self.dataChanged.emit(index, index, [self.SubDiagramProgressRole])
+
+    def _update_sub_diagram_watches(self) -> None:
+        """Update the file watcher to watch all current sub-diagram files."""
+        # Remove all current watches
+        current_files = self._sub_diagram_watcher.files()
+        if current_files:
+            self._sub_diagram_watcher.removePaths(current_files)
+
+        # Add watches for all sub-diagram paths
+        for item in self._items:
+            if item.sub_diagram_path:
+                resolved = self._resolve_sub_diagram_path(item.sub_diagram_path)
+                if resolved and os.path.exists(resolved):
+                    self._sub_diagram_watcher.addPath(resolved)
+
     @Slot(str, result="QVariant")
     def getItemSnapshot(self, item_id: str) -> Dict[str, Any]:
         item = self.getItem(item_id)
@@ -920,6 +1104,7 @@ class DiagramModel(QAbstractListModel):
             "width": item.width,
             "height": item.height,
             "text": item.text,
+            "subDiagramPath": item.sub_diagram_path,
         }
 
     def getItemAt(self, x: float, y: float) -> Optional[str]:
@@ -990,6 +1175,9 @@ class DiagramModel(QAbstractListModel):
             # Only store image_data if it's an image item (to avoid bloating files)
             if item.item_type == DiagramItemType.IMAGE and item.image_data:
                 item_dict["image_data"] = item.image_data
+            # Only store sub_diagram_path if set
+            if item.sub_diagram_path:
+                item_dict["sub_diagram_path"] = item.sub_diagram_path
             items_data.append(item_dict)
 
         edges_data = []
@@ -1065,6 +1253,7 @@ class DiagramModel(QAbstractListModel):
                 color=item_data.get("color", "#4a9eff"),
                 text_color=item_data.get("text_color", "#f5f6f8"),
                 image_data=item_data.get("image_data", ""),
+                sub_diagram_path=item_data.get("sub_diagram_path", ""),
             )
             self.beginInsertRows(QModelIndex(), len(self._items), len(self._items))
             self._items.append(item)
@@ -1122,6 +1311,9 @@ class DiagramModel(QAbstractListModel):
         self.edgesChanged.emit()
         self.drawingChanged.emit()
         self.currentTaskChanged.emit()
+
+        # Update file watcher for sub-diagrams
+        self._update_sub_diagram_watches()
 
 
 ACTIONDRAW_QML = r"""
@@ -2346,6 +2538,31 @@ ApplicationWindow {
         }
     }
 
+    FileDialog {
+        id: subDiagramFileDialog
+        title: "Select Sub-diagram"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["Progress files (*.progress)", "All files (*)"]
+        onAccepted: {
+            if (diagramModel && diagramLayer.contextMenuItemId) {
+                diagramModel.setSubDiagramPath(diagramLayer.contextMenuItemId, selectedFile)
+            }
+        }
+    }
+
+    FileDialog {
+        id: newSubDiagramFileDialog
+        title: "Create New Sub-diagram"
+        fileMode: FileDialog.SaveFile
+        nameFilters: ["Progress files (*.progress)", "All files (*)"]
+        defaultSuffix: "progress"
+        onAccepted: {
+            if (diagramModel && diagramLayer.contextMenuItemId) {
+                diagramModel.createAndLinkSubDiagram(diagramLayer.contextMenuItemId, selectedFile)
+            }
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 16
@@ -2690,6 +2907,7 @@ ApplicationWindow {
 
                     property real contextMenuX: 0
                     property real contextMenuY: 0
+                    property string contextMenuItemId: ""
 
                     Menu {
                         id: canvasContextMenu
@@ -2714,6 +2932,36 @@ ApplicationWindow {
                                 var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
                                 root.openFreeTextDialog(snapped, "", "")
                             }
+                        }
+                    }
+
+                    Menu {
+                        id: itemContextMenu
+
+                        MenuItem {
+                            text: "New Sub-diagram..."
+                            onTriggered: newSubDiagramFileDialog.open()
+                        }
+                        MenuItem {
+                            text: "Link Existing Sub-diagram..."
+                            onTriggered: subDiagramFileDialog.open()
+                        }
+                        MenuItem {
+                            id: openSubDiagramMenuItem
+                            text: "Open Sub-diagram"
+                            visible: {
+                                if (!diagramModel || !diagramLayer.contextMenuItemId)
+                                    return false
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                return item && item.subDiagramPath && item.subDiagramPath !== ""
+                            }
+                            height: visible ? implicitHeight : 0
+                            onTriggered: diagramModel.openSubDiagram(diagramLayer.contextMenuItemId)
+                        }
+                        MenuSeparator {}
+                        MenuItem {
+                            text: "Delete"
+                            onTriggered: diagramModel.removeItem(diagramLayer.contextMenuItemId)
                         }
                     }
 
@@ -3071,6 +3319,7 @@ ApplicationWindow {
                             property int taskIndex: model.taskIndex
                             property bool taskCompleted: model.taskCompleted
                             property bool taskCurrent: model.taskCurrent
+                            property int subDiagramProgress: model.subDiagramProgress
                             property bool isTask: itemRect.itemType === "task" && itemRect.taskIndex >= 0
                             property real dragStartX: 0
                             property real dragStartY: 0
@@ -3101,6 +3350,30 @@ ApplicationWindow {
                                 border.color: "#ffcc00"
                                 opacity: 0.5
                                 z: -1
+                            }
+
+                            // Sub-diagram progress badge
+                            Rectangle {
+                                id: subDiagramBadge
+                                visible: itemRect.subDiagramProgress >= 0
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                anchors.rightMargin: 6
+                                anchors.bottomMargin: 6
+                                width: subDiagramText.width + 12
+                                height: 20
+                                radius: 10
+                                color: itemRect.subDiagramProgress === 100 ? "#4caf50" : "#2196f3"
+                                z: 25
+
+                                Text {
+                                    id: subDiagramText
+                                    anchors.centerIn: parent
+                                    text: itemRect.subDiagramProgress + "%"
+                                    color: "#ffffff"
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                }
                             }
 
                             Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
@@ -3702,6 +3975,14 @@ ApplicationWindow {
                                 }
                             }
 
+                            TapHandler {
+                                acceptedButtons: Qt.RightButton
+                                onTapped: {
+                                    diagramLayer.contextMenuItemId = itemRect.itemId
+                                    itemContextMenu.popup()
+                                }
+                            }
+
                             Rectangle {
                                 id: edgeHandle
                                 width: 26
@@ -3875,10 +4156,20 @@ def main() -> int:
     task_model = TaskModel()
     diagram_model = DiagramModel(task_model=task_model)
     project_manager = ProjectManager(task_model, diagram_model)
-    
+
     engine = create_actiondraw_window(diagram_model, task_model, project_manager)
     if not engine.rootObjects():
         return 1
+
+    # Load file from command line argument if provided
+    if len(sys.argv) > 1:
+        file_path = sys.argv[1]
+        # Handle file:// URLs
+        if file_path.startswith("file://"):
+            file_path = file_path[7:]
+        if os.path.exists(file_path):
+            project_manager.loadProject(file_path)
+
     return app.exec()
 
 

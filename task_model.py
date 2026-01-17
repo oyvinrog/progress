@@ -693,6 +693,7 @@ class ProjectManager(QObject):
             # Load diagram
             diagram_data = project_data.get("diagram", {})
             self._diagram_model.from_dict(diagram_data)
+            self._diagram_model.setProjectPath(file_path)
 
             self._current_file_path = file_path
             self.currentFilePathChanged.emit()
