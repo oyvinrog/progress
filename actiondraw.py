@@ -3866,7 +3866,7 @@ def create_actiondraw_window(
 
 def main() -> int:
     from PySide6.QtWidgets import QApplication
-    from progress_list import TaskModel, ProjectManager
+    from task_model import TaskModel, ProjectManager
 
     app = QApplication.instance()
     if app is None:

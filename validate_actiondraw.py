@@ -56,10 +56,10 @@ def check_imports():
             'DiagramItemType',
             'create_actiondraw_window',
         ]),
-        ('progress_list', [
+        ('task_model', [
             'TaskModel',
             'Task',
-            'ActionDrawManager',
+            'ProjectManager',
         ]),
     ]
 
@@ -144,7 +144,7 @@ def main():
     
     files_to_check = [
         'actiondraw.py',
-        'progress_list.py',
+        'task_model.py',
         'test_actiondraw.py',
     ]
     

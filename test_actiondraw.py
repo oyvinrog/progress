@@ -15,7 +15,7 @@ from actiondraw import (
     DrawingStroke,
     create_actiondraw_window,
 )
-from progress_list import TaskModel
+from task_model import TaskModel
 
 
 @pytest.fixture(scope="session")

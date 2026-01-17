@@ -1,0 +1,714 @@
+"""Shared task model for use across actiondraw and other modules.
+
+This module provides the Task dataclass and TaskModel class that were
+previously embedded in progress_list.py, making them available for
+independent use by actiondraw.
+"""
+
+import json
+import os
+import subprocess
+import sys
+import time
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional
+
+from PySide6.QtCore import (
+    QAbstractListModel,
+    QModelIndex,
+    QObject,
+    Qt,
+    QTimer,
+    QUrl,
+    QSettings,
+    Signal,
+    Slot,
+    Property,
+)
+
+
+@dataclass
+class Task:
+    """Represents a single task with time tracking."""
+    title: str
+    completed: bool = False
+    time_spent: float = 0.0  # minutes
+    start_time: Optional[float] = None  # timestamp when started
+    parent_index: int = -1  # -1 for root tasks, else index of parent
+    indent_level: int = 0
+    custom_estimate: Optional[float] = None  # minutes, overrides avg estimate if set
+
+
+class TaskModel(QAbstractListModel):
+    """Qt model for managing a list of tasks with time estimation."""
+    
+    TitleRole = Qt.UserRole + 1
+    CompletedRole = Qt.UserRole + 2
+    TimeSpentRole = Qt.UserRole + 3
+    EstimatedTimeRole = Qt.UserRole + 4
+    CompletionTimeRole = Qt.UserRole + 5
+    EstimatedTimeOfDayRole = Qt.UserRole + 6
+    IndentLevelRole = Qt.UserRole + 7
+    TotalEstimatedRole = Qt.UserRole + 8
+
+    avgTimeChanged = Signal()
+    totalEstimateChanged = Signal()
+    taskCountChanged = Signal()
+    taskRenamed = Signal(int, str, arguments=['taskIndex', 'newTitle'])
+    taskCompletionChanged = Signal(int, bool, arguments=['taskIndex', 'completed'])
+
+    def __init__(self, tasks: Optional[List[Task]] = None):
+        super().__init__()
+        self._tasks: List[Task] = tasks or []
+        self._timer = QTimer()
+        self._timer.timeout.connect(self._updateActiveTasks)
+        self._timer.start(1000)  # Update every second
+        self.taskCountChanged.emit()
+
+    def rowCount(self, parent: Optional[QModelIndex] = QModelIndex()) -> int:  # type: ignore[override]
+        return len(self._tasks)
+
+    @Property(int, notify=taskCountChanged)
+    def taskCount(self) -> int:
+        """Expose the current number of tasks to QML."""
+        return len(self._tasks)
+
+    def data(self, index: QModelIndex, role: int = Qt.DisplayRole):  # type: ignore[override]
+        if not index.isValid() or not (0 <= index.row() < len(self._tasks)):
+            return None
+
+        task = self._tasks[index.row()]
+        if role == self.TitleRole:
+            return task.title
+        elif role == self.CompletedRole:
+            return task.completed
+        elif role == self.TimeSpentRole:
+            return task.time_spent
+        elif role == self.EstimatedTimeRole:
+            return self._estimateTaskTime(index.row())
+        elif role == self.CompletionTimeRole:
+            return self._estimateCompletionTime(index.row())
+        elif role == self.EstimatedTimeOfDayRole:
+            return self._estimateTimeOfDay(index.row())
+        elif role == self.IndentLevelRole:
+            return task.indent_level
+        return None
+
+    def roleNames(self):  # type: ignore[override]
+        return {
+            self.TitleRole: b"title",
+            self.CompletedRole: b"completed",
+            self.TimeSpentRole: b"timeSpent",
+            self.EstimatedTimeRole: b"estimatedTime",
+            self.CompletionTimeRole: b"completionTime",
+            self.EstimatedTimeOfDayRole: b"estimatedTimeOfDay",
+            self.IndentLevelRole: b"indentLevel",
+            self.TotalEstimatedRole: b"totalEstimated",
+        }
+
+    def _getAverageTaskTime(self) -> float:
+        """Calculate average time per completed task."""
+        completed_tasks = [t for t in self._tasks if t.completed and t.time_spent > 0]
+        if not completed_tasks:
+            return 0.0
+        return sum(t.time_spent for t in completed_tasks) / len(completed_tasks)
+
+    @Property(float, notify=avgTimeChanged)
+    def averageTaskTime(self) -> float:
+        return self._getAverageTaskTime()
+
+    def _getTotalEstimatedTime(self) -> float:
+        """Calculate total estimated time to complete all remaining tasks."""
+        total = 0.0
+        for i, task in enumerate(self._tasks):
+            if not task.completed:
+                total += self._estimateTaskTime(i)
+        return total
+
+    @Property(float, notify=totalEstimateChanged)
+    def totalEstimatedTime(self) -> float:
+        return self._getTotalEstimatedTime()
+
+    @Property(float, notify=totalEstimateChanged)
+    def percentageComplete(self) -> float:
+        """Calculate percentage of tasks completed."""
+        if not self._tasks:
+            return 0.0
+        completed = sum(1 for t in self._tasks if t.completed)
+        return (completed / len(self._tasks)) * 100.0
+
+    @Property(str, notify=totalEstimateChanged)
+    def estimatedCompletionTimeOfDay(self) -> str:
+        """Calculate the time of day when all tasks will be completed."""
+        total_time = self._getTotalEstimatedTime()
+        if total_time == 0:
+            return ""
+
+        future_time = datetime.now() + timedelta(minutes=total_time)
+        return future_time.strftime("%H:%M")
+
+    def _estimateTaskTime(self, row: int) -> float:
+        """Estimate time for a single task to complete."""
+        task = self._tasks[row]
+        if task.completed:
+            return task.time_spent
+
+        # Use custom estimate if set
+        if task.custom_estimate is not None:
+            return task.custom_estimate
+
+        avg_time = self._getAverageTaskTime()
+        if avg_time == 0:
+            return 0.0
+
+        # Each task is estimated to take the average time
+        return avg_time
+
+    def _estimateCompletionTime(self, row: int) -> float:
+        """Estimate when this task will be completed (cumulative time from now)."""
+        task = self._tasks[row]
+        if task.completed:
+            return 0.0  # Already completed
+
+        # Find the first incomplete task (currently being worked on)
+        first_incomplete_idx = None
+        for i, t in enumerate(self._tasks):
+            if not t.completed:
+                first_incomplete_idx = i
+                break
+
+        if first_incomplete_idx is None:
+            return 0.0
+
+        # Calculate cumulative time for all incomplete tasks before this one
+        cumulative_time = 0.0
+
+        for i in range(first_incomplete_idx, row + 1):
+            if self._tasks[i].completed:
+                continue
+
+            task_estimate = self._estimateTaskTime(i)
+            if task_estimate == 0:
+                # No estimate available, skip
+                continue
+
+            if i == first_incomplete_idx:
+                # First incomplete task: use remaining time
+                remaining = task_estimate - self._tasks[i].time_spent
+                cumulative_time += max(0.0, remaining)
+            elif i < row:
+                # Tasks before this one: use full estimate
+                cumulative_time += task_estimate
+            else:
+                # This is the target task: add full estimate
+                cumulative_time += task_estimate
+
+        return cumulative_time
+
+    def _estimateTimeOfDay(self, row: int) -> str:
+        """Estimate the time of day when this task will be completed."""
+        task = self._tasks[row]
+        if task.completed:
+            return ""  # Already completed, no estimate needed
+
+        completion_time_minutes = self._estimateCompletionTime(row)
+        if completion_time_minutes == 0:
+            return ""
+
+        # Calculate future time
+        future_time = datetime.now() + timedelta(minutes=completion_time_minutes)
+        return future_time.strftime("%H:%M")
+
+    def _updateActiveTasks(self) -> None:
+        """Update time spent on active (incomplete) tasks."""
+        current_time = time.time()
+        changed = False
+        for i, task in enumerate(self._tasks):
+            if not task.completed and task.start_time:
+                elapsed = (current_time - task.start_time) / 60.0  # to minutes
+                task.time_spent += elapsed
+                task.start_time = current_time
+                changed = True
+
+        # Update all rows if any task changed, since completion times are interdependent
+        if changed and len(self._tasks) > 0:
+            first = self.index(0, 0)
+            last = self.index(len(self._tasks) - 1, 0)
+            self.dataChanged.emit(first, last, [self.TimeSpentRole, self.CompletionTimeRole, self.EstimatedTimeOfDayRole])
+
+    def addTask(self, title: str, parent_row: int = -1) -> None:
+        """Add a new task to the model."""
+        title = title.strip()
+        if not title:
+            return
+
+        indent = 0
+        if parent_row >= 0 and parent_row < len(self._tasks):
+            indent = self._tasks[parent_row].indent_level + 1
+
+        task = Task(
+            title=title,
+            start_time=time.time(),
+            parent_index=parent_row,
+            indent_level=indent,
+        )
+
+        insert_pos = len(self._tasks)
+        if parent_row >= 0:
+            # Insert after parent and its existing children
+            insert_pos = parent_row + 1
+            while insert_pos < len(self._tasks) and self._tasks[insert_pos].indent_level > indent - 1:
+                insert_pos += 1
+
+        self.beginInsertRows(QModelIndex(), insert_pos, insert_pos)
+        self._tasks.insert(insert_pos, task)
+        self.endInsertRows()
+        self.taskCountChanged.emit()
+
+    def toggleComplete(self, row: int, completed: bool) -> None:
+        """Toggle task completion status."""
+        if row < 0 or row >= len(self._tasks):
+            return
+
+        task = self._tasks[row]
+        task.completed = completed
+
+        if completed:
+            # Finalize time
+            if task.start_time:
+                elapsed = (time.time() - task.start_time) / 60.0
+                task.time_spent += elapsed
+                task.start_time = None
+        else:
+            # Restart timing
+            task.start_time = time.time()
+
+        idx = self.index(row, 0)
+        self.dataChanged.emit(idx, idx)
+        self.taskCompletionChanged.emit(row, completed)
+        self.avgTimeChanged.emit()
+        self.totalEstimateChanged.emit()
+
+        # Update estimates for all tasks
+        if len(self._tasks) > 0:
+            first = self.index(0, 0)
+            last = self.index(len(self._tasks) - 1, 0)
+            self.dataChanged.emit(first, last, [self.EstimatedTimeRole, self.CompletionTimeRole, self.EstimatedTimeOfDayRole])
+
+    def addSubtask(self, parent_row: int) -> None:
+        """Add a subtask under the given parent task."""
+        if parent_row < 0 or parent_row >= len(self._tasks):
+            return
+
+        # Create placeholder subtask
+        self.addTask("Subtask", parent_row)
+
+    def renameTask(self, row: int, new_title: str) -> None:
+        """Rename an existing task."""
+        if row < 0 or row >= len(self._tasks):
+            return
+
+        new_title = new_title.strip()
+        if not new_title:
+            return
+
+        old_title = self._tasks[row].title
+        if old_title == new_title:
+            return
+
+        self._tasks[row].title = new_title
+        idx = self.index(row, 0)
+        self.dataChanged.emit(idx, idx, [self.TitleRole])
+        self.taskRenamed.emit(row, new_title)
+
+    def setCustomEstimate(self, row: int, estimate_str: str) -> None:
+        """Set a custom time estimate for a task.
+
+        Args:
+            row: Task index
+            estimate_str: Time string like "30m", "2h", "1.5h", or just a number (minutes)
+        """
+        if row < 0 or row >= len(self._tasks):
+            return
+
+        estimate_str = estimate_str.strip().lower()
+        if not estimate_str:
+            # Clear custom estimate
+            self._tasks[row].custom_estimate = None
+        else:
+            try:
+                # Parse time string
+                if estimate_str.endswith('h'):
+                    # Hours
+                    hours = float(estimate_str[:-1])
+                    minutes = hours * 60
+                elif estimate_str.endswith('m'):
+                    # Minutes
+                    minutes = float(estimate_str[:-1])
+                else:
+                    # Default to minutes
+                    minutes = float(estimate_str)
+
+                self._tasks[row].custom_estimate = max(0.0, minutes)
+            except ValueError:
+                # Invalid format, ignore
+                return
+
+        # Update UI
+        idx = self.index(row, 0)
+        self.dataChanged.emit(idx, idx, [self.EstimatedTimeRole, self.CompletionTimeRole, self.EstimatedTimeOfDayRole])
+
+        # Update total estimate
+        self.totalEstimateChanged.emit()
+
+        # Update all completion times since they depend on estimates
+        if len(self._tasks) > 0:
+            first = self.index(0, 0)
+            last = self.index(len(self._tasks) - 1, 0)
+            self.dataChanged.emit(first, last, [self.CompletionTimeRole, self.EstimatedTimeOfDayRole])
+
+    def moveTask(self, from_row: int, to_row: int) -> None:
+        """Move a task from one position to another."""
+        if (
+            from_row == to_row
+            or from_row < 0
+            or to_row < 0
+            or from_row >= len(self._tasks)
+            or to_row >= len(self._tasks)
+        ):
+            return
+
+        # Qt's beginMoveRows expects destination to be the position before removal
+        destination = to_row + 1 if to_row > from_row else to_row
+        self.beginMoveRows(QModelIndex(), from_row, from_row, QModelIndex(), destination)
+        task = self._tasks.pop(from_row)
+        self._tasks.insert(to_row, task)
+        self.endMoveRows()
+
+        # Update completion time estimates since order changed
+        if len(self._tasks) > 0:
+            first = self.index(0, 0)
+            last = self.index(len(self._tasks) - 1, 0)
+            self.dataChanged.emit(first, last, [self.CompletionTimeRole, self.EstimatedTimeOfDayRole])
+
+    def removeAt(self, row: int) -> None:
+        """Remove a task and all its children."""
+        if row < 0 or row >= len(self._tasks):
+            return
+
+        # Remove task and all its children
+        task = self._tasks[row]
+        rows_to_remove = [row]
+
+        # Find all children
+        i = row + 1
+        while i < len(self._tasks) and self._tasks[i].indent_level > task.indent_level:
+            rows_to_remove.append(i)
+            i += 1
+
+        # Remove in reverse order to maintain indices
+        for r in reversed(rows_to_remove):
+            self.beginRemoveRows(QModelIndex(), r, r)
+            self._tasks.pop(r)
+            self.endRemoveRows()
+
+        self.avgTimeChanged.emit()
+        self.taskCountChanged.emit()
+
+    def clear(self) -> None:
+        """Clear all tasks from the model."""
+        if not self._tasks:
+            return
+        self.beginRemoveRows(QModelIndex(), 0, len(self._tasks) - 1)
+        self._tasks.clear()
+        self.endRemoveRows()
+        self.avgTimeChanged.emit()
+        self.taskCountChanged.emit()
+
+    def pasteSampleTasks(self) -> None:
+        """Add sample tasks for testing."""
+        sample_tasks = [
+            "Review pull requests",
+            "Write documentation",
+            "Fix critical bug",
+            "Update dependencies",
+            "Code review meeting",
+        ]
+        for title in sample_tasks:
+            self.addTask(title)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Serialize tasks to a dictionary for saving.
+
+        Returns:
+            Dictionary containing all task data.
+        """
+        tasks_data = []
+        for task in self._tasks:
+            tasks_data.append({
+                "title": task.title,
+                "completed": task.completed,
+                "time_spent": task.time_spent,
+                "parent_index": task.parent_index,
+                "indent_level": task.indent_level,
+                "custom_estimate": task.custom_estimate,
+            })
+        return {"tasks": tasks_data}
+
+    def from_dict(self, data: Dict[str, Any]) -> None:
+        """Load tasks from a dictionary.
+
+        Args:
+            data: Dictionary containing task data (from to_dict).
+        """
+        # Clear existing tasks
+        self.clear()
+
+        # Load new tasks
+        tasks_data = data.get("tasks", [])
+        for task_data in tasks_data:
+            task = Task(
+                title=task_data.get("title", ""),
+                completed=task_data.get("completed", False),
+                time_spent=task_data.get("time_spent", 0.0),
+                parent_index=task_data.get("parent_index", -1),
+                indent_level=task_data.get("indent_level", 0),
+                custom_estimate=task_data.get("custom_estimate"),
+            )
+            # Don't auto-start timing for loaded tasks
+            if not task.completed:
+                task.start_time = time.time()
+
+            self.beginInsertRows(QModelIndex(), len(self._tasks), len(self._tasks))
+            self._tasks.append(task)
+            self.endInsertRows()
+
+        self.avgTimeChanged.emit()
+        self.totalEstimateChanged.emit()
+        self.taskCountChanged.emit()
+
+
+class ProjectManager(QObject):
+    """Manager for saving and loading project files.
+
+    Project files are JSON files containing:
+    - Task list data (titles, completion status, time spent, estimates)
+    - Diagram data (items, edges, positions)
+    """
+
+    PROJECT_VERSION = "1.0"
+    MAX_RECENT_PROJECTS = 8
+    
+    saveCompleted = Signal(str)  # Emitted with file path after successful save
+    loadCompleted = Signal(str)  # Emitted with file path after successful load
+    errorOccurred = Signal(str)  # Emitted with error message on failure
+    recentProjectsChanged = Signal()  # Emitted when recent projects list changes
+    currentFilePathChanged = Signal()  # Emitted when current file path changes
+
+    def __init__(self, task_model: TaskModel, diagram_model_or_manager):
+        """Initialize ProjectManager.
+        
+        Args:
+            task_model: The TaskModel instance.
+            diagram_model_or_manager: Either a DiagramModel directly or an
+                ActionDrawManager (for backwards compatibility).
+        """
+        super().__init__()
+        self._task_model = task_model
+        # Support both DiagramModel directly and ActionDrawManager (backwards compat)
+        if hasattr(diagram_model_or_manager, 'diagram_model'):
+            self._diagram_model = diagram_model_or_manager.diagram_model
+        else:
+            self._diagram_model = diagram_model_or_manager
+        self._current_file_path: str = ""
+        self._settings = QSettings("ProgressTracker", "ProgressTracker")
+        self._recent_projects: List[str] = self._load_recent_projects()
+
+    def _load_recent_projects(self) -> List[str]:
+        """Load recent projects list from settings."""
+        stored = self._settings.value("recentProjects", [])
+        # QSettings may return a string if only one item, or None
+        if stored is None:
+            return []
+        if isinstance(stored, str):
+            stored = [stored] if stored else []
+        if isinstance(stored, list):
+            # Filter out non-existent files
+            return [p for p in stored if p and os.path.exists(p)][:self.MAX_RECENT_PROJECTS]
+        return []
+
+    def _save_recent_projects(self) -> None:
+        """Save recent projects list to settings."""
+        self._settings.setValue("recentProjects", self._recent_projects)
+        self._settings.sync()  # Ensure settings are written to disk
+
+    def _add_to_recent(self, file_path: str) -> None:
+        """Add a project to the recent projects list."""
+        if not file_path or not os.path.exists(file_path):
+            return
+        # Remove if already in list
+        if file_path in self._recent_projects:
+            self._recent_projects.remove(file_path)
+        # Add to front
+        self._recent_projects.insert(0, file_path)
+        # Trim to max size
+        self._recent_projects = self._recent_projects[:self.MAX_RECENT_PROJECTS]
+        self._save_recent_projects()
+        self.recentProjectsChanged.emit()
+
+    @Property("QVariantList", notify=recentProjectsChanged)
+    def recentProjects(self) -> List[str]:
+        """Return the list of recent project file paths."""
+        return self._recent_projects
+
+    @Slot()
+    def newInstanceActionDraw(self) -> None:
+        """Open a new instance of ActionDraw."""
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        actiondraw_path = os.path.join(script_dir, "actiondraw.py")
+        self._launchScript(actiondraw_path)
+
+    def _launchScript(self, script_path: str) -> None:
+        """Launch a Python script as a new process."""
+        try:
+            subprocess.Popen(
+                [sys.executable, os.path.abspath(script_path)],
+                start_new_session=True,
+            )
+        except OSError as e:
+            self.errorOccurred.emit(f"Failed to open new instance: {e}")
+
+    @Slot(result=list)
+    def getRecentProjectNames(self) -> List[Dict[str, str]]:
+        """Return list of recent projects with display name and path."""
+        result = []
+        for path in self._recent_projects:
+            name = os.path.basename(path)
+            # Remove .progress extension for display
+            if name.endswith(".progress"):
+                name = name[:-9]
+            result.append({"name": name, "path": path})
+        return result
+
+    @Property(str, notify=currentFilePathChanged)
+    def currentFilePath(self) -> str:
+        """Return the current project file path."""
+        return self._current_file_path
+
+    def _normalize_file_path(self, file_path: str) -> str:
+        """Convert file URLs into local paths, including Windows file URLs."""
+        if file_path.startswith("file:"):
+            url = QUrl(file_path)
+            if url.isLocalFile():
+                file_path = url.toLocalFile()
+            else:
+                file_path = url.path()
+        if os.name == "nt" and file_path.startswith("/") and len(file_path) > 2 and file_path[2] == ":":
+            file_path = file_path[1:]
+        return file_path
+
+    @Slot(result=bool)
+    def hasCurrentFile(self) -> bool:
+        """Return True if a current project file is set."""
+        return bool(self._current_file_path)
+
+    @Slot()
+    def saveCurrentProject(self) -> None:
+        """Save the current project to the existing file path."""
+        if not self._current_file_path:
+            self.errorOccurred.emit("No current project file selected")
+            return
+        self.saveProject(self._current_file_path)
+
+    @Slot(str)
+    def saveProject(self, file_path: str) -> None:
+        """Save the current project to a JSON file.
+
+        Args:
+            file_path: Path to save the project file (should end in .progress)
+        """
+        file_path = self._normalize_file_path(file_path)
+
+        if not file_path:
+            self.errorOccurred.emit("No file path specified")
+            return
+
+        # Ensure .progress extension
+        if not file_path.endswith(".progress"):
+            file_path += ".progress"
+
+        try:
+            project_data = {
+                "version": self.PROJECT_VERSION,
+                "saved_at": datetime.now().isoformat(),
+                "tasks": self._task_model.to_dict(),
+                "diagram": self._diagram_model.to_dict(),
+            }
+
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(project_data, f, indent=2, ensure_ascii=False)
+
+            self._current_file_path = file_path
+            self.currentFilePathChanged.emit()
+            self._add_to_recent(file_path)
+            self.saveCompleted.emit(file_path)
+            print(f"Project saved to: {file_path}")
+
+        except (OSError, IOError) as e:
+            error_msg = f"Failed to save project: {e}"
+            self.errorOccurred.emit(error_msg)
+            print(error_msg)
+
+    @Slot(str)
+    def loadProject(self, file_path: str) -> None:
+        """Load a project from a JSON file.
+
+        Args:
+            file_path: Path to the project file
+        """
+        file_path = self._normalize_file_path(file_path)
+
+        if not file_path:
+            self.errorOccurred.emit("No file path specified")
+            return
+
+        if not os.path.exists(file_path):
+            self.errorOccurred.emit(f"File not found: {file_path}")
+            return
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                project_data = json.load(f)
+
+            # Validate version
+            version = project_data.get("version", "unknown")
+            if version != self.PROJECT_VERSION:
+                print(f"Warning: Loading project from version {version}, current is {self.PROJECT_VERSION}")
+
+            # Load tasks
+            tasks_data = project_data.get("tasks", {})
+            self._task_model.from_dict(tasks_data)
+
+            # Load diagram
+            diagram_data = project_data.get("diagram", {})
+            self._diagram_model.from_dict(diagram_data)
+
+            self._current_file_path = file_path
+            self.currentFilePathChanged.emit()
+            self._add_to_recent(file_path)
+            self.loadCompleted.emit(file_path)
+            print(f"Project loaded from: {file_path}")
+
+        except json.JSONDecodeError as e:
+            error_msg = f"Invalid project file format: {e}"
+            self.errorOccurred.emit(error_msg)
+            print(error_msg)
+        except (OSError, IOError) as e:
+            error_msg = f"Failed to load project: {e}"
+            self.errorOccurred.emit(error_msg)
+            print(error_msg)
+        except (KeyError, TypeError) as e:
+            error_msg = f"Corrupted project file: {e}"
+            self.errorOccurred.emit(error_msg)
+            print(error_msg)
