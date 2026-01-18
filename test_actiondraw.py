@@ -735,6 +735,18 @@ class TestDiagramModelSerialization:
         assert "task_index" in item
         assert "color" in item
         assert "text_color" in item
+        assert "note_markdown" not in item
+
+    def test_note_markdown_roundtrip(self, empty_diagram_model):
+        item_id = empty_diagram_model.addPresetItem("note", 10.0, 20.0)
+        empty_diagram_model.setItemMarkdown(item_id, "# Title\nBody")
+
+        data = empty_diagram_model.to_dict()
+        assert data["items"][0]["note_markdown"] == "# Title\nBody"
+
+        new_model = DiagramModel()
+        new_model.from_dict(data)
+        assert new_model.getItemMarkdown(item_id) == "# Title\nBody"
 
     def test_from_dict_empty(self, empty_diagram_model):
         """Test loading empty data."""

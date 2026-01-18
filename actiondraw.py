@@ -31,6 +31,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QGuiApplication, QImage
 from PySide6.QtQml import QQmlApplicationEngine
 
+from markdown_note_editor import MarkdownNoteManager
 
 class DiagramItemType(Enum):
     """Supported diagram item types."""
@@ -63,6 +64,7 @@ class DiagramItem:
     text_color: str = "#f5f6f8"
     image_data: str = ""  # Base64-encoded PNG data for IMAGE type
     sub_diagram_path: str = ""  # Path to linked sub-diagram .progress file
+    note_markdown: str = ""  # Markdown note content for note-like items
 
 
 @dataclass
@@ -646,6 +648,23 @@ class DiagramModel(QAbstractListModel):
                 self.itemsChanged.emit()
                 return
 
+    @Slot(str, str)
+    def setItemMarkdown(self, item_id: str, markdown: str) -> None:
+        for item in self._items:
+            if item.id == item_id:
+                if item.note_markdown == markdown:
+                    return
+                item.note_markdown = markdown
+                self.itemsChanged.emit()
+                return
+
+    @Slot(str, result=str)
+    def getItemMarkdown(self, item_id: str) -> str:
+        for item in self._items:
+            if item.id == item_id:
+                return item.note_markdown
+        return ""
+
     def setProjectPath(self, path: str) -> None:
         """Set the current project file path for resolving relative sub-diagram paths.
 
@@ -1178,6 +1197,8 @@ class DiagramModel(QAbstractListModel):
             # Only store sub_diagram_path if set
             if item.sub_diagram_path:
                 item_dict["sub_diagram_path"] = item.sub_diagram_path
+            if item.note_markdown:
+                item_dict["note_markdown"] = item.note_markdown
             items_data.append(item_dict)
 
         edges_data = []
@@ -1254,6 +1275,7 @@ class DiagramModel(QAbstractListModel):
                 text_color=item_data.get("text_color", "#f5f6f8"),
                 image_data=item_data.get("image_data", ""),
                 sub_diagram_path=item_data.get("sub_diagram_path", ""),
+                note_markdown=item_data.get("note_markdown", ""),
             )
             self.beginInsertRows(QModelIndex(), len(self._items), len(self._items))
             self._items.append(item)
@@ -2957,6 +2979,23 @@ ApplicationWindow {
                             onTriggered: subDiagramFileDialog.open()
                         }
                         MenuItem {
+                            id: renameNoteMenuItem
+                            text: "Rename Label..."
+                            visible: {
+                                if (!diagramModel || !diagramLayer.contextMenuItemId)
+                                    return false
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                return item && (item.type === "note" || item.type === "wish" || item.type === "obstacle")
+                            }
+                            height: visible ? implicitHeight : 0
+                            onTriggered: {
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                if (!item)
+                                    return
+                                root.openPresetDialog(item.type, Qt.point(item.x, item.y), item.id, item.text)
+                            }
+                        }
+                        MenuItem {
                             id: openSubDiagramMenuItem
                             text: "Open Sub-diagram"
                             visible: {
@@ -4228,6 +4267,10 @@ ApplicationWindow {
                                         edgeDropTaskDialog.dropX = newX
                                         edgeDropTaskDialog.dropY = newY
                                         edgeDropTaskDialog.open()
+                                    } else if (itemRect.itemType === "note" || itemRect.itemType === "wish" || itemRect.itemType === "obstacle") {
+                                        if (markdownNoteManager) {
+                                            markdownNoteManager.openNote(itemRect.itemId)
+                                        }
                                     } else if (itemRect.itemType === "task" && itemRect.taskIndex < 0) {
                                         // Task not yet linked to task list - create new task
                                         newTaskDialog.openWithItem(itemRect.itemId, model.text)
@@ -4403,13 +4446,18 @@ def create_actiondraw_window(
     diagram_model: DiagramModel,
     task_model,
     project_manager=None,
+    markdown_note_manager=None,
 ) -> QQmlApplicationEngine:
     """Create and return a QQmlApplicationEngine hosting the ActionDraw UI."""
 
     engine = QQmlApplicationEngine()
+    if markdown_note_manager is None:
+        markdown_note_manager = MarkdownNoteManager(diagram_model)
     engine.rootContext().setContextProperty("diagramModel", diagram_model)
     engine.rootContext().setContextProperty("taskModel", task_model)
     engine.rootContext().setContextProperty("projectManager", project_manager)
+    engine.rootContext().setContextProperty("markdownNoteManager", markdown_note_manager)
+    engine._markdown_note_manager = markdown_note_manager
     engine.loadData(ACTIONDRAW_QML.encode("utf-8"))
     return engine
 
