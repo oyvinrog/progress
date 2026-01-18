@@ -1,24 +1,47 @@
-# Progress List
+# ActionDraw
 
-A progress tracking task list with time estimation using PySide6 + QML.
+A diagramming module built with PySide6 and QML for creating system diagrams, flowcharts, and visual documentation.
 
 ![Screenshot](assets/screenshot.png)
 
 ## Features
 
-- ✓ Tasks with checkboxes to mark completion
-- ✓ Automatic time tracking for active tasks
-- ✓ Estimated completion times based on historical average
-- ✓ Break down tasks into subtasks
-- ✓ Add new tasks dynamically
-- ✓ ActionDraw canvas for system diagrams (database, network, notes)
+- Preset shapes for boxes, databases, servers, clouds, notes, obstacles, and wishes
+- Snap-to-grid toggle with optional grid overlay for tidy layouts
+- Smooth zoom controls via toolbar, mouse wheel (Ctrl+Scroll), or touchpad pinch
+- Drag-and-drop connections with live previews and arrowheads
+- Quick resizing gestures (pinch) that respect to grid spacing
+- Inline editing for labels
+- Task integration with task management capabilities
+- Free drawing mode for sketches and annotations
+- Image paste functionality for adding external graphics
 
-## ActionDraw Diagramming
+## Installation
 
-Launch the standalone canvas with:
+Install from the latest release:
 
 ```bash
-python actiondraw.py
+pip install git+https://github.com/oyvinrog/progress.git
+```
+
+Or install from the repo:
+
+```bash
+pip install .
+```
+
+## Usage
+
+After installation, run from anywhere:
+
+```bash
+actiondraw       # Diagramming canvas
+```
+
+For local development (from the repo directory):
+
+```bash
+python -m actiondraw
 ```
 
 Key capabilities:
@@ -63,7 +86,6 @@ actiondraw       # Standalone diagramming canvas
 For local development (from the repo directory):
 
 ```bash
-python -m progress_list
 python -m actiondraw
 ```
 

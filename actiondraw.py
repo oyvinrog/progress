@@ -7,6 +7,9 @@ connections between items works reliably when dragging across the canvas.
 from __future__ import annotations
 
 import base64
+import json
+import os
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from enum import Enum
@@ -17,6 +20,7 @@ from PySide6.QtCore import (
     QAbstractListModel,
     QByteArray,
     QBuffer,
+    QFileSystemWatcher,
     QIODevice,
     QModelIndex,
     Property,
@@ -27,6 +31,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QGuiApplication, QImage
 from PySide6.QtQml import QQmlApplicationEngine
 
+from markdown_note_editor import MarkdownNoteManager
 
 class DiagramItemType(Enum):
     """Supported diagram item types."""
@@ -58,6 +63,8 @@ class DiagramItem:
     color: str = "#4a9eff"
     text_color: str = "#f5f6f8"
     image_data: str = ""  # Base64-encoded PNG data for IMAGE type
+    sub_diagram_path: str = ""  # Path to linked sub-diagram .progress file
+    note_markdown: str = ""  # Markdown note content for note-like items
 
 
 @dataclass
@@ -172,6 +179,9 @@ class DiagramModel(QAbstractListModel):
     TaskCompletedRole = Qt.UserRole + 11
     ImageDataRole = Qt.UserRole + 12
     TaskCurrentRole = Qt.UserRole + 13
+    SubDiagramPathRole = Qt.UserRole + 14
+    SubDiagramProgressRole = Qt.UserRole + 15
+    NoteMarkdownRole = Qt.UserRole + 16
 
     itemsChanged = Signal()
     edgesChanged = Signal()
@@ -205,6 +215,9 @@ class DiagramModel(QAbstractListModel):
         self._edge_drag_x: float = 0.0
         self._edge_drag_y: float = 0.0
         self._is_dragging_edge: bool = False
+        self._project_path: str = ""  # Path to current project file for resolving relative sub-diagram paths
+        self._sub_diagram_watcher = QFileSystemWatcher()
+        self._sub_diagram_watcher.fileChanged.connect(self._on_sub_diagram_changed)
 
     def _next_id(self, prefix: str) -> str:
         return f"{prefix}_{next(self._id_source)}"
@@ -275,6 +288,12 @@ class DiagramModel(QAbstractListModel):
             return item.image_data
         if role == self.TaskCurrentRole:
             return item.task_index >= 0 and item.task_index == self._current_task_index
+        if role == self.SubDiagramPathRole:
+            return item.sub_diagram_path
+        if role == self.SubDiagramProgressRole:
+            return self._calculate_sub_diagram_progress(item.sub_diagram_path)
+        if role == self.NoteMarkdownRole:
+            return item.note_markdown
         return None
 
     def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
@@ -292,6 +311,9 @@ class DiagramModel(QAbstractListModel):
             self.TaskCompletedRole: b"taskCompleted",
             self.ImageDataRole: b"imageData",
             self.TaskCurrentRole: b"taskCurrent",
+            self.SubDiagramPathRole: b"subDiagramPath",
+            self.SubDiagramProgressRole: b"subDiagramProgress",
+            self.NoteMarkdownRole: b"noteMarkdown",
         }
 
     # --- Properties exposed to QML -----------------------------------------
@@ -631,6 +653,124 @@ class DiagramModel(QAbstractListModel):
                 return
 
     @Slot(str, str)
+    def setItemMarkdown(self, item_id: str, markdown: str) -> None:
+        for row, item in enumerate(self._items):
+            if item.id == item_id:
+                if item.note_markdown == markdown:
+                    return
+                item.note_markdown = markdown
+                index = self.index(row, 0)
+                self.dataChanged.emit(index, index, [self.NoteMarkdownRole])
+                self.itemsChanged.emit()
+                return
+
+    @Slot(str, result=str)
+    def getItemMarkdown(self, item_id: str) -> str:
+        for item in self._items:
+            if item.id == item_id:
+                return item.note_markdown
+        return ""
+
+    def setProjectPath(self, path: str) -> None:
+        """Set the current project file path for resolving relative sub-diagram paths.
+
+        Args:
+            path: Path to the current project file.
+        """
+        self._project_path = path
+
+    @Slot(str, str)
+    def setSubDiagramPath(self, item_id: str, path: str) -> None:
+        """Set the sub-diagram path for an item.
+
+        Args:
+            item_id: ID of the item to update.
+            path: Path to the .progress file, or empty string to clear.
+        """
+        # Normalize file:// URL to path
+        if path.startswith("file://"):
+            path = path[7:]
+
+        for row, item in enumerate(self._items):
+            if item.id == item_id:
+                if item.sub_diagram_path == path:
+                    return
+                item.sub_diagram_path = path
+                index = self.index(row, 0)
+                self.dataChanged.emit(index, index, [self.SubDiagramPathRole, self.SubDiagramProgressRole])
+                self.itemsChanged.emit()
+                # Update file watcher
+                self._update_sub_diagram_watches()
+                return
+
+    @Slot(str)
+    def openSubDiagram(self, item_id: str) -> bool:
+        """Open the sub-diagram linked to an item in a new window.
+
+        Args:
+            item_id: ID of the item with the sub-diagram link.
+
+        Returns:
+            True if subprocess was launched, False otherwise.
+        """
+        item = self.getItem(item_id)
+        if not item or not item.sub_diagram_path:
+            return False
+
+        # Normalize file:// URL to path (in case it wasn't normalized when set)
+        path = item.sub_diagram_path
+        if path.startswith("file://"):
+            path = path[7:]
+
+        # Resolve relative paths against current project directory
+        if self._project_path and not os.path.isabs(path):
+            base_dir = os.path.dirname(self._project_path)
+            path = os.path.join(base_dir, path)
+
+        if not os.path.exists(path):
+            print(f"Sub-diagram file not found: {path}")
+            return False
+
+        # Launch new process with the sub-diagram file
+        script_path = os.path.abspath(__file__)
+        subprocess.Popen([sys.executable, script_path, path])
+        return True
+
+    @Slot(str, str)
+    def createAndLinkSubDiagram(self, item_id: str, file_path: str, open_after: bool = True) -> None:
+        """Create a new empty sub-diagram file and link it to an item.
+
+        Args:
+            item_id: ID of the item to link.
+            file_path: Path where to create the new .progress file.
+            open_after: Whether to open the sub-diagram in a new window after creating.
+        """
+        # Normalize file:// URL to path
+        if file_path.startswith("file://"):
+            file_path = file_path[7:]
+
+        # Create empty project structure
+        empty_project = {
+            "version": "1.0",
+            "saved_at": "",
+            "tasks": {"tasks": []},
+            "diagram": {"items": [], "edges": [], "strokes": [], "current_task_index": -1}
+        }
+
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(empty_project, f, indent=2)
+
+            # Link the new file to the item
+            self.setSubDiagramPath(item_id, file_path)
+
+            # Open it in a new window
+            if open_after:
+                self.openSubDiagram(item_id)
+        except (OSError, IOError) as e:
+            print(f"Failed to create sub-diagram: {e}")
+
+    @Slot(str, str)
     def renameTaskItem(self, item_id: str, new_text: str) -> None:
         """Rename a task item and sync to the task list."""
         new_text = new_text.strip()
@@ -907,6 +1047,75 @@ class DiagramModel(QAbstractListModel):
         idx = self._task_model.index(task_index, 0)
         return bool(self._task_model.data(idx, self._task_model.CompletedRole))
 
+    def _calculate_sub_diagram_progress(self, sub_diagram_path: str) -> int:
+        """Calculate completion percentage of a linked sub-diagram.
+
+        Args:
+            sub_diagram_path: Path to the .progress file.
+
+        Returns:
+            Percentage (0-100) of completed tasks, or -1 if no sub-diagram or error.
+        """
+        if not sub_diagram_path:
+            return -1
+
+        # Resolve relative paths against current project directory
+        if hasattr(self, '_project_path') and self._project_path and not os.path.isabs(sub_diagram_path):
+            base_dir = os.path.dirname(self._project_path)
+            sub_diagram_path = os.path.join(base_dir, sub_diagram_path)
+
+        if not os.path.exists(sub_diagram_path):
+            return -1
+
+        try:
+            with open(sub_diagram_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            tasks = data.get("tasks", {}).get("tasks", [])
+            if not tasks:
+                return 0
+
+            completed = sum(1 for t in tasks if t.get("completed", False))
+            return int((completed / len(tasks)) * 100)
+        except (json.JSONDecodeError, OSError, KeyError):
+            return -1
+
+    def _resolve_sub_diagram_path(self, sub_diagram_path: str) -> str:
+        """Resolve a sub-diagram path to an absolute path."""
+        if not sub_diagram_path:
+            return ""
+        if self._project_path and not os.path.isabs(sub_diagram_path):
+            base_dir = os.path.dirname(self._project_path)
+            return os.path.join(base_dir, sub_diagram_path)
+        return sub_diagram_path
+
+    def _on_sub_diagram_changed(self, path: str) -> None:
+        """Handle sub-diagram file changes - refresh progress for affected items."""
+        # Re-add the file to the watcher (some systems remove it after modification)
+        if os.path.exists(path) and path not in self._sub_diagram_watcher.files():
+            self._sub_diagram_watcher.addPath(path)
+
+        # Find items that reference this path and emit dataChanged
+        for row, item in enumerate(self._items):
+            resolved = self._resolve_sub_diagram_path(item.sub_diagram_path)
+            if resolved == path:
+                index = self.index(row, 0)
+                self.dataChanged.emit(index, index, [self.SubDiagramProgressRole])
+
+    def _update_sub_diagram_watches(self) -> None:
+        """Update the file watcher to watch all current sub-diagram files."""
+        # Remove all current watches
+        current_files = self._sub_diagram_watcher.files()
+        if current_files:
+            self._sub_diagram_watcher.removePaths(current_files)
+
+        # Add watches for all sub-diagram paths
+        for item in self._items:
+            if item.sub_diagram_path:
+                resolved = self._resolve_sub_diagram_path(item.sub_diagram_path)
+                if resolved and os.path.exists(resolved):
+                    self._sub_diagram_watcher.addPath(resolved)
+
     @Slot(str, result="QVariant")
     def getItemSnapshot(self, item_id: str) -> Dict[str, Any]:
         item = self.getItem(item_id)
@@ -920,6 +1129,7 @@ class DiagramModel(QAbstractListModel):
             "width": item.width,
             "height": item.height,
             "text": item.text,
+            "subDiagramPath": item.sub_diagram_path,
         }
 
     def getItemAt(self, x: float, y: float) -> Optional[str]:
@@ -990,6 +1200,11 @@ class DiagramModel(QAbstractListModel):
             # Only store image_data if it's an image item (to avoid bloating files)
             if item.item_type == DiagramItemType.IMAGE and item.image_data:
                 item_dict["image_data"] = item.image_data
+            # Only store sub_diagram_path if set
+            if item.sub_diagram_path:
+                item_dict["sub_diagram_path"] = item.sub_diagram_path
+            if item.note_markdown:
+                item_dict["note_markdown"] = item.note_markdown
             items_data.append(item_dict)
 
         edges_data = []
@@ -1065,6 +1280,8 @@ class DiagramModel(QAbstractListModel):
                 color=item_data.get("color", "#4a9eff"),
                 text_color=item_data.get("text_color", "#f5f6f8"),
                 image_data=item_data.get("image_data", ""),
+                sub_diagram_path=item_data.get("sub_diagram_path", ""),
+                note_markdown=item_data.get("note_markdown", ""),
             )
             self.beginInsertRows(QModelIndex(), len(self._items), len(self._items))
             self._items.append(item)
@@ -1122,6 +1339,9 @@ class DiagramModel(QAbstractListModel):
         self.edgesChanged.emit()
         self.drawingChanged.emit()
         self.currentTaskChanged.emit()
+
+        # Update file watcher for sub-diagrams
+        self._update_sub_diagram_watches()
 
 
 ACTIONDRAW_QML = r"""
@@ -1448,6 +1668,7 @@ ApplicationWindow {
     property string pendingEdgeSourceId: ""
     property real pendingEdgeDropX: 0
     property real pendingEdgeDropY: 0
+    property string selectedItemId: ""
 
     Shortcut {
         sequence: "Ctrl+S"
@@ -1464,6 +1685,12 @@ ApplicationWindow {
                 diagramModel.pasteImageFromClipboard(center.x, center.y)
             }
         }
+    }
+
+    Shortcut {
+        sequence: "F2"
+        enabled: diagramModel !== null
+        onActivated: root.renameSelectedItem()
     }
 
     function showEdgeDropSuggestions(sourceId, dropX, dropY) {
@@ -1495,6 +1722,27 @@ ApplicationWindow {
         var cx = (viewport.contentX + viewport.width / 2) / root.zoomLevel
         var cy = (viewport.contentY + viewport.height / 2) / root.zoomLevel
         return snapPoint(Qt.point(cx, cy))
+    }
+
+    function renameItemById(itemId) {
+        if (!diagramModel || !itemId)
+            return
+        var item = diagramModel.getItemSnapshot(itemId)
+        if (!item || !item.id)
+            return
+        if (item.type === "task" && item.taskIndex < 0) {
+            newTaskDialog.openWithItem(item.id, item.text)
+        } else if (item.type === "task" && item.taskIndex >= 0) {
+            taskRenameDialog.openWithItem(item.id, item.text)
+        } else if (item.type === "freetext") {
+            root.openFreeTextDialog(Qt.point(item.x, item.y), item.id, item.text)
+        } else if (item.type !== "image") {
+            root.openPresetDialog(item.type, Qt.point(item.x, item.y), item.id, item.text)
+        }
+    }
+
+    function renameSelectedItem() {
+        renameItemById(root.selectedItemId)
     }
 
     function openPresetDialog(preset, point, itemId, initialText) {
@@ -1962,21 +2210,22 @@ ApplicationWindow {
                     border.color: "#384458"
                 }
                 onTextChanged: newTaskDialog.textValue = text
-                onAccepted: newTaskButtons.accept()
+                Keys.onReturnPressed: newTaskDialog.accept()
+                Keys.onEnterPressed: newTaskDialog.accept()
             }
         }
 
         footer: DialogButtonBox {
             id: newTaskButtons
             standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
-            onAccepted: {
-                if (diagramModel && newTaskDialog.pendingItemId.length > 0) {
-                    diagramModel.createTaskFromText(newTaskDialog.textValue, newTaskDialog.pendingItemId)
-                }
-                newTaskDialog.close()
-            }
-            onRejected: newTaskDialog.close()
         }
+
+        onAccepted: {
+            if (diagramModel && newTaskDialog.pendingItemId.length > 0) {
+                diagramModel.createTaskFromText(newTaskDialog.textValue, newTaskDialog.pendingItemId)
+            }
+        }
+        onRejected: newTaskDialog.close()
 
         onClosed: {
             newTaskDialog.pendingItemId = ""
@@ -2081,21 +2330,22 @@ ApplicationWindow {
                     border.color: "#384458"
                 }
                 onTextChanged: taskRenameDialog.textValue = text
-                onAccepted: taskRenameButtons.accept()
+                Keys.onReturnPressed: taskRenameDialog.accept()
+                Keys.onEnterPressed: taskRenameDialog.accept()
             }
         }
 
         footer: DialogButtonBox {
             id: taskRenameButtons
             standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
-            onAccepted: {
-                if (diagramModel && taskRenameDialog.editingItemId.length > 0 && taskRenameDialog.textValue.trim().length > 0) {
-                    diagramModel.renameTaskItem(taskRenameDialog.editingItemId, taskRenameDialog.textValue)
-                }
-                taskRenameDialog.close()
-            }
-            onRejected: taskRenameDialog.close()
         }
+
+        onAccepted: {
+            if (diagramModel && taskRenameDialog.editingItemId.length > 0 && taskRenameDialog.textValue.trim().length > 0) {
+                diagramModel.renameTaskItem(taskRenameDialog.editingItemId, taskRenameDialog.textValue)
+            }
+        }
+        onRejected: taskRenameDialog.close()
 
         onClosed: {
             taskRenameDialog.editingItemId = ""
@@ -2122,6 +2372,7 @@ ApplicationWindow {
             onTriggered: {
                 // Copy pending state to dialog before menu closes
                 edgeDropTaskDialog.sourceId = root.pendingEdgeSourceId
+                edgeDropTaskDialog.sourceType = "task"
                 edgeDropTaskDialog.dropX = root.pendingEdgeDropX
                 edgeDropTaskDialog.dropY = root.pendingEdgeDropY
                 edgeDropTaskDialog.open()
@@ -2251,10 +2502,11 @@ ApplicationWindow {
     Dialog {
         id: edgeDropTaskDialog
         modal: true
-        title: "Create Connected Task"
+        title: sourceType === "task" ? "Create Connected Task" : ("Create Connected " + sourceType.charAt(0).toUpperCase() + sourceType.slice(1))
 
         // Store our own copy of pending state (menu clears root state on close)
         property string sourceId: ""
+        property string sourceType: "task"  // Type of item to create
         property real dropX: 0
         property real dropY: 0
 
@@ -2265,7 +2517,12 @@ ApplicationWindow {
             spacing: 12
 
             Label {
-                text: taskModel ? "Create a new task connected from the source item." : "Create a box connected from the source item (no task list available)."
+                text: {
+                    if (edgeDropTaskDialog.sourceType === "task" && taskModel)
+                        return "Create a new task connected from the source item."
+                    else
+                        return "Create a new " + edgeDropTaskDialog.sourceType + " connected from the source item."
+                }
                 color: "#8a93a5"
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
@@ -2274,7 +2531,7 @@ ApplicationWindow {
             TextField {
                 id: edgeDropTaskField
                 Layout.fillWidth: true
-                placeholderText: taskModel ? "Task name" : "Box label"
+                placeholderText: edgeDropTaskDialog.sourceType === "task" ? "Task name" : (edgeDropTaskDialog.sourceType.charAt(0).toUpperCase() + edgeDropTaskDialog.sourceType.slice(1) + " label")
                 selectByMouse: true
                 color: "#f5f6f8"
                 background: Rectangle {
@@ -2293,7 +2550,7 @@ ApplicationWindow {
 
         onAccepted: {
             if (diagramModel && edgeDropTaskDialog.sourceId && edgeDropTaskField.text.trim().length > 0) {
-                if (taskModel) {
+                if (edgeDropTaskDialog.sourceType === "task" && taskModel) {
                     diagramModel.addTaskFromTextAndConnect(
                         edgeDropTaskDialog.sourceId,
                         snapValue(edgeDropTaskDialog.dropX),
@@ -2301,10 +2558,10 @@ ApplicationWindow {
                         edgeDropTaskField.text
                     )
                 } else {
-                    // Fallback to box when no task model
+                    // Create item of the same type as source
                     diagramModel.addPresetItemAndConnect(
                         edgeDropTaskDialog.sourceId,
-                        "box",
+                        edgeDropTaskDialog.sourceType === "task" ? "box" : edgeDropTaskDialog.sourceType,
                         snapValue(edgeDropTaskDialog.dropX),
                         snapValue(edgeDropTaskDialog.dropY),
                         edgeDropTaskField.text
@@ -2318,6 +2575,7 @@ ApplicationWindow {
         onClosed: {
             edgeDropTaskField.text = ""
             edgeDropTaskDialog.sourceId = ""
+            edgeDropTaskDialog.sourceType = "task"
         }
     }
 
@@ -2342,6 +2600,31 @@ ApplicationWindow {
         onAccepted: {
             if (projectManager) {
                 projectManager.loadProject(selectedFile)
+            }
+        }
+    }
+
+    FileDialog {
+        id: subDiagramFileDialog
+        title: "Select Sub-diagram"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["Progress files (*.progress)", "All files (*)"]
+        onAccepted: {
+            if (diagramModel && diagramLayer.contextMenuItemId) {
+                diagramModel.setSubDiagramPath(diagramLayer.contextMenuItemId, selectedFile)
+            }
+        }
+    }
+
+    FileDialog {
+        id: newSubDiagramFileDialog
+        title: "Create New Sub-diagram"
+        fileMode: FileDialog.SaveFile
+        nameFilters: ["Progress files (*.progress)", "All files (*)"]
+        defaultSuffix: "progress"
+        onAccepted: {
+            if (diagramModel && diagramLayer.contextMenuItemId) {
+                diagramModel.createAndLinkSubDiagram(diagramLayer.contextMenuItemId, selectedFile)
             }
         }
     }
@@ -2690,6 +2973,7 @@ ApplicationWindow {
 
                     property real contextMenuX: 0
                     property real contextMenuY: 0
+                    property string contextMenuItemId: ""
 
                     Menu {
                         id: canvasContextMenu
@@ -2714,6 +2998,50 @@ ApplicationWindow {
                                 var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
                                 root.openFreeTextDialog(snapped, "", "")
                             }
+                        }
+                    }
+
+                    Menu {
+                        id: itemContextMenu
+
+                        MenuItem {
+                            text: "New Sub-diagram..."
+                            onTriggered: newSubDiagramFileDialog.open()
+                        }
+                        MenuItem {
+                            text: "Link Existing Sub-diagram..."
+                            onTriggered: subDiagramFileDialog.open()
+                        }
+                        MenuItem {
+                            id: renameNoteMenuItem
+                            text: "Rename Label..."
+                            visible: {
+                                if (!diagramModel || !diagramLayer.contextMenuItemId)
+                                    return false
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                return item && (item.type === "note" || item.type === "wish" || item.type === "obstacle")
+                            }
+                            height: visible ? implicitHeight : 0
+                            onTriggered: {
+                                root.renameItemById(diagramLayer.contextMenuItemId)
+                            }
+                        }
+                        MenuItem {
+                            id: openSubDiagramMenuItem
+                            text: "Open Sub-diagram"
+                            visible: {
+                                if (!diagramModel || !diagramLayer.contextMenuItemId)
+                                    return false
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                return item && item.subDiagramPath && item.subDiagramPath !== ""
+                            }
+                            height: visible ? implicitHeight : 0
+                            onTriggered: diagramModel.openSubDiagram(diagramLayer.contextMenuItemId)
+                        }
+                        MenuSeparator {}
+                        MenuItem {
+                            text: "Delete"
+                            onTriggered: diagramModel.removeItem(diagramLayer.contextMenuItemId)
                         }
                     }
 
@@ -3071,12 +3399,14 @@ ApplicationWindow {
                             property int taskIndex: model.taskIndex
                             property bool taskCompleted: model.taskCompleted
                             property bool taskCurrent: model.taskCurrent
+                            property int subDiagramProgress: model.subDiagramProgress
                             property bool isTask: itemRect.itemType === "task" && itemRect.taskIndex >= 0
                             property real dragStartX: 0
                             property real dragStartY: 0
                             property real pinchStartWidth: model.width
                             property real pinchStartHeight: model.height
                             property bool isEdgeDropTarget: diagramModel && diagramModel.edgeHoverTargetId === itemRect.itemId
+                            property bool hovered: itemHover.hovered
                             x: model.x
                             y: model.y
                             width: model.width
@@ -3103,6 +3433,30 @@ ApplicationWindow {
                                 z: -1
                             }
 
+                            // Sub-diagram progress badge
+                            Rectangle {
+                                id: subDiagramBadge
+                                visible: itemRect.subDiagramProgress >= 0
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                anchors.rightMargin: 6
+                                anchors.bottomMargin: 6
+                                width: subDiagramText.width + 12
+                                height: 20
+                                radius: 10
+                                color: itemRect.subDiagramProgress === 100 ? "#4caf50" : "#2196f3"
+                                z: 25
+
+                                Text {
+                                    id: subDiagramText
+                                    anchors.centerIn: parent
+                                    text: itemRect.subDiagramProgress + "%"
+                                    color: "#ffffff"
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                }
+                            }
+
                             Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
                             Behavior on border.width { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
                             Behavior on x { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
@@ -3112,6 +3466,10 @@ ApplicationWindow {
                                 anchors.fill: parent
                                 color: Qt.rgba(0, 0, 0, itemDrag.active ? 0.08 : 0)
                                 radius: itemRect.radius
+                            }
+
+                            HoverHandler {
+                                id: itemHover
                             }
 
                             Rectangle {
@@ -3568,18 +3926,207 @@ ApplicationWindow {
                                 }
                             }
 
+                            Item {
+                                id: resizeHandles
+                                anchors.fill: parent
+                                visible: itemRect.itemType !== "image" && (itemRect.hovered || itemDrag.active)
+                                z: 30
+                                property real startX: 0
+                                property real startY: 0
+                                property real startWidth: 0
+                                property real startHeight: 0
+                                property real minWidth: 40
+                                property real minHeight: 30
+
+                                function beginResize() {
+                                    startX = model.x
+                                    startY = model.y
+                                    startWidth = model.width
+                                    startHeight = model.height
+                                }
+
+                                function applyResize(deltaX, deltaY, handle) {
+                                    if (!diagramModel)
+                                        return
+                                    var dx = deltaX / root.zoomLevel
+                                    var dy = deltaY / root.zoomLevel
+                                    var left = startX
+                                    var top = startY
+                                    var right = startX + startWidth
+                                    var bottom = startY + startHeight
+
+                                    var useLeft = handle.indexOf("Left") >= 0
+                                    var useTop = handle.indexOf("Top") >= 0
+
+                                    if (useLeft) {
+                                        left = left + dx
+                                    } else {
+                                        right = right + dx
+                                    }
+
+                                    if (useTop) {
+                                        top = top + dy
+                                    } else {
+                                        bottom = bottom + dy
+                                    }
+
+                                    var newWidth = right - left
+                                    var newHeight = bottom - top
+
+                                    if (newWidth < minWidth) {
+                                        if (useLeft) {
+                                            left = right - minWidth
+                                        } else {
+                                            right = left + minWidth
+                                        }
+                                    }
+
+                                    if (newHeight < minHeight) {
+                                        if (useTop) {
+                                            top = bottom - minHeight
+                                        } else {
+                                            bottom = top + minHeight
+                                        }
+                                    }
+
+                                    newWidth = right - left
+                                    newHeight = bottom - top
+
+                                    if (root.snapToGrid) {
+                                        var snappedWidth = Math.max(minWidth, Math.round(newWidth / root.gridSpacing) * root.gridSpacing)
+                                        var snappedHeight = Math.max(minHeight, Math.round(newHeight / root.gridSpacing) * root.gridSpacing)
+                                        if (useLeft) {
+                                            left = right - snappedWidth
+                                        } else {
+                                            right = left + snappedWidth
+                                        }
+                                        if (useTop) {
+                                            top = bottom - snappedHeight
+                                        } else {
+                                            bottom = top + snappedHeight
+                                        }
+                                    }
+
+                                    diagramModel.moveItem(itemRect.itemId, left, top)
+                                    diagramModel.resizeItem(itemRect.itemId, right - left, bottom - top)
+                                    edgeCanvas.requestPaint()
+                                }
+
+                                Rectangle {
+                                    id: resizeTopLeft
+                                    width: 12
+                                    height: 12
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top
+                                    anchors.leftMargin: -2
+                                    anchors.topMargin: -2
+                                    color: "#2b3646"
+                                    border.color: "#5a6575"
+                                    radius: 3
+
+                                    DragHandler {
+                                        target: null
+                                        acceptedButtons: Qt.LeftButton
+                                        cursorShape: Qt.SizeFDiagCursor
+                                        onActiveChanged: if (active) resizeHandles.beginResize()
+                                        onTranslationChanged: if (active) resizeHandles.applyResize(translation.x, translation.y, "TopLeft")
+                                    }
+                                }
+
+                                Rectangle {
+                                    id: resizeTopRight
+                                    width: 12
+                                    height: 12
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    anchors.rightMargin: -2
+                                    anchors.topMargin: -2
+                                    color: "#2b3646"
+                                    border.color: "#5a6575"
+                                    radius: 3
+
+                                    DragHandler {
+                                        target: null
+                                        acceptedButtons: Qt.LeftButton
+                                        cursorShape: Qt.SizeBDiagCursor
+                                        onActiveChanged: if (active) resizeHandles.beginResize()
+                                        onTranslationChanged: if (active) resizeHandles.applyResize(translation.x, translation.y, "TopRight")
+                                    }
+                                }
+
+                                Rectangle {
+                                    id: resizeBottomLeft
+                                    width: 12
+                                    height: 12
+                                    anchors.left: parent.left
+                                    anchors.bottom: parent.bottom
+                                    anchors.leftMargin: -2
+                                    anchors.bottomMargin: -2
+                                    color: "#2b3646"
+                                    border.color: "#5a6575"
+                                    radius: 3
+
+                                    DragHandler {
+                                        target: null
+                                        acceptedButtons: Qt.LeftButton
+                                        cursorShape: Qt.SizeBDiagCursor
+                                        onActiveChanged: if (active) resizeHandles.beginResize()
+                                        onTranslationChanged: if (active) resizeHandles.applyResize(translation.x, translation.y, "BottomLeft")
+                                    }
+                                }
+
+                                Rectangle {
+                                    id: resizeBottomRight
+                                    width: 12
+                                    height: 12
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    anchors.rightMargin: -2
+                                    anchors.bottomMargin: -2
+                                    color: "#2b3646"
+                                    border.color: "#5a6575"
+                                    radius: 3
+
+                                    DragHandler {
+                                        target: null
+                                        acceptedButtons: Qt.LeftButton
+                                        cursorShape: Qt.SizeFDiagCursor
+                                        onActiveChanged: if (active) resizeHandles.beginResize()
+                                        onTranslationChanged: if (active) resizeHandles.applyResize(translation.x, translation.y, "BottomRight")
+                                    }
+                                }
+                            }
+
                             Text {
+                                id: itemLabel
                                 visible: itemRect.itemType !== "freetext" && itemRect.itemType !== "obstacle" && itemRect.itemType !== "wish" && itemRect.itemType !== "image"
                                 anchors.centerIn: parent
                                 width: parent.width - 36
+                                height: parent.height - 24
                                 text: model.text
                                 color: itemRect.isTask && itemRect.taskCompleted ? "#c9d7ce" : model.textColor
                                 wrapMode: Text.WordWrap
                                 horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
                                 textFormat: Text.PlainText
                                 font.pixelSize: 14
                                 font.bold: itemRect.itemType === "task"
                                 font.strikeout: itemRect.isTask && itemRect.taskCompleted
+                                maximumLineCount: Math.max(1, Math.floor(height / (font.pixelSize * 1.3)))
+                                elide: Text.ElideRight
+                                clip: true
+
+                                ToolTip.visible: labelHover.containsMouse
+                                ToolTip.delay: 400
+                                ToolTip.timeout: 2000
+                                ToolTip.text: model.text + (itemRect.itemType === "note" && model.noteMarkdown ? "\n\n" + model.noteMarkdown : "")
+
+                                MouseArea {
+                                    id: labelHover
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.NoButton
+                                }
                             }
 
                             Text {
@@ -3598,6 +4145,22 @@ ApplicationWindow {
                                 textFormat: Text.PlainText
                                 font.pixelSize: 12
                                 font.bold: true
+                                height: parent.height - (anchors.bottomMargin + 12)
+                                maximumLineCount: Math.max(1, Math.floor(height / (font.pixelSize * 1.3)))
+                                elide: Text.ElideRight
+                                clip: true
+
+                                ToolTip.visible: obstacleHover.containsMouse
+                                ToolTip.delay: 400
+                                ToolTip.timeout: 2000
+                                ToolTip.text: model.text + (model.noteMarkdown ? "\n\n" + model.noteMarkdown : "")
+
+                                MouseArea {
+                                    id: obstacleHover
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.NoButton
+                                }
                             }
 
                             Text {
@@ -3616,6 +4179,22 @@ ApplicationWindow {
                                 textFormat: Text.PlainText
                                 font.pixelSize: 12
                                 font.bold: true
+                                height: parent.height - (anchors.bottomMargin + 12)
+                                maximumLineCount: Math.max(1, Math.floor(height / (font.pixelSize * 1.3)))
+                                elide: Text.ElideRight
+                                clip: true
+
+                                ToolTip.visible: wishHover.containsMouse
+                                ToolTip.delay: 400
+                                ToolTip.timeout: 2000
+                                ToolTip.text: model.text + (model.noteMarkdown ? "\n\n" + model.noteMarkdown : "")
+
+                                MouseArea {
+                                    id: wishHover
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.NoButton
+                                }
                             }
 
                             Text {
@@ -3632,7 +4211,21 @@ ApplicationWindow {
                                 verticalAlignment: Text.AlignTop
                                 textFormat: Text.PlainText
                                 font.pixelSize: 13
+                                maximumLineCount: Math.max(1, Math.floor(height / (font.pixelSize * 1.35)))
                                 elide: Text.ElideRight
+                                clip: true
+
+                                ToolTip.visible: freeTextHover.containsMouse
+                                ToolTip.delay: 400
+                                ToolTip.timeout: 2000
+                                ToolTip.text: model.text
+
+                                MouseArea {
+                                    id: freeTextHover
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.NoButton
+                                }
                             }
 
                             DragHandler {
@@ -3686,8 +4279,33 @@ ApplicationWindow {
                             TapHandler {
                                 acceptedButtons: Qt.LeftButton
                                 gesturePolicy: TapHandler.DragThreshold
-                                onDoubleTapped: {
-                                    if (itemRect.itemType === "task" && itemRect.taskIndex < 0) {
+                                onTapped: {
+                                    root.selectedItemId = itemRect.itemId
+                                }
+                                onDoubleTapped: function(eventPoint) {
+                                    // Check if double-click is on the edge handle (26x26 button, 6px from top-right)
+                                    var localPos = eventPoint.position
+                                    var handleLeft = itemRect.width - 6 - 26
+                                    var handleRight = itemRect.width - 6
+                                    var handleTop = 6
+                                    var handleBottom = 6 + 26
+                                    var onEdgeHandle = (localPos.x >= handleLeft) && (localPos.x <= handleRight) &&
+                                                       (localPos.y >= handleTop) && (localPos.y <= handleBottom)
+
+                                    if (onEdgeHandle) {
+                                        // Double-click on edge handle - create connected item of same type
+                                        var newX = model.x + model.width + 40
+                                        var newY = model.y
+                                        edgeDropTaskDialog.sourceId = itemRect.itemId
+                                        edgeDropTaskDialog.sourceType = itemRect.itemType
+                                        edgeDropTaskDialog.dropX = newX
+                                        edgeDropTaskDialog.dropY = newY
+                                        edgeDropTaskDialog.open()
+                                    } else if (itemRect.itemType === "note" || itemRect.itemType === "wish" || itemRect.itemType === "obstacle") {
+                                        if (markdownNoteManager) {
+                                            markdownNoteManager.openNote(itemRect.itemId)
+                                        }
+                                    } else if (itemRect.itemType === "task" && itemRect.taskIndex < 0) {
                                         // Task not yet linked to task list - create new task
                                         newTaskDialog.openWithItem(itemRect.itemId, model.text)
                                     } else if (itemRect.itemType === "task" && itemRect.taskIndex >= 0) {
@@ -3699,6 +4317,15 @@ ApplicationWindow {
                                     } else if (itemRect.itemType !== "task") {
                                         root.openPresetDialog(itemRect.itemType, Qt.point(model.x, model.y), itemRect.itemId, model.text)
                                     }
+                                }
+                            }
+
+                            TapHandler {
+                                acceptedButtons: Qt.RightButton
+                                onTapped: {
+                                    root.selectedItemId = itemRect.itemId
+                                    diagramLayer.contextMenuItemId = itemRect.itemId
+                                    itemContextMenu.popup()
                                 }
                             }
 
@@ -3761,6 +4388,7 @@ ApplicationWindow {
                                         edgeCanvas.requestPaint()
                                     }
                                 }
+
                             }
 
                             Rectangle {
@@ -3853,20 +4481,25 @@ def create_actiondraw_window(
     diagram_model: DiagramModel,
     task_model,
     project_manager=None,
+    markdown_note_manager=None,
 ) -> QQmlApplicationEngine:
     """Create and return a QQmlApplicationEngine hosting the ActionDraw UI."""
 
     engine = QQmlApplicationEngine()
+    if markdown_note_manager is None:
+        markdown_note_manager = MarkdownNoteManager(diagram_model)
     engine.rootContext().setContextProperty("diagramModel", diagram_model)
     engine.rootContext().setContextProperty("taskModel", task_model)
     engine.rootContext().setContextProperty("projectManager", project_manager)
+    engine.rootContext().setContextProperty("markdownNoteManager", markdown_note_manager)
+    engine._markdown_note_manager = markdown_note_manager
     engine.loadData(ACTIONDRAW_QML.encode("utf-8"))
     return engine
 
 
 def main() -> int:
     from PySide6.QtWidgets import QApplication
-    from progress_list import TaskModel, ProjectManager
+    from task_model import TaskModel, ProjectManager
 
     app = QApplication.instance()
     if app is None:
@@ -3875,10 +4508,20 @@ def main() -> int:
     task_model = TaskModel()
     diagram_model = DiagramModel(task_model=task_model)
     project_manager = ProjectManager(task_model, diagram_model)
-    
+
     engine = create_actiondraw_window(diagram_model, task_model, project_manager)
     if not engine.rootObjects():
         return 1
+
+    # Load file from command line argument if provided
+    if len(sys.argv) > 1:
+        file_path = sys.argv[1]
+        # Handle file:// URLs
+        if file_path.startswith("file://"):
+            file_path = file_path[7:]
+        if os.path.exists(file_path):
+            project_manager.loadProject(file_path)
+
     return app.exec()
 
 
