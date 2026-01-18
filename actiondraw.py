@@ -181,6 +181,7 @@ class DiagramModel(QAbstractListModel):
     TaskCurrentRole = Qt.UserRole + 13
     SubDiagramPathRole = Qt.UserRole + 14
     SubDiagramProgressRole = Qt.UserRole + 15
+    NoteMarkdownRole = Qt.UserRole + 16
 
     itemsChanged = Signal()
     edgesChanged = Signal()
@@ -291,6 +292,8 @@ class DiagramModel(QAbstractListModel):
             return item.sub_diagram_path
         if role == self.SubDiagramProgressRole:
             return self._calculate_sub_diagram_progress(item.sub_diagram_path)
+        if role == self.NoteMarkdownRole:
+            return item.note_markdown
         return None
 
     def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
@@ -310,6 +313,7 @@ class DiagramModel(QAbstractListModel):
             self.TaskCurrentRole: b"taskCurrent",
             self.SubDiagramPathRole: b"subDiagramPath",
             self.SubDiagramProgressRole: b"subDiagramProgress",
+            self.NoteMarkdownRole: b"noteMarkdown",
         }
 
     # --- Properties exposed to QML -----------------------------------------
@@ -650,11 +654,13 @@ class DiagramModel(QAbstractListModel):
 
     @Slot(str, str)
     def setItemMarkdown(self, item_id: str, markdown: str) -> None:
-        for item in self._items:
+        for row, item in enumerate(self._items):
             if item.id == item_id:
                 if item.note_markdown == markdown:
                     return
                 item.note_markdown = markdown
+                index = self.index(row, 0)
+                self.dataChanged.emit(index, index, [self.NoteMarkdownRole])
                 self.itemsChanged.emit()
                 return
 
@@ -4113,7 +4119,7 @@ ApplicationWindow {
                                 ToolTip.visible: labelHover.containsMouse
                                 ToolTip.delay: 400
                                 ToolTip.timeout: 2000
-                                ToolTip.text: model.text
+                                ToolTip.text: model.text + (itemRect.itemType === "note" && model.noteMarkdown ? "\n\n" + model.noteMarkdown : "")
 
                                 MouseArea {
                                     id: labelHover
@@ -4147,7 +4153,7 @@ ApplicationWindow {
                                 ToolTip.visible: obstacleHover.containsMouse
                                 ToolTip.delay: 400
                                 ToolTip.timeout: 2000
-                                ToolTip.text: model.text
+                                ToolTip.text: model.text + (model.noteMarkdown ? "\n\n" + model.noteMarkdown : "")
 
                                 MouseArea {
                                     id: obstacleHover
@@ -4181,7 +4187,7 @@ ApplicationWindow {
                                 ToolTip.visible: wishHover.containsMouse
                                 ToolTip.delay: 400
                                 ToolTip.timeout: 2000
-                                ToolTip.text: model.text
+                                ToolTip.text: model.text + (model.noteMarkdown ? "\n\n" + model.noteMarkdown : "")
 
                                 MouseArea {
                                     id: wishHover
