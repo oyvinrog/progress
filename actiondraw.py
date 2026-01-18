@@ -3336,6 +3336,7 @@ ApplicationWindow {
                             property real pinchStartWidth: model.width
                             property real pinchStartHeight: model.height
                             property bool isEdgeDropTarget: diagramModel && diagramModel.edgeHoverTargetId === itemRect.itemId
+                            property bool hovered: itemHover.hovered
                             x: model.x
                             y: model.y
                             width: model.width
@@ -3395,6 +3396,10 @@ ApplicationWindow {
                                 anchors.fill: parent
                                 color: Qt.rgba(0, 0, 0, itemDrag.active ? 0.08 : 0)
                                 radius: itemRect.radius
+                            }
+
+                            HoverHandler {
+                                id: itemHover
                             }
 
                             Rectangle {
@@ -3851,18 +3856,207 @@ ApplicationWindow {
                                 }
                             }
 
+                            Item {
+                                id: resizeHandles
+                                anchors.fill: parent
+                                visible: itemRect.itemType !== "image" && (itemRect.hovered || itemDrag.active)
+                                z: 30
+                                property real startX: 0
+                                property real startY: 0
+                                property real startWidth: 0
+                                property real startHeight: 0
+                                property real minWidth: 40
+                                property real minHeight: 30
+
+                                function beginResize() {
+                                    startX = model.x
+                                    startY = model.y
+                                    startWidth = model.width
+                                    startHeight = model.height
+                                }
+
+                                function applyResize(deltaX, deltaY, handle) {
+                                    if (!diagramModel)
+                                        return
+                                    var dx = deltaX / root.zoomLevel
+                                    var dy = deltaY / root.zoomLevel
+                                    var left = startX
+                                    var top = startY
+                                    var right = startX + startWidth
+                                    var bottom = startY + startHeight
+
+                                    var useLeft = handle.indexOf("Left") >= 0
+                                    var useTop = handle.indexOf("Top") >= 0
+
+                                    if (useLeft) {
+                                        left = left + dx
+                                    } else {
+                                        right = right + dx
+                                    }
+
+                                    if (useTop) {
+                                        top = top + dy
+                                    } else {
+                                        bottom = bottom + dy
+                                    }
+
+                                    var newWidth = right - left
+                                    var newHeight = bottom - top
+
+                                    if (newWidth < minWidth) {
+                                        if (useLeft) {
+                                            left = right - minWidth
+                                        } else {
+                                            right = left + minWidth
+                                        }
+                                    }
+
+                                    if (newHeight < minHeight) {
+                                        if (useTop) {
+                                            top = bottom - minHeight
+                                        } else {
+                                            bottom = top + minHeight
+                                        }
+                                    }
+
+                                    newWidth = right - left
+                                    newHeight = bottom - top
+
+                                    if (root.snapToGrid) {
+                                        var snappedWidth = Math.max(minWidth, Math.round(newWidth / root.gridSpacing) * root.gridSpacing)
+                                        var snappedHeight = Math.max(minHeight, Math.round(newHeight / root.gridSpacing) * root.gridSpacing)
+                                        if (useLeft) {
+                                            left = right - snappedWidth
+                                        } else {
+                                            right = left + snappedWidth
+                                        }
+                                        if (useTop) {
+                                            top = bottom - snappedHeight
+                                        } else {
+                                            bottom = top + snappedHeight
+                                        }
+                                    }
+
+                                    diagramModel.moveItem(itemRect.itemId, left, top)
+                                    diagramModel.resizeItem(itemRect.itemId, right - left, bottom - top)
+                                    edgeCanvas.requestPaint()
+                                }
+
+                                Rectangle {
+                                    id: resizeTopLeft
+                                    width: 12
+                                    height: 12
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top
+                                    anchors.leftMargin: -2
+                                    anchors.topMargin: -2
+                                    color: "#2b3646"
+                                    border.color: "#5a6575"
+                                    radius: 3
+
+                                    DragHandler {
+                                        target: null
+                                        acceptedButtons: Qt.LeftButton
+                                        cursorShape: Qt.SizeFDiagCursor
+                                        onActiveChanged: if (active) resizeHandles.beginResize()
+                                        onTranslationChanged: if (active) resizeHandles.applyResize(translation.x, translation.y, "TopLeft")
+                                    }
+                                }
+
+                                Rectangle {
+                                    id: resizeTopRight
+                                    width: 12
+                                    height: 12
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    anchors.rightMargin: -2
+                                    anchors.topMargin: -2
+                                    color: "#2b3646"
+                                    border.color: "#5a6575"
+                                    radius: 3
+
+                                    DragHandler {
+                                        target: null
+                                        acceptedButtons: Qt.LeftButton
+                                        cursorShape: Qt.SizeBDiagCursor
+                                        onActiveChanged: if (active) resizeHandles.beginResize()
+                                        onTranslationChanged: if (active) resizeHandles.applyResize(translation.x, translation.y, "TopRight")
+                                    }
+                                }
+
+                                Rectangle {
+                                    id: resizeBottomLeft
+                                    width: 12
+                                    height: 12
+                                    anchors.left: parent.left
+                                    anchors.bottom: parent.bottom
+                                    anchors.leftMargin: -2
+                                    anchors.bottomMargin: -2
+                                    color: "#2b3646"
+                                    border.color: "#5a6575"
+                                    radius: 3
+
+                                    DragHandler {
+                                        target: null
+                                        acceptedButtons: Qt.LeftButton
+                                        cursorShape: Qt.SizeBDiagCursor
+                                        onActiveChanged: if (active) resizeHandles.beginResize()
+                                        onTranslationChanged: if (active) resizeHandles.applyResize(translation.x, translation.y, "BottomLeft")
+                                    }
+                                }
+
+                                Rectangle {
+                                    id: resizeBottomRight
+                                    width: 12
+                                    height: 12
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    anchors.rightMargin: -2
+                                    anchors.bottomMargin: -2
+                                    color: "#2b3646"
+                                    border.color: "#5a6575"
+                                    radius: 3
+
+                                    DragHandler {
+                                        target: null
+                                        acceptedButtons: Qt.LeftButton
+                                        cursorShape: Qt.SizeFDiagCursor
+                                        onActiveChanged: if (active) resizeHandles.beginResize()
+                                        onTranslationChanged: if (active) resizeHandles.applyResize(translation.x, translation.y, "BottomRight")
+                                    }
+                                }
+                            }
+
                             Text {
+                                id: itemLabel
                                 visible: itemRect.itemType !== "freetext" && itemRect.itemType !== "obstacle" && itemRect.itemType !== "wish" && itemRect.itemType !== "image"
                                 anchors.centerIn: parent
                                 width: parent.width - 36
+                                height: parent.height - 24
                                 text: model.text
                                 color: itemRect.isTask && itemRect.taskCompleted ? "#c9d7ce" : model.textColor
                                 wrapMode: Text.WordWrap
                                 horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
                                 textFormat: Text.PlainText
                                 font.pixelSize: 14
                                 font.bold: itemRect.itemType === "task"
                                 font.strikeout: itemRect.isTask && itemRect.taskCompleted
+                                maximumLineCount: Math.max(1, Math.floor(height / (font.pixelSize * 1.3)))
+                                elide: Text.ElideRight
+                                clip: true
+
+                                ToolTip.visible: labelHover.containsMouse
+                                ToolTip.delay: 400
+                                ToolTip.timeout: 2000
+                                ToolTip.text: model.text
+
+                                MouseArea {
+                                    id: labelHover
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.NoButton
+                                }
                             }
 
                             Text {
@@ -3881,6 +4075,22 @@ ApplicationWindow {
                                 textFormat: Text.PlainText
                                 font.pixelSize: 12
                                 font.bold: true
+                                height: parent.height - (anchors.bottomMargin + 12)
+                                maximumLineCount: Math.max(1, Math.floor(height / (font.pixelSize * 1.3)))
+                                elide: Text.ElideRight
+                                clip: true
+
+                                ToolTip.visible: obstacleHover.containsMouse
+                                ToolTip.delay: 400
+                                ToolTip.timeout: 2000
+                                ToolTip.text: model.text
+
+                                MouseArea {
+                                    id: obstacleHover
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.NoButton
+                                }
                             }
 
                             Text {
@@ -3899,6 +4109,22 @@ ApplicationWindow {
                                 textFormat: Text.PlainText
                                 font.pixelSize: 12
                                 font.bold: true
+                                height: parent.height - (anchors.bottomMargin + 12)
+                                maximumLineCount: Math.max(1, Math.floor(height / (font.pixelSize * 1.3)))
+                                elide: Text.ElideRight
+                                clip: true
+
+                                ToolTip.visible: wishHover.containsMouse
+                                ToolTip.delay: 400
+                                ToolTip.timeout: 2000
+                                ToolTip.text: model.text
+
+                                MouseArea {
+                                    id: wishHover
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.NoButton
+                                }
                             }
 
                             Text {
@@ -3915,7 +4141,21 @@ ApplicationWindow {
                                 verticalAlignment: Text.AlignTop
                                 textFormat: Text.PlainText
                                 font.pixelSize: 13
+                                maximumLineCount: Math.max(1, Math.floor(height / (font.pixelSize * 1.35)))
                                 elide: Text.ElideRight
+                                clip: true
+
+                                ToolTip.visible: freeTextHover.containsMouse
+                                ToolTip.delay: 400
+                                ToolTip.timeout: 2000
+                                ToolTip.text: model.text
+
+                                MouseArea {
+                                    id: freeTextHover
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.NoButton
+                                }
                             }
 
                             DragHandler {
