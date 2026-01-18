@@ -1662,6 +1662,7 @@ ApplicationWindow {
     property string pendingEdgeSourceId: ""
     property real pendingEdgeDropX: 0
     property real pendingEdgeDropY: 0
+    property string selectedItemId: ""
 
     Shortcut {
         sequence: "Ctrl+S"
@@ -1678,6 +1679,12 @@ ApplicationWindow {
                 diagramModel.pasteImageFromClipboard(center.x, center.y)
             }
         }
+    }
+
+    Shortcut {
+        sequence: "F2"
+        enabled: diagramModel !== null
+        onActivated: root.renameSelectedItem()
     }
 
     function showEdgeDropSuggestions(sourceId, dropX, dropY) {
@@ -1709,6 +1716,27 @@ ApplicationWindow {
         var cx = (viewport.contentX + viewport.width / 2) / root.zoomLevel
         var cy = (viewport.contentY + viewport.height / 2) / root.zoomLevel
         return snapPoint(Qt.point(cx, cy))
+    }
+
+    function renameItemById(itemId) {
+        if (!diagramModel || !itemId)
+            return
+        var item = diagramModel.getItemSnapshot(itemId)
+        if (!item || !item.id)
+            return
+        if (item.type === "task" && item.taskIndex < 0) {
+            newTaskDialog.openWithItem(item.id, item.text)
+        } else if (item.type === "task" && item.taskIndex >= 0) {
+            taskRenameDialog.openWithItem(item.id, item.text)
+        } else if (item.type === "freetext") {
+            root.openFreeTextDialog(Qt.point(item.x, item.y), item.id, item.text)
+        } else if (item.type !== "image") {
+            root.openPresetDialog(item.type, Qt.point(item.x, item.y), item.id, item.text)
+        }
+    }
+
+    function renameSelectedItem() {
+        renameItemById(root.selectedItemId)
     }
 
     function openPresetDialog(preset, point, itemId, initialText) {
@@ -2989,10 +3017,7 @@ ApplicationWindow {
                             }
                             height: visible ? implicitHeight : 0
                             onTriggered: {
-                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
-                                if (!item)
-                                    return
-                                root.openPresetDialog(item.type, Qt.point(item.x, item.y), item.id, item.text)
+                                root.renameItemById(diagramLayer.contextMenuItemId)
                             }
                         }
                         MenuItem {
@@ -4248,6 +4273,9 @@ ApplicationWindow {
                             TapHandler {
                                 acceptedButtons: Qt.LeftButton
                                 gesturePolicy: TapHandler.DragThreshold
+                                onTapped: {
+                                    root.selectedItemId = itemRect.itemId
+                                }
                                 onDoubleTapped: function(eventPoint) {
                                     // Check if double-click is on the edge handle (26x26 button, 6px from top-right)
                                     var localPos = eventPoint.position
@@ -4289,6 +4317,7 @@ ApplicationWindow {
                             TapHandler {
                                 acceptedButtons: Qt.RightButton
                                 onTapped: {
+                                    root.selectedItemId = itemRect.itemId
                                     diagramLayer.contextMenuItemId = itemRect.itemId
                                     itemContextMenu.popup()
                                 }

@@ -38,18 +38,58 @@ ApplicationWindow {
             font.bold: true
         }
 
-        TextArea {
-            id: editor
+        SplitView {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            text: editorRoot.noteText
-            wrapMode: TextArea.Wrap
-            color: "#f8fafc"
-            selectionColor: "#60a5fa"
-            background: Rectangle {
+            orientation: Qt.Horizontal
+
+            TextArea {
+                id: editor
+                SplitView.fillWidth: true
+                SplitView.fillHeight: true
+                text: editorRoot.noteText
+                wrapMode: TextArea.Wrap
+                color: "#f8fafc"
+                selectionColor: "#60a5fa"
+                background: Rectangle {
+                    color: "#0b1220"
+                    radius: 8
+                    border.color: "#2b3646"
+                }
+            }
+
+            Rectangle {
+                SplitView.fillWidth: true
+                SplitView.fillHeight: true
                 color: "#0b1220"
                 radius: 8
                 border.color: "#2b3646"
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    spacing: 8
+
+                    Label {
+                        text: "Preview"
+                        color: "#cbd5f5"
+                        font.pixelSize: 12
+                        font.bold: true
+                    }
+
+                    ScrollView {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+
+                        Text {
+                            width: parent.width
+                            text: editor.text
+                            textFormat: Text.MarkdownText
+                            wrapMode: Text.WordWrap
+                            color: "#e2e8f0"
+                        }
+                    }
+                }
             }
         }
 
@@ -64,7 +104,10 @@ ApplicationWindow {
 
             Button {
                 text: "Save"
-                onClicked: editorRoot.saveRequested(editorRoot.noteId, editor.text)
+                onClicked: {
+                    editorRoot.noteText = editor.text
+                    editorRoot.saveRequested(editorRoot.noteId, editor.text)
+                }
             }
         }
     }
