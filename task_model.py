@@ -40,6 +40,14 @@ class Task:
     custom_estimate: Optional[float] = None  # minutes, overrides avg estimate if set
 
 
+@dataclass
+class Tab:
+    """Represents a single tab containing tasks and diagram data."""
+    name: str
+    tasks: Dict[str, Any]  # TaskModel.to_dict() data
+    diagram: Dict[str, Any]  # DiagramModel.to_dict() data
+
+
 class TaskModel(QAbstractListModel):
     """Qt model for managing a list of tasks with time estimation."""
     
@@ -489,30 +497,184 @@ class TaskModel(QAbstractListModel):
         self.taskCountChanged.emit()
 
 
+class TabModel(QAbstractListModel):
+    """Qt model for managing multiple tabs in a project.
+
+    Each tab contains its own TaskModel and DiagramModel data.
+    """
+
+    NameRole = Qt.UserRole + 1
+    IndexRole = Qt.UserRole + 2
+
+    tabsChanged = Signal()
+    currentTabChanged = Signal()
+    currentTabIndexChanged = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self._tabs: List[Tab] = [Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})]
+        self._current_tab_index: int = 0
+
+    def rowCount(self, parent: Optional[QModelIndex] = QModelIndex()) -> int:  # type: ignore[override]
+        return len(self._tabs)
+
+    def data(self, index: QModelIndex, role: int = Qt.DisplayRole):  # type: ignore[override]
+        if not index.isValid() or not (0 <= index.row() < len(self._tabs)):
+            return None
+
+        tab = self._tabs[index.row()]
+        if role == self.NameRole:
+            return tab.name
+        if role == self.IndexRole:
+            return index.row()
+        return None
+
+    def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
+        return {
+            self.NameRole: b"name",
+            self.IndexRole: b"tabIndex",
+        }
+
+    @Property(int, notify=currentTabIndexChanged)
+    def currentTabIndex(self) -> int:
+        return self._current_tab_index
+
+    @Property(str, notify=currentTabChanged)
+    def currentTabName(self) -> str:
+        if 0 <= self._current_tab_index < len(self._tabs):
+            return self._tabs[self._current_tab_index].name
+        return ""
+
+    @Property(int, notify=tabsChanged)
+    def tabCount(self) -> int:
+        return len(self._tabs)
+
+    @Slot(str)
+    def addTab(self, name: str = "") -> None:
+        """Add a new empty tab."""
+        if not name or not name.strip():
+            name = f"Tab {len(self._tabs) + 1}"
+
+        new_tab = Tab(
+            name=name.strip(),
+            tasks={"tasks": []},
+            diagram={"items": [], "edges": [], "strokes": []}
+        )
+
+        self.beginInsertRows(QModelIndex(), len(self._tabs), len(self._tabs))
+        self._tabs.append(new_tab)
+        self.endInsertRows()
+        self.tabsChanged.emit()
+
+    @Slot(int)
+    def removeTab(self, index: int) -> None:
+        """Remove a tab at the given index. Cannot remove last tab."""
+        if len(self._tabs) <= 1:
+            return  # Cannot remove last tab
+        if index < 0 or index >= len(self._tabs):
+            return
+
+        self.beginRemoveRows(QModelIndex(), index, index)
+        self._tabs.pop(index)
+        self.endRemoveRows()
+
+        # Adjust current tab index if needed
+        if self._current_tab_index >= len(self._tabs):
+            self._current_tab_index = len(self._tabs) - 1
+            self.currentTabIndexChanged.emit()
+            self.currentTabChanged.emit()
+        elif self._current_tab_index > index:
+            self._current_tab_index -= 1
+            self.currentTabIndexChanged.emit()
+
+        self.tabsChanged.emit()
+
+    @Slot(int, str)
+    def renameTab(self, index: int, name: str) -> None:
+        """Rename a tab."""
+        if index < 0 or index >= len(self._tabs):
+            return
+        if not name or not name.strip():
+            return
+
+        self._tabs[index].name = name.strip()
+        model_index = self.index(index, 0)
+        self.dataChanged.emit(model_index, model_index, [self.NameRole])
+        if index == self._current_tab_index:
+            self.currentTabChanged.emit()
+
+    @Slot(int)
+    def setCurrentTab(self, index: int) -> None:
+        """Switch to a different tab."""
+        if index < 0 or index >= len(self._tabs):
+            return
+        if index == self._current_tab_index:
+            return
+
+        self._current_tab_index = index
+        self.currentTabIndexChanged.emit()
+        self.currentTabChanged.emit()
+
+    def getCurrentTabData(self) -> Tab:
+        """Get the current tab's data."""
+        return self._tabs[self._current_tab_index]
+
+    def setCurrentTabData(self, tasks: Dict[str, Any], diagram: Dict[str, Any]) -> None:
+        """Update the current tab's data."""
+        if 0 <= self._current_tab_index < len(self._tabs):
+            self._tabs[self._current_tab_index].tasks = tasks
+            self._tabs[self._current_tab_index].diagram = diagram
+
+    def getAllTabs(self) -> List[Tab]:
+        """Get all tabs."""
+        return self._tabs
+
+    def setTabs(self, tabs: List[Tab], active_tab: int = 0) -> None:
+        """Replace all tabs with new data."""
+        self.beginResetModel()
+        self._tabs = tabs if tabs else [Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})]
+        self.endResetModel()
+
+        # Validate and set active tab index
+        if active_tab < 0 or active_tab >= len(self._tabs):
+            active_tab = 0
+        self._current_tab_index = active_tab
+
+        self.tabsChanged.emit()
+        self.currentTabIndexChanged.emit()
+        self.currentTabChanged.emit()
+
+    def clear(self) -> None:
+        """Reset to a single empty tab."""
+        self.setTabs([Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})], 0)
+
+
 class ProjectManager(QObject):
     """Manager for saving and loading project files.
 
     Project files are JSON files containing:
-    - Task list data (titles, completion status, time spent, estimates)
-    - Diagram data (items, edges, positions)
+    - v1.0: Task list data and diagram data (single tab)
+    - v1.1: Multiple tabs, each with its own tasks and diagram data
     """
 
-    PROJECT_VERSION = "1.0"
+    PROJECT_VERSION = "1.1"
     MAX_RECENT_PROJECTS = 8
-    
+
     saveCompleted = Signal(str)  # Emitted with file path after successful save
     loadCompleted = Signal(str)  # Emitted with file path after successful load
     errorOccurred = Signal(str)  # Emitted with error message on failure
     recentProjectsChanged = Signal()  # Emitted when recent projects list changes
     currentFilePathChanged = Signal()  # Emitted when current file path changes
+    tabSwitched = Signal()  # Emitted when switching to a different tab
 
-    def __init__(self, task_model: TaskModel, diagram_model_or_manager):
+    def __init__(self, task_model: TaskModel, diagram_model_or_manager, tab_model: Optional["TabModel"] = None):
         """Initialize ProjectManager.
-        
+
         Args:
             task_model: The TaskModel instance.
             diagram_model_or_manager: Either a DiagramModel directly or an
                 ActionDrawManager (for backwards compatibility).
+            tab_model: Optional TabModel for multi-tab support.
         """
         super().__init__()
         self._task_model = task_model
@@ -521,6 +683,7 @@ class ProjectManager(QObject):
             self._diagram_model = diagram_model_or_manager.diagram_model
         else:
             self._diagram_model = diagram_model_or_manager
+        self._tab_model = tab_model
         self._current_file_path: str = ""
         self._settings = QSettings("ProgressTracker", "ProgressTracker")
         self._recent_projects: List[str] = self._load_recent_projects()
@@ -621,9 +784,17 @@ class ProjectManager(QObject):
             return
         self.saveProject(self._current_file_path)
 
+    def _saveCurrentTabState(self) -> None:
+        """Save the current task/diagram state to the tab model."""
+        if self._tab_model is not None:
+            self._tab_model.setCurrentTabData(
+                self._task_model.to_dict(),
+                self._diagram_model.to_dict()
+            )
+
     @Slot(str)
     def saveProject(self, file_path: str) -> None:
-        """Save the current project to a JSON file.
+        """Save the current project to a JSON file in v1.1 format.
 
         Args:
             file_path: Path to save the project file (should end in .progress)
@@ -639,12 +810,37 @@ class ProjectManager(QObject):
             file_path += ".progress"
 
         try:
-            project_data = {
-                "version": self.PROJECT_VERSION,
-                "saved_at": datetime.now().isoformat(),
-                "tasks": self._task_model.to_dict(),
-                "diagram": self._diagram_model.to_dict(),
-            }
+            # Save current tab state first
+            self._saveCurrentTabState()
+
+            if self._tab_model is not None:
+                # v1.1 format with tabs
+                tabs_data = []
+                for tab in self._tab_model.getAllTabs():
+                    tabs_data.append({
+                        "name": tab.name,
+                        "tasks": tab.tasks,
+                        "diagram": tab.diagram,
+                    })
+
+                project_data = {
+                    "version": self.PROJECT_VERSION,
+                    "saved_at": datetime.now().isoformat(),
+                    "tabs": tabs_data,
+                    "active_tab": self._tab_model.currentTabIndex,
+                }
+            else:
+                # Fallback: save as single tab in v1.1 format
+                project_data = {
+                    "version": self.PROJECT_VERSION,
+                    "saved_at": datetime.now().isoformat(),
+                    "tabs": [{
+                        "name": "Main",
+                        "tasks": self._task_model.to_dict(),
+                        "diagram": self._diagram_model.to_dict(),
+                    }],
+                    "active_tab": 0,
+                }
 
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(project_data, f, indent=2, ensure_ascii=False)
@@ -660,9 +856,24 @@ class ProjectManager(QObject):
             self.errorOccurred.emit(error_msg)
             print(error_msg)
 
+    def _loadFromV1(self, project_data: Dict[str, Any]) -> List[Tab]:
+        """Convert v1.0 format data to tabs structure.
+
+        Args:
+            project_data: Project data in v1.0 format (tasks + diagram at root).
+
+        Returns:
+            List containing a single Tab with the v1.0 data.
+        """
+        tasks_data = project_data.get("tasks", {"tasks": []})
+        diagram_data = project_data.get("diagram", {"items": [], "edges": [], "strokes": []})
+        return [Tab(name="Main", tasks=tasks_data, diagram=diagram_data)]
+
     @Slot(str)
     def loadProject(self, file_path: str) -> None:
         """Load a project from a JSON file.
+
+        Supports both v1.0 (single tab) and v1.1 (multi-tab) formats.
 
         Args:
             file_path: Path to the project file
@@ -681,18 +892,42 @@ class ProjectManager(QObject):
             with open(file_path, "r", encoding="utf-8") as f:
                 project_data = json.load(f)
 
-            # Validate version
-            version = project_data.get("version", "unknown")
-            if version != self.PROJECT_VERSION:
-                print(f"Warning: Loading project from version {version}, current is {self.PROJECT_VERSION}")
+            version = project_data.get("version", "1.0")
+            active_tab = 0
 
-            # Load tasks
-            tasks_data = project_data.get("tasks", {})
-            self._task_model.from_dict(tasks_data)
+            # Handle different versions
+            if version == "1.0" or "tabs" not in project_data:
+                # v1.0 format: convert to single-tab structure
+                print(f"Loading v1.0 project, converting to multi-tab format")
+                tabs = self._loadFromV1(project_data)
+            else:
+                # v1.1+ format: load tabs directly
+                tabs_data = project_data.get("tabs", [])
+                tabs = []
+                for tab_data in tabs_data:
+                    tabs.append(Tab(
+                        name=tab_data.get("name", "Tab"),
+                        tasks=tab_data.get("tasks", {"tasks": []}),
+                        diagram=tab_data.get("diagram", {"items": [], "edges": [], "strokes": []})
+                    ))
+                active_tab = project_data.get("active_tab", 0)
 
-            # Load diagram
-            diagram_data = project_data.get("diagram", {})
-            self._diagram_model.from_dict(diagram_data)
+                # Ensure at least one tab exists
+                if not tabs:
+                    tabs = [Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})]
+
+            # Validate active_tab index
+            if active_tab < 0 or active_tab >= len(tabs):
+                active_tab = 0
+
+            # Update tab model if available
+            if self._tab_model is not None:
+                self._tab_model.setTabs(tabs, active_tab)
+
+            # Load the active tab's data into the models
+            active_tab_data = tabs[active_tab]
+            self._task_model.from_dict(active_tab_data.tasks)
+            self._diagram_model.from_dict(active_tab_data.diagram)
             self._diagram_model.setProjectPath(file_path)
 
             self._current_file_path = file_path
@@ -713,3 +948,28 @@ class ProjectManager(QObject):
             error_msg = f"Corrupted project file: {e}"
             self.errorOccurred.emit(error_msg)
             print(error_msg)
+
+    @Slot(int)
+    def switchTab(self, index: int) -> None:
+        """Switch to a different tab, saving current state first.
+
+        Args:
+            index: Index of the tab to switch to.
+        """
+        if self._tab_model is None:
+            return
+
+        # Save current tab state
+        self._saveCurrentTabState()
+
+        # Switch tab in tab model
+        self._tab_model.setCurrentTab(index)
+
+        # Load new tab data into models
+        tab_data = self._tab_model.getCurrentTabData()
+        self._task_model.from_dict(tab_data.tasks)
+        self._diagram_model.from_dict(tab_data.diagram)
+        if self._current_file_path:
+            self._diagram_model.setProjectPath(self._current_file_path)
+
+        self.tabSwitched.emit()

@@ -2757,6 +2757,144 @@ ApplicationWindow {
             }
         }
 
+        // Tab Bar for multiple diagrams
+        RowLayout {
+            id: tabBarRow
+            Layout.fillWidth: true
+            spacing: 4
+            visible: tabModel !== null
+
+            Repeater {
+                model: tabModel
+
+                delegate: Rectangle {
+                    id: tabButton
+                    property bool isActive: tabModel ? index === tabModel.currentTabIndex : false
+                    width: tabLabel.implicitWidth + 24
+                    height: 32
+                    radius: 6
+                    color: isActive ? "#3b485c" : (tabMouseArea.containsMouse ? "#2a3444" : "#1b2028")
+                    border.color: isActive ? "#4a9eff" : "#2e3744"
+                    border.width: isActive ? 2 : 1
+
+                    Text {
+                        id: tabLabel
+                        anchors.centerIn: parent
+                        text: model.name
+                        color: isActive ? "#ffffff" : "#9aa6b8"
+                        font.pixelSize: 12
+                        font.bold: isActive
+                    }
+
+                    MouseArea {
+                        id: tabMouseArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        onClicked: function(mouse) {
+                            if (mouse.button === Qt.RightButton) {
+                                tabContextMenu.tabIndex = index
+                                tabContextMenu.tabName = model.name
+                                tabContextMenu.popup()
+                            } else {
+                                if (projectManager)
+                                    projectManager.switchTab(index)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Add tab button
+            Rectangle {
+                width: 28
+                height: 28
+                radius: 6
+                color: addTabMouseArea.containsMouse ? "#2a3444" : "#1b2028"
+                border.color: "#2e3744"
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "+"
+                    color: "#9aa6b8"
+                    font.pixelSize: 16
+                    font.bold: true
+                }
+
+                MouseArea {
+                    id: addTabMouseArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onClicked: {
+                        if (tabModel) {
+                            tabModel.addTab("")
+                            // Switch to the newly created tab
+                            if (projectManager)
+                                projectManager.switchTab(tabModel.tabCount - 1)
+                        }
+                    }
+                }
+            }
+
+            Item { Layout.fillWidth: true }
+        }
+
+        // Tab context menu
+        Menu {
+            id: tabContextMenu
+            property int tabIndex: -1
+            property string tabName: ""
+
+            MenuItem {
+                text: "Rename..."
+                onTriggered: {
+                    renameTabDialog.tabIndex = tabContextMenu.tabIndex
+                    renameTabDialog.currentName = tabContextMenu.tabName
+                    renameTabDialog.open()
+                }
+            }
+            MenuItem {
+                text: "Delete"
+                enabled: tabModel ? tabModel.tabCount > 1 : false
+                onTriggered: {
+                    if (tabModel && tabModel.tabCount > 1)
+                        tabModel.removeTab(tabContextMenu.tabIndex)
+                }
+            }
+        }
+
+        // Rename tab dialog
+        Dialog {
+            id: renameTabDialog
+            property int tabIndex: -1
+            property string currentName: ""
+            title: "Rename Tab"
+            modal: true
+            anchors.centerIn: parent
+            width: 300
+            standardButtons: Dialog.Ok | Dialog.Cancel
+
+            TextField {
+                id: renameTabField
+                width: parent.width
+                text: renameTabDialog.currentName
+                placeholderText: "Tab name"
+                selectByMouse: true
+                onAccepted: renameTabDialog.accept()
+            }
+
+            onOpened: {
+                renameTabField.text = currentName
+                renameTabField.selectAll()
+                renameTabField.forceActiveFocus()
+            }
+
+            onAccepted: {
+                if (tabModel && renameTabField.text.trim())
+                    tabModel.renameTab(tabIndex, renameTabField.text.trim())
+            }
+        }
+
         RowLayout {
             Layout.fillWidth: true
             spacing: 12
@@ -4470,6 +4608,10 @@ ApplicationWindow {
             root.updateBoardBounds()
             Qt.callLater(root.scrollToContent)
         }
+        function onTabSwitched() {
+            root.updateBoardBounds()
+            Qt.callLater(root.scrollToContent)
+        }
     }
 
     Component.onCompleted: { updateBoardBounds(); Qt.callLater(resetView) }
@@ -4482,6 +4624,7 @@ def create_actiondraw_window(
     task_model,
     project_manager=None,
     markdown_note_manager=None,
+    tab_model=None,
 ) -> QQmlApplicationEngine:
     """Create and return a QQmlApplicationEngine hosting the ActionDraw UI."""
 
@@ -4492,6 +4635,7 @@ def create_actiondraw_window(
     engine.rootContext().setContextProperty("taskModel", task_model)
     engine.rootContext().setContextProperty("projectManager", project_manager)
     engine.rootContext().setContextProperty("markdownNoteManager", markdown_note_manager)
+    engine.rootContext().setContextProperty("tabModel", tab_model)
     engine._markdown_note_manager = markdown_note_manager
     engine.loadData(ACTIONDRAW_QML.encode("utf-8"))
     return engine
@@ -4499,7 +4643,9 @@ def create_actiondraw_window(
 
 def main() -> int:
     from PySide6.QtWidgets import QApplication
-    from task_model import TaskModel, ProjectManager
+    from task_model import TaskModel, ProjectManager, TabModel
+
+    smoke_mode = "--smoke" in sys.argv or os.environ.get("ACTIONDRAW_SMOKE") == "1"
 
     app = QApplication.instance()
     if app is None:
@@ -4507,11 +4653,15 @@ def main() -> int:
 
     task_model = TaskModel()
     diagram_model = DiagramModel(task_model=task_model)
-    project_manager = ProjectManager(task_model, diagram_model)
+    tab_model = TabModel()
+    project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
-    engine = create_actiondraw_window(diagram_model, task_model, project_manager)
+    engine = create_actiondraw_window(diagram_model, task_model, project_manager, tab_model=tab_model)
     if not engine.rootObjects():
         return 1
+
+    if smoke_mode:
+        return 0
 
     # Load file from command line argument if provided
     if len(sys.argv) > 1:

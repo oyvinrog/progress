@@ -1815,5 +1815,240 @@ class TestCommandLineLoading:
         assert os.path.exists(path)
 
 
+class TestMultiTabSupport:
+    """Tests for multi-tab support in ActionDraw."""
+
+    @pytest.fixture
+    def tab_model(self, app):
+        from task_model import TabModel
+        return TabModel()
+
+    @pytest.fixture
+    def project_manager_with_tabs(self, app, task_model, empty_diagram_model):
+        from task_model import ProjectManager, TabModel
+        tab_model = TabModel()
+        return ProjectManager(task_model, empty_diagram_model, tab_model), tab_model
+
+    # --- Format tests ---
+
+    def test_load_v1_format_creates_single_tab(self, app, tmp_path):
+        """Loading a v1.0 file creates a single 'Main' tab."""
+        import json
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        # Create v1.0 format file
+        v1_data = {
+            "version": "1.0",
+            "saved_at": "2024-01-01T12:00:00",
+            "tasks": {
+                "tasks": [
+                    {"title": "Task 1", "completed": False, "time_spent": 0.0}
+                ]
+            },
+            "diagram": {
+                "items": [
+                    {"id": "box_0", "item_type": "box", "x": 10.0, "y": 20.0,
+                     "width": 120.0, "height": 60.0, "text": "Test Box",
+                     "task_index": -1, "color": "#4a9eff", "text_color": "#f5f6f8"}
+                ],
+                "edges": [],
+                "strokes": []
+            }
+        }
+        project_file = tmp_path / "v1_project.progress"
+        project_file.write_text(json.dumps(v1_data))
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        project_manager.loadProject(str(project_file))
+
+        assert tab_model.tabCount == 1
+        assert tab_model.currentTabName == "Main"
+        assert task_model.rowCount() == 1
+        assert diagram_model.count == 1
+
+    def test_save_creates_v1_1_format(self, app, tmp_path):
+        """Saving a project creates v1.1 format with tabs array."""
+        import json
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        task_model.addTask("Test Task", -1)
+        diagram_model.addBox(50.0, 50.0, "Box")
+
+        project_file = tmp_path / "new_project.progress"
+        project_manager.saveProject(str(project_file))
+
+        data = json.loads(project_file.read_text())
+        assert data["version"] == "1.1"
+        assert "tabs" in data
+        assert len(data["tabs"]) == 1
+        assert data["tabs"][0]["name"] == "Main"
+        assert "active_tab" in data
+        assert data["active_tab"] == 0
+
+    def test_roundtrip_multiple_tabs(self, app, tmp_path):
+        """Save and load preserves multiple tabs."""
+        import json
+        from task_model import TaskModel, ProjectManager, TabModel, Tab
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        # Add tasks and items to first tab
+        task_model.addTask("Tab 1 Task", -1)
+        diagram_model.addBox(10.0, 10.0, "Tab 1 Box")
+
+        # Save state and add second tab
+        tab_model.addTab("Second Tab")
+        project_manager.switchTab(1)
+
+        # Add different content to second tab
+        task_model.addTask("Tab 2 Task", -1)
+        diagram_model.addBox(100.0, 100.0, "Tab 2 Box")
+
+        # Save project
+        project_file = tmp_path / "multi_tab.progress"
+        project_manager.saveProject(str(project_file))
+
+        # Reload in new instances
+        task_model2 = TaskModel()
+        diagram_model2 = DiagramModel()
+        tab_model2 = TabModel()
+        project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
+
+        project_manager2.loadProject(str(project_file))
+
+        assert tab_model2.tabCount == 2
+        assert tab_model2.currentTabIndex == 1  # Was active tab
+
+        # Verify tab 2 content loaded
+        assert task_model2.rowCount() == 1
+        assert diagram_model2.count == 1
+
+        # Switch to tab 1 and verify its content
+        project_manager2.switchTab(0)
+        assert task_model2.rowCount() == 1
+        assert diagram_model2.count == 1
+
+    # --- Tab operation tests ---
+
+    def test_add_tab(self, tab_model):
+        """Adding a tab increases count and allows switch."""
+        assert tab_model.tabCount == 1  # Starts with Main
+
+        tab_model.addTab("New Tab")
+        assert tab_model.tabCount == 2
+
+        tab_model.addTab("")  # Empty name gets default
+        assert tab_model.tabCount == 3
+
+    def test_remove_tab(self, tab_model):
+        """Removing a tab decreases count."""
+        tab_model.addTab("Tab 2")
+        tab_model.addTab("Tab 3")
+        assert tab_model.tabCount == 3
+
+        tab_model.removeTab(1)
+        assert tab_model.tabCount == 2
+
+    def test_rename_tab(self, tab_model):
+        """Renaming a tab updates the name."""
+        assert tab_model.currentTabName == "Main"
+
+        tab_model.renameTab(0, "Renamed Tab")
+        assert tab_model.currentTabName == "Renamed Tab"
+
+    def test_switch_tab(self, tab_model):
+        """Switching tabs updates current index."""
+        tab_model.addTab("Second")
+        assert tab_model.currentTabIndex == 0
+
+        tab_model.setCurrentTab(1)
+        assert tab_model.currentTabIndex == 1
+        assert tab_model.currentTabName == "Second"
+
+    def test_cannot_remove_last_tab(self, tab_model):
+        """Cannot remove the last remaining tab."""
+        assert tab_model.tabCount == 1
+        tab_model.removeTab(0)
+        assert tab_model.tabCount == 1  # Still has 1 tab
+
+    # --- Tab data isolation tests ---
+
+    def test_tabs_have_independent_diagrams(self, app, tmp_path):
+        """Each tab maintains its own diagram data."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        # Add box to first tab
+        diagram_model.addBox(10.0, 10.0, "Tab 1 Box")
+        assert diagram_model.count == 1
+
+        # Switch to new tab
+        tab_model.addTab("Tab 2")
+        project_manager.switchTab(1)
+
+        # New tab should be empty
+        assert diagram_model.count == 0
+
+        # Add different box
+        diagram_model.addBox(50.0, 50.0, "Tab 2 Box")
+        assert diagram_model.count == 1
+
+        # Switch back to first tab
+        project_manager.switchTab(0)
+        assert diagram_model.count == 1
+
+        # Verify it's the original box
+        index = diagram_model.index(0, 0)
+        assert diagram_model.data(index, diagram_model.TextRole) == "Tab 1 Box"
+
+    def test_tabs_have_independent_tasks(self, app, tmp_path):
+        """Each tab maintains its own task list."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        # Add task to first tab
+        task_model.addTask("Tab 1 Task", -1)
+        assert task_model.rowCount() == 1
+
+        # Switch to new tab
+        tab_model.addTab("Tab 2")
+        project_manager.switchTab(1)
+
+        # New tab should have no tasks
+        assert task_model.rowCount() == 0
+
+        # Add different task
+        task_model.addTask("Tab 2 Task", -1)
+        assert task_model.rowCount() == 1
+
+        # Switch back to first tab
+        project_manager.switchTab(0)
+        assert task_model.rowCount() == 1
+
+        # Verify it's the original task
+        index = task_model.index(0, 0)
+        assert task_model.data(index, task_model.TitleRole) == "Tab 1 Task"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

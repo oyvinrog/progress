@@ -14,6 +14,8 @@ Usage:
 
 import sys
 import ast
+import subprocess
+from pathlib import Path
 
 
 def check_syntax(filename):
@@ -137,6 +139,101 @@ def check_basic_functionality():
         return False
 
 
+def _load_pyproject_modules():
+    """Load py-modules from pyproject.toml if possible."""
+    try:
+        import tomllib as toml
+    except ImportError:
+        try:
+            import tomli as toml
+        except ImportError:
+            print("⚠ Packaging check skipped (tomllib/tomli not available)")
+            return None
+
+    try:
+        with open("pyproject.toml", "rb") as f:
+            data = toml.load(f)
+    except Exception as e:
+        print(f"⚠ Packaging check skipped ({e})")
+        return None
+
+    modules = data.get("tool", {}).get("setuptools", {}).get("py-modules", [])
+    if not modules:
+        print("⚠ Packaging check skipped (no tool.setuptools.py-modules)")
+        return None
+    return modules
+
+
+def check_packaging_manifest():
+    """Ensure local imports are listed in pyproject.toml py-modules."""
+    modules = _load_pyproject_modules()
+    if not modules:
+        return True
+
+    module_set = set(modules)
+    local_modules = {p.stem for p in Path(".").glob("*.py")}
+    missing = {}
+
+    for module_name in modules:
+        module_path = Path(f"{module_name}.py")
+        if not module_path.exists():
+            continue
+
+        try:
+            source = module_path.read_text(encoding="utf-8")
+            tree = ast.parse(source, str(module_path))
+        except Exception as e:
+            print(f"⚠ Packaging check skipped ({module_path}: {e})")
+            return True
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    name = alias.name.split(".")[0]
+                    if name in local_modules and name not in module_set:
+                        missing.setdefault(module_name, set()).add(name)
+            elif isinstance(node, ast.ImportFrom):
+                if node.module:
+                    name = node.module.split(".")[0]
+                    if name in local_modules and name not in module_set:
+                        missing.setdefault(module_name, set()).add(name)
+
+    if missing:
+        print("✗ Packaging manifest missing local modules:")
+        for module_name in sorted(missing):
+            deps = ", ".join(sorted(missing[module_name]))
+            print(f"  {module_name}.py imports: {deps}")
+        print("  Add them under [tool.setuptools].py-modules in pyproject.toml")
+        return False
+
+    print("✓ Packaging manifest covers local imports")
+    return True
+
+
+def check_actiondraw_smoke():
+    """Run a smoke test for `python -m actiondraw` without entering the event loop."""
+    cmd = [sys.executable, "-m", "actiondraw", "--smoke"]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+
+    if result.returncode == 0:
+        print("✓ ActionDraw smoke test passed")
+        return True
+
+    stderr = (result.stderr or "").strip()
+    stdout = (result.stdout or "").strip()
+    error_msg = stderr or stdout
+    if _is_missing_gui_dependency(error_msg):
+        print("⚠ ActionDraw smoke test skipped (GUI dependencies not available)")
+        return True
+
+    print("✗ ActionDraw smoke test failed")
+    if stdout:
+        print(stdout)
+    if stderr:
+        print(stderr)
+    return False
+
+
 def main():
     """Run all validation checks."""
     print("ActionDraw Validation")
@@ -159,9 +256,17 @@ def main():
     print("\n3. Basic Functionality Checks")
     print("-" * 50)
     functionality_ok = check_basic_functionality()
+
+    print("\n4. Packaging Manifest Checks")
+    print("-" * 50)
+    packaging_ok = check_packaging_manifest()
+
+    print("\n5. ActionDraw Smoke Test")
+    print("-" * 50)
+    smoke_ok = check_actiondraw_smoke()
     
     print("\n" + "=" * 50)
-    if syntax_ok and import_ok and functionality_ok:
+    if syntax_ok and import_ok and functionality_ok and packaging_ok and smoke_ok:
         print("✓ All validation checks passed!")
         return 0
     else:
