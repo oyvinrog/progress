@@ -14,6 +14,7 @@ Usage:
 
 import sys
 import ast
+import subprocess
 from pathlib import Path
 
 
@@ -209,6 +210,30 @@ def check_packaging_manifest():
     return True
 
 
+def check_actiondraw_smoke():
+    """Run a smoke test for `python -m actiondraw` without entering the event loop."""
+    cmd = [sys.executable, "-m", "actiondraw", "--smoke"]
+    result = subprocess.run(cmd, capture_output=True, text=True)
+
+    if result.returncode == 0:
+        print("✓ ActionDraw smoke test passed")
+        return True
+
+    stderr = (result.stderr or "").strip()
+    stdout = (result.stdout or "").strip()
+    error_msg = stderr or stdout
+    if _is_missing_gui_dependency(error_msg):
+        print("⚠ ActionDraw smoke test skipped (GUI dependencies not available)")
+        return True
+
+    print("✗ ActionDraw smoke test failed")
+    if stdout:
+        print(stdout)
+    if stderr:
+        print(stderr)
+    return False
+
+
 def main():
     """Run all validation checks."""
     print("ActionDraw Validation")
@@ -235,9 +260,13 @@ def main():
     print("\n4. Packaging Manifest Checks")
     print("-" * 50)
     packaging_ok = check_packaging_manifest()
+
+    print("\n5. ActionDraw Smoke Test")
+    print("-" * 50)
+    smoke_ok = check_actiondraw_smoke()
     
     print("\n" + "=" * 50)
-    if syntax_ok and import_ok and functionality_ok and packaging_ok:
+    if syntax_ok and import_ok and functionality_ok and packaging_ok and smoke_ok:
         print("✓ All validation checks passed!")
         return 0
     else:

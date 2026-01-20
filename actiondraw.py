@@ -4501,6 +4501,8 @@ def main() -> int:
     from PySide6.QtWidgets import QApplication
     from task_model import TaskModel, ProjectManager
 
+    smoke_mode = "--smoke" in sys.argv or os.environ.get("ACTIONDRAW_SMOKE") == "1"
+
     app = QApplication.instance()
     if app is None:
         app = QApplication(sys.argv)
@@ -4512,6 +4514,9 @@ def main() -> int:
     engine = create_actiondraw_window(diagram_model, task_model, project_manager)
     if not engine.rootObjects():
         return 1
+
+    if smoke_mode:
+        return 0
 
     # Load file from command line argument if provided
     if len(sys.argv) > 1:
