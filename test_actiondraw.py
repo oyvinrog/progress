@@ -2050,5 +2050,286 @@ class TestMultiTabSupport:
         assert task_model.data(index, task_model.TitleRole) == "Tab 1 Task"
 
 
+class TestCountdownTimer:
+    """Tests for the countdown timer feature."""
+
+    @pytest.fixture
+    def task_model_with_timer(self, app):
+        """Create a task model with a task and set up for timer testing."""
+        model = TaskModel()
+        model.addTask("Task with timer", -1)
+        return model
+
+    @pytest.fixture
+    def diagram_model_with_timer_task(self, app, task_model_with_timer):
+        """Create a diagram model with a task item for timer testing."""
+        model = DiagramModel(task_model=task_model_with_timer)
+        model.addTask(0, 100.0, 100.0)
+        return model, task_model_with_timer
+
+    # --- TaskModel countdown tests ---
+
+    def test_countdown_fields_default_none(self, task_model_with_timer):
+        """Task countdown fields default to None."""
+        index = task_model_with_timer.index(0, 0)
+        remaining = task_model_with_timer.data(index, task_model_with_timer.CountdownRemainingRole)
+        progress = task_model_with_timer.data(index, task_model_with_timer.CountdownProgressRole)
+        expired = task_model_with_timer.data(index, task_model_with_timer.CountdownExpiredRole)
+        active = task_model_with_timer.data(index, task_model_with_timer.CountdownActiveRole)
+
+        assert remaining == -1.0  # No timer
+        assert progress == -1.0  # No timer
+        assert expired == False
+        assert active == False
+
+    def test_set_countdown_timer_seconds(self, task_model_with_timer):
+        """Setting countdown timer in seconds works."""
+        task_model_with_timer.setCountdownTimer(0, "30s")
+        index = task_model_with_timer.index(0, 0)
+
+        remaining = task_model_with_timer.data(index, task_model_with_timer.CountdownRemainingRole)
+        progress = task_model_with_timer.data(index, task_model_with_timer.CountdownProgressRole)
+        active = task_model_with_timer.data(index, task_model_with_timer.CountdownActiveRole)
+
+        assert remaining > 29.0 and remaining <= 30.0
+        assert progress > 0.95 and progress <= 1.0
+        assert active == True
+
+    def test_set_countdown_timer_minutes(self, task_model_with_timer):
+        """Setting countdown timer in minutes works."""
+        task_model_with_timer.setCountdownTimer(0, "2m")
+        index = task_model_with_timer.index(0, 0)
+
+        remaining = task_model_with_timer.data(index, task_model_with_timer.CountdownRemainingRole)
+        assert remaining > 119.0 and remaining <= 120.0  # ~2 minutes in seconds
+
+    def test_set_countdown_timer_hours(self, task_model_with_timer):
+        """Setting countdown timer in hours works."""
+        task_model_with_timer.setCountdownTimer(0, "1h")
+        index = task_model_with_timer.index(0, 0)
+
+        remaining = task_model_with_timer.data(index, task_model_with_timer.CountdownRemainingRole)
+        assert remaining > 3599.0 and remaining <= 3600.0  # ~1 hour in seconds
+
+    def test_set_countdown_timer_numeric(self, task_model_with_timer):
+        """Setting countdown timer with plain number (seconds) works."""
+        task_model_with_timer.setCountdownTimer(0, "60")
+        index = task_model_with_timer.index(0, 0)
+
+        remaining = task_model_with_timer.data(index, task_model_with_timer.CountdownRemainingRole)
+        assert remaining > 59.0 and remaining <= 60.0
+
+    def test_set_countdown_timer_invalid_row(self, task_model_with_timer):
+        """Setting timer on invalid row does nothing."""
+        task_model_with_timer.setCountdownTimer(-1, "30s")
+        task_model_with_timer.setCountdownTimer(100, "30s")
+        # Should not crash
+
+    def test_set_countdown_timer_invalid_format(self, task_model_with_timer):
+        """Setting timer with invalid format does nothing."""
+        task_model_with_timer.setCountdownTimer(0, "invalid")
+        index = task_model_with_timer.index(0, 0)
+        active = task_model_with_timer.data(index, task_model_with_timer.CountdownActiveRole)
+        assert active == False
+
+    def test_set_countdown_timer_empty_string(self, task_model_with_timer):
+        """Setting timer with empty string does nothing."""
+        task_model_with_timer.setCountdownTimer(0, "")
+        index = task_model_with_timer.index(0, 0)
+        active = task_model_with_timer.data(index, task_model_with_timer.CountdownActiveRole)
+        assert active == False
+
+    def test_clear_countdown_timer(self, task_model_with_timer):
+        """Clearing countdown timer removes it."""
+        task_model_with_timer.setCountdownTimer(0, "30s")
+        task_model_with_timer.clearCountdownTimer(0)
+        index = task_model_with_timer.index(0, 0)
+
+        remaining = task_model_with_timer.data(index, task_model_with_timer.CountdownRemainingRole)
+        active = task_model_with_timer.data(index, task_model_with_timer.CountdownActiveRole)
+
+        assert remaining == -1.0
+        assert active == False
+
+    def test_restart_countdown_timer(self, task_model_with_timer):
+        """Restarting countdown timer resets to full duration."""
+        import time
+
+        task_model_with_timer.setCountdownTimer(0, "30s")
+        time.sleep(0.1)  # Let some time pass
+
+        task_model_with_timer.restartCountdownTimer(0)
+        index = task_model_with_timer.index(0, 0)
+
+        remaining = task_model_with_timer.data(index, task_model_with_timer.CountdownRemainingRole)
+        assert remaining > 29.9  # Should be back to ~30 seconds
+
+    def test_restart_without_timer_does_nothing(self, task_model_with_timer):
+        """Restarting when no timer set does nothing."""
+        task_model_with_timer.restartCountdownTimer(0)
+        index = task_model_with_timer.index(0, 0)
+        active = task_model_with_timer.data(index, task_model_with_timer.CountdownActiveRole)
+        assert active == False
+
+    def test_complete_task_clears_timer(self, task_model_with_timer):
+        """Completing a task clears its countdown timer."""
+        task_model_with_timer.setCountdownTimer(0, "30s")
+        task_model_with_timer.toggleComplete(0, True)
+        index = task_model_with_timer.index(0, 0)
+
+        active = task_model_with_timer.data(index, task_model_with_timer.CountdownActiveRole)
+        assert active == False
+
+    def test_countdown_expired_when_time_runs_out(self, task_model_with_timer):
+        """Countdown expired is True when time runs out."""
+        import time
+
+        task_model_with_timer.setCountdownTimer(0, "0.05s")  # 50ms
+        time.sleep(0.1)  # Wait for it to expire
+
+        index = task_model_with_timer.index(0, 0)
+        expired = task_model_with_timer.data(index, task_model_with_timer.CountdownExpiredRole)
+        remaining = task_model_with_timer.data(index, task_model_with_timer.CountdownRemainingRole)
+
+        assert expired == True
+        assert remaining == 0.0
+
+    def test_countdown_progress_decreases_over_time(self, task_model_with_timer):
+        """Countdown progress decreases as time passes."""
+        import time
+
+        task_model_with_timer.setCountdownTimer(0, "1s")
+        index = task_model_with_timer.index(0, 0)
+
+        progress1 = task_model_with_timer.data(index, task_model_with_timer.CountdownProgressRole)
+        time.sleep(0.3)
+        progress2 = task_model_with_timer.data(index, task_model_with_timer.CountdownProgressRole)
+
+        assert progress2 < progress1
+
+    # --- Serialization tests ---
+
+    def test_countdown_serialization(self, task_model_with_timer):
+        """Countdown fields are serialized properly."""
+        task_model_with_timer.setCountdownTimer(0, "60s")
+
+        data = task_model_with_timer.to_dict()
+        task_data = data["tasks"][0]
+
+        assert "countdown_duration" in task_data
+        assert task_data["countdown_duration"] == 60.0
+        assert "countdown_start" in task_data
+
+    def test_countdown_deserialization(self, app):
+        """Countdown fields are deserialized properly."""
+        import time
+        model = TaskModel()
+
+        # Create data with countdown fields
+        data = {
+            "tasks": [{
+                "title": "Timed Task",
+                "completed": False,
+                "time_spent": 0.0,
+                "parent_index": -1,
+                "indent_level": 0,
+                "custom_estimate": None,
+                "countdown_duration": 60.0,
+                "countdown_start": time.time()
+            }]
+        }
+
+        model.from_dict(data)
+        index = model.index(0, 0)
+
+        active = model.data(index, model.CountdownActiveRole)
+        remaining = model.data(index, model.CountdownRemainingRole)
+
+        assert active == True
+        assert remaining > 0 and remaining <= 60.0
+
+    def test_countdown_not_serialized_when_none(self, task_model_with_timer):
+        """Countdown fields not included when not set."""
+        data = task_model_with_timer.to_dict()
+        task_data = data["tasks"][0]
+
+        assert "countdown_duration" not in task_data
+        assert "countdown_start" not in task_data
+
+    # --- DiagramModel countdown tests ---
+
+    def test_diagram_countdown_roles_exist(self, diagram_model_with_timer_task):
+        """DiagramModel has countdown roles."""
+        model, _ = diagram_model_with_timer_task
+        role_names = model.roleNames()
+
+        assert b"taskCountdownRemaining" in role_names.values()
+        assert b"taskCountdownProgress" in role_names.values()
+        assert b"taskCountdownExpired" in role_names.values()
+        assert b"taskCountdownActive" in role_names.values()
+
+    def test_diagram_countdown_reflects_task_model(self, diagram_model_with_timer_task):
+        """DiagramModel countdown roles reflect TaskModel state."""
+        diagram_model, task_model = diagram_model_with_timer_task
+
+        task_model.setCountdownTimer(0, "30s")
+        index = diagram_model.index(0, 0)
+
+        active = diagram_model.data(index, diagram_model.TaskCountdownActiveRole)
+        remaining = diagram_model.data(index, diagram_model.TaskCountdownRemainingRole)
+        progress = diagram_model.data(index, diagram_model.TaskCountdownProgressRole)
+
+        assert active == True
+        assert remaining > 29.0 and remaining <= 30.0
+        assert progress > 0.95 and progress <= 1.0
+
+    def test_diagram_set_countdown_timer_slot(self, diagram_model_with_timer_task):
+        """DiagramModel setTaskCountdownTimer slot works."""
+        diagram_model, task_model = diagram_model_with_timer_task
+
+        diagram_model.setTaskCountdownTimer(0, "45s")
+        index = task_model.index(0, 0)
+
+        remaining = task_model.data(index, task_model.CountdownRemainingRole)
+        assert remaining > 44.0 and remaining <= 45.0
+
+    def test_diagram_clear_countdown_timer_slot(self, diagram_model_with_timer_task):
+        """DiagramModel clearTaskCountdownTimer slot works."""
+        diagram_model, task_model = diagram_model_with_timer_task
+
+        task_model.setCountdownTimer(0, "30s")
+        diagram_model.clearTaskCountdownTimer(0)
+
+        index = task_model.index(0, 0)
+        active = task_model.data(index, task_model.CountdownActiveRole)
+        assert active == False
+
+    def test_diagram_restart_countdown_timer_slot(self, diagram_model_with_timer_task):
+        """DiagramModel restartTaskCountdownTimer slot works."""
+        import time
+        diagram_model, task_model = diagram_model_with_timer_task
+
+        task_model.setCountdownTimer(0, "30s")
+        time.sleep(0.1)
+        diagram_model.restartTaskCountdownTimer(0)
+
+        index = task_model.index(0, 0)
+        remaining = task_model.data(index, task_model.CountdownRemainingRole)
+        assert remaining > 29.9
+
+    def test_diagram_countdown_no_task_model(self, app):
+        """DiagramModel handles countdown queries without task model."""
+        model = DiagramModel()
+        model.addBox(100.0, 100.0, "Box")
+        index = model.index(0, 0)
+
+        # Should return defaults without crashing
+        remaining = model.data(index, model.TaskCountdownRemainingRole)
+        active = model.data(index, model.TaskCountdownActiveRole)
+
+        assert remaining == -1.0
+        assert active == False
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
