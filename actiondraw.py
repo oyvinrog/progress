@@ -2764,41 +2764,67 @@ ApplicationWindow {
             spacing: 4
             visible: tabModel !== null
 
-            Repeater {
-                model: tabModel
+            Flickable {
+                id: tabFlickable
+                Layout.fillWidth: true
+                Layout.maximumWidth: parent.width - 40  // Leave space for add button
+                height: 32
+                contentWidth: tabRowContent.width
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
 
-                delegate: Rectangle {
-                    id: tabButton
-                    property bool isActive: tabModel ? index === tabModel.currentTabIndex : false
-                    width: tabLabel.implicitWidth + 24
-                    height: 32
-                    radius: 6
-                    color: isActive ? "#3b485c" : (tabMouseArea.containsMouse ? "#2a3444" : "#1b2028")
-                    border.color: isActive ? "#4a9eff" : "#2e3744"
-                    border.width: isActive ? 2 : 1
+                Row {
+                    id: tabRowContent
+                    spacing: 4
 
-                    Text {
-                        id: tabLabel
-                        anchors.centerIn: parent
-                        text: model.name
-                        color: isActive ? "#ffffff" : "#9aa6b8"
-                        font.pixelSize: 12
-                        font.bold: isActive
-                    }
+                    Repeater {
+                        model: tabModel
 
-                    MouseArea {
-                        id: tabMouseArea
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        acceptedButtons: Qt.LeftButton | Qt.RightButton
-                        onClicked: function(mouse) {
-                            if (mouse.button === Qt.RightButton) {
-                                tabContextMenu.tabIndex = index
-                                tabContextMenu.tabName = model.name
-                                tabContextMenu.popup()
-                            } else {
-                                if (projectManager)
-                                    projectManager.switchTab(index)
+                        delegate: Rectangle {
+                            id: tabButton
+                            property bool isActive: tabModel ? index === tabModel.currentTabIndex : false
+                            width: Math.min(Math.max(tabLabel.implicitWidth + 24, 60), 250)
+                            height: 32
+                            radius: 6
+                            color: isActive ? "#3b485c" : (tabMouseArea.containsMouse ? "#2a3444" : "#1b2028")
+                            border.color: isActive ? "#4a9eff" : "#2e3744"
+                            border.width: isActive ? 2 : 1
+
+                            Text {
+                                id: tabLabel
+                                anchors.centerIn: parent
+                                anchors.leftMargin: 12
+                                anchors.rightMargin: 12
+                                width: parent.width - 24
+                                text: model.name
+                                color: isActive ? "#ffffff" : "#9aa6b8"
+                                font.pixelSize: 12
+                                font.bold: isActive
+                                elide: Text.ElideRight
+                                horizontalAlignment: Text.AlignHCenter
+                            }
+
+                            ToolTip {
+                                visible: tabMouseArea.containsMouse && tabLabel.truncated
+                                text: model.name
+                                delay: 500
+                            }
+
+                            MouseArea {
+                                id: tabMouseArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                onClicked: function(mouse) {
+                                    if (mouse.button === Qt.RightButton) {
+                                        tabContextMenu.tabIndex = index
+                                        tabContextMenu.tabName = model.name
+                                        tabContextMenu.popup()
+                                    } else {
+                                        if (projectManager)
+                                            projectManager.switchTab(index)
+                                    }
+                                }
                             }
                         }
                     }
