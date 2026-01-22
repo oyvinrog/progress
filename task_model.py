@@ -38,6 +38,8 @@ class Task:
     parent_index: int = -1  # -1 for root tasks, else index of parent
     indent_level: int = 0
     custom_estimate: Optional[float] = None  # minutes, overrides avg estimate if set
+    countdown_duration: Optional[float] = None  # countdown duration in seconds
+    countdown_start: Optional[float] = None  # timestamp when countdown started
 
 
 @dataclass
@@ -59,12 +61,17 @@ class TaskModel(QAbstractListModel):
     EstimatedTimeOfDayRole = Qt.UserRole + 6
     IndentLevelRole = Qt.UserRole + 7
     TotalEstimatedRole = Qt.UserRole + 8
+    CountdownRemainingRole = Qt.UserRole + 9
+    CountdownProgressRole = Qt.UserRole + 10
+    CountdownExpiredRole = Qt.UserRole + 11
+    CountdownActiveRole = Qt.UserRole + 12
 
     avgTimeChanged = Signal()
     totalEstimateChanged = Signal()
     taskCountChanged = Signal()
     taskRenamed = Signal(int, str, arguments=['taskIndex', 'newTitle'])
     taskCompletionChanged = Signal(int, bool, arguments=['taskIndex', 'completed'])
+    taskCountdownChanged = Signal(int, arguments=['taskIndex'])
 
     def __init__(self, tasks: Optional[List[Task]] = None):
         super().__init__()
@@ -101,6 +108,14 @@ class TaskModel(QAbstractListModel):
             return self._estimateTimeOfDay(index.row())
         elif role == self.IndentLevelRole:
             return task.indent_level
+        elif role == self.CountdownRemainingRole:
+            return self._getCountdownRemaining(task)
+        elif role == self.CountdownProgressRole:
+            return self._getCountdownProgress(task)
+        elif role == self.CountdownExpiredRole:
+            return self._isCountdownExpired(task)
+        elif role == self.CountdownActiveRole:
+            return self._isCountdownActive(task)
         return None
 
     def roleNames(self):  # type: ignore[override]
@@ -113,6 +128,10 @@ class TaskModel(QAbstractListModel):
             self.EstimatedTimeOfDayRole: b"estimatedTimeOfDay",
             self.IndentLevelRole: b"indentLevel",
             self.TotalEstimatedRole: b"totalEstimated",
+            self.CountdownRemainingRole: b"countdownRemaining",
+            self.CountdownProgressRole: b"countdownProgress",
+            self.CountdownExpiredRole: b"countdownExpired",
+            self.CountdownActiveRole: b"countdownActive",
         }
 
     def _getAverageTaskTime(self) -> float:
@@ -228,10 +247,140 @@ class TaskModel(QAbstractListModel):
         future_time = datetime.now() + timedelta(minutes=completion_time_minutes)
         return future_time.strftime("%H:%M")
 
+    def _getCountdownRemaining(self, task: Task) -> float:
+        """Get seconds remaining on countdown timer, or -1 if no timer."""
+        if task.countdown_duration is None or task.countdown_start is None:
+            return -1.0
+        elapsed = time.time() - task.countdown_start
+        remaining = task.countdown_duration - elapsed
+        return max(0.0, remaining)
+
+    def _getCountdownProgress(self, task: Task) -> float:
+        """Get countdown progress as 0.0-1.0, or -1 if no timer."""
+        if task.countdown_duration is None or task.countdown_start is None:
+            return -1.0
+        if task.countdown_duration <= 0:
+            return 0.0
+        elapsed = time.time() - task.countdown_start
+        progress = 1.0 - (elapsed / task.countdown_duration)
+        return max(0.0, min(1.0, progress))
+
+    def _isCountdownExpired(self, task: Task) -> bool:
+        """Return True if countdown has expired without task completion."""
+        if task.completed:
+            return False
+        if task.countdown_duration is None or task.countdown_start is None:
+            return False
+        elapsed = time.time() - task.countdown_start
+        return elapsed >= task.countdown_duration
+
+    def _isCountdownActive(self, task: Task) -> bool:
+        """Return True if countdown timer is active."""
+        return task.countdown_duration is not None and task.countdown_start is not None
+
+    @Slot(int, str)
+    def setCountdownTimer(self, row: int, duration_str: str) -> None:
+        """Set a countdown timer for a task.
+
+        Args:
+            row: Task index
+            duration_str: Duration string like "30s", "2m", "1h", or just a number (seconds)
+        """
+        if row < 0 or row >= len(self._tasks):
+            return
+
+        duration_str = duration_str.strip().lower()
+        if not duration_str:
+            return
+
+        try:
+            # Parse duration string
+            if duration_str.endswith('h'):
+                hours = float(duration_str[:-1])
+                seconds = hours * 3600
+            elif duration_str.endswith('m'):
+                minutes = float(duration_str[:-1])
+                seconds = minutes * 60
+            elif duration_str.endswith('s'):
+                seconds = float(duration_str[:-1])
+            else:
+                # Default to seconds
+                seconds = float(duration_str)
+
+            if seconds <= 0:
+                return
+
+            task = self._tasks[row]
+            task.countdown_duration = seconds
+            task.countdown_start = time.time()
+
+            idx = self.index(row, 0)
+            self.dataChanged.emit(idx, idx, [
+                self.CountdownRemainingRole,
+                self.CountdownProgressRole,
+                self.CountdownExpiredRole,
+                self.CountdownActiveRole
+            ])
+            self.taskCountdownChanged.emit(row)
+
+        except ValueError:
+            # Invalid format, ignore
+            return
+
+    @Slot(int)
+    def clearCountdownTimer(self, row: int) -> None:
+        """Clear the countdown timer for a task.
+
+        Args:
+            row: Task index
+        """
+        if row < 0 or row >= len(self._tasks):
+            return
+
+        task = self._tasks[row]
+        task.countdown_duration = None
+        task.countdown_start = None
+
+        idx = self.index(row, 0)
+        self.dataChanged.emit(idx, idx, [
+            self.CountdownRemainingRole,
+            self.CountdownProgressRole,
+            self.CountdownExpiredRole,
+            self.CountdownActiveRole
+        ])
+        self.taskCountdownChanged.emit(row)
+
+    @Slot(int)
+    def restartCountdownTimer(self, row: int) -> None:
+        """Restart the countdown timer for a task to its full duration.
+
+        Args:
+            row: Task index
+        """
+        if row < 0 or row >= len(self._tasks):
+            return
+
+        task = self._tasks[row]
+        if task.countdown_duration is None:
+            return
+
+        task.countdown_start = time.time()
+
+        idx = self.index(row, 0)
+        self.dataChanged.emit(idx, idx, [
+            self.CountdownRemainingRole,
+            self.CountdownProgressRole,
+            self.CountdownExpiredRole,
+            self.CountdownActiveRole
+        ])
+        self.taskCountdownChanged.emit(row)
+
     def _updateActiveTasks(self) -> None:
-        """Update time spent on active (incomplete) tasks."""
+        """Update time spent on active (incomplete) tasks and countdown timers."""
         current_time = time.time()
         changed = False
+        countdown_task_indices = []
+
         for i, task in enumerate(self._tasks):
             if not task.completed and task.start_time:
                 elapsed = (current_time - task.start_time) / 60.0  # to minutes
@@ -239,11 +388,26 @@ class TaskModel(QAbstractListModel):
                 task.start_time = current_time
                 changed = True
 
+            # Track tasks with active countdown timers
+            if task.countdown_duration is not None and task.countdown_start is not None:
+                countdown_task_indices.append(i)
+
         # Update all rows if any task changed, since completion times are interdependent
         if changed and len(self._tasks) > 0:
             first = self.index(0, 0)
             last = self.index(len(self._tasks) - 1, 0)
             self.dataChanged.emit(first, last, [self.TimeSpentRole, self.CompletionTimeRole, self.EstimatedTimeOfDayRole])
+
+        # Update countdown timer displays and notify listeners (like DiagramModel)
+        for i in countdown_task_indices:
+            idx = self.index(i, 0)
+            self.dataChanged.emit(idx, idx, [
+                self.CountdownRemainingRole,
+                self.CountdownProgressRole,
+                self.CountdownExpiredRole
+            ])
+            # Emit signal so DiagramModel can update its own dataChanged
+            self.taskCountdownChanged.emit(i)
 
     def addTask(self, title: str, parent_row: int = -1) -> None:
         """Add a new task to the model."""
@@ -288,6 +452,9 @@ class TaskModel(QAbstractListModel):
                 elapsed = (time.time() - task.start_time) / 60.0
                 task.time_spent += elapsed
                 task.start_time = None
+            # Clear countdown timer when task is completed
+            task.countdown_duration = None
+            task.countdown_start = None
         else:
             # Restart timing
             task.start_time = time.time()
@@ -454,14 +621,20 @@ class TaskModel(QAbstractListModel):
         """
         tasks_data = []
         for task in self._tasks:
-            tasks_data.append({
+            task_dict = {
                 "title": task.title,
                 "completed": task.completed,
                 "time_spent": task.time_spent,
                 "parent_index": task.parent_index,
                 "indent_level": task.indent_level,
                 "custom_estimate": task.custom_estimate,
-            })
+            }
+            # Only save countdown fields if set
+            if task.countdown_duration is not None:
+                task_dict["countdown_duration"] = task.countdown_duration
+            if task.countdown_start is not None:
+                task_dict["countdown_start"] = task.countdown_start
+            tasks_data.append(task_dict)
         return {"tasks": tasks_data}
 
     def from_dict(self, data: Dict[str, Any]) -> None:
@@ -483,6 +656,8 @@ class TaskModel(QAbstractListModel):
                 parent_index=task_data.get("parent_index", -1),
                 indent_level=task_data.get("indent_level", 0),
                 custom_estimate=task_data.get("custom_estimate"),
+                countdown_duration=task_data.get("countdown_duration"),
+                countdown_start=task_data.get("countdown_start"),
             )
             # Don't auto-start timing for loaded tasks
             if not task.completed:

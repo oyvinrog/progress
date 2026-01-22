@@ -182,6 +182,10 @@ class DiagramModel(QAbstractListModel):
     SubDiagramPathRole = Qt.UserRole + 14
     SubDiagramProgressRole = Qt.UserRole + 15
     NoteMarkdownRole = Qt.UserRole + 16
+    TaskCountdownRemainingRole = Qt.UserRole + 17
+    TaskCountdownProgressRole = Qt.UserRole + 18
+    TaskCountdownExpiredRole = Qt.UserRole + 19
+    TaskCountdownActiveRole = Qt.UserRole + 20
 
     itemsChanged = Signal()
     edgesChanged = Signal()
@@ -212,6 +216,7 @@ class DiagramModel(QAbstractListModel):
         if self._task_model is not None:
             self._task_model.taskRenamed.connect(self.onTaskRenamed)
             self._task_model.taskCompletionChanged.connect(self.onTaskCompletionChanged)
+            self._task_model.taskCountdownChanged.connect(self.onTaskCountdownChanged)
         self._edge_drag_x: float = 0.0
         self._edge_drag_y: float = 0.0
         self._is_dragging_edge: bool = False
@@ -294,6 +299,14 @@ class DiagramModel(QAbstractListModel):
             return self._calculate_sub_diagram_progress(item.sub_diagram_path)
         if role == self.NoteMarkdownRole:
             return item.note_markdown
+        if role == self.TaskCountdownRemainingRole:
+            return self._getTaskCountdownRemaining(item.task_index)
+        if role == self.TaskCountdownProgressRole:
+            return self._getTaskCountdownProgress(item.task_index)
+        if role == self.TaskCountdownExpiredRole:
+            return self._isTaskCountdownExpired(item.task_index)
+        if role == self.TaskCountdownActiveRole:
+            return self._isTaskCountdownActive(item.task_index)
         return None
 
     def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
@@ -314,6 +327,10 @@ class DiagramModel(QAbstractListModel):
             self.SubDiagramPathRole: b"subDiagramPath",
             self.SubDiagramProgressRole: b"subDiagramProgress",
             self.NoteMarkdownRole: b"noteMarkdown",
+            self.TaskCountdownRemainingRole: b"taskCountdownRemaining",
+            self.TaskCountdownProgressRole: b"taskCountdownProgress",
+            self.TaskCountdownExpiredRole: b"taskCountdownExpired",
+            self.TaskCountdownActiveRole: b"taskCountdownActive",
         }
 
     # --- Properties exposed to QML -----------------------------------------
@@ -816,6 +833,73 @@ class DiagramModel(QAbstractListModel):
             if item.task_index == task_index:
                 index = self.index(row, 0)
                 self.dataChanged.emit(index, index, [self.TaskCompletedRole])
+
+    @Slot(int)
+    def onTaskCountdownChanged(self, task_index: int) -> None:
+        """Handle countdown timer updates from the task list."""
+        for row, item in enumerate(self._items):
+            if item.task_index == task_index:
+                index = self.index(row, 0)
+                self.dataChanged.emit(index, index, [
+                    self.TaskCountdownRemainingRole,
+                    self.TaskCountdownProgressRole,
+                    self.TaskCountdownExpiredRole,
+                    self.TaskCountdownActiveRole
+                ])
+
+    def _getTaskCountdownRemaining(self, task_index: int) -> float:
+        """Get seconds remaining on task countdown, or -1 if no timer."""
+        if self._task_model is None:
+            return -1.0
+        if task_index < 0 or task_index >= self._task_model.rowCount():
+            return -1.0
+        idx = self._task_model.index(task_index, 0)
+        return float(self._task_model.data(idx, self._task_model.CountdownRemainingRole))
+
+    def _getTaskCountdownProgress(self, task_index: int) -> float:
+        """Get countdown progress as 0.0-1.0, or -1 if no timer."""
+        if self._task_model is None:
+            return -1.0
+        if task_index < 0 or task_index >= self._task_model.rowCount():
+            return -1.0
+        idx = self._task_model.index(task_index, 0)
+        return float(self._task_model.data(idx, self._task_model.CountdownProgressRole))
+
+    def _isTaskCountdownExpired(self, task_index: int) -> bool:
+        """Return True if task countdown has expired."""
+        if self._task_model is None:
+            return False
+        if task_index < 0 or task_index >= self._task_model.rowCount():
+            return False
+        idx = self._task_model.index(task_index, 0)
+        return bool(self._task_model.data(idx, self._task_model.CountdownExpiredRole))
+
+    def _isTaskCountdownActive(self, task_index: int) -> bool:
+        """Return True if task has an active countdown timer."""
+        if self._task_model is None:
+            return False
+        if task_index < 0 or task_index >= self._task_model.rowCount():
+            return False
+        idx = self._task_model.index(task_index, 0)
+        return bool(self._task_model.data(idx, self._task_model.CountdownActiveRole))
+
+    @Slot(int, str)
+    def setTaskCountdownTimer(self, task_index: int, duration_str: str) -> None:
+        """Set a countdown timer for a task from QML."""
+        if self._task_model is not None:
+            self._task_model.setCountdownTimer(task_index, duration_str)
+
+    @Slot(int)
+    def clearTaskCountdownTimer(self, task_index: int) -> None:
+        """Clear the countdown timer for a task from QML."""
+        if self._task_model is not None:
+            self._task_model.clearCountdownTimer(task_index)
+
+    @Slot(int)
+    def restartTaskCountdownTimer(self, task_index: int) -> None:
+        """Restart the countdown timer for a task from QML."""
+        if self._task_model is not None:
+            self._task_model.restartCountdownTimer(task_index)
 
     @Slot(str, float, float)
     def resizeItem(self, item_id: str, width: float, height: float) -> None:
@@ -2353,6 +2437,169 @@ ApplicationWindow {
         }
     }
 
+    // Timer dialog for setting countdown duration
+    Dialog {
+        id: timerDialog
+        modal: true
+        title: "Set Timer"
+        property int taskIndex: -1
+        property string durationValue: ""
+
+        onOpened: timerDurationField.forceActiveFocus()
+
+        contentItem: ColumnLayout {
+            width: 280
+            spacing: 12
+
+            Label {
+                text: "Enter duration (e.g. 30s, 2m, 1h)"
+                color: "#8a93a5"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            TextField {
+                id: timerDurationField
+                Layout.fillWidth: true
+                text: timerDialog.durationValue
+                placeholderText: "e.g. 2m"
+                selectByMouse: true
+                color: "#f5f6f8"
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#384458"
+                }
+                onTextChanged: timerDialog.durationValue = text
+                Keys.onReturnPressed: timerDialog.accept()
+                Keys.onEnterPressed: timerDialog.accept()
+            }
+
+            // Quick preset buttons
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                Button {
+                    text: "30s"
+                    onClicked: {
+                        timerDialog.durationValue = "30s"
+                        timerDialog.accept()
+                    }
+                    background: Rectangle {
+                        color: parent.pressed ? "#384458" : "#2a3240"
+                        radius: 4
+                        border.color: "#4b5b72"
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        color: "#f5f6f8"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+
+                Button {
+                    text: "1m"
+                    onClicked: {
+                        timerDialog.durationValue = "1m"
+                        timerDialog.accept()
+                    }
+                    background: Rectangle {
+                        color: parent.pressed ? "#384458" : "#2a3240"
+                        radius: 4
+                        border.color: "#4b5b72"
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        color: "#f5f6f8"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+
+                Button {
+                    text: "2m"
+                    onClicked: {
+                        timerDialog.durationValue = "2m"
+                        timerDialog.accept()
+                    }
+                    background: Rectangle {
+                        color: parent.pressed ? "#384458" : "#2a3240"
+                        radius: 4
+                        border.color: "#4b5b72"
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        color: "#f5f6f8"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+
+                Button {
+                    text: "5m"
+                    onClicked: {
+                        timerDialog.durationValue = "5m"
+                        timerDialog.accept()
+                    }
+                    background: Rectangle {
+                        color: parent.pressed ? "#384458" : "#2a3240"
+                        radius: 4
+                        border.color: "#4b5b72"
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        color: "#f5f6f8"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+            }
+        }
+
+        footer: DialogButtonBox {
+            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+        }
+
+        onAccepted: {
+            if (diagramModel && timerDialog.taskIndex >= 0 && timerDialog.durationValue.trim().length > 0) {
+                diagramModel.setTaskCountdownTimer(timerDialog.taskIndex, timerDialog.durationValue)
+            }
+            timerDialog.close()
+        }
+        onRejected: timerDialog.close()
+
+        onClosed: {
+            timerDialog.taskIndex = -1
+            timerDialog.durationValue = ""
+        }
+    }
+
+    // Context menu for active timer
+    Menu {
+        id: timerContextMenu
+        property int taskIndex: -1
+
+        MenuItem {
+            text: "Restart Timer"
+            onTriggered: {
+                if (diagramModel && timerContextMenu.taskIndex >= 0) {
+                    diagramModel.restartTaskCountdownTimer(timerContextMenu.taskIndex)
+                }
+            }
+        }
+
+        MenuItem {
+            text: "Clear Timer"
+            onTriggered: {
+                if (diagramModel && timerContextMenu.taskIndex >= 0) {
+                    diagramModel.clearTaskCountdownTimer(timerContextMenu.taskIndex)
+                }
+            }
+        }
+    }
+
     function openQuickTaskDialog(point) {
         quickTaskDialog.targetX = point.x
         quickTaskDialog.targetY = point.y
@@ -3571,14 +3818,18 @@ ApplicationWindow {
                             property real pinchStartHeight: model.height
                             property bool isEdgeDropTarget: diagramModel && diagramModel.edgeHoverTargetId === itemRect.itemId
                             property bool hovered: itemHover.hovered
+                            property real taskCountdownRemaining: model.taskCountdownRemaining
+                            property real taskCountdownProgress: model.taskCountdownProgress
+                            property bool taskCountdownExpired: model.taskCountdownExpired
+                            property bool taskCountdownActive: model.taskCountdownActive
                             x: model.x
                             y: model.y
                             width: model.width
                             height: model.height
                             radius: itemRect.itemType === "cloud" ? Math.min(width, height) / 2 : 12
                             color: itemRect.isTask && itemRect.taskCompleted ? Qt.darker(model.color, 1.5) : model.color
-                            border.width: itemRect.taskCurrent ? 4 : (isEdgeDropTarget ? 3 : 1)
-                            border.color: itemRect.taskCurrent ? "#ffcc00" : (isEdgeDropTarget ? "#74d9a0" : (itemDrag.active ? Qt.lighter(model.color, 1.4) : Qt.darker(model.color, 1.6)))
+                            border.width: itemRect.taskCountdownExpired ? 4 : (itemRect.taskCurrent ? 4 : (isEdgeDropTarget ? 3 : 1))
+                            border.color: itemRect.taskCountdownExpired ? "#e74c3c" : (itemRect.taskCurrent ? "#ffcc00" : (isEdgeDropTarget ? "#74d9a0" : (itemDrag.active ? Qt.lighter(model.color, 1.4) : Qt.darker(model.color, 1.6))))
                             z: itemRect.taskCurrent ? 15 : (isEdgeDropTarget ? 10 : 5)
                             scale: isEdgeDropTarget ? 1.08 : 1.0
                             transformOrigin: Item.Center
@@ -3697,6 +3948,105 @@ ApplicationWindow {
                                     onClicked: {
                                         if (diagramModel)
                                             diagramModel.setCurrentTask(itemRect.taskIndex)
+                                    }
+                                }
+                            }
+
+                            // Timer button - clock icon for countdown timer
+                            Rectangle {
+                                id: timerButton
+                                visible: itemRect.isTask
+                                width: 20
+                                height: 20
+                                radius: 10
+                                anchors.left: currentButton.right
+                                anchors.top: parent.top
+                                anchors.leftMargin: 4
+                                anchors.topMargin: 8
+                                color: itemRect.taskCountdownActive ? "#3498db" : "#1a2230"
+                                border.color: itemRect.taskCountdownActive ? "#2980b9" : "#4b5b72"
+                                border.width: 2
+                                z: 20
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "⏱"
+                                    color: itemRect.taskCountdownActive ? "#ffffff" : "#8a93a5"
+                                    font.pixelSize: 10
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                    onClicked: function(mouse) {
+                                        if (itemRect.taskCountdownActive) {
+                                            // Show context menu for active timer
+                                            timerContextMenu.taskIndex = itemRect.taskIndex
+                                            timerContextMenu.popup()
+                                        } else {
+                                            // Show timer dialog for new timer
+                                            timerDialog.taskIndex = itemRect.taskIndex
+                                            timerDialog.durationValue = ""
+                                            timerDialog.open()
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Countdown progress bar at bottom of task
+                            Item {
+                                id: countdownBar
+                                visible: itemRect.isTask && itemRect.taskCountdownActive
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 8
+                                anchors.bottomMargin: 6
+                                height: 16
+                                z: 20
+
+                                // Time remaining text
+                                Text {
+                                    id: countdownText
+                                    anchors.right: parent.right
+                                    anchors.bottom: countdownBarBg.top
+                                    anchors.bottomMargin: 2
+                                    text: {
+                                        var remaining = itemRect.taskCountdownRemaining
+                                        if (remaining < 0) return ""
+                                        var mins = Math.floor(remaining / 60)
+                                        var secs = Math.floor(remaining % 60)
+                                        return mins + ":" + (secs < 10 ? "0" : "") + secs
+                                    }
+                                    color: itemRect.taskCountdownExpired ? "#e74c3c" : "#f5f6f8"
+                                    font.pixelSize: 10
+                                    font.bold: true
+                                }
+
+                                // Progress bar background
+                                Rectangle {
+                                    id: countdownBarBg
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    height: 4
+                                    radius: 2
+                                    color: "#1a2230"
+                                }
+
+                                // Progress bar fill
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.bottom: parent.bottom
+                                    height: 4
+                                    radius: 2
+                                    width: countdownBarBg.width * Math.max(0, itemRect.taskCountdownProgress)
+                                    color: {
+                                        var progress = itemRect.taskCountdownProgress
+                                        if (progress > 0.5) return "#2ecc71"  // Green
+                                        if (progress > 0.25) return "#f39c12"  // Orange
+                                        return "#e74c3c"  // Red
                                     }
                                 }
                             }
