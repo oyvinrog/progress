@@ -438,6 +438,35 @@ class TaskModel(QAbstractListModel):
         self.endInsertRows()
         self.taskCountChanged.emit()
 
+    def addTaskWithParent(self, title: str, parent_row: int = -1) -> int:
+        """Add a new task and return its row index."""
+        title = title.strip()
+        if not title:
+            return -1
+
+        indent = 0
+        if parent_row >= 0 and parent_row < len(self._tasks):
+            indent = self._tasks[parent_row].indent_level + 1
+
+        task = Task(
+            title=title,
+            start_time=time.time(),
+            parent_index=parent_row,
+            indent_level=indent,
+        )
+
+        insert_pos = len(self._tasks)
+        if parent_row >= 0:
+            insert_pos = parent_row + 1
+            while insert_pos < len(self._tasks) and self._tasks[insert_pos].indent_level > indent - 1:
+                insert_pos += 1
+
+        self.beginInsertRows(QModelIndex(), insert_pos, insert_pos)
+        self._tasks.insert(insert_pos, task)
+        self.endInsertRows()
+        self.taskCountChanged.emit()
+        return insert_pos
+
     def toggleComplete(self, row: int, completed: bool) -> None:
         """Toggle task completion status."""
         if row < 0 or row >= len(self._tasks):

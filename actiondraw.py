@@ -774,6 +774,139 @@ class DiagramModel(QAbstractListModel):
     def hasClipboardDiagram(self) -> bool:
         return self._read_clipboard_payload() is not None
 
+    @Slot(result=bool)
+    def hasClipboardTextLines(self) -> bool:
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is None:
+            return False
+        mime_data = clipboard.mimeData()
+        if mime_data is None or not mime_data.hasText():
+            return False
+        text = mime_data.text() or ""
+        lines = [line for line in text.splitlines() if line.strip()]
+        return len(lines) > 1
+
+    def _parse_text_hierarchy(self, text: str) -> List[Dict[str, Any]]:
+        entries: List[Dict[str, Any]] = []
+        indent_stack: List[int] = []
+        for raw_line in text.splitlines():
+            if not raw_line.strip():
+                continue
+            leading = len(raw_line) - len(raw_line.lstrip(" \t"))
+            indent_text = raw_line[:leading].replace("\t", "    ")
+            indent_len = len(indent_text)
+            if not indent_stack:
+                indent_stack = [indent_len]
+                level = 0
+            else:
+                if indent_len > indent_stack[-1]:
+                    indent_stack.append(indent_len)
+                    level = len(indent_stack) - 1
+                else:
+                    while indent_stack and indent_len < indent_stack[-1]:
+                        indent_stack.pop()
+                    if not indent_stack:
+                        indent_stack = [indent_len]
+                        level = 0
+                    elif indent_len > indent_stack[-1]:
+                        indent_stack.append(indent_len)
+                        level = len(indent_stack) - 1
+                    else:
+                        level = len(indent_stack) - 1
+            entries.append({"text": raw_line.lstrip(" \t").strip(), "level": level})
+        return entries
+
+    @Slot(float, float, bool, result=bool)
+    def pasteTextFromClipboard(self, x: float, y: float, as_tasks: bool) -> bool:
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is None:
+            return False
+        mime_data = clipboard.mimeData()
+        if mime_data is None or not mime_data.hasText():
+            return False
+        text = mime_data.text() or ""
+        entries = self._parse_text_hierarchy(text)
+        if not entries:
+            return False
+        if as_tasks and self._task_model is None:
+            return False
+
+        indent_spacing = 160.0
+        row_spacing = 90.0
+        positions = []
+        min_x = None
+        max_x = None
+        min_y = None
+        max_y = None
+        for idx, entry in enumerate(entries):
+            px = entry["level"] * indent_spacing
+            py = idx * row_spacing
+            positions.append((px, py))
+            min_x = px if min_x is None else min(min_x, px)
+            max_x = px if max_x is None else max(max_x, px)
+            min_y = py if min_y is None else min(min_y, py)
+            max_y = py if max_y is None else max(max_y, py)
+
+        if min_x is None or max_x is None or min_y is None or max_y is None:
+            return False
+
+        offset_x = x - (min_x + max_x) / 2.0
+        offset_y = y - (min_y + max_y) / 2.0
+
+        previous_item_id = ""
+        task_index_stack: List[int] = []
+
+        for idx, entry in enumerate(entries):
+            level = int(entry["level"])
+            text_value = entry["text"]
+            px, py = positions[idx]
+            item_x = px + offset_x
+            item_y = py + offset_y
+
+            while len(task_index_stack) > level:
+                task_index_stack.pop()
+
+            task_level = min(level, len(task_index_stack))
+
+            parent_task_index = task_index_stack[task_level - 1] if task_level > 0 else -1
+
+            if as_tasks:
+                add_task = getattr(self._task_model, "addTaskWithParent", None)
+                if callable(add_task):
+                    task_index = add_task(text_value, parent_task_index)
+                else:
+                    self._task_model.addTask(text_value, parent_task_index)
+                    task_index = self._task_model.rowCount() - 1
+
+                item_id = self._next_id("task")
+                item = DiagramItem(
+                    id=item_id,
+                    item_type=DiagramItemType.TASK,
+                    x=item_x,
+                    y=item_y,
+                    width=140.0,
+                    height=70.0,
+                    text=text_value,
+                    task_index=task_index,
+                    color="#82c3a5",
+                    text_color="#1b2028",
+                )
+                self._append_item(item)
+            else:
+                item_id = self._add_preset("box", item_x, item_y, text_value)
+
+            if previous_item_id:
+                self.addEdge(previous_item_id, item_id)
+            previous_item_id = item_id
+
+            if as_tasks:
+                if len(task_index_stack) == task_level:
+                    task_index_stack.append(task_index)
+                else:
+                    task_index_stack[task_level] = task_index
+
+        return True
+
     @Slot(float, float, result=bool)
     def pasteDiagramFromClipboard(self, x: float, y: float) -> bool:
         payload = self._read_clipboard_payload()
@@ -2073,6 +2206,12 @@ ApplicationWindow {
         }
         if (diagramModel.hasClipboardImage()) {
             diagramModel.pasteImageFromClipboard(center.x, center.y)
+            return
+        }
+        if (diagramModel.hasClipboardTextLines()) {
+            clipboardPasteDialog.pasteX = center.x
+            clipboardPasteDialog.pasteY = center.y
+            clipboardPasteDialog.open()
         }
     }
 
@@ -3478,6 +3617,56 @@ ApplicationWindow {
             onAccepted: {
                 if (tabModel && renameTabField.text.trim())
                     tabModel.renameTab(tabIndex, renameTabField.text.trim())
+            }
+        }
+
+        Dialog {
+            id: clipboardPasteDialog
+            property real pasteX: 0
+            property real pasteY: 0
+            title: "Paste from Clipboard"
+            modal: true
+            anchors.centerIn: parent
+            width: 320
+
+            contentItem: ColumnLayout {
+                width: 300
+                spacing: 12
+
+                Label {
+                    text: "Clipboard has multiple lines. Create tasks or boxes?"
+                    color: "#8a93a5"
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+
+                RowLayout {
+                    spacing: 10
+                    Layout.alignment: Qt.AlignHCenter
+
+                    Button {
+                        text: "Tasks"
+                        onClicked: {
+                            if (diagramModel)
+                                diagramModel.pasteTextFromClipboard(clipboardPasteDialog.pasteX, clipboardPasteDialog.pasteY, true)
+                            clipboardPasteDialog.close()
+                        }
+                    }
+
+                    Button {
+                        text: "Boxes"
+                        onClicked: {
+                            if (diagramModel)
+                                diagramModel.pasteTextFromClipboard(clipboardPasteDialog.pasteX, clipboardPasteDialog.pasteY, false)
+                            clipboardPasteDialog.close()
+                        }
+                    }
+
+                    Button {
+                        text: "Cancel"
+                        onClicked: clipboardPasteDialog.close()
+                    }
+                }
             }
         }
 
