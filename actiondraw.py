@@ -11,6 +11,8 @@ import json
 import os
 import subprocess
 import sys
+import urllib.parse
+import webbrowser
 from dataclasses import dataclass, field
 from enum import Enum
 from itertools import count
@@ -47,6 +49,7 @@ class DiagramItemType(Enum):
     OBSTACLE = "obstacle"
     WISH = "wish"
     IMAGE = "image"
+    CHATGPT = "chatgpt"
 
 
 CLIPBOARD_MIME_TYPE = "application/x-actiondraw-diagram"
@@ -163,6 +166,14 @@ ITEM_PRESETS: Dict[str, Dict[str, Any]] = {
         "color": "#f1c40f",
         "text": "Wish",
         "text_color": "#2d3436",
+    },
+    "chatgpt": {
+        "type": DiagramItemType.CHATGPT,
+        "width": 180.0,
+        "height": 90.0,
+        "color": "#1f8f6b",
+        "text": "Ask ChatGPT",
+        "text_color": "#f5f6f8",
     },
 }
 
@@ -1111,6 +1122,19 @@ class DiagramModel(QAbstractListModel):
         script_path = os.path.abspath(__file__)
         subprocess.Popen([sys.executable, script_path, path])
         return True
+
+    @Slot(str, result=bool)
+    def openChatGpt(self, item_id: str) -> bool:
+        """Open a ChatGPT browser tab with the item's text as the prompt."""
+        item = self.getItem(item_id)
+        if not item or item.item_type != DiagramItemType.CHATGPT:
+            return False
+        prompt = item.text.strip() if item.text else ""
+        if not prompt:
+            prompt = "Research question"
+        query = urllib.parse.quote_plus(prompt)
+        url = f"https://chatgpt.com/?q={query}"
+        return webbrowser.open(url)
 
     @Slot(str, str)
     def createAndLinkSubDiagram(self, item_id: str, file_path: str, open_after: bool = True) -> None:
@@ -2118,7 +2142,8 @@ ApplicationWindow {
         "note": { "text": "Note", "title": "Create Note" },
         "freetext": { "text": "", "title": "Free Text" },
         "obstacle": { "text": "Obstacle", "title": "Add Obstacle" },
-        "wish": { "text": "Wish", "title": "Add Wish" }
+        "wish": { "text": "Wish", "title": "Add Wish" },
+        "chatgpt": { "text": "Ask ChatGPT", "title": "Ask ChatGPT" }
     })
 
     // Pending edge drop state (for creating new items when dropping into empty space)
@@ -2380,6 +2405,14 @@ ApplicationWindow {
                 onClicked: {
                     addDialog.close()
                     root.openPresetDialog("wish", Qt.point(addDialog.targetX, addDialog.targetY), "", undefined)
+                }
+            }
+
+            Button {
+                text: "ChatGPT"
+                onClicked: {
+                    addDialog.close()
+                    root.openPresetDialog("chatgpt", Qt.point(addDialog.targetX, addDialog.targetY), "", undefined)
                 }
             }
 
@@ -3059,6 +3092,22 @@ ApplicationWindow {
                         snapValue(root.pendingEdgeDropX),
                         snapValue(root.pendingEdgeDropY),
                         "Wish"
+                    )
+                }
+                root.pendingEdgeSourceId = ""
+            }
+        }
+
+        MenuItem {
+            text: "→ ChatGPT"
+            onTriggered: {
+                if (diagramModel && root.pendingEdgeSourceId) {
+                    diagramModel.addPresetItemAndConnect(
+                        root.pendingEdgeSourceId,
+                        "chatgpt",
+                        snapValue(root.pendingEdgeDropX),
+                        snapValue(root.pendingEdgeDropY),
+                        "Ask ChatGPT"
                     )
                 }
                 root.pendingEdgeSourceId = ""
@@ -3951,6 +4000,18 @@ ApplicationWindow {
                             height: visible ? implicitHeight : 0
                             onTriggered: diagramModel.openSubDiagram(diagramLayer.contextMenuItemId)
                         }
+                        MenuItem {
+                            id: openChatGptMenuItem
+                            text: "Open ChatGPT"
+                            visible: {
+                                if (!diagramModel || !diagramLayer.contextMenuItemId)
+                                    return false
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                return item && item.type === "chatgpt"
+                            }
+                            height: visible ? implicitHeight : 0
+                            onTriggered: diagramModel.openChatGpt(diagramLayer.contextMenuItemId)
+                        }
                         MenuSeparator {}
                         MenuItem {
                             text: "Delete"
@@ -4788,6 +4849,44 @@ ApplicationWindow {
 
                             Item {
                                 anchors.fill: parent
+                                visible: itemRect.itemType === "chatgpt"
+
+                                Rectangle {
+                                    width: 26
+                                    height: 26
+                                    radius: 13
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top
+                                    anchors.leftMargin: 8
+                                    anchors.topMargin: 8
+                                    color: Qt.lighter(model.color, 1.25)
+                                    border.color: Qt.darker(model.color, 1.4)
+                                    border.width: 1
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "GPT"
+                                        color: model.textColor
+                                        font.pixelSize: 9
+                                        font.bold: true
+                                    }
+                                }
+
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top
+                                    anchors.leftMargin: 40
+                                    anchors.topMargin: 14
+                                    width: parent.width * 0.5
+                                    height: 6
+                                    radius: 3
+                                    color: Qt.lighter(model.color, 1.35)
+                                    opacity: 0.8
+                                }
+                            }
+
+                            Item {
+                                anchors.fill: parent
                                 visible: itemRect.itemType === "freetext"
 
                                 Rectangle {
@@ -5320,6 +5419,8 @@ ApplicationWindow {
                                         edgeDropTaskDialog.dropX = newX
                                         edgeDropTaskDialog.dropY = newY
                                         edgeDropTaskDialog.open()
+                                    } else if (itemRect.itemType === "chatgpt") {
+                                        diagramModel.openChatGpt(itemRect.itemId)
                                     } else if (itemRect.itemType === "note" || itemRect.itemType === "wish" || itemRect.itemType === "obstacle") {
                                         if (markdownNoteManager) {
                                             markdownNoteManager.openNote(itemRect.itemId)
