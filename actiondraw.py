@@ -3282,15 +3282,15 @@ ApplicationWindow {
             Flickable {
                 id: tabFlickable
                 Layout.fillWidth: true
-                Layout.maximumWidth: parent.width - 40  // Leave space for add button
-                height: 32
+                Layout.maximumWidth: parent.width - 36  // Leave space for add button
+                height: 28
                 contentWidth: tabRowContent.width
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
 
                 Row {
                     id: tabRowContent
-                    spacing: 4
+                    spacing: 2
 
                     Repeater {
                         model: tabModel
@@ -3298,30 +3298,42 @@ ApplicationWindow {
                         delegate: Rectangle {
                             id: tabButton
                             property bool isActive: tabModel ? index === tabModel.currentTabIndex : false
-                            width: Math.min(Math.max(tabLabel.implicitWidth + 24, 60), 250)
-                            height: 32
-                            radius: 6
+                            width: Math.min(Math.max(tabName.implicitWidth + tabPercent.implicitWidth + 24, 48), 180)
+                            height: 28
+                            radius: 5
                             color: isActive ? "#3b485c" : (tabMouseArea.containsMouse ? "#2a3444" : "#1b2028")
                             border.color: isActive ? "#4a9eff" : "#2e3744"
-                            border.width: isActive ? 2 : 1
+                            border.width: 1
 
-                            Text {
-                                id: tabLabel
-                                anchors.centerIn: parent
-                                anchors.leftMargin: 12
-                                anchors.rightMargin: 12
-                                width: parent.width - 24
-                                text: model.name
-                                color: isActive ? "#ffffff" : "#9aa6b8"
-                                font.pixelSize: 12
-                                font.bold: isActive
-                                elide: Text.ElideRight
-                                horizontalAlignment: Text.AlignHCenter
+                            RowLayout {
+                                id: tabLabelRow
+                                anchors.fill: parent
+                                anchors.margins: 6
+                                spacing: 6
+
+                                Text {
+                                    id: tabName
+                                    Layout.fillWidth: true
+                                    text: model.name
+                                    color: isActive ? "#ffffff" : "#9aa6b8"
+                                    font.pixelSize: 11
+                                    font.bold: isActive
+                                    elide: Text.ElideRight
+                                    horizontalAlignment: Text.AlignLeft
+                                }
+
+                                Text {
+                                    id: tabPercent
+                                    text: Math.round(model.completionPercent) + "%"
+                                    color: isActive ? "#c8d6e5" : "#7f8a9a"
+                                    font.pixelSize: 10
+                                    font.bold: isActive
+                                }
                             }
 
                             ToolTip {
-                                visible: tabMouseArea.containsMouse && tabLabel.truncated
-                                text: model.name
+                                visible: tabMouseArea.containsMouse && tabName.truncated
+                                text: model.name + " (" + Math.round(model.completionPercent) + "%)"
                                 delay: 500
                             }
 
@@ -3343,6 +3355,23 @@ ApplicationWindow {
                             }
                         }
                     }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.NoButton
+                    onWheel: function(wheel) {
+                        if (tabFlickable.contentWidth <= tabFlickable.width)
+                            return
+                        var delta = wheel.angleDelta.y !== 0 ? wheel.angleDelta.y : wheel.angleDelta.x
+                        tabFlickable.contentX = Math.max(0, Math.min(tabFlickable.contentWidth - tabFlickable.width, tabFlickable.contentX - delta))
+                        wheel.accepted = true
+                    }
+                }
+
+                ScrollBar.horizontal: ScrollBar {
+                    policy: ScrollBar.AsNeeded
+                    height: 6
                 }
             }
 
@@ -3386,6 +3415,22 @@ ApplicationWindow {
             property int tabIndex: -1
             property string tabName: ""
 
+            MenuItem {
+                text: "Move Left"
+                enabled: tabModel ? tabContextMenu.tabIndex > 0 : false
+                onTriggered: {
+                    if (tabModel && tabContextMenu.tabIndex > 0)
+                        tabModel.moveTab(tabContextMenu.tabIndex, tabContextMenu.tabIndex - 1)
+                }
+            }
+            MenuItem {
+                text: "Move Right"
+                enabled: tabModel ? tabContextMenu.tabIndex < tabModel.tabCount - 1 : false
+                onTriggered: {
+                    if (tabModel && tabContextMenu.tabIndex < tabModel.tabCount - 1)
+                        tabModel.moveTab(tabContextMenu.tabIndex, tabContextMenu.tabIndex + 1)
+                }
+            }
             MenuItem {
                 text: "Rename..."
                 onTriggered: {

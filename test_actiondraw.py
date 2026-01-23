@@ -1977,11 +1977,31 @@ class TestMultiTabSupport:
         assert tab_model.currentTabIndex == 1
         assert tab_model.currentTabName == "Second"
 
+    def test_move_tab(self, tab_model):
+        """Moving tabs preserves the active tab and reorders list."""
+        tab_model.addTab("Second")
+        tab_model.addTab("Third")
+
+        tab_model.moveTab(2, 0)
+        assert tab_model.data(tab_model.index(0, 0), tab_model.NameRole) == "Third"
+        assert tab_model.currentTabIndex == 1  # Main tab shifted right
+
     def test_cannot_remove_last_tab(self, tab_model):
         """Cannot remove the last remaining tab."""
         assert tab_model.tabCount == 1
         tab_model.removeTab(0)
         assert tab_model.tabCount == 1  # Still has 1 tab
+
+    def test_tab_completion_role(self, tab_model):
+        """Completion percent reflects task completion."""
+        tab_model.updateCurrentTabTasks({
+            "tasks": [
+                {"title": "One", "completed": True},
+                {"title": "Two", "completed": False},
+            ]
+        })
+        index = tab_model.index(0, 0)
+        assert tab_model.data(index, tab_model.CompletionRole) == 50.0
 
     # --- Tab data isolation tests ---
 

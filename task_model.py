@@ -680,6 +680,7 @@ class TabModel(QAbstractListModel):
 
     NameRole = Qt.UserRole + 1
     IndexRole = Qt.UserRole + 2
+    CompletionRole = Qt.UserRole + 3
 
     tabsChanged = Signal()
     currentTabChanged = Signal()
@@ -702,12 +703,15 @@ class TabModel(QAbstractListModel):
             return tab.name
         if role == self.IndexRole:
             return index.row()
+        if role == self.CompletionRole:
+            return self._calculateTabCompletion(tab)
         return None
 
     def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
         return {
             self.NameRole: b"name",
             self.IndexRole: b"tabIndex",
+            self.CompletionRole: b"completionPercent",
         }
 
     @Property(int, notify=currentTabIndexChanged)
@@ -723,6 +727,13 @@ class TabModel(QAbstractListModel):
     @Property(int, notify=tabsChanged)
     def tabCount(self) -> int:
         return len(self._tabs)
+
+    def _calculateTabCompletion(self, tab: Tab) -> float:
+        tasks = tab.tasks.get("tasks", []) if tab.tasks else []
+        if not tasks:
+            return 0.0
+        completed = sum(1 for task in tasks if task.get("completed"))
+        return (completed / len(tasks)) * 100.0
 
     @Slot(str)
     def addTab(self, name: str = "") -> None:
@@ -799,6 +810,15 @@ class TabModel(QAbstractListModel):
         if 0 <= self._current_tab_index < len(self._tabs):
             self._tabs[self._current_tab_index].tasks = tasks
             self._tabs[self._current_tab_index].diagram = diagram
+            model_index = self.index(self._current_tab_index, 0)
+            self.dataChanged.emit(model_index, model_index, [self.CompletionRole])
+
+    def updateCurrentTabTasks(self, tasks: Dict[str, Any]) -> None:
+        """Update only the current tab's tasks data."""
+        if 0 <= self._current_tab_index < len(self._tabs):
+            self._tabs[self._current_tab_index].tasks = tasks
+            model_index = self.index(self._current_tab_index, 0)
+            self.dataChanged.emit(model_index, model_index, [self.CompletionRole])
 
     def getAllTabs(self) -> List[Tab]:
         """Get all tabs."""
@@ -822,6 +842,31 @@ class TabModel(QAbstractListModel):
     def clear(self) -> None:
         """Reset to a single empty tab."""
         self.setTabs([Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})], 0)
+
+    @Slot(int, int)
+    def moveTab(self, from_index: int, to_index: int) -> None:
+        """Move a tab to a new index."""
+        if from_index == to_index:
+            return
+        if not (0 <= from_index < len(self._tabs) and 0 <= to_index < len(self._tabs)):
+            return
+
+        destination = to_index + 1 if to_index > from_index else to_index
+        self.beginMoveRows(QModelIndex(), from_index, from_index, QModelIndex(), destination)
+        tab = self._tabs.pop(from_index)
+        self._tabs.insert(to_index, tab)
+        self.endMoveRows()
+
+        if self._current_tab_index == from_index:
+            self._current_tab_index = to_index
+            self.currentTabIndexChanged.emit()
+            self.currentTabChanged.emit()
+        elif from_index < self._current_tab_index <= to_index:
+            self._current_tab_index -= 1
+            self.currentTabIndexChanged.emit()
+        elif to_index <= self._current_tab_index < from_index:
+            self._current_tab_index += 1
+            self.currentTabIndexChanged.emit()
 
 
 class ProjectManager(QObject):
@@ -862,6 +907,10 @@ class ProjectManager(QObject):
         self._current_file_path: str = ""
         self._settings = QSettings("ProgressTracker", "ProgressTracker")
         self._recent_projects: List[str] = self._load_recent_projects()
+        if self._tab_model is not None:
+            self._task_model.taskCompletionChanged.connect(self._refreshCurrentTabTasks)
+            self._task_model.taskCountChanged.connect(self._refreshCurrentTabTasks)
+            self._task_model.taskRenamed.connect(self._refreshCurrentTabTasks)
 
     def _load_recent_projects(self) -> List[str]:
         """Load recent projects list from settings."""
@@ -966,6 +1015,10 @@ class ProjectManager(QObject):
                 self._task_model.to_dict(),
                 self._diagram_model.to_dict()
             )
+
+    def _refreshCurrentTabTasks(self, *args) -> None:
+        if self._tab_model is not None:
+            self._tab_model.updateCurrentTabTasks(self._task_model.to_dict())
 
     @Slot(str)
     def saveProject(self, file_path: str) -> None:
