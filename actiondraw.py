@@ -23,13 +23,14 @@ from PySide6.QtCore import (
     QFileSystemWatcher,
     QIODevice,
     QModelIndex,
+    QMimeData,
     Property,
     Qt,
     Signal,
     Slot,
 )
 from PySide6.QtGui import QGuiApplication, QImage
-from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQml import QQmlApplicationEngine, QJSValue
 
 from markdown_note_editor import MarkdownNoteManager
 
@@ -46,6 +47,9 @@ class DiagramItemType(Enum):
     OBSTACLE = "obstacle"
     WISH = "wish"
     IMAGE = "image"
+
+
+CLIPBOARD_MIME_TYPE = "application/x-actiondraw-diagram"
 
 
 @dataclass
@@ -643,6 +647,228 @@ class DiagramModel(QAbstractListModel):
         if mime_data is None:
             return False
         return mime_data.hasImage()
+
+    def _serialize_item_for_clipboard(self, item: DiagramItem) -> Dict[str, Any]:
+        return {
+            "id": item.id,
+            "type": item.item_type.value,
+            "x": item.x,
+            "y": item.y,
+            "width": item.width,
+            "height": item.height,
+            "text": item.text,
+            "taskIndex": item.task_index,
+            "color": item.color,
+            "textColor": item.text_color,
+            "imageData": item.image_data,
+            "subDiagramPath": item.sub_diagram_path,
+            "noteMarkdown": item.note_markdown,
+        }
+
+    def _write_clipboard_payload(self, payload: Dict[str, Any]) -> bool:
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is None:
+            return False
+        payload_text = json.dumps(payload)
+        mime_data = QMimeData()
+        mime_data.setData(CLIPBOARD_MIME_TYPE, QByteArray(payload_text.encode("utf-8")))
+        mime_data.setText(payload_text)
+        clipboard.setMimeData(mime_data)
+        return True
+
+    def _read_clipboard_payload(self) -> Optional[Dict[str, Any]]:
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is None:
+            return None
+        mime_data = clipboard.mimeData()
+        if mime_data is None:
+            return None
+        payload_text: Optional[str] = None
+        if mime_data.hasFormat(CLIPBOARD_MIME_TYPE):
+            raw = mime_data.data(CLIPBOARD_MIME_TYPE)
+            payload_text = bytes(raw).decode("utf-8")
+        elif mime_data.hasText():
+            payload_text = mime_data.text()
+        if not payload_text:
+            return None
+        try:
+            payload = json.loads(payload_text)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("format") != "actiondraw-diagram":
+            return None
+        return payload
+
+    @Slot("QVariant", result=bool)
+    def copyItemsToClipboard(self, item_ids: Any) -> bool:
+        if isinstance(item_ids, QJSValue):
+            item_ids = item_ids.toVariant()
+        if not item_ids:
+            return False
+        if not isinstance(item_ids, list):
+            return False
+        normalized_ids = [str(item_id) for item_id in item_ids if item_id]
+        if not normalized_ids:
+            return False
+        items = []
+        valid_ids = set()
+        for item_id in normalized_ids:
+            item = self.getItem(item_id)
+            if item is None:
+                continue
+            items.append(self._serialize_item_for_clipboard(item))
+            valid_ids.add(item_id)
+        if not items:
+            return False
+        edges = []
+        for edge in self._edges:
+            if edge.from_id in valid_ids and edge.to_id in valid_ids:
+                edges.append({
+                    "fromId": edge.from_id,
+                    "toId": edge.to_id,
+                    "description": edge.description,
+                })
+        payload = {
+            "format": "actiondraw-diagram",
+            "version": 1,
+            "items": items,
+            "edges": edges,
+        }
+        return self._write_clipboard_payload(payload)
+
+    @Slot(str, result=bool)
+    def copyEdgeToClipboard(self, edge_id: str) -> bool:
+        if not edge_id:
+            return False
+        edge = next((edge for edge in self._edges if edge.id == edge_id), None)
+        if edge is None:
+            return False
+        item_ids = [edge.from_id, edge.to_id]
+        items = []
+        valid_ids = set()
+        for item_id in item_ids:
+            item = self.getItem(item_id)
+            if item is None:
+                continue
+            items.append(self._serialize_item_for_clipboard(item))
+            valid_ids.add(item_id)
+        if len(valid_ids) < 2:
+            return False
+        payload = {
+            "format": "actiondraw-diagram",
+            "version": 1,
+            "items": items,
+            "edges": [
+                {
+                    "fromId": edge.from_id,
+                    "toId": edge.to_id,
+                    "description": edge.description,
+                }
+            ],
+        }
+        return self._write_clipboard_payload(payload)
+
+    @Slot(result=bool)
+    def hasClipboardDiagram(self) -> bool:
+        return self._read_clipboard_payload() is not None
+
+    @Slot(float, float, result=bool)
+    def pasteDiagramFromClipboard(self, x: float, y: float) -> bool:
+        payload = self._read_clipboard_payload()
+        if not payload:
+            return False
+        items_data = payload.get("items", [])
+        if not isinstance(items_data, list) or not items_data:
+            return False
+        min_x = None
+        min_y = None
+        max_x = None
+        max_y = None
+        for item_data in items_data:
+            try:
+                item_x = float(item_data.get("x", 0.0))
+                item_y = float(item_data.get("y", 0.0))
+                item_w = float(item_data.get("width", 120.0))
+                item_h = float(item_data.get("height", 60.0))
+            except (TypeError, ValueError):
+                continue
+            min_x = item_x if min_x is None else min(min_x, item_x)
+            min_y = item_y if min_y is None else min(min_y, item_y)
+            max_x = item_x + item_w if max_x is None else max(max_x, item_x + item_w)
+            max_y = item_y + item_h if max_y is None else max(max_y, item_y + item_h)
+        if min_x is None or min_y is None or max_x is None or max_y is None:
+            return False
+        center_x = (min_x + max_x) / 2.0
+        center_y = (min_y + max_y) / 2.0
+        offset_x = x - center_x
+        offset_y = y - center_y
+
+        id_map: Dict[str, str] = {}
+        for item_data in items_data:
+            item_type_str = str(item_data.get("type", "box"))
+            try:
+                item_type = DiagramItemType(item_type_str)
+            except ValueError:
+                item_type = DiagramItemType.BOX
+
+            task_index = int(item_data.get("taskIndex", -1))
+            if self._task_model is None or task_index < 0 or task_index >= self._task_model.rowCount():
+                task_index = -1
+
+            item_id = self._next_id(item_type.value)
+            try:
+                item_x = float(item_data.get("x", 0.0)) + offset_x
+                item_y = float(item_data.get("y", 0.0)) + offset_y
+                item_w = float(item_data.get("width", 120.0))
+                item_h = float(item_data.get("height", 60.0))
+            except (TypeError, ValueError):
+                continue
+            item = DiagramItem(
+                id=item_id,
+                item_type=item_type,
+                x=item_x,
+                y=item_y,
+                width=item_w,
+                height=item_h,
+                text=str(item_data.get("text", "")),
+                task_index=task_index,
+                color=str(item_data.get("color", "#4a9eff")),
+                text_color=str(item_data.get("textColor", "#f5f6f8")),
+                image_data=str(item_data.get("imageData", "")),
+                sub_diagram_path=str(item_data.get("subDiagramPath", "")),
+                note_markdown=str(item_data.get("noteMarkdown", "")),
+            )
+            self._append_item(item)
+            old_id = str(item_data.get("id", ""))
+            if old_id:
+                id_map[old_id] = item_id
+
+        edges_data = payload.get("edges", [])
+        edges_added = False
+        if isinstance(edges_data, list):
+            for edge_data in edges_data:
+                old_from = str(edge_data.get("fromId", ""))
+                old_to = str(edge_data.get("toId", ""))
+                if not old_from or not old_to:
+                    continue
+                if old_from not in id_map or old_to not in id_map:
+                    continue
+                from_id = id_map[old_from]
+                to_id = id_map[old_to]
+                if from_id == to_id:
+                    continue
+                if any(edge.from_id == from_id and edge.to_id == to_id for edge in self._edges):
+                    continue
+                edge_id = f"edge_{len(self._edges)}"
+                description = str(edge_data.get("description", ""))
+                self._edges.append(DiagramEdge(edge_id, from_id, to_id, description))
+                edges_added = True
+        if edges_added:
+            self.edgesChanged.emit()
+        self._update_sub_diagram_watches()
+        return True
 
     @Slot(str, float, float)
     def moveItem(self, item_id: str, x: float, y: float) -> None:
@@ -1522,6 +1748,20 @@ ApplicationWindow {
             title: "Edit"
 
             MenuItem {
+                text: "Copy"
+                enabled: diagramModel !== null && (root.selectedItemId.length > 0 || (edgeCanvas && edgeCanvas.selectedEdgeId.length > 0))
+                onTriggered: root.copySelectionToClipboard()
+            }
+
+            MenuItem {
+                text: "Paste"
+                enabled: diagramModel !== null && (diagramModel.hasClipboardDiagram() || diagramModel.hasClipboardImage())
+                onTriggered: root.pasteFromClipboard()
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
                 text: "Clear All Items"
                 onTriggered: {
                     if (!diagramModel) return
@@ -1588,7 +1828,7 @@ ApplicationWindow {
             MenuSeparator {}
 
             MenuItem {
-                text: "Paste Image from Clipboard (Ctrl+V)"
+                text: "Paste Image from Clipboard"
                 enabled: diagramModel !== null && diagramModel.hasClipboardImage()
                 onTriggered: {
                     if (diagramModel && diagramModel.hasClipboardImage()) {
@@ -1761,13 +2001,16 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Ctrl+C"
+        enabled: diagramModel !== null
+        onActivated: root.copySelectionToClipboard()
+    }
+
+    Shortcut {
         sequence: "Ctrl+V"
         enabled: diagramModel !== null
         onActivated: {
-            if (diagramModel && diagramModel.hasClipboardImage()) {
-                var center = root.diagramCenterPoint()
-                diagramModel.pasteImageFromClipboard(center.x, center.y)
-            }
+            root.pasteFromClipboard()
         }
     }
 
@@ -1806,6 +2049,31 @@ ApplicationWindow {
         var cx = (viewport.contentX + viewport.width / 2) / root.zoomLevel
         var cy = (viewport.contentY + viewport.height / 2) / root.zoomLevel
         return snapPoint(Qt.point(cx, cy))
+    }
+
+    function copySelectionToClipboard() {
+        if (!diagramModel)
+            return
+        if (edgeCanvas && edgeCanvas.selectedEdgeId && edgeCanvas.selectedEdgeId.length > 0) {
+            diagramModel.copyEdgeToClipboard(edgeCanvas.selectedEdgeId)
+            return
+        }
+        if (root.selectedItemId && root.selectedItemId.length > 0) {
+            diagramModel.copyItemsToClipboard([root.selectedItemId])
+        }
+    }
+
+    function pasteFromClipboard() {
+        if (!diagramModel)
+            return
+        var center = root.diagramCenterPoint()
+        if (diagramModel.hasClipboardDiagram()) {
+            diagramModel.pasteDiagramFromClipboard(center.x, center.y)
+            return
+        }
+        if (diagramModel.hasClipboardImage()) {
+            diagramModel.pasteImageFromClipboard(center.x, center.y)
+        }
     }
 
     function renameItemById(itemId) {
@@ -3662,6 +3930,7 @@ ApplicationWindow {
                                     } else {
                                         edgeCanvas.selectedEdgeId = edgeId
                                     }
+                                    root.selectedItemId = ""
                                     edgeCanvas.requestPaint()
                                 }
                             }
@@ -4795,6 +5064,8 @@ ApplicationWindow {
                                 gesturePolicy: TapHandler.DragThreshold
                                 onTapped: {
                                     root.selectedItemId = itemRect.itemId
+                                    if (edgeCanvas)
+                                        edgeCanvas.selectedEdgeId = ""
                                 }
                                 onDoubleTapped: function(eventPoint) {
                                     // Check if double-click is on the edge handle (26x26 button, 6px from top-right)
