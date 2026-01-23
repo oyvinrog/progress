@@ -1681,6 +1681,9 @@ class DiagramModel(QAbstractListModel):
         Args:
             data: Dictionary containing diagram data (from to_dict).
         """
+        # Set current task index up front so new items render with correct state.
+        self._current_task_index = int(data.get("current_task_index", -1))
+
         # Clear existing items, edges, and strokes
         if self._items:
             self.beginRemoveRows(QModelIndex(), 0, len(self._items) - 1)
@@ -1774,9 +1777,6 @@ class DiagramModel(QAbstractListModel):
             self._strokes.append(stroke)
 
         self._stroke_id_source = count(max_stroke_id)
-
-        # Load current task
-        self._current_task_index = int(data.get("current_task_index", -1))
 
         self.itemsChanged.emit()
         self.edgesChanged.emit()
