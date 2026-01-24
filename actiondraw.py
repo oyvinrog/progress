@@ -2460,7 +2460,11 @@ ApplicationWindow {
         property string presetName: "box"
         title: boxDialog.editingItemId.length === 0 ? root.presetTitle(boxDialog.presetName) : "Edit Label"
 
-        onOpened: boxTextField.forceActiveFocus()
+        onOpened: {
+            boxTextField.forceActiveFocus()
+            if (boxDialog.editingItemId.length > 0)
+                boxTextField.selectAll()
+        }
 
         contentItem: ColumnLayout {
             width: 320
@@ -2522,7 +2526,11 @@ ApplicationWindow {
         property string textValue: ""
         title: freeTextDialog.editingItemId.length === 0 ? "Free Text" : "Edit Free Text"
 
-        onOpened: freeTextArea.forceActiveFocus()
+        onOpened: {
+            freeTextArea.forceActiveFocus()
+            if (freeTextDialog.editingItemId.length > 0)
+                freeTextArea.selectAll()
+        }
 
         contentItem: ColumnLayout {
             width: 360
@@ -2827,7 +2835,10 @@ ApplicationWindow {
         property string editingItemId: ""
         property string textValue: ""
 
-        onOpened: taskRenameField.forceActiveFocus()
+        onOpened: {
+            taskRenameField.forceActiveFocus()
+            taskRenameField.selectAll()
+        }
 
         function openWithItem(itemId, text) {
             editingItemId = itemId
@@ -3964,6 +3975,13 @@ ApplicationWindow {
                             onTriggered: {
                                 var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
                                 root.openFreeTextDialog(snapped, "", "")
+                            }
+                        }
+                        MenuItem {
+                            text: "Obstacle"
+                            onTriggered: {
+                                var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
+                                root.openPresetDialog("obstacle", snapped, "", undefined)
                             }
                         }
                     }
