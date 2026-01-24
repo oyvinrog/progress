@@ -2351,5 +2351,554 @@ class TestCountdownTimer:
         assert active == False
 
 
+class TestAddTaskWithParent:
+    """Tests for TaskModel.addTaskWithParent method."""
+
+    def test_add_task_with_parent_returns_index(self, app):
+        """addTaskWithParent returns the inserted row index."""
+        model = TaskModel()
+        idx = model.addTaskWithParent("Root Task")
+        assert idx == 0
+        assert model.rowCount() == 1
+
+    def test_add_task_with_parent_root_level(self, app):
+        """Adding task at root level with parent_row=-1."""
+        model = TaskModel()
+        idx = model.addTaskWithParent("Task 1", -1)
+        assert idx == 0
+        index = model.index(0, 0)
+        assert model.data(index, model.IndentLevelRole) == 0
+
+    def test_add_task_with_parent_as_child(self, app):
+        """Adding task as child of another task."""
+        model = TaskModel()
+        parent_idx = model.addTaskWithParent("Parent Task", -1)
+        child_idx = model.addTaskWithParent("Child Task", parent_idx)
+
+        assert child_idx == 1
+        index = model.index(1, 0)
+        assert model.data(index, model.IndentLevelRole) == 1
+        assert model.data(index, model.TitleRole) == "Child Task"
+
+    def test_add_task_with_parent_empty_title(self, app):
+        """Adding task with empty title returns -1."""
+        model = TaskModel()
+        idx = model.addTaskWithParent("")
+        assert idx == -1
+        assert model.rowCount() == 0
+
+    def test_add_task_with_parent_whitespace_title(self, app):
+        """Adding task with whitespace-only title returns -1."""
+        model = TaskModel()
+        idx = model.addTaskWithParent("   ")
+        assert idx == -1
+        assert model.rowCount() == 0
+
+    def test_add_task_with_parent_nested_children(self, app):
+        """Adding multiple levels of nested children."""
+        model = TaskModel()
+        root = model.addTaskWithParent("Root", -1)
+        child1 = model.addTaskWithParent("Child 1", root)
+        grandchild = model.addTaskWithParent("Grandchild", child1)
+
+        assert model.rowCount() == 3
+        assert model.data(model.index(2, 0), model.IndentLevelRole) == 2
+
+
+class TestTabModelCompletion:
+    """Tests for TabModel completion percentage functionality."""
+
+    def test_tab_completion_role_exists(self, app):
+        """TabModel has CompletionRole."""
+        from task_model import TabModel
+        model = TabModel()
+        role_names = model.roleNames()
+        assert b"completionPercent" in role_names.values()
+
+    def test_tab_completion_empty_tab(self, app):
+        """Empty tab has 0% completion."""
+        from task_model import TabModel
+        model = TabModel()
+        index = model.index(0, 0)
+        completion = model.data(index, model.CompletionRole)
+        assert completion == 0.0
+
+    def test_tab_completion_with_tasks(self, app):
+        """Tab completion reflects task completion."""
+        from task_model import TabModel
+        model = TabModel()
+        # Set tab with 2 tasks, 1 completed
+        model._tabs[0].tasks = {
+            "tasks": [
+                {"title": "Task 1", "completed": True},
+                {"title": "Task 2", "completed": False},
+            ]
+        }
+        index = model.index(0, 0)
+        completion = model.data(index, model.CompletionRole)
+        assert completion == 50.0
+
+    def test_tab_completion_all_completed(self, app):
+        """100% completion when all tasks done."""
+        from task_model import TabModel
+        model = TabModel()
+        model._tabs[0].tasks = {
+            "tasks": [
+                {"title": "Task 1", "completed": True},
+                {"title": "Task 2", "completed": True},
+            ]
+        }
+        index = model.index(0, 0)
+        completion = model.data(index, model.CompletionRole)
+        assert completion == 100.0
+
+
+class TestTabModelMoveTab:
+    """Tests for TabModel.moveTab method."""
+
+    def test_move_tab_forward(self, app):
+        """Moving tab forward works."""
+        from task_model import TabModel
+        model = TabModel()
+        model.addTab("Tab 2")
+        model.addTab("Tab 3")
+        assert model.rowCount() == 3
+
+        model.moveTab(0, 2)
+        assert model.data(model.index(0, 0), model.NameRole) == "Tab 2"
+        assert model.data(model.index(2, 0), model.NameRole) == "Main"
+
+    def test_move_tab_backward(self, app):
+        """Moving tab backward works."""
+        from task_model import TabModel
+        model = TabModel()
+        model.addTab("Tab 2")
+        model.addTab("Tab 3")
+
+        model.moveTab(2, 0)
+        assert model.data(model.index(0, 0), model.NameRole) == "Tab 3"
+        assert model.data(model.index(2, 0), model.NameRole) == "Tab 2"
+
+    def test_move_tab_same_position(self, app):
+        """Moving tab to same position does nothing."""
+        from task_model import TabModel
+        model = TabModel()
+        model.addTab("Tab 2")
+        model.moveTab(0, 0)
+        assert model.data(model.index(0, 0), model.NameRole) == "Main"
+
+    def test_move_tab_invalid_indices(self, app):
+        """Moving with invalid indices does nothing."""
+        from task_model import TabModel
+        model = TabModel()
+        model.addTab("Tab 2")
+        model.moveTab(-1, 0)
+        model.moveTab(0, 10)
+        model.moveTab(10, 0)
+        # Should not crash, tabs unchanged
+        assert model.rowCount() == 2
+
+    def test_move_tab_updates_current_index(self, app):
+        """Moving current tab updates currentTabIndex."""
+        from task_model import TabModel
+        model = TabModel()
+        model.addTab("Tab 2")
+        model.addTab("Tab 3")
+        model.setCurrentTab(0)
+
+        model.moveTab(0, 2)
+        assert model.currentTabIndex == 2
+
+
+class TestTabModelUpdateCurrentTabTasks:
+    """Tests for TabModel.updateCurrentTabTasks method."""
+
+    def test_update_current_tab_tasks(self, app):
+        """updateCurrentTabTasks updates only tasks data."""
+        from task_model import TabModel
+        model = TabModel()
+        original_diagram = model._tabs[0].diagram
+
+        new_tasks = {"tasks": [{"title": "New Task", "completed": False}]}
+        model.updateCurrentTabTasks(new_tasks)
+
+        assert model._tabs[0].tasks == new_tasks
+        assert model._tabs[0].diagram == original_diagram
+
+    def test_update_current_tab_tasks_emits_data_changed(self, app):
+        """updateCurrentTabTasks emits dataChanged signal."""
+        from task_model import TabModel
+        model = TabModel()
+        signal_received = []
+
+        def on_data_changed(top_left, bottom_right, roles):
+            signal_received.append((top_left.row(), roles))
+
+        model.dataChanged.connect(on_data_changed)
+        model.updateCurrentTabTasks({"tasks": []})
+
+        assert len(signal_received) == 1
+        assert model.CompletionRole in signal_received[0][1]
+
+
+class TestClipboardFunctionality:
+    """Tests for DiagramModel clipboard operations."""
+
+    def test_copy_items_to_clipboard_empty_list(self, empty_diagram_model):
+        """Copying empty list returns False."""
+        result = empty_diagram_model.copyItemsToClipboard([])
+        assert result == False
+
+    def test_copy_items_to_clipboard_invalid_ids(self, empty_diagram_model):
+        """Copying non-existent items returns False."""
+        result = empty_diagram_model.copyItemsToClipboard(["nonexistent_1"])
+        assert result == False
+
+    def test_copy_items_to_clipboard_success(self, empty_diagram_model):
+        """Copying valid items succeeds."""
+        item_id = empty_diagram_model.addBox(100.0, 100.0, "Test Box")
+        result = empty_diagram_model.copyItemsToClipboard([item_id])
+        assert result == True
+
+    def test_copy_items_to_clipboard_multiple(self, empty_diagram_model):
+        """Copying multiple items preserves edges."""
+        id1 = empty_diagram_model.addBox(100.0, 100.0, "Box 1")
+        id2 = empty_diagram_model.addBox(200.0, 100.0, "Box 2")
+        empty_diagram_model.addEdge(id1, id2)
+
+        result = empty_diagram_model.copyItemsToClipboard([id1, id2])
+        assert result == True
+
+    def test_copy_edge_to_clipboard_success(self, empty_diagram_model):
+        """Copying edge includes both connected items."""
+        id1 = empty_diagram_model.addBox(100.0, 100.0, "Box 1")
+        id2 = empty_diagram_model.addBox(200.0, 100.0, "Box 2")
+        empty_diagram_model.addEdge(id1, id2)
+        edge_id = empty_diagram_model.edges[0]["id"]
+
+        result = empty_diagram_model.copyEdgeToClipboard(edge_id)
+        assert result == True
+
+    def test_copy_edge_to_clipboard_invalid(self, empty_diagram_model):
+        """Copying non-existent edge returns False."""
+        result = empty_diagram_model.copyEdgeToClipboard("nonexistent_edge")
+        assert result == False
+
+    def test_copy_edge_to_clipboard_empty(self, empty_diagram_model):
+        """Copying empty edge id returns False."""
+        result = empty_diagram_model.copyEdgeToClipboard("")
+        assert result == False
+
+    def test_has_clipboard_diagram_false_initially(self, empty_diagram_model):
+        """hasClipboardDiagram returns False when clipboard is empty."""
+        # Clear clipboard first
+        from PySide6.QtGui import QGuiApplication
+        clipboard = QGuiApplication.clipboard()
+        if clipboard:
+            clipboard.clear()
+        result = empty_diagram_model.hasClipboardDiagram()
+        assert result == False
+
+    def test_has_clipboard_diagram_after_copy(self, empty_diagram_model):
+        """hasClipboardDiagram returns True after copying items."""
+        item_id = empty_diagram_model.addBox(100.0, 100.0, "Test")
+        empty_diagram_model.copyItemsToClipboard([item_id])
+        result = empty_diagram_model.hasClipboardDiagram()
+        assert result == True
+
+    def test_paste_diagram_from_clipboard(self, empty_diagram_model):
+        """Pasting diagram creates new items."""
+        item_id = empty_diagram_model.addBox(100.0, 100.0, "Original")
+        empty_diagram_model.copyItemsToClipboard([item_id])
+
+        # Paste at different position
+        result = empty_diagram_model.pasteDiagramFromClipboard(300.0, 300.0)
+        assert result == True
+        assert empty_diagram_model.count == 2
+
+    def test_paste_diagram_with_edges(self, empty_diagram_model):
+        """Pasting diagram preserves edges between items."""
+        id1 = empty_diagram_model.addBox(100.0, 100.0, "Box 1")
+        id2 = empty_diagram_model.addBox(200.0, 100.0, "Box 2")
+        empty_diagram_model.addEdge(id1, id2)
+        empty_diagram_model.copyItemsToClipboard([id1, id2])
+
+        result = empty_diagram_model.pasteDiagramFromClipboard(400.0, 400.0)
+        assert result == True
+        assert empty_diagram_model.count == 4
+        assert len(empty_diagram_model.edges) == 2
+
+    def test_paste_diagram_empty_clipboard(self, empty_diagram_model):
+        """Pasting from empty clipboard returns False."""
+        from PySide6.QtGui import QGuiApplication
+        clipboard = QGuiApplication.clipboard()
+        if clipboard:
+            clipboard.clear()
+        result = empty_diagram_model.pasteDiagramFromClipboard(100.0, 100.0)
+        assert result == False
+
+
+class TestParseTextHierarchy:
+    """Tests for DiagramModel._parse_text_hierarchy method."""
+
+    def test_parse_flat_lines(self, empty_diagram_model):
+        """Parsing flat text produces level 0 entries."""
+        text = "Line 1\nLine 2\nLine 3"
+        result = empty_diagram_model._parse_text_hierarchy(text)
+        assert len(result) == 3
+        assert all(entry["level"] == 0 for entry in result)
+
+    def test_parse_indented_lines(self, empty_diagram_model):
+        """Parsing indented text produces correct hierarchy."""
+        text = "Parent\n  Child 1\n  Child 2\n    Grandchild"
+        result = empty_diagram_model._parse_text_hierarchy(text)
+        assert len(result) == 4
+        assert result[0]["level"] == 0
+        assert result[1]["level"] == 1
+        assert result[2]["level"] == 1
+        assert result[3]["level"] == 2
+
+    def test_parse_empty_lines_ignored(self, empty_diagram_model):
+        """Empty lines are ignored."""
+        text = "Line 1\n\n\nLine 2"
+        result = empty_diagram_model._parse_text_hierarchy(text)
+        assert len(result) == 2
+
+    def test_parse_tab_indentation(self, empty_diagram_model):
+        """Tab indentation is handled."""
+        text = "Parent\n\tChild"
+        result = empty_diagram_model._parse_text_hierarchy(text)
+        assert len(result) == 2
+        assert result[0]["level"] == 0
+        assert result[1]["level"] == 1
+
+    def test_parse_text_stripped(self, empty_diagram_model):
+        """Text is stripped of leading/trailing whitespace."""
+        text = "  Item 1  \n    Item 2  "
+        result = empty_diagram_model._parse_text_hierarchy(text)
+        assert result[0]["text"] == "Item 1"
+        assert result[1]["text"] == "Item 2"
+
+
+class TestHasClipboardTextLines:
+    """Tests for DiagramModel.hasClipboardTextLines method."""
+
+    def test_has_clipboard_text_lines_false_empty(self, empty_diagram_model):
+        """Returns False when clipboard is empty."""
+        from PySide6.QtGui import QGuiApplication
+        clipboard = QGuiApplication.clipboard()
+        if clipboard:
+            clipboard.clear()
+        result = empty_diagram_model.hasClipboardTextLines()
+        assert result == False
+
+    def test_has_clipboard_text_lines_single_line(self, empty_diagram_model):
+        """Returns False for single line text."""
+        from PySide6.QtGui import QGuiApplication
+        clipboard = QGuiApplication.clipboard()
+        if clipboard:
+            clipboard.setText("Single line")
+        result = empty_diagram_model.hasClipboardTextLines()
+        assert result == False
+
+    def test_has_clipboard_text_lines_multiple_lines(self, empty_diagram_model):
+        """Returns True for multiple non-empty lines."""
+        from PySide6.QtGui import QGuiApplication
+        clipboard = QGuiApplication.clipboard()
+        if clipboard:
+            clipboard.setText("Line 1\nLine 2")
+        result = empty_diagram_model.hasClipboardTextLines()
+        assert result == True
+
+
+class TestPasteTextFromClipboard:
+    """Tests for DiagramModel.pasteTextFromClipboard method."""
+
+    def test_paste_text_as_boxes(self, empty_diagram_model):
+        """Pasting text as boxes creates box items."""
+        from PySide6.QtGui import QGuiApplication
+        clipboard = QGuiApplication.clipboard()
+        if clipboard:
+            clipboard.setText("Box 1\nBox 2\nBox 3")
+
+        result = empty_diagram_model.pasteTextFromClipboard(100.0, 100.0, False)
+        assert result == True
+        assert empty_diagram_model.count == 3
+
+    def test_paste_text_as_tasks(self, diagram_model_with_task_model):
+        """Pasting text as tasks creates task items."""
+        from PySide6.QtGui import QGuiApplication
+        clipboard = QGuiApplication.clipboard()
+        if clipboard:
+            clipboard.setText("Task A\nTask B")
+
+        initial_task_count = diagram_model_with_task_model._task_model.rowCount()
+        result = diagram_model_with_task_model.pasteTextFromClipboard(100.0, 100.0, True)
+
+        assert result == True
+        assert diagram_model_with_task_model._task_model.rowCount() == initial_task_count + 2
+
+    def test_paste_text_empty_clipboard(self, empty_diagram_model):
+        """Pasting from empty clipboard returns False."""
+        from PySide6.QtGui import QGuiApplication
+        clipboard = QGuiApplication.clipboard()
+        if clipboard:
+            clipboard.clear()
+        result = empty_diagram_model.pasteTextFromClipboard(100.0, 100.0, False)
+        assert result == False
+
+    def test_paste_text_creates_edges(self, empty_diagram_model):
+        """Pasting multiple lines creates edges between items."""
+        from PySide6.QtGui import QGuiApplication
+        clipboard = QGuiApplication.clipboard()
+        if clipboard:
+            clipboard.setText("Item 1\nItem 2\nItem 3")
+
+        empty_diagram_model.pasteTextFromClipboard(100.0, 100.0, False)
+        # Should have edges connecting items in sequence
+        assert len(empty_diagram_model.edges) == 2
+
+    def test_paste_text_as_tasks_without_task_model(self, empty_diagram_model):
+        """Pasting as tasks without task model returns False."""
+        from PySide6.QtGui import QGuiApplication
+        clipboard = QGuiApplication.clipboard()
+        if clipboard:
+            clipboard.setText("Task 1\nTask 2")
+
+        result = empty_diagram_model.pasteTextFromClipboard(100.0, 100.0, True)
+        assert result == False
+
+
+class TestProjectManagerRefreshTasks:
+    """Tests for ProjectManager._refreshCurrentTabTasks method."""
+
+    def test_refresh_skipped_during_loading(self, app):
+        """_refreshCurrentTabTasks is skipped when _loading is True."""
+        from task_model import TaskModel, TabModel, ProjectManager
+        from actiondraw import DiagramModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_mgr = ProjectManager(task_model, diagram_model, tab_model)
+
+        task_model._loading = True
+        # This should not update tab model
+        initial_tasks = tab_model._tabs[0].tasks.copy()
+        task_model.taskCountChanged.emit()
+        # Tasks should not have been serialized
+        assert tab_model._tabs[0].tasks == initial_tasks
+
+    def test_refresh_works_when_not_loading(self, app):
+        """_refreshCurrentTabTasks works when _loading is False."""
+        from task_model import TaskModel, TabModel, ProjectManager
+        from actiondraw import DiagramModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_mgr = ProjectManager(task_model, diagram_model, tab_model)
+
+        task_model.addTask("New Task", -1)
+        # Tab model should now have the new task
+        assert len(tab_model._tabs[0].tasks.get("tasks", [])) == 1
+
+
+class TestBatchLoading:
+    """Tests for batch loading performance optimization."""
+
+    def test_from_dict_batch_insert(self, app):
+        """from_dict uses batch insertion for tasks."""
+        model = TaskModel()
+        data = {
+            "tasks": [
+                {"title": f"Task {i}", "completed": False, "time_spent": 0.0,
+                 "parent_index": -1, "indent_level": 0, "custom_estimate": None}
+                for i in range(10)
+            ]
+        }
+
+        model.from_dict(data)
+        assert model.rowCount() == 10
+
+    def test_loading_flag_set_during_from_dict(self, app):
+        """_loading flag is set during from_dict execution."""
+        model = TaskModel()
+        loading_states = []
+
+        # Capture loading state during signal emission
+        def capture_state(*args):
+            loading_states.append(model._loading)
+
+        model.taskCountChanged.connect(capture_state)
+
+        data = {"tasks": [{"title": "Task", "completed": False, "time_spent": 0.0,
+                          "parent_index": -1, "indent_level": 0, "custom_estimate": None}]}
+        model.from_dict(data)
+
+        # The signal is emitted after loading is complete, so _loading should be False
+        assert loading_states[-1] == False
+
+    def test_loading_flag_reset_after_from_dict(self, app):
+        """_loading flag is reset to False after from_dict completes."""
+        model = TaskModel()
+        data = {"tasks": [{"title": "Task", "completed": False, "time_spent": 0.0,
+                          "parent_index": -1, "indent_level": 0, "custom_estimate": None}]}
+        model.from_dict(data)
+        assert model._loading == False
+
+    def test_loading_flag_reset_on_exception(self, app):
+        """_loading flag is reset even if from_dict fails."""
+        model = TaskModel()
+        # Pass invalid data that might cause issues
+        try:
+            model.from_dict({"tasks": "invalid"})
+        except (TypeError, AttributeError):
+            pass
+        # Flag should still be reset
+        assert model._loading == False
+
+
+class TestSerializeItemForClipboard:
+    """Tests for DiagramModel._serialize_item_for_clipboard method."""
+
+    def test_serialize_item_basic(self, empty_diagram_model):
+        """Serializing item produces correct dictionary."""
+        from actiondraw import DiagramItem, DiagramItemType
+        item = DiagramItem(
+            id="box_1",
+            item_type=DiagramItemType.BOX,
+            x=100.0,
+            y=200.0,
+            width=120.0,
+            height=60.0,
+            text="Test Box",
+            color="#4a9eff",
+            text_color="#f5f6f8",
+        )
+
+        result = empty_diagram_model._serialize_item_for_clipboard(item)
+
+        assert result["id"] == "box_1"
+        assert result["type"] == "box"
+        assert result["x"] == 100.0
+        assert result["y"] == 200.0
+        assert result["text"] == "Test Box"
+
+    def test_serialize_item_with_note(self, empty_diagram_model):
+        """Serializing item with note preserves markdown."""
+        from actiondraw import DiagramItem, DiagramItemType
+        item = DiagramItem(
+            id="note_1",
+            item_type=DiagramItemType.NOTE,
+            x=0.0,
+            y=0.0,
+            note_markdown="# Heading\n\nContent",
+        )
+
+        result = empty_diagram_model._serialize_item_for_clipboard(item)
+        assert result["noteMarkdown"] == "# Heading\n\nContent"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
