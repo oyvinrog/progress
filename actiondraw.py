@@ -1720,41 +1720,46 @@ class DiagramModel(QAbstractListModel):
         # Track highest ID number to resume ID generation
         max_id = 0
 
-        # Load items
+        # Load items with batch insertion
         items_data = data.get("items", [])
-        for item_data in items_data:
-            item_id = item_data.get("id", "")
-            # Extract numeric part from item ID to track max
-            try:
-                id_parts = item_id.rsplit("_", 1)
-                if len(id_parts) == 2:
-                    max_id = max(max_id, int(id_parts[1]) + 1)
-            except (ValueError, IndexError):
-                pass
+        if items_data:
+            new_items = []
+            for item_data in items_data:
+                item_id = item_data.get("id", "")
+                # Extract numeric part from item ID to track max
+                try:
+                    id_parts = item_id.rsplit("_", 1)
+                    if len(id_parts) == 2:
+                        max_id = max(max_id, int(id_parts[1]) + 1)
+                except (ValueError, IndexError):
+                    pass
 
-            item_type_str = item_data.get("item_type", "box")
-            try:
-                item_type = DiagramItemType(item_type_str)
-            except ValueError:
-                item_type = DiagramItemType.BOX
+                item_type_str = item_data.get("item_type", "box")
+                try:
+                    item_type = DiagramItemType(item_type_str)
+                except ValueError:
+                    item_type = DiagramItemType.BOX
 
-            item = DiagramItem(
-                id=item_id,
-                item_type=item_type,
-                x=float(item_data.get("x", 0.0)),
-                y=float(item_data.get("y", 0.0)),
-                width=float(item_data.get("width", 120.0)),
-                height=float(item_data.get("height", 60.0)),
-                text=item_data.get("text", ""),
-                task_index=int(item_data.get("task_index", -1)),
-                color=item_data.get("color", "#4a9eff"),
-                text_color=item_data.get("text_color", "#f5f6f8"),
-                image_data=item_data.get("image_data", ""),
-                sub_diagram_path=item_data.get("sub_diagram_path", ""),
-                note_markdown=item_data.get("note_markdown", ""),
-            )
-            self.beginInsertRows(QModelIndex(), len(self._items), len(self._items))
-            self._items.append(item)
+                item = DiagramItem(
+                    id=item_id,
+                    item_type=item_type,
+                    x=float(item_data.get("x", 0.0)),
+                    y=float(item_data.get("y", 0.0)),
+                    width=float(item_data.get("width", 120.0)),
+                    height=float(item_data.get("height", 60.0)),
+                    text=item_data.get("text", ""),
+                    task_index=int(item_data.get("task_index", -1)),
+                    color=item_data.get("color", "#4a9eff"),
+                    text_color=item_data.get("text_color", "#f5f6f8"),
+                    image_data=item_data.get("image_data", ""),
+                    sub_diagram_path=item_data.get("sub_diagram_path", ""),
+                    note_markdown=item_data.get("note_markdown", ""),
+                )
+                new_items.append(item)
+
+            # Batch insert all items at once
+            self.beginInsertRows(QModelIndex(), 0, len(new_items) - 1)
+            self._items.extend(new_items)
             self.endInsertRows()
 
         # Update ID source to avoid collisions

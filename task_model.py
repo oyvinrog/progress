@@ -76,6 +76,7 @@ class TaskModel(QAbstractListModel):
     def __init__(self, tasks: Optional[List[Task]] = None):
         super().__init__()
         self._tasks: List[Task] = tasks or []
+        self._loading = False  # Flag to suppress signals during bulk loading
         self._timer = QTimer()
         self._timer.timeout.connect(self._updateActiveTasks)
         self._timer.start(1000)  # Update every second
@@ -672,29 +673,40 @@ class TaskModel(QAbstractListModel):
         Args:
             data: Dictionary containing task data (from to_dict).
         """
-        # Clear existing tasks
-        self.clear()
+        self._loading = True
+        try:
+            # Clear existing tasks without emitting signals
+            if self._tasks:
+                self.beginRemoveRows(QModelIndex(), 0, len(self._tasks) - 1)
+                self._tasks.clear()
+                self.endRemoveRows()
 
-        # Load new tasks
-        tasks_data = data.get("tasks", [])
-        for task_data in tasks_data:
-            task = Task(
-                title=task_data.get("title", ""),
-                completed=task_data.get("completed", False),
-                time_spent=task_data.get("time_spent", 0.0),
-                parent_index=task_data.get("parent_index", -1),
-                indent_level=task_data.get("indent_level", 0),
-                custom_estimate=task_data.get("custom_estimate"),
-                countdown_duration=task_data.get("countdown_duration"),
-                countdown_start=task_data.get("countdown_start"),
-            )
-            # Don't auto-start timing for loaded tasks
-            if not task.completed:
-                task.start_time = time.time()
+            # Load new tasks with batch insertion
+            tasks_data = data.get("tasks", [])
+            if tasks_data:
+                new_tasks = []
+                for task_data in tasks_data:
+                    task = Task(
+                        title=task_data.get("title", ""),
+                        completed=task_data.get("completed", False),
+                        time_spent=task_data.get("time_spent", 0.0),
+                        parent_index=task_data.get("parent_index", -1),
+                        indent_level=task_data.get("indent_level", 0),
+                        custom_estimate=task_data.get("custom_estimate"),
+                        countdown_duration=task_data.get("countdown_duration"),
+                        countdown_start=task_data.get("countdown_start"),
+                    )
+                    # Don't auto-start timing for loaded tasks
+                    if not task.completed:
+                        task.start_time = time.time()
+                    new_tasks.append(task)
 
-            self.beginInsertRows(QModelIndex(), len(self._tasks), len(self._tasks))
-            self._tasks.append(task)
-            self.endInsertRows()
+                # Batch insert all tasks at once
+                self.beginInsertRows(QModelIndex(), 0, len(new_tasks) - 1)
+                self._tasks.extend(new_tasks)
+                self.endInsertRows()
+        finally:
+            self._loading = False
 
         self.avgTimeChanged.emit()
         self.totalEstimateChanged.emit()
@@ -1046,7 +1058,7 @@ class ProjectManager(QObject):
             )
 
     def _refreshCurrentTabTasks(self, *args) -> None:
-        if self._tab_model is not None:
+        if self._tab_model is not None and not self._task_model._loading:
             self._tab_model.updateCurrentTabTasks(self._task_model.to_dict())
 
     @Slot(str)
