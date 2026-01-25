@@ -76,6 +76,7 @@ class TaskModel(QAbstractListModel):
     def __init__(self, tasks: Optional[List[Task]] = None):
         super().__init__()
         self._tasks: List[Task] = tasks or []
+        self._loading = False  # Flag to suppress signals during bulk loading
         self._timer = QTimer()
         self._timer.timeout.connect(self._updateActiveTasks)
         self._timer.start(1000)  # Update every second
@@ -438,6 +439,35 @@ class TaskModel(QAbstractListModel):
         self.endInsertRows()
         self.taskCountChanged.emit()
 
+    def addTaskWithParent(self, title: str, parent_row: int = -1) -> int:
+        """Add a new task and return its row index."""
+        title = title.strip()
+        if not title:
+            return -1
+
+        indent = 0
+        if parent_row >= 0 and parent_row < len(self._tasks):
+            indent = self._tasks[parent_row].indent_level + 1
+
+        task = Task(
+            title=title,
+            start_time=time.time(),
+            parent_index=parent_row,
+            indent_level=indent,
+        )
+
+        insert_pos = len(self._tasks)
+        if parent_row >= 0:
+            insert_pos = parent_row + 1
+            while insert_pos < len(self._tasks) and self._tasks[insert_pos].indent_level > indent - 1:
+                insert_pos += 1
+
+        self.beginInsertRows(QModelIndex(), insert_pos, insert_pos)
+        self._tasks.insert(insert_pos, task)
+        self.endInsertRows()
+        self.taskCountChanged.emit()
+        return insert_pos
+
     def toggleComplete(self, row: int, completed: bool) -> None:
         """Toggle task completion status."""
         if row < 0 or row >= len(self._tasks):
@@ -643,29 +673,40 @@ class TaskModel(QAbstractListModel):
         Args:
             data: Dictionary containing task data (from to_dict).
         """
-        # Clear existing tasks
-        self.clear()
+        self._loading = True
+        try:
+            # Clear existing tasks without emitting signals
+            if self._tasks:
+                self.beginRemoveRows(QModelIndex(), 0, len(self._tasks) - 1)
+                self._tasks.clear()
+                self.endRemoveRows()
 
-        # Load new tasks
-        tasks_data = data.get("tasks", [])
-        for task_data in tasks_data:
-            task = Task(
-                title=task_data.get("title", ""),
-                completed=task_data.get("completed", False),
-                time_spent=task_data.get("time_spent", 0.0),
-                parent_index=task_data.get("parent_index", -1),
-                indent_level=task_data.get("indent_level", 0),
-                custom_estimate=task_data.get("custom_estimate"),
-                countdown_duration=task_data.get("countdown_duration"),
-                countdown_start=task_data.get("countdown_start"),
-            )
-            # Don't auto-start timing for loaded tasks
-            if not task.completed:
-                task.start_time = time.time()
+            # Load new tasks with batch insertion
+            tasks_data = data.get("tasks", [])
+            if tasks_data:
+                new_tasks = []
+                for task_data in tasks_data:
+                    task = Task(
+                        title=task_data.get("title", ""),
+                        completed=task_data.get("completed", False),
+                        time_spent=task_data.get("time_spent", 0.0),
+                        parent_index=task_data.get("parent_index", -1),
+                        indent_level=task_data.get("indent_level", 0),
+                        custom_estimate=task_data.get("custom_estimate"),
+                        countdown_duration=task_data.get("countdown_duration"),
+                        countdown_start=task_data.get("countdown_start"),
+                    )
+                    # Don't auto-start timing for loaded tasks
+                    if not task.completed:
+                        task.start_time = time.time()
+                    new_tasks.append(task)
 
-            self.beginInsertRows(QModelIndex(), len(self._tasks), len(self._tasks))
-            self._tasks.append(task)
-            self.endInsertRows()
+                # Batch insert all tasks at once
+                self.beginInsertRows(QModelIndex(), 0, len(new_tasks) - 1)
+                self._tasks.extend(new_tasks)
+                self.endInsertRows()
+        finally:
+            self._loading = False
 
         self.avgTimeChanged.emit()
         self.totalEstimateChanged.emit()
@@ -680,6 +721,7 @@ class TabModel(QAbstractListModel):
 
     NameRole = Qt.UserRole + 1
     IndexRole = Qt.UserRole + 2
+    CompletionRole = Qt.UserRole + 3
 
     tabsChanged = Signal()
     currentTabChanged = Signal()
@@ -702,12 +744,15 @@ class TabModel(QAbstractListModel):
             return tab.name
         if role == self.IndexRole:
             return index.row()
+        if role == self.CompletionRole:
+            return self._calculateTabCompletion(tab)
         return None
 
     def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
         return {
             self.NameRole: b"name",
             self.IndexRole: b"tabIndex",
+            self.CompletionRole: b"completionPercent",
         }
 
     @Property(int, notify=currentTabIndexChanged)
@@ -723,6 +768,13 @@ class TabModel(QAbstractListModel):
     @Property(int, notify=tabsChanged)
     def tabCount(self) -> int:
         return len(self._tabs)
+
+    def _calculateTabCompletion(self, tab: Tab) -> float:
+        tasks = tab.tasks.get("tasks", []) if tab.tasks else []
+        if not tasks:
+            return 0.0
+        completed = sum(1 for task in tasks if task.get("completed"))
+        return (completed / len(tasks)) * 100.0
 
     @Slot(str)
     def addTab(self, name: str = "") -> None:
@@ -799,6 +851,15 @@ class TabModel(QAbstractListModel):
         if 0 <= self._current_tab_index < len(self._tabs):
             self._tabs[self._current_tab_index].tasks = tasks
             self._tabs[self._current_tab_index].diagram = diagram
+            model_index = self.index(self._current_tab_index, 0)
+            self.dataChanged.emit(model_index, model_index, [self.CompletionRole])
+
+    def updateCurrentTabTasks(self, tasks: Dict[str, Any]) -> None:
+        """Update only the current tab's tasks data."""
+        if 0 <= self._current_tab_index < len(self._tabs):
+            self._tabs[self._current_tab_index].tasks = tasks
+            model_index = self.index(self._current_tab_index, 0)
+            self.dataChanged.emit(model_index, model_index, [self.CompletionRole])
 
     def getAllTabs(self) -> List[Tab]:
         """Get all tabs."""
@@ -822,6 +883,31 @@ class TabModel(QAbstractListModel):
     def clear(self) -> None:
         """Reset to a single empty tab."""
         self.setTabs([Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})], 0)
+
+    @Slot(int, int)
+    def moveTab(self, from_index: int, to_index: int) -> None:
+        """Move a tab to a new index."""
+        if from_index == to_index:
+            return
+        if not (0 <= from_index < len(self._tabs) and 0 <= to_index < len(self._tabs)):
+            return
+
+        destination = to_index + 1 if to_index > from_index else to_index
+        self.beginMoveRows(QModelIndex(), from_index, from_index, QModelIndex(), destination)
+        tab = self._tabs.pop(from_index)
+        self._tabs.insert(to_index, tab)
+        self.endMoveRows()
+
+        if self._current_tab_index == from_index:
+            self._current_tab_index = to_index
+            self.currentTabIndexChanged.emit()
+            self.currentTabChanged.emit()
+        elif from_index < self._current_tab_index <= to_index:
+            self._current_tab_index -= 1
+            self.currentTabIndexChanged.emit()
+        elif to_index <= self._current_tab_index < from_index:
+            self._current_tab_index += 1
+            self.currentTabIndexChanged.emit()
 
 
 class ProjectManager(QObject):
@@ -862,6 +948,10 @@ class ProjectManager(QObject):
         self._current_file_path: str = ""
         self._settings = QSettings("ProgressTracker", "ProgressTracker")
         self._recent_projects: List[str] = self._load_recent_projects()
+        if self._tab_model is not None:
+            self._task_model.taskCompletionChanged.connect(self._refreshCurrentTabTasks)
+            self._task_model.taskCountChanged.connect(self._refreshCurrentTabTasks)
+            self._task_model.taskRenamed.connect(self._refreshCurrentTabTasks)
 
     def _load_recent_projects(self) -> List[str]:
         """Load recent projects list from settings."""
@@ -966,6 +1056,10 @@ class ProjectManager(QObject):
                 self._task_model.to_dict(),
                 self._diagram_model.to_dict()
             )
+
+    def _refreshCurrentTabTasks(self, *args) -> None:
+        if self._tab_model is not None and not self._task_model._loading:
+            self._tab_model.updateCurrentTabTasks(self._task_model.to_dict())
 
     @Slot(str)
     def saveProject(self, file_path: str) -> None:

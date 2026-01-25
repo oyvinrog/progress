@@ -11,6 +11,8 @@ import json
 import os
 import subprocess
 import sys
+import urllib.parse
+import webbrowser
 from dataclasses import dataclass, field
 from enum import Enum
 from itertools import count
@@ -23,13 +25,14 @@ from PySide6.QtCore import (
     QFileSystemWatcher,
     QIODevice,
     QModelIndex,
+    QMimeData,
     Property,
     Qt,
     Signal,
     Slot,
 )
 from PySide6.QtGui import QGuiApplication, QImage
-from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQml import QQmlApplicationEngine, QJSValue
 
 from markdown_note_editor import MarkdownNoteManager
 
@@ -46,6 +49,10 @@ class DiagramItemType(Enum):
     OBSTACLE = "obstacle"
     WISH = "wish"
     IMAGE = "image"
+    CHATGPT = "chatgpt"
+
+
+CLIPBOARD_MIME_TYPE = "application/x-actiondraw-diagram"
 
 
 @dataclass
@@ -159,6 +166,14 @@ ITEM_PRESETS: Dict[str, Dict[str, Any]] = {
         "color": "#f1c40f",
         "text": "Wish",
         "text_color": "#2d3436",
+    },
+    "chatgpt": {
+        "type": DiagramItemType.CHATGPT,
+        "width": 180.0,
+        "height": 90.0,
+        "color": "#1f8f6b",
+        "text": "Ask ChatGPT",
+        "text_color": "#f5f6f8",
     },
 }
 
@@ -644,6 +659,361 @@ class DiagramModel(QAbstractListModel):
             return False
         return mime_data.hasImage()
 
+    def _serialize_item_for_clipboard(self, item: DiagramItem) -> Dict[str, Any]:
+        return {
+            "id": item.id,
+            "type": item.item_type.value,
+            "x": item.x,
+            "y": item.y,
+            "width": item.width,
+            "height": item.height,
+            "text": item.text,
+            "taskIndex": item.task_index,
+            "color": item.color,
+            "textColor": item.text_color,
+            "imageData": item.image_data,
+            "subDiagramPath": item.sub_diagram_path,
+            "noteMarkdown": item.note_markdown,
+        }
+
+    def _write_clipboard_payload(self, payload: Dict[str, Any]) -> bool:
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is None:
+            return False
+        payload_text = json.dumps(payload)
+        mime_data = QMimeData()
+        mime_data.setData(CLIPBOARD_MIME_TYPE, QByteArray(payload_text.encode("utf-8")))
+        mime_data.setText(payload_text)
+        clipboard.setMimeData(mime_data)
+        return True
+
+    def _read_clipboard_payload(self) -> Optional[Dict[str, Any]]:
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is None:
+            return None
+        mime_data = clipboard.mimeData()
+        if mime_data is None:
+            return None
+        payload_text: Optional[str] = None
+        if mime_data.hasFormat(CLIPBOARD_MIME_TYPE):
+            raw = mime_data.data(CLIPBOARD_MIME_TYPE)
+            payload_text = bytes(raw).decode("utf-8")
+        elif mime_data.hasText():
+            payload_text = mime_data.text()
+        if not payload_text:
+            return None
+        try:
+            payload = json.loads(payload_text)
+        except json.JSONDecodeError:
+            return None
+        if not isinstance(payload, dict):
+            return None
+        if payload.get("format") != "actiondraw-diagram":
+            return None
+        return payload
+
+    @Slot("QVariant", result=bool)
+    def copyItemsToClipboard(self, item_ids: Any) -> bool:
+        if isinstance(item_ids, QJSValue):
+            item_ids = item_ids.toVariant()
+        if not item_ids:
+            return False
+        if not isinstance(item_ids, list):
+            return False
+        normalized_ids = [str(item_id) for item_id in item_ids if item_id]
+        if not normalized_ids:
+            return False
+        items = []
+        valid_ids = set()
+        for item_id in normalized_ids:
+            item = self.getItem(item_id)
+            if item is None:
+                continue
+            items.append(self._serialize_item_for_clipboard(item))
+            valid_ids.add(item_id)
+        if not items:
+            return False
+        edges = []
+        for edge in self._edges:
+            if edge.from_id in valid_ids and edge.to_id in valid_ids:
+                edges.append({
+                    "fromId": edge.from_id,
+                    "toId": edge.to_id,
+                    "description": edge.description,
+                })
+        payload = {
+            "format": "actiondraw-diagram",
+            "version": 1,
+            "items": items,
+            "edges": edges,
+        }
+        return self._write_clipboard_payload(payload)
+
+    @Slot(str, result=bool)
+    def copyEdgeToClipboard(self, edge_id: str) -> bool:
+        if not edge_id:
+            return False
+        edge = next((edge for edge in self._edges if edge.id == edge_id), None)
+        if edge is None:
+            return False
+        item_ids = [edge.from_id, edge.to_id]
+        items = []
+        valid_ids = set()
+        for item_id in item_ids:
+            item = self.getItem(item_id)
+            if item is None:
+                continue
+            items.append(self._serialize_item_for_clipboard(item))
+            valid_ids.add(item_id)
+        if len(valid_ids) < 2:
+            return False
+        payload = {
+            "format": "actiondraw-diagram",
+            "version": 1,
+            "items": items,
+            "edges": [
+                {
+                    "fromId": edge.from_id,
+                    "toId": edge.to_id,
+                    "description": edge.description,
+                }
+            ],
+        }
+        return self._write_clipboard_payload(payload)
+
+    @Slot(result=bool)
+    def hasClipboardDiagram(self) -> bool:
+        return self._read_clipboard_payload() is not None
+
+    @Slot(result=bool)
+    def hasClipboardTextLines(self) -> bool:
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is None:
+            return False
+        mime_data = clipboard.mimeData()
+        if mime_data is None or not mime_data.hasText():
+            return False
+        text = mime_data.text() or ""
+        lines = [line for line in text.splitlines() if line.strip()]
+        return len(lines) > 1
+
+    def _parse_text_hierarchy(self, text: str) -> List[Dict[str, Any]]:
+        entries: List[Dict[str, Any]] = []
+        indent_stack: List[int] = []
+        for raw_line in text.splitlines():
+            if not raw_line.strip():
+                continue
+            leading = len(raw_line) - len(raw_line.lstrip(" \t"))
+            indent_text = raw_line[:leading].replace("\t", "    ")
+            indent_len = len(indent_text)
+            if not indent_stack:
+                indent_stack = [indent_len]
+                level = 0
+            else:
+                if indent_len > indent_stack[-1]:
+                    indent_stack.append(indent_len)
+                    level = len(indent_stack) - 1
+                else:
+                    while indent_stack and indent_len < indent_stack[-1]:
+                        indent_stack.pop()
+                    if not indent_stack:
+                        indent_stack = [indent_len]
+                        level = 0
+                    elif indent_len > indent_stack[-1]:
+                        indent_stack.append(indent_len)
+                        level = len(indent_stack) - 1
+                    else:
+                        level = len(indent_stack) - 1
+            entries.append({"text": raw_line.lstrip(" \t").strip(), "level": level})
+        return entries
+
+    @Slot(float, float, bool, result=bool)
+    def pasteTextFromClipboard(self, x: float, y: float, as_tasks: bool) -> bool:
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is None:
+            return False
+        mime_data = clipboard.mimeData()
+        if mime_data is None or not mime_data.hasText():
+            return False
+        text = mime_data.text() or ""
+        entries = self._parse_text_hierarchy(text)
+        if not entries:
+            return False
+        if as_tasks and self._task_model is None:
+            return False
+
+        indent_spacing = 160.0
+        row_spacing = 90.0
+        positions = []
+        min_x = None
+        max_x = None
+        min_y = None
+        max_y = None
+        for idx, entry in enumerate(entries):
+            px = entry["level"] * indent_spacing
+            py = idx * row_spacing
+            positions.append((px, py))
+            min_x = px if min_x is None else min(min_x, px)
+            max_x = px if max_x is None else max(max_x, px)
+            min_y = py if min_y is None else min(min_y, py)
+            max_y = py if max_y is None else max(max_y, py)
+
+        if min_x is None or max_x is None or min_y is None or max_y is None:
+            return False
+
+        offset_x = x - (min_x + max_x) / 2.0
+        offset_y = y - (min_y + max_y) / 2.0
+
+        previous_item_id = ""
+        task_index_stack: List[int] = []
+
+        for idx, entry in enumerate(entries):
+            level = int(entry["level"])
+            text_value = entry["text"]
+            px, py = positions[idx]
+            item_x = px + offset_x
+            item_y = py + offset_y
+
+            while len(task_index_stack) > level:
+                task_index_stack.pop()
+
+            task_level = min(level, len(task_index_stack))
+
+            parent_task_index = task_index_stack[task_level - 1] if task_level > 0 else -1
+
+            if as_tasks:
+                add_task = getattr(self._task_model, "addTaskWithParent", None)
+                if callable(add_task):
+                    task_index = add_task(text_value, parent_task_index)
+                else:
+                    self._task_model.addTask(text_value, parent_task_index)
+                    task_index = self._task_model.rowCount() - 1
+
+                item_id = self._next_id("task")
+                item = DiagramItem(
+                    id=item_id,
+                    item_type=DiagramItemType.TASK,
+                    x=item_x,
+                    y=item_y,
+                    width=140.0,
+                    height=70.0,
+                    text=text_value,
+                    task_index=task_index,
+                    color="#82c3a5",
+                    text_color="#1b2028",
+                )
+                self._append_item(item)
+            else:
+                item_id = self._add_preset("box", item_x, item_y, text_value)
+
+            if previous_item_id:
+                self.addEdge(previous_item_id, item_id)
+            previous_item_id = item_id
+
+            if as_tasks:
+                if len(task_index_stack) == task_level:
+                    task_index_stack.append(task_index)
+                else:
+                    task_index_stack[task_level] = task_index
+
+        return True
+
+    @Slot(float, float, result=bool)
+    def pasteDiagramFromClipboard(self, x: float, y: float) -> bool:
+        payload = self._read_clipboard_payload()
+        if not payload:
+            return False
+        items_data = payload.get("items", [])
+        if not isinstance(items_data, list) or not items_data:
+            return False
+        min_x = None
+        min_y = None
+        max_x = None
+        max_y = None
+        for item_data in items_data:
+            try:
+                item_x = float(item_data.get("x", 0.0))
+                item_y = float(item_data.get("y", 0.0))
+                item_w = float(item_data.get("width", 120.0))
+                item_h = float(item_data.get("height", 60.0))
+            except (TypeError, ValueError):
+                continue
+            min_x = item_x if min_x is None else min(min_x, item_x)
+            min_y = item_y if min_y is None else min(min_y, item_y)
+            max_x = item_x + item_w if max_x is None else max(max_x, item_x + item_w)
+            max_y = item_y + item_h if max_y is None else max(max_y, item_y + item_h)
+        if min_x is None or min_y is None or max_x is None or max_y is None:
+            return False
+        center_x = (min_x + max_x) / 2.0
+        center_y = (min_y + max_y) / 2.0
+        offset_x = x - center_x
+        offset_y = y - center_y
+
+        id_map: Dict[str, str] = {}
+        for item_data in items_data:
+            item_type_str = str(item_data.get("type", "box"))
+            try:
+                item_type = DiagramItemType(item_type_str)
+            except ValueError:
+                item_type = DiagramItemType.BOX
+
+            task_index = int(item_data.get("taskIndex", -1))
+            if self._task_model is None or task_index < 0 or task_index >= self._task_model.rowCount():
+                task_index = -1
+
+            item_id = self._next_id(item_type.value)
+            try:
+                item_x = float(item_data.get("x", 0.0)) + offset_x
+                item_y = float(item_data.get("y", 0.0)) + offset_y
+                item_w = float(item_data.get("width", 120.0))
+                item_h = float(item_data.get("height", 60.0))
+            except (TypeError, ValueError):
+                continue
+            item = DiagramItem(
+                id=item_id,
+                item_type=item_type,
+                x=item_x,
+                y=item_y,
+                width=item_w,
+                height=item_h,
+                text=str(item_data.get("text", "")),
+                task_index=task_index,
+                color=str(item_data.get("color", "#4a9eff")),
+                text_color=str(item_data.get("textColor", "#f5f6f8")),
+                image_data=str(item_data.get("imageData", "")),
+                sub_diagram_path=str(item_data.get("subDiagramPath", "")),
+                note_markdown=str(item_data.get("noteMarkdown", "")),
+            )
+            self._append_item(item)
+            old_id = str(item_data.get("id", ""))
+            if old_id:
+                id_map[old_id] = item_id
+
+        edges_data = payload.get("edges", [])
+        edges_added = False
+        if isinstance(edges_data, list):
+            for edge_data in edges_data:
+                old_from = str(edge_data.get("fromId", ""))
+                old_to = str(edge_data.get("toId", ""))
+                if not old_from or not old_to:
+                    continue
+                if old_from not in id_map or old_to not in id_map:
+                    continue
+                from_id = id_map[old_from]
+                to_id = id_map[old_to]
+                if from_id == to_id:
+                    continue
+                if any(edge.from_id == from_id and edge.to_id == to_id for edge in self._edges):
+                    continue
+                edge_id = f"edge_{len(self._edges)}"
+                description = str(edge_data.get("description", ""))
+                self._edges.append(DiagramEdge(edge_id, from_id, to_id, description))
+                edges_added = True
+        if edges_added:
+            self.edgesChanged.emit()
+        self._update_sub_diagram_watches()
+        return True
+
     @Slot(str, float, float)
     def moveItem(self, item_id: str, x: float, y: float) -> None:
         for row, item in enumerate(self._items):
@@ -752,6 +1122,19 @@ class DiagramModel(QAbstractListModel):
         script_path = os.path.abspath(__file__)
         subprocess.Popen([sys.executable, script_path, path])
         return True
+
+    @Slot(str, result=bool)
+    def openChatGpt(self, item_id: str) -> bool:
+        """Open a ChatGPT browser tab with the item's text as the prompt."""
+        item = self.getItem(item_id)
+        if not item or item.item_type != DiagramItemType.CHATGPT:
+            return False
+        prompt = item.text.strip() if item.text else ""
+        if not prompt:
+            prompt = "Research question"
+        query = urllib.parse.quote_plus(prompt)
+        url = f"https://chatgpt.com/?q={query}"
+        return webbrowser.open(url)
 
     @Slot(str, str)
     def createAndLinkSubDiagram(self, item_id: str, file_path: str, open_after: bool = True) -> None:
@@ -1251,6 +1634,194 @@ class DiagramModel(QAbstractListModel):
         for idx in range(len(ordered) - 1):
             self.addEdge(ordered[idx].id, ordered[idx + 1].id)
 
+    @Slot(str)
+    def arrangeItems(self, layout_type: str) -> None:
+        """Arrange diagram items using the specified layout algorithm.
+
+        Args:
+            layout_type: One of 'grid', 'horizontal', 'vertical', 'hierarchical'
+        """
+        if not self._items:
+            return
+
+        padding = 40.0  # Space between items
+        start_x = 60.0
+        start_y = 60.0
+
+        if layout_type == "grid":
+            self._arrange_grid(start_x, start_y, padding)
+        elif layout_type == "horizontal":
+            self._arrange_flow(start_x, start_y, padding, horizontal=True)
+        elif layout_type == "vertical":
+            self._arrange_flow(start_x, start_y, padding, horizontal=False)
+        elif layout_type == "hierarchical":
+            self._arrange_hierarchical(start_x, start_y, padding)
+
+    def _arrange_grid(self, start_x: float, start_y: float, padding: float) -> None:
+        """Arrange items in a grid pattern."""
+        import math
+        n = len(self._items)
+        cols = max(1, int(math.ceil(math.sqrt(n))))
+
+        # Sort items by their current position to maintain some order
+        sorted_items = sorted(self._items, key=lambda item: (item.y, item.x))
+
+        # Find the max dimensions for uniform grid cells
+        max_width = max(item.width for item in self._items)
+        max_height = max(item.height for item in self._items)
+        cell_width = max_width + padding
+        cell_height = max_height + padding
+
+        for idx, item in enumerate(sorted_items):
+            row = idx // cols
+            col = idx % cols
+            new_x = start_x + col * cell_width
+            new_y = start_y + row * cell_height
+            self.moveItem(item.id, new_x, new_y)
+
+    def _arrange_flow(self, start_x: float, start_y: float, padding: float, horizontal: bool) -> None:
+        """Arrange items in a single row or column."""
+        # Sort by current position in the flow direction
+        if horizontal:
+            sorted_items = sorted(self._items, key=lambda item: (item.x, item.y))
+        else:
+            sorted_items = sorted(self._items, key=lambda item: (item.y, item.x))
+
+        current_pos = start_x if horizontal else start_y
+
+        for item in sorted_items:
+            if horizontal:
+                self.moveItem(item.id, current_pos, start_y)
+                current_pos += item.width + padding
+            else:
+                self.moveItem(item.id, start_x, current_pos)
+                current_pos += item.height + padding
+
+    def _arrange_hierarchical(self, start_x: float, start_y: float, padding: float) -> None:
+        """Arrange items in layers based on edge connections (DAG layout).
+
+        Connected components are kept together and arranged side by side.
+        """
+        if not self._items:
+            return
+
+        item_by_id = {item.id: item for item in self._items}
+        item_ids = set(item_by_id.keys())
+
+        # Build adjacency info (directed)
+        outgoing: Dict[str, List[str]] = {item.id: [] for item in self._items}
+        incoming: Dict[str, List[str]] = {item.id: [] for item in self._items}
+        # Also build undirected adjacency for finding connected components
+        neighbors: Dict[str, set] = {item.id: set() for item in self._items}
+
+        for edge in self._edges:
+            if edge.from_id in item_ids and edge.to_id in item_ids:
+                outgoing[edge.from_id].append(edge.to_id)
+                incoming[edge.to_id].append(edge.from_id)
+                neighbors[edge.from_id].add(edge.to_id)
+                neighbors[edge.to_id].add(edge.from_id)
+
+        # Find connected components using DFS
+        visited: set = set()
+        components: List[List[str]] = []
+
+        def find_component(start_id: str) -> List[str]:
+            component = []
+            stack = [start_id]
+            while stack:
+                item_id = stack.pop()
+                if item_id in visited:
+                    continue
+                visited.add(item_id)
+                component.append(item_id)
+                for neighbor_id in neighbors[item_id]:
+                    if neighbor_id not in visited:
+                        stack.append(neighbor_id)
+            return component
+
+        # Find all connected components, processing items in position order
+        for item in sorted(self._items, key=lambda i: (i.y, i.x)):
+            if item.id not in visited:
+                component = find_component(item.id)
+                if component:
+                    components.append(component)
+
+        # Arrange each connected component and track positions
+        component_gap = padding * 2  # Extra gap between components
+        current_x_offset = start_x
+
+        for component_ids in components:
+            component_items = [item_by_id[item_id] for item_id in component_ids]
+
+            # Assign layers within this component
+            layers: Dict[str, int] = {}
+            layer_visited: set = set()
+
+            def assign_layer(item_id: str, layer: int) -> None:
+                if item_id in layer_visited:
+                    layers[item_id] = max(layers.get(item_id, 0), layer)
+                    return
+                layer_visited.add(item_id)
+                layers[item_id] = max(layers.get(item_id, 0), layer)
+                for child_id in outgoing[item_id]:
+                    if child_id in component_ids:
+                        assign_layer(child_id, layer + 1)
+
+            # Start from items with no incoming edges within this component
+            component_set = set(component_ids)
+            roots = [item_id for item_id in component_ids
+                     if not any(inc in component_set for inc in incoming[item_id])]
+
+            if not roots:
+                # No clear roots (cycle), use topmost item
+                roots = [min(component_ids, key=lambda id: (item_by_id[id].y, item_by_id[id].x))]
+
+            for root_id in roots:
+                assign_layer(root_id, 0)
+
+            # Handle any items not reached (shouldn't happen but just in case)
+            for item_id in component_ids:
+                if item_id not in layers:
+                    layers[item_id] = 0
+
+            # Group items by layer within this component
+            layer_items: Dict[int, List[DiagramItem]] = {}
+            for item_id in component_ids:
+                layer = layers[item_id]
+                if layer not in layer_items:
+                    layer_items[layer] = []
+                layer_items[layer].append(item_by_id[item_id])
+
+            # Sort items within each layer by original x position
+            for layer in layer_items:
+                layer_items[layer].sort(key=lambda item: item.x)
+
+            # Calculate component dimensions and position items
+            max_height = max(item.height for item in component_items)
+            layer_spacing = max_height + padding * 2
+
+            # Find the widest layer to determine component width
+            max_layer_width = 0.0
+            for layer_num in layer_items:
+                items_in_layer = layer_items[layer_num]
+                layer_width = sum(item.width for item in items_in_layer) + padding * (len(items_in_layer) - 1)
+                max_layer_width = max(max_layer_width, layer_width)
+
+            # Position items in this component
+            current_y = start_y
+            for layer_num in sorted(layer_items.keys()):
+                items_in_layer = layer_items[layer_num]
+                current_x = current_x_offset
+
+                for item in items_in_layer:
+                    self.moveItem(item.id, current_x, current_y)
+                    current_x += item.width + padding
+
+                current_y += layer_spacing
+
+            # Move to next component position
+            current_x_offset += max_layer_width + component_gap
+
     def _reset_edge_state(self) -> None:
         changed = self._edge_source_id is not None or self._is_dragging_edge
         self._edge_source_id = None
@@ -1322,6 +1893,9 @@ class DiagramModel(QAbstractListModel):
         Args:
             data: Dictionary containing diagram data (from to_dict).
         """
+        # Set current task index up front so new items render with correct state.
+        self._current_task_index = int(data.get("current_task_index", -1))
+
         # Clear existing items, edges, and strokes
         if self._items:
             self.beginRemoveRows(QModelIndex(), 0, len(self._items) - 1)
@@ -1334,41 +1908,46 @@ class DiagramModel(QAbstractListModel):
         # Track highest ID number to resume ID generation
         max_id = 0
 
-        # Load items
+        # Load items with batch insertion
         items_data = data.get("items", [])
-        for item_data in items_data:
-            item_id = item_data.get("id", "")
-            # Extract numeric part from item ID to track max
-            try:
-                id_parts = item_id.rsplit("_", 1)
-                if len(id_parts) == 2:
-                    max_id = max(max_id, int(id_parts[1]) + 1)
-            except (ValueError, IndexError):
-                pass
+        if items_data:
+            new_items = []
+            for item_data in items_data:
+                item_id = item_data.get("id", "")
+                # Extract numeric part from item ID to track max
+                try:
+                    id_parts = item_id.rsplit("_", 1)
+                    if len(id_parts) == 2:
+                        max_id = max(max_id, int(id_parts[1]) + 1)
+                except (ValueError, IndexError):
+                    pass
 
-            item_type_str = item_data.get("item_type", "box")
-            try:
-                item_type = DiagramItemType(item_type_str)
-            except ValueError:
-                item_type = DiagramItemType.BOX
+                item_type_str = item_data.get("item_type", "box")
+                try:
+                    item_type = DiagramItemType(item_type_str)
+                except ValueError:
+                    item_type = DiagramItemType.BOX
 
-            item = DiagramItem(
-                id=item_id,
-                item_type=item_type,
-                x=float(item_data.get("x", 0.0)),
-                y=float(item_data.get("y", 0.0)),
-                width=float(item_data.get("width", 120.0)),
-                height=float(item_data.get("height", 60.0)),
-                text=item_data.get("text", ""),
-                task_index=int(item_data.get("task_index", -1)),
-                color=item_data.get("color", "#4a9eff"),
-                text_color=item_data.get("text_color", "#f5f6f8"),
-                image_data=item_data.get("image_data", ""),
-                sub_diagram_path=item_data.get("sub_diagram_path", ""),
-                note_markdown=item_data.get("note_markdown", ""),
-            )
-            self.beginInsertRows(QModelIndex(), len(self._items), len(self._items))
-            self._items.append(item)
+                item = DiagramItem(
+                    id=item_id,
+                    item_type=item_type,
+                    x=float(item_data.get("x", 0.0)),
+                    y=float(item_data.get("y", 0.0)),
+                    width=float(item_data.get("width", 120.0)),
+                    height=float(item_data.get("height", 60.0)),
+                    text=item_data.get("text", ""),
+                    task_index=int(item_data.get("task_index", -1)),
+                    color=item_data.get("color", "#4a9eff"),
+                    text_color=item_data.get("text_color", "#f5f6f8"),
+                    image_data=item_data.get("image_data", ""),
+                    sub_diagram_path=item_data.get("sub_diagram_path", ""),
+                    note_markdown=item_data.get("note_markdown", ""),
+                )
+                new_items.append(item)
+
+            # Batch insert all items at once
+            self.beginInsertRows(QModelIndex(), 0, len(new_items) - 1)
+            self._items.extend(new_items)
             self.endInsertRows()
 
         # Update ID source to avoid collisions
@@ -1415,9 +1994,6 @@ class DiagramModel(QAbstractListModel):
             self._strokes.append(stroke)
 
         self._stroke_id_source = count(max_stroke_id)
-
-        # Load current task
-        self._current_task_index = int(data.get("current_task_index", -1))
 
         self.itemsChanged.emit()
         self.edgesChanged.emit()
@@ -1522,6 +2098,20 @@ ApplicationWindow {
             title: "Edit"
 
             MenuItem {
+                text: "Copy"
+                enabled: diagramModel !== null && (root.selectedItemId.length > 0 || (edgeCanvas && edgeCanvas.selectedEdgeId.length > 0))
+                onTriggered: root.copySelectionToClipboard()
+            }
+
+            MenuItem {
+                text: "Paste"
+                enabled: diagramModel !== null && (diagramModel.hasClipboardDiagram() || diagramModel.hasClipboardImage())
+                onTriggered: root.pasteFromClipboard()
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
                 text: "Clear All Items"
                 onTriggered: {
                     if (!diagramModel) return
@@ -1588,7 +2178,7 @@ ApplicationWindow {
             MenuSeparator {}
 
             MenuItem {
-                text: "Paste Image from Clipboard (Ctrl+V)"
+                text: "Paste Image from Clipboard"
                 enabled: diagramModel !== null && diagramModel.hasClipboardImage()
                 onTriggered: {
                     if (diagramModel && diagramModel.hasClipboardImage()) {
@@ -1660,6 +2250,31 @@ ApplicationWindow {
             MenuItem {
                 text: "Connect All Items"
                 onTriggered: diagramModel && diagramModel.connectAllItems()
+            }
+
+            Menu {
+                title: "Arrange Diagram"
+                enabled: diagramModel !== null && diagramModel.count > 0
+
+                MenuItem {
+                    text: "Grid Layout"
+                    onTriggered: diagramModel && diagramModel.arrangeItems("grid")
+                }
+
+                MenuItem {
+                    text: "Horizontal Flow"
+                    onTriggered: diagramModel && diagramModel.arrangeItems("horizontal")
+                }
+
+                MenuItem {
+                    text: "Vertical Flow"
+                    onTriggered: diagramModel && diagramModel.arrangeItems("vertical")
+                }
+
+                MenuItem {
+                    text: "Hierarchical (by Connections)"
+                    onTriggered: diagramModel && diagramModel.arrangeItems("hierarchical")
+                }
             }
 
             MenuSeparator {}
@@ -1745,7 +2360,8 @@ ApplicationWindow {
         "note": { "text": "Note", "title": "Create Note" },
         "freetext": { "text": "", "title": "Free Text" },
         "obstacle": { "text": "Obstacle", "title": "Add Obstacle" },
-        "wish": { "text": "Wish", "title": "Add Wish" }
+        "wish": { "text": "Wish", "title": "Add Wish" },
+        "chatgpt": { "text": "Ask ChatGPT", "title": "Ask ChatGPT" }
     })
 
     // Pending edge drop state (for creating new items when dropping into empty space)
@@ -1761,13 +2377,16 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Ctrl+C"
+        enabled: diagramModel !== null
+        onActivated: root.copySelectionToClipboard()
+    }
+
+    Shortcut {
         sequence: "Ctrl+V"
         enabled: diagramModel !== null
         onActivated: {
-            if (diagramModel && diagramModel.hasClipboardImage()) {
-                var center = root.diagramCenterPoint()
-                diagramModel.pasteImageFromClipboard(center.x, center.y)
-            }
+            root.pasteFromClipboard()
         }
     }
 
@@ -1806,6 +2425,37 @@ ApplicationWindow {
         var cx = (viewport.contentX + viewport.width / 2) / root.zoomLevel
         var cy = (viewport.contentY + viewport.height / 2) / root.zoomLevel
         return snapPoint(Qt.point(cx, cy))
+    }
+
+    function copySelectionToClipboard() {
+        if (!diagramModel)
+            return
+        if (edgeCanvas && edgeCanvas.selectedEdgeId && edgeCanvas.selectedEdgeId.length > 0) {
+            diagramModel.copyEdgeToClipboard(edgeCanvas.selectedEdgeId)
+            return
+        }
+        if (root.selectedItemId && root.selectedItemId.length > 0) {
+            diagramModel.copyItemsToClipboard([root.selectedItemId])
+        }
+    }
+
+    function pasteFromClipboard() {
+        if (!diagramModel)
+            return
+        var center = root.diagramCenterPoint()
+        if (diagramModel.hasClipboardDiagram()) {
+            diagramModel.pasteDiagramFromClipboard(center.x, center.y)
+            return
+        }
+        if (diagramModel.hasClipboardImage()) {
+            diagramModel.pasteImageFromClipboard(center.x, center.y)
+            return
+        }
+        if (diagramModel.hasClipboardTextLines()) {
+            clipboardPasteDialog.pasteX = center.x
+            clipboardPasteDialog.pasteY = center.y
+            clipboardPasteDialog.open()
+        }
     }
 
     function renameItemById(itemId) {
@@ -1977,6 +2627,14 @@ ApplicationWindow {
             }
 
             Button {
+                text: "ChatGPT"
+                onClicked: {
+                    addDialog.close()
+                    root.openPresetDialog("chatgpt", Qt.point(addDialog.targetX, addDialog.targetY), "", undefined)
+                }
+            }
+
+            Button {
                 text: "Task from List"
                 enabled: taskModel && taskModel.taskCount > 0
                 onClicked: {
@@ -2015,7 +2673,11 @@ ApplicationWindow {
         property string presetName: "box"
         title: boxDialog.editingItemId.length === 0 ? root.presetTitle(boxDialog.presetName) : "Edit Label"
 
-        onOpened: boxTextField.forceActiveFocus()
+        onOpened: {
+            boxTextField.forceActiveFocus()
+            if (boxDialog.editingItemId.length > 0)
+                boxTextField.selectAll()
+        }
 
         contentItem: ColumnLayout {
             width: 320
@@ -2077,7 +2739,11 @@ ApplicationWindow {
         property string textValue: ""
         title: freeTextDialog.editingItemId.length === 0 ? "Free Text" : "Edit Free Text"
 
-        onOpened: freeTextArea.forceActiveFocus()
+        onOpened: {
+            freeTextArea.forceActiveFocus()
+            if (freeTextDialog.editingItemId.length > 0)
+                freeTextArea.selectAll()
+        }
 
         contentItem: ColumnLayout {
             width: 360
@@ -2382,7 +3048,10 @@ ApplicationWindow {
         property string editingItemId: ""
         property string textValue: ""
 
-        onOpened: taskRenameField.forceActiveFocus()
+        onOpened: {
+            taskRenameField.forceActiveFocus()
+            taskRenameField.selectAll()
+        }
 
         function openWithItem(itemId, text) {
             editingItemId = itemId
@@ -2652,6 +3321,22 @@ ApplicationWindow {
                         snapValue(root.pendingEdgeDropX),
                         snapValue(root.pendingEdgeDropY),
                         "Wish"
+                    )
+                }
+                root.pendingEdgeSourceId = ""
+            }
+        }
+
+        MenuItem {
+            text: "→ ChatGPT"
+            onTriggered: {
+                if (diagramModel && root.pendingEdgeSourceId) {
+                    diagramModel.addPresetItemAndConnect(
+                        root.pendingEdgeSourceId,
+                        "chatgpt",
+                        snapValue(root.pendingEdgeDropX),
+                        snapValue(root.pendingEdgeDropY),
+                        "Ask ChatGPT"
                     )
                 }
                 root.pendingEdgeSourceId = ""
@@ -3014,15 +3699,15 @@ ApplicationWindow {
             Flickable {
                 id: tabFlickable
                 Layout.fillWidth: true
-                Layout.maximumWidth: parent.width - 40  // Leave space for add button
-                height: 32
+                Layout.maximumWidth: parent.width - 36  // Leave space for add button
+                height: 28
                 contentWidth: tabRowContent.width
                 clip: true
                 boundsBehavior: Flickable.StopAtBounds
 
                 Row {
                     id: tabRowContent
-                    spacing: 4
+                    spacing: 2
 
                     Repeater {
                         model: tabModel
@@ -3030,30 +3715,42 @@ ApplicationWindow {
                         delegate: Rectangle {
                             id: tabButton
                             property bool isActive: tabModel ? index === tabModel.currentTabIndex : false
-                            width: Math.min(Math.max(tabLabel.implicitWidth + 24, 60), 250)
-                            height: 32
-                            radius: 6
+                            width: Math.min(Math.max(tabName.implicitWidth + tabPercent.implicitWidth + 24, 48), 180)
+                            height: 28
+                            radius: 5
                             color: isActive ? "#3b485c" : (tabMouseArea.containsMouse ? "#2a3444" : "#1b2028")
                             border.color: isActive ? "#4a9eff" : "#2e3744"
-                            border.width: isActive ? 2 : 1
+                            border.width: 1
 
-                            Text {
-                                id: tabLabel
-                                anchors.centerIn: parent
-                                anchors.leftMargin: 12
-                                anchors.rightMargin: 12
-                                width: parent.width - 24
-                                text: model.name
-                                color: isActive ? "#ffffff" : "#9aa6b8"
-                                font.pixelSize: 12
-                                font.bold: isActive
-                                elide: Text.ElideRight
-                                horizontalAlignment: Text.AlignHCenter
+                            RowLayout {
+                                id: tabLabelRow
+                                anchors.fill: parent
+                                anchors.margins: 6
+                                spacing: 6
+
+                                Text {
+                                    id: tabName
+                                    Layout.fillWidth: true
+                                    text: model.name
+                                    color: isActive ? "#ffffff" : "#9aa6b8"
+                                    font.pixelSize: 11
+                                    font.bold: isActive
+                                    elide: Text.ElideRight
+                                    horizontalAlignment: Text.AlignLeft
+                                }
+
+                                Text {
+                                    id: tabPercent
+                                    text: Math.round(model.completionPercent) + "%"
+                                    color: isActive ? "#c8d6e5" : "#7f8a9a"
+                                    font.pixelSize: 10
+                                    font.bold: isActive
+                                }
                             }
 
                             ToolTip {
-                                visible: tabMouseArea.containsMouse && tabLabel.truncated
-                                text: model.name
+                                visible: tabMouseArea.containsMouse && tabName.truncated
+                                text: model.name + " (" + Math.round(model.completionPercent) + "%)"
                                 delay: 500
                             }
 
@@ -3075,6 +3772,23 @@ ApplicationWindow {
                             }
                         }
                     }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.NoButton
+                    onWheel: function(wheel) {
+                        if (tabFlickable.contentWidth <= tabFlickable.width)
+                            return
+                        var delta = wheel.angleDelta.y !== 0 ? wheel.angleDelta.y : wheel.angleDelta.x
+                        tabFlickable.contentX = Math.max(0, Math.min(tabFlickable.contentWidth - tabFlickable.width, tabFlickable.contentX - delta))
+                        wheel.accepted = true
+                    }
+                }
+
+                ScrollBar.horizontal: ScrollBar {
+                    policy: ScrollBar.AsNeeded
+                    height: 6
                 }
             }
 
@@ -3118,6 +3832,22 @@ ApplicationWindow {
             property int tabIndex: -1
             property string tabName: ""
 
+            MenuItem {
+                text: "Move Left"
+                enabled: tabModel ? tabContextMenu.tabIndex > 0 : false
+                onTriggered: {
+                    if (tabModel && tabContextMenu.tabIndex > 0)
+                        tabModel.moveTab(tabContextMenu.tabIndex, tabContextMenu.tabIndex - 1)
+                }
+            }
+            MenuItem {
+                text: "Move Right"
+                enabled: tabModel ? tabContextMenu.tabIndex < tabModel.tabCount - 1 : false
+                onTriggered: {
+                    if (tabModel && tabContextMenu.tabIndex < tabModel.tabCount - 1)
+                        tabModel.moveTab(tabContextMenu.tabIndex, tabContextMenu.tabIndex + 1)
+                }
+            }
             MenuItem {
                 text: "Rename..."
                 onTriggered: {
@@ -3165,6 +3895,56 @@ ApplicationWindow {
             onAccepted: {
                 if (tabModel && renameTabField.text.trim())
                     tabModel.renameTab(tabIndex, renameTabField.text.trim())
+            }
+        }
+
+        Dialog {
+            id: clipboardPasteDialog
+            property real pasteX: 0
+            property real pasteY: 0
+            title: "Paste from Clipboard"
+            modal: true
+            anchors.centerIn: parent
+            width: 320
+
+            contentItem: ColumnLayout {
+                width: 300
+                spacing: 12
+
+                Label {
+                    text: "Clipboard has multiple lines. Create tasks or boxes?"
+                    color: "#8a93a5"
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+
+                RowLayout {
+                    spacing: 10
+                    Layout.alignment: Qt.AlignHCenter
+
+                    Button {
+                        text: "Tasks"
+                        onClicked: {
+                            if (diagramModel)
+                                diagramModel.pasteTextFromClipboard(clipboardPasteDialog.pasteX, clipboardPasteDialog.pasteY, true)
+                            clipboardPasteDialog.close()
+                        }
+                    }
+
+                    Button {
+                        text: "Boxes"
+                        onClicked: {
+                            if (diagramModel)
+                                diagramModel.pasteTextFromClipboard(clipboardPasteDialog.pasteX, clipboardPasteDialog.pasteY, false)
+                            clipboardPasteDialog.close()
+                        }
+                    }
+
+                    Button {
+                        text: "Cancel"
+                        onClicked: clipboardPasteDialog.close()
+                    }
+                }
             }
         }
 
@@ -3410,6 +4190,13 @@ ApplicationWindow {
                                 root.openFreeTextDialog(snapped, "", "")
                             }
                         }
+                        MenuItem {
+                            text: "Obstacle"
+                            onTriggered: {
+                                var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
+                                root.openPresetDialog("obstacle", snapped, "", undefined)
+                            }
+                        }
                     }
 
                     Menu {
@@ -3448,6 +4235,18 @@ ApplicationWindow {
                             }
                             height: visible ? implicitHeight : 0
                             onTriggered: diagramModel.openSubDiagram(diagramLayer.contextMenuItemId)
+                        }
+                        MenuItem {
+                            id: openChatGptMenuItem
+                            text: "Open ChatGPT"
+                            visible: {
+                                if (!diagramModel || !diagramLayer.contextMenuItemId)
+                                    return false
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                return item && item.type === "chatgpt"
+                            }
+                            height: visible ? implicitHeight : 0
+                            onTriggered: diagramModel.openChatGpt(diagramLayer.contextMenuItemId)
                         }
                         MenuSeparator {}
                         MenuItem {
@@ -3662,6 +4461,7 @@ ApplicationWindow {
                                     } else {
                                         edgeCanvas.selectedEdgeId = edgeId
                                     }
+                                    root.selectedItemId = ""
                                     edgeCanvas.requestPaint()
                                 }
                             }
@@ -4285,6 +5085,44 @@ ApplicationWindow {
 
                             Item {
                                 anchors.fill: parent
+                                visible: itemRect.itemType === "chatgpt"
+
+                                Rectangle {
+                                    width: 26
+                                    height: 26
+                                    radius: 13
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top
+                                    anchors.leftMargin: 8
+                                    anchors.topMargin: 8
+                                    color: Qt.lighter(model.color, 1.25)
+                                    border.color: Qt.darker(model.color, 1.4)
+                                    border.width: 1
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "GPT"
+                                        color: model.textColor
+                                        font.pixelSize: 9
+                                        font.bold: true
+                                    }
+                                }
+
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top
+                                    anchors.leftMargin: 40
+                                    anchors.topMargin: 14
+                                    width: parent.width * 0.5
+                                    height: 6
+                                    radius: 3
+                                    color: Qt.lighter(model.color, 1.35)
+                                    opacity: 0.8
+                                }
+                            }
+
+                            Item {
+                                anchors.fill: parent
                                 visible: itemRect.itemType === "freetext"
 
                                 Rectangle {
@@ -4795,6 +5633,8 @@ ApplicationWindow {
                                 gesturePolicy: TapHandler.DragThreshold
                                 onTapped: {
                                     root.selectedItemId = itemRect.itemId
+                                    if (edgeCanvas)
+                                        edgeCanvas.selectedEdgeId = ""
                                 }
                                 onDoubleTapped: function(eventPoint) {
                                     // Check if double-click is on the edge handle (26x26 button, 6px from top-right)
@@ -4815,6 +5655,8 @@ ApplicationWindow {
                                         edgeDropTaskDialog.dropX = newX
                                         edgeDropTaskDialog.dropY = newY
                                         edgeDropTaskDialog.open()
+                                    } else if (itemRect.itemType === "chatgpt") {
+                                        diagramModel.openChatGpt(itemRect.itemId)
                                     } else if (itemRect.itemType === "note" || itemRect.itemType === "wish" || itemRect.itemType === "obstacle") {
                                         if (markdownNoteManager) {
                                             markdownNoteManager.openNote(itemRect.itemId)
