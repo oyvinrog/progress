@@ -1351,6 +1351,7 @@ class DiagramModel(QAbstractListModel):
     def removeItem(self, item_id: str) -> None:
         # Remove edges touching the item
         removed = False
+        removed_task_index = -1
         filtered = [edge for edge in self._edges if edge.from_id != item_id and edge.to_id != item_id]
         if len(filtered) != len(self._edges):
             self._edges = filtered
@@ -1358,12 +1359,24 @@ class DiagramModel(QAbstractListModel):
 
         for row, item in enumerate(self._items):
             if item.id == item_id:
+                removed_task_index = item.task_index
                 self.beginRemoveRows(QModelIndex(), row, row)
                 self._items.pop(row)
                 self.endRemoveRows()
                 self.itemsChanged.emit()
                 removed = True
                 break
+
+        # If the removed item was a task, also remove from TaskModel
+        if removed_task_index >= 0 and self._task_model is not None:
+            self._task_model.removeAt(removed_task_index)
+            # Update task indices for all remaining items that referenced tasks after the deleted one
+            for row, item in enumerate(self._items):
+                if item.task_index > removed_task_index:
+                    item.task_index -= 1
+                    # Notify UI that this item's task reference changed
+                    idx = self.index(row, 0)
+                    self.dataChanged.emit(idx, idx, [self.TaskIndexRole])
 
         if removed and self._edge_source_id == item_id:
             self._reset_edge_state()
