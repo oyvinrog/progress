@@ -437,6 +437,7 @@ class TaskModel(QAbstractListModel):
         self.beginInsertRows(QModelIndex(), insert_pos, insert_pos)
         self._tasks.insert(insert_pos, task)
         self.endInsertRows()
+        self.totalEstimateChanged.emit()
         self.taskCountChanged.emit()
 
     def addTaskWithParent(self, title: str, parent_row: int = -1) -> int:
@@ -465,6 +466,7 @@ class TaskModel(QAbstractListModel):
         self.beginInsertRows(QModelIndex(), insert_pos, insert_pos)
         self._tasks.insert(insert_pos, task)
         self.endInsertRows()
+        self.totalEstimateChanged.emit()
         self.taskCountChanged.emit()
         return insert_pos
 
@@ -619,6 +621,7 @@ class TaskModel(QAbstractListModel):
             self.endRemoveRows()
 
         self.avgTimeChanged.emit()
+        self.totalEstimateChanged.emit()
         self.taskCountChanged.emit()
 
     def clear(self) -> None:
@@ -629,6 +632,7 @@ class TaskModel(QAbstractListModel):
         self._tasks.clear()
         self.endRemoveRows()
         self.avgTimeChanged.emit()
+        self.totalEstimateChanged.emit()
         self.taskCountChanged.emit()
 
     def pasteSampleTasks(self) -> None:

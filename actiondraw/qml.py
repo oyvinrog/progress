@@ -1,0 +1,3904 @@
+"""QML UI definition for ActionDraw."""
+
+ACTIONDRAW_QML = r"""
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.15
+import QtQuick.Dialogs
+ApplicationWindow {
+    id: root
+    visible: true
+    width: 1100
+    height: 800
+    color: "#10141c"
+    title: {
+        if (projectManager && projectManager.currentFilePath) {
+            var name = projectManager.currentFilePath.split("/").pop()
+            if (name.endsWith(".progress"))
+                name = name.slice(0, -9)
+            return name
+        }
+        return "ActionDraw - Progress Tracker"
+    }
+
+    menuBar: MenuBar {
+        Menu {
+            title: "File"
+
+            MenuItem {
+                text: "New Instance"
+                enabled: projectManager !== null
+                onTriggered: projectManager.newInstanceActionDraw()
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
+                text: "Save\t\t\tCtrl+S"
+                enabled: projectManager !== null
+                onTriggered: root.performSave()
+            }
+
+            MenuItem {
+                text: "Save As..."
+                enabled: projectManager !== null
+                onTriggered: saveDialog.open()
+            }
+
+            MenuItem {
+                text: "Load..."
+                enabled: projectManager !== null
+                onTriggered: loadDialog.open()
+            }
+
+            MenuSeparator {}
+
+            Menu {
+                id: recentMenu
+                title: "Recent Projects"
+                enabled: projectManager !== null && recentRepeater.count > 0
+
+                Repeater {
+                    id: recentRepeater
+                    model: projectManager ? projectManager.recentProjects : []
+
+                    MenuItem {
+                        property string filePath: modelData
+                        property string fileName: {
+                            var name = filePath.split("/").pop()
+                            if (name.endsWith(".progress"))
+                                name = name.slice(0, -9)
+                            return name
+                        }
+                        text: fileName
+                        onTriggered: projectManager.loadProject(filePath)
+                    }
+                }
+
+                MenuItem {
+                    text: "(No recent projects)"
+                    enabled: false
+                    visible: recentRepeater.count === 0
+                }
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
+                text: "Exit"
+                onTriggered: root.close()
+            }
+        }
+
+        Menu {
+            title: "Edit"
+
+            MenuItem {
+                text: "Copy\t\t\tCtrl+C"
+                enabled: diagramModel !== null && (root.selectedItemId.length > 0 || (edgeCanvas && edgeCanvas.selectedEdgeId.length > 0))
+                onTriggered: root.copySelectionToClipboard()
+            }
+
+            MenuItem {
+                text: "Paste\t\t\tCtrl+V"
+                enabled: diagramModel !== null && (diagramModel.hasClipboardDiagram() || diagramModel.hasClipboardImage())
+                onTriggered: root.pasteFromClipboard()
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
+                text: "Clear All Items"
+                onTriggered: {
+                    if (!diagramModel) return
+                    for (var i = diagramModel.count - 1; i >= 0; --i) {
+                        var idx = diagramModel.index(i, 0)
+                        var itemId = diagramModel.data(idx, diagramModel.IdRole)
+                        diagramModel.removeItem(itemId)
+                    }
+                    root.resetView()
+                }
+            }
+
+            MenuItem {
+                text: "Clear Drawings"
+                onTriggered: diagramModel && diagramModel.clearStrokes()
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
+                text: "Undo Drawing"
+                onTriggered: diagramModel && diagramModel.undoLastStroke()
+            }
+        }
+
+        Menu {
+            title: "Insert"
+
+            MenuItem {
+                text: "Box"
+                onTriggered: root.addPresetAtCenter("box")
+            }
+
+            MenuItem {
+                text: "Database"
+                onTriggered: root.addPresetAtCenter("database")
+            }
+
+            MenuItem {
+                text: "Server"
+                onTriggered: root.addPresetAtCenter("server")
+            }
+
+            MenuItem {
+                text: "Cloud"
+                onTriggered: root.addPresetAtCenter("cloud")
+            }
+
+            MenuItem {
+                text: "Note"
+                onTriggered: root.addPresetAtCenter("note")
+            }
+
+            MenuItem {
+                text: "Obstacle"
+                onTriggered: root.addPresetAtCenter("obstacle")
+            }
+
+            MenuItem {
+                text: "Wish"
+                onTriggered: root.addPresetAtCenter("wish")
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
+                text: "Paste Image from Clipboard"
+                enabled: diagramModel !== null && diagramModel.hasClipboardImage()
+                onTriggered: {
+                    if (diagramModel && diagramModel.hasClipboardImage()) {
+                        var center = root.diagramCenterPoint()
+                        diagramModel.pasteImageFromClipboard(center.x, center.y)
+                    }
+                }
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
+                text: "Task from List..."
+                enabled: taskModel !== null
+                onTriggered: {
+                    if (!taskModel) return
+                    var center = root.diagramCenterPoint()
+                    taskDialog.targetX = center.x
+                    taskDialog.targetY = center.y
+                    taskDialog.open()
+                }
+            }
+
+            MenuItem {
+                text: "New Task...\t\tCtrl+Enter"
+                enabled: diagramModel !== null
+                onTriggered: root.addTaskOrConnectedTask()
+            }
+        }
+
+        Menu {
+            title: "View"
+
+            MenuItem {
+                text: "Show Grid"
+                checkable: true
+                checked: root.showGrid
+                onTriggered: root.showGrid = checked
+            }
+
+            MenuItem {
+                text: "Snap to Grid"
+                checkable: true
+                checked: root.snapToGrid
+                onTriggered: root.snapToGrid = checked
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
+                text: "Zoom In"
+                onTriggered: root.applyZoomFactor(1.2, viewport.width / 2, viewport.height / 2)
+            }
+
+            MenuItem {
+                text: "Zoom Out"
+                onTriggered: root.applyZoomFactor(0.8, viewport.width / 2, viewport.height / 2)
+            }
+
+            MenuItem {
+                text: "Reset View"
+                onTriggered: root.resetView()
+            }
+        }
+
+        Menu {
+            title: "Tools"
+
+            MenuItem {
+                text: "Connect All Items"
+                onTriggered: diagramModel && diagramModel.connectAllItems()
+            }
+
+            Menu {
+                title: "Arrange Diagram"
+                enabled: diagramModel !== null && diagramModel.count > 0
+
+                MenuItem {
+                    text: "Grid Layout"
+                    onTriggered: diagramModel && diagramModel.arrangeItems("grid")
+                }
+
+                MenuItem {
+                    text: "Horizontal Flow"
+                    onTriggered: diagramModel && diagramModel.arrangeItems("horizontal")
+                }
+
+                MenuItem {
+                    text: "Vertical Flow"
+                    onTriggered: diagramModel && diagramModel.arrangeItems("vertical")
+                }
+
+                MenuItem {
+                    text: "Hierarchical (by Connections)"
+                    onTriggered: diagramModel && diagramModel.arrangeItems("hierarchical")
+                }
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
+                id: drawingModeMenuItem
+                text: diagramModel && diagramModel.drawingMode ? "Exit Drawing Mode" : "Drawing Mode"
+                checkable: true
+                checked: diagramModel && diagramModel.drawingMode
+                onTriggered: diagramModel && diagramModel.setDrawingMode(checked)
+            }
+        }
+    }
+
+    function showWindow() {
+        root.visible = true
+        root.requestActivate()
+    }
+
+    function formatTime(minutes) {
+        if (minutes === 0) return "N/A"
+        if (minutes < 1) return (minutes * 60).toFixed(0) + "s"
+        return minutes.toFixed(1) + "m"
+    }
+
+    function performSave() {
+        if (!projectManager) {
+            return
+        }
+        if (projectManager.hasCurrentFile()) {
+            projectManager.saveCurrentProject()
+        } else {
+            saveDialog.open()
+        }
+    }
+
+    function showSaveNotification(message) {
+        saveNotification.text = message
+        saveNotification.opacity = 1
+        saveNotificationTimer.restart()
+    }
+
+    property int minBoardSize: 2000
+    property int boardMargin: 500
+    property real currentMaxItemX: 0
+    property real currentMaxItemY: 0
+    property int boardWidth: Math.max(minBoardSize, currentMaxItemX + boardMargin)
+    property int boardHeight: Math.max(minBoardSize, currentMaxItemY + boardMargin)
+
+    function updateBoardBounds() {
+        if (diagramModel) {
+            currentMaxItemX = diagramModel.maxItemX
+            currentMaxItemY = diagramModel.maxItemY
+        } else {
+            currentMaxItemX = 0
+            currentMaxItemY = 0
+        }
+    }
+
+    function scrollToContent() {
+        if (!diagramModel || diagramModel.count === 0) return
+        // Scroll to show content with some padding
+        var minX = diagramModel.minItemX
+        var minY = diagramModel.minItemY
+        var padding = 50
+        var targetX = Math.max(0, (minX - padding) * root.zoomLevel)
+        var targetY = Math.max(0, (minY - padding) * root.zoomLevel)
+        viewport.contentX = targetX
+        viewport.contentY = targetY
+    }
+
+    property bool showGrid: true
+    property bool snapToGrid: true
+    property real gridSpacing: 60
+    property real zoomLevel: 1.0
+    property real minZoom: 0.4
+    property real maxZoom: 2.5
+    readonly property var presetDefaults: ({
+        "box": { "text": "Box", "title": "Create Box" },
+        "database": { "text": "Database", "title": "Create Database" },
+        "server": { "text": "Server", "title": "Create Server" },
+        "cloud": { "text": "Cloud", "title": "Create Cloud" },
+        "note": { "text": "Note", "title": "Create Note" },
+        "freetext": { "text": "", "title": "Free Text" },
+        "obstacle": { "text": "Obstacle", "title": "Add Obstacle" },
+        "wish": { "text": "Wish", "title": "Add Wish" },
+        "chatgpt": { "text": "Ask ChatGPT", "title": "Ask ChatGPT" }
+    })
+
+    // Pending edge drop state (for creating new items when dropping into empty space)
+    property string pendingEdgeSourceId: ""
+    property real pendingEdgeDropX: 0
+    property real pendingEdgeDropY: 0
+    property string selectedItemId: ""
+
+    Shortcut {
+        sequence: "Ctrl+S"
+        enabled: projectManager !== null
+        onActivated: root.performSave()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+C"
+        enabled: diagramModel !== null
+        onActivated: root.copySelectionToClipboard()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+V"
+        enabled: diagramModel !== null
+        onActivated: {
+            root.pasteFromClipboard()
+        }
+    }
+
+    Shortcut {
+        sequence: "F2"
+        enabled: diagramModel !== null
+        onActivated: root.renameSelectedItem()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Return"
+        enabled: diagramModel !== null
+        onActivated: root.addTaskOrConnectedTask()
+    }
+
+    function addTaskOrConnectedTask() {
+        if (!diagramModel)
+            return
+        if (root.selectedItemId && root.selectedItemId.length > 0) {
+            // Add connected task from selected item
+            var item = diagramModel.getItemSnapshot(root.selectedItemId)
+            if (item && (item.x || item.x === 0)) {
+                var dropX = item.x + (item.width || 100) + 50
+                var dropY = item.y
+                edgeDropTaskDialog.sourceId = root.selectedItemId
+                edgeDropTaskDialog.sourceType = "task"
+                edgeDropTaskDialog.dropX = dropX
+                edgeDropTaskDialog.dropY = dropY
+                edgeDropTaskDialog.open()
+            }
+        } else {
+            // No selection - add new task at center
+            addQuickTaskAtCenter()
+        }
+    }
+
+    function showEdgeDropSuggestions(sourceId, dropX, dropY) {
+        root.pendingEdgeSourceId = sourceId
+        root.pendingEdgeDropX = dropX
+        root.pendingEdgeDropY = dropY
+        edgeDropMenu.popup()
+    }
+
+    function clampZoom(value) {
+        if (value < root.minZoom)
+            return root.minZoom
+        if (value > root.maxZoom)
+            return root.maxZoom
+        return value
+    }
+
+    function snapValue(value) {
+        if (!root.snapToGrid)
+            return value
+        return Math.round(value / root.gridSpacing) * root.gridSpacing
+    }
+
+    function snapPoint(point) {
+        return Qt.point(snapValue(point.x), snapValue(point.y))
+    }
+
+    function diagramCenterPoint() {
+        var cx = (viewport.contentX + viewport.width / 2) / root.zoomLevel
+        var cy = (viewport.contentY + viewport.height / 2) / root.zoomLevel
+        return snapPoint(Qt.point(cx, cy))
+    }
+
+    function copySelectionToClipboard() {
+        if (!diagramModel)
+            return
+        if (edgeCanvas && edgeCanvas.selectedEdgeId && edgeCanvas.selectedEdgeId.length > 0) {
+            diagramModel.copyEdgeToClipboard(edgeCanvas.selectedEdgeId)
+            return
+        }
+        if (root.selectedItemId && root.selectedItemId.length > 0) {
+            diagramModel.copyItemsToClipboard([root.selectedItemId])
+        }
+    }
+
+    function pasteFromClipboard() {
+        if (!diagramModel)
+            return
+        var center = root.diagramCenterPoint()
+        if (diagramModel.hasClipboardDiagram()) {
+            diagramModel.pasteDiagramFromClipboard(center.x, center.y)
+            return
+        }
+        if (diagramModel.hasClipboardImage()) {
+            diagramModel.pasteImageFromClipboard(center.x, center.y)
+            return
+        }
+        if (diagramModel.hasClipboardTextLines()) {
+            clipboardPasteDialog.pasteX = center.x
+            clipboardPasteDialog.pasteY = center.y
+            clipboardPasteDialog.open()
+        }
+    }
+
+    function renameItemById(itemId) {
+        if (!diagramModel || !itemId)
+            return
+        var item = diagramModel.getItemSnapshot(itemId)
+        if (!item || !item.id)
+            return
+        if (item.type === "task" && item.taskIndex < 0) {
+            newTaskDialog.openWithItem(item.id, item.text)
+        } else if (item.type === "task" && item.taskIndex >= 0) {
+            taskRenameDialog.openWithItem(item.id, item.text)
+        } else if (item.type === "freetext") {
+            root.openFreeTextDialog(Qt.point(item.x, item.y), item.id, item.text)
+        } else if (item.type !== "image") {
+            root.openPresetDialog(item.type, Qt.point(item.x, item.y), item.id, item.text)
+        }
+    }
+
+    function renameSelectedItem() {
+        renameItemById(root.selectedItemId)
+    }
+
+    function openPresetDialog(preset, point, itemId, initialText) {
+        if (!root.presetDefaults[preset])
+            preset = "box"
+        var defaults = root.presetDefaults[preset]
+        boxDialog.editingItemId = itemId || ""
+        boxDialog.presetName = preset
+        boxDialog.targetX = snapValue(point.x)
+        boxDialog.targetY = snapValue(point.y)
+        boxDialog.textValue = initialText !== undefined ? initialText : (defaults && defaults.text ? defaults.text : "")
+        boxDialog.open()
+    }
+
+    function addPresetAtCenter(preset) {
+        openPresetDialog(preset, diagramCenterPoint(), "", undefined)
+    }
+
+    function addBoxAtCenter() {
+        addPresetAtCenter("box")
+    }
+
+    function presetTitle(preset) {
+        var defaults = root.presetDefaults[preset]
+        if (defaults && defaults.title)
+            return defaults.title
+        return "Create Item"
+    }
+
+    function openFreeTextDialog(point, itemId, initialText) {
+        freeTextDialog.editingItemId = itemId || ""
+        freeTextDialog.targetX = snapValue(point.x)
+        freeTextDialog.targetY = snapValue(point.y)
+        freeTextDialog.textValue = initialText !== undefined ? initialText : ""
+        freeTextDialog.open()
+    }
+
+    function setZoomInternal(newZoom, focusX, focusY) {
+        var clamped = clampZoom(newZoom)
+        if (Math.abs(clamped - root.zoomLevel) < 0.0001)
+            return
+        var fx = focusX === undefined ? viewport.width / 2 : focusX
+        var fy = focusY === undefined ? viewport.height / 2 : focusY
+        var focusContentX = viewport.contentX + fx
+        var focusContentY = viewport.contentY + fy
+        var focusDiagramX = focusContentX / root.zoomLevel
+        var focusDiagramY = focusContentY / root.zoomLevel
+        root.zoomLevel = clamped
+        var newContentX = focusDiagramX * root.zoomLevel - fx
+        var newContentY = focusDiagramY * root.zoomLevel - fy
+        var maxX = Math.max(0, viewport.contentWidth - viewport.width)
+        var maxY = Math.max(0, viewport.contentHeight - viewport.height)
+        viewport.contentX = Math.min(Math.max(newContentX, 0), maxX)
+        viewport.contentY = Math.min(Math.max(newContentY, 0), maxY)
+        if (gridCanvas)
+            gridCanvas.requestPaint()
+        if (edgeCanvas)
+            edgeCanvas.requestPaint()
+    }
+
+    function applyZoomFactor(factor, focusX, focusY) {
+        setZoomInternal(root.zoomLevel * factor, focusX, focusY)
+    }
+
+    function setZoomDirect(value, focusX, focusY) {
+        setZoomInternal(value, focusX, focusY)
+    }
+
+    function centerOnPoint(x, y) {
+        var targetX = x * root.zoomLevel - viewport.width / 2
+        var targetY = y * root.zoomLevel - viewport.height / 2
+        var maxX = Math.max(0, viewport.contentWidth - viewport.width)
+        var maxY = Math.max(0, viewport.contentHeight - viewport.height)
+        viewport.contentX = Math.min(Math.max(targetX, 0), maxX)
+        viewport.contentY = Math.min(Math.max(targetY, 0), maxY)
+    }
+
+    function resetView() {
+        setZoomInternal(1.0)
+        centerOnPoint(root.boardSize / 2, root.boardSize / 2)
+    }
+
+    Dialog {
+        id: addDialog
+        modal: true
+        title: "Add to Diagram"
+        property real targetX: 0
+        property real targetY: 0
+
+        contentItem: ColumnLayout {
+            width: 320
+            spacing: 12
+
+            Button {
+                text: "Box"
+                onClicked: {
+                    addDialog.close()
+                    root.openPresetDialog("box", Qt.point(addDialog.targetX, addDialog.targetY), "", undefined)
+                }
+            }
+
+            Button {
+                text: "Database"
+                onClicked: {
+                    addDialog.close()
+                    root.openPresetDialog("database", Qt.point(addDialog.targetX, addDialog.targetY), "", undefined)
+                }
+            }
+
+            Button {
+                text: "Server"
+                onClicked: {
+                    addDialog.close()
+                    root.openPresetDialog("server", Qt.point(addDialog.targetX, addDialog.targetY), "", undefined)
+                }
+            }
+
+            Button {
+                text: "Cloud"
+                onClicked: {
+                    addDialog.close()
+                    root.openPresetDialog("cloud", Qt.point(addDialog.targetX, addDialog.targetY), "", undefined)
+                }
+            }
+
+            Button {
+                text: "Note"
+                onClicked: {
+                    addDialog.close()
+                    root.openPresetDialog("note", Qt.point(addDialog.targetX, addDialog.targetY), "", undefined)
+                }
+            }
+
+            Button {
+                text: "Obstacle"
+                onClicked: {
+                    addDialog.close()
+                    root.openPresetDialog("obstacle", Qt.point(addDialog.targetX, addDialog.targetY), "", undefined)
+                }
+            }
+
+            Button {
+                text: "Wish"
+                onClicked: {
+                    addDialog.close()
+                    root.openPresetDialog("wish", Qt.point(addDialog.targetX, addDialog.targetY), "", undefined)
+                }
+            }
+
+            Button {
+                text: "ChatGPT"
+                onClicked: {
+                    addDialog.close()
+                    root.openPresetDialog("chatgpt", Qt.point(addDialog.targetX, addDialog.targetY), "", undefined)
+                }
+            }
+
+            Button {
+                text: "Task from List"
+                enabled: taskModel && taskModel.taskCount > 0
+                onClicked: {
+                    addDialog.close()
+                    if (taskModel) {
+                        taskDialog.targetX = snapValue(addDialog.targetX)
+                        taskDialog.targetY = snapValue(addDialog.targetY)
+                        taskDialog.open()
+                    }
+                }
+            }
+
+            Button {
+                text: "New Task (freetext)"
+                enabled: diagramModel !== null
+                onClicked: {
+                    addDialog.close()
+                    root.openQuickTaskDialog(Qt.point(addDialog.targetX, addDialog.targetY))
+                }
+            }
+        }
+
+        footer: DialogButtonBox {
+            standardButtons: DialogButtonBox.Cancel
+            onRejected: addDialog.close()
+        }
+    }
+
+    Dialog {
+        id: boxDialog
+        modal: true
+        property real targetX: 0
+        property real targetY: 0
+        property string editingItemId: ""
+        property string textValue: ""
+        property string presetName: "box"
+        title: boxDialog.editingItemId.length === 0 ? root.presetTitle(boxDialog.presetName) : "Edit Label"
+
+        onOpened: {
+            boxTextField.forceActiveFocus()
+            if (boxDialog.editingItemId.length > 0)
+                boxTextField.selectAll()
+        }
+
+        contentItem: ColumnLayout {
+            width: 320
+            spacing: 12
+
+            TextField {
+                id: boxTextField
+                Layout.fillWidth: true
+                text: boxDialog.textValue
+                placeholderText: "Label"
+                selectByMouse: true
+                color: "#f5f6f8"
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#384458"
+                }
+                onTextChanged: boxDialog.textValue = text
+                Keys.onReturnPressed: boxDialog.accept()
+                Keys.onEnterPressed: boxDialog.accept()
+            }
+        }
+
+        footer: DialogButtonBox {
+            id: boxDialogButtonBox
+            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+        }
+
+        onAccepted: {
+            if (!diagramModel)
+                return
+            if (boxDialog.editingItemId.length === 0) {
+                diagramModel.addPresetItemWithText(
+                    boxDialog.presetName,
+                    snapValue(boxDialog.targetX),
+                    snapValue(boxDialog.targetY),
+                    boxDialog.textValue
+                )
+            } else {
+                diagramModel.setItemText(boxDialog.editingItemId, boxDialog.textValue)
+            }
+            boxDialog.close()
+        }
+        onRejected: boxDialog.close()
+
+        onClosed: {
+            boxDialog.textValue = ""
+            boxDialog.editingItemId = ""
+            boxDialog.presetName = "box"
+        }
+    }
+
+    Dialog {
+        id: freeTextDialog
+        modal: true
+        property real targetX: 0
+        property real targetY: 0
+        property string editingItemId: ""
+        property string textValue: ""
+        title: freeTextDialog.editingItemId.length === 0 ? "Free Text" : "Edit Free Text"
+
+        onOpened: {
+            freeTextArea.forceActiveFocus()
+            if (freeTextDialog.editingItemId.length > 0)
+                freeTextArea.selectAll()
+        }
+
+        contentItem: ColumnLayout {
+            width: 360
+            spacing: 12
+
+            ScrollView {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 160
+
+                TextArea {
+                    id: freeTextArea
+                    text: freeTextDialog.textValue
+                    placeholderText: "Write your text here..."
+                    wrapMode: TextEdit.Wrap
+                    selectByMouse: true
+                    color: "#f5f6f8"
+                    font.pixelSize: 14
+                    background: Rectangle {
+                        color: "#1b2028"
+                        radius: 6
+                        border.color: "#384458"
+                    }
+                    onTextChanged: freeTextDialog.textValue = text
+                }
+            }
+        }
+
+        footer: DialogButtonBox {
+            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+        }
+
+        onAccepted: {
+            if (!diagramModel)
+                return
+            if (freeTextDialog.editingItemId.length === 0) {
+                diagramModel.addPresetItemWithText(
+                    "freetext",
+                    snapValue(freeTextDialog.targetX),
+                    snapValue(freeTextDialog.targetY),
+                    freeTextDialog.textValue
+                )
+            } else {
+                diagramModel.setItemText(freeTextDialog.editingItemId, freeTextDialog.textValue)
+            }
+            freeTextDialog.close()
+        }
+        onRejected: freeTextDialog.close()
+
+        onClosed: {
+            freeTextDialog.textValue = ""
+            freeTextDialog.editingItemId = ""
+        }
+    }
+
+    Dialog {
+        id: edgeDescriptionDialog
+        modal: true
+        title: "Edge Description"
+        property string edgeId: ""
+        property string descriptionValue: ""
+
+        function openWithEdge(eId) {
+            edgeId = eId
+            descriptionValue = diagramModel ? diagramModel.getEdgeDescription(eId) : ""
+            open()
+        }
+
+        onOpened: edgeDescriptionField.forceActiveFocus()
+
+        contentItem: ColumnLayout {
+            width: 320
+            spacing: 12
+
+            TextField {
+                id: edgeDescriptionField
+                Layout.fillWidth: true
+                text: edgeDescriptionDialog.descriptionValue
+                placeholderText: "Description (optional)"
+                selectByMouse: true
+                color: "#f5f6f8"
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#384458"
+                }
+                onTextChanged: edgeDescriptionDialog.descriptionValue = text
+                Keys.onReturnPressed: edgeDescriptionDialog.accept()
+                Keys.onEnterPressed: edgeDescriptionDialog.accept()
+            }
+        }
+
+        footer: DialogButtonBox {
+            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+        }
+
+        onAccepted: {
+            if (diagramModel && edgeDescriptionDialog.edgeId.length > 0) {
+                diagramModel.setEdgeDescription(edgeDescriptionDialog.edgeId, edgeDescriptionDialog.descriptionValue)
+            }
+            close()
+        }
+        onRejected: close()
+
+        onClosed: {
+            edgeDescriptionDialog.edgeId = ""
+            edgeDescriptionDialog.descriptionValue = ""
+        }
+    }
+
+    Dialog {
+        id: taskDialog
+        modal: true
+        title: "Add Task"
+        width: 450
+        property real targetX: 0
+        property real targetY: 0
+
+        contentItem: ColumnLayout {
+            spacing: 12
+
+            ListView {
+                id: taskListView
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                Layout.preferredWidth: 420
+                Layout.preferredHeight: 320
+                model: taskModel
+                clip: true
+
+                delegate: Item {
+                    width: taskListView.width
+                    height: Math.max(40, taskText.implicitHeight + 16)
+
+                    Rectangle {
+                        anchors.fill: parent
+                        color: mouseArea.containsMouse ? "#283346" : "#1a2230"
+                        border.color: "#30405a"
+                    }
+
+                    Text {
+                        id: taskText
+                        anchors.left: parent.left
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.margins: 12
+                        text: model.title
+                        color: "#f5f6f8"
+                        font.pixelSize: 14
+                        wrapMode: Text.WordWrap
+                    }
+
+                    MouseArea {
+                        id: mouseArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: {
+                            if (diagramModel) {
+                                diagramModel.addTask(
+                                    index,
+                                    snapValue(taskDialog.targetX),
+                                    snapValue(taskDialog.targetY)
+                                )
+                            }
+                            taskDialog.close()
+                        }
+                    }
+                }
+            }
+
+            Label {
+                text: taskModel ? "No tasks available. Add tasks in Progress Tracker." : "Task list unavailable. Open ActionDraw from the task app."
+                color: "#8a93a5"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+                Layout.alignment: Qt.AlignHCenter
+                horizontalAlignment: Text.AlignHCenter
+                visible: !taskModel || taskListView.count === 0
+            }
+        }
+
+        footer: DialogButtonBox {
+            standardButtons: DialogButtonBox.Cancel
+            onRejected: taskDialog.close()
+        }
+    }
+
+    Dialog {
+        id: newTaskDialog
+        modal: true
+        title: "Create Task"
+        property string pendingItemId: ""
+        property string textValue: ""
+
+        function openWithItem(itemId, text) {
+            pendingItemId = itemId
+            textValue = text
+            open()
+        }
+
+        contentItem: ColumnLayout {
+            width: 320
+            spacing: 12
+
+            TextField {
+                id: newTaskField
+                Layout.fillWidth: true
+                text: newTaskDialog.textValue
+                placeholderText: "Task name"
+                selectByMouse: true
+                color: "#f5f6f8"
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#384458"
+                }
+                onTextChanged: newTaskDialog.textValue = text
+                Keys.onReturnPressed: newTaskDialog.accept()
+                Keys.onEnterPressed: newTaskDialog.accept()
+            }
+        }
+
+        footer: DialogButtonBox {
+            id: newTaskButtons
+            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+        }
+
+        onAccepted: {
+            if (diagramModel && newTaskDialog.pendingItemId.length > 0) {
+                diagramModel.createTaskFromText(newTaskDialog.textValue, newTaskDialog.pendingItemId)
+            }
+        }
+        onRejected: newTaskDialog.close()
+
+        onClosed: {
+            newTaskDialog.pendingItemId = ""
+            newTaskDialog.textValue = ""
+        }
+    }
+
+    Dialog {
+        id: quickTaskDialog
+        modal: true
+        title: "New Task"
+        property real targetX: 0
+        property real targetY: 0
+
+        onOpened: quickTaskField.forceActiveFocus()
+
+        contentItem: ColumnLayout {
+            width: 320
+            spacing: 12
+
+            Label {
+                text: "Create a new task that will be added to both the diagram and your Progress List."
+                color: "#8a93a5"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            TextField {
+                id: quickTaskField
+                Layout.fillWidth: true
+                placeholderText: "Task name"
+                selectByMouse: true
+                color: "#f5f6f8"
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#384458"
+                }
+                Keys.onReturnPressed: quickTaskDialog.accept()
+                Keys.onEnterPressed: quickTaskDialog.accept()
+            }
+        }
+
+        footer: DialogButtonBox {
+            id: quickTaskButtons
+            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+        }
+
+        onAccepted: {
+            if (diagramModel && quickTaskField.text.trim().length > 0) {
+                diagramModel.addTaskFromText(
+                    quickTaskField.text,
+                    snapValue(quickTaskDialog.targetX),
+                    snapValue(quickTaskDialog.targetY)
+                )
+            }
+            quickTaskDialog.close()
+        }
+        onRejected: quickTaskDialog.close()
+
+        onClosed: {
+            quickTaskField.text = ""
+        }
+    }
+
+    Dialog {
+        id: taskRenameDialog
+        modal: true
+        title: "Rename Task"
+        property string editingItemId: ""
+        property string textValue: ""
+
+        onOpened: {
+            taskRenameField.forceActiveFocus()
+            taskRenameField.selectAll()
+        }
+
+        function openWithItem(itemId, text) {
+            editingItemId = itemId
+            textValue = text
+            open()
+        }
+
+        contentItem: ColumnLayout {
+            width: 320
+            spacing: 12
+
+            Label {
+                text: "Rename this task. Changes will be synced to the Progress List."
+                color: "#8a93a5"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            TextField {
+                id: taskRenameField
+                Layout.fillWidth: true
+                text: taskRenameDialog.textValue
+                placeholderText: "Task name"
+                selectByMouse: true
+                color: "#f5f6f8"
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#384458"
+                }
+                onTextChanged: taskRenameDialog.textValue = text
+                Keys.onReturnPressed: taskRenameDialog.accept()
+                Keys.onEnterPressed: taskRenameDialog.accept()
+            }
+        }
+
+        footer: DialogButtonBox {
+            id: taskRenameButtons
+            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+        }
+
+        onAccepted: {
+            if (diagramModel && taskRenameDialog.editingItemId.length > 0 && taskRenameDialog.textValue.trim().length > 0) {
+                diagramModel.renameTaskItem(taskRenameDialog.editingItemId, taskRenameDialog.textValue)
+            }
+        }
+        onRejected: taskRenameDialog.close()
+
+        onClosed: {
+            taskRenameDialog.editingItemId = ""
+            taskRenameDialog.textValue = ""
+        }
+    }
+
+    // Timer dialog for setting countdown duration
+    Dialog {
+        id: timerDialog
+        modal: true
+        title: "Set Timer"
+        property int taskIndex: -1
+        property string durationValue: ""
+
+        onOpened: timerDurationField.forceActiveFocus()
+
+        contentItem: ColumnLayout {
+            width: 280
+            spacing: 12
+
+            Label {
+                text: "Enter duration (e.g. 30s, 2m, 1h)"
+                color: "#8a93a5"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            TextField {
+                id: timerDurationField
+                Layout.fillWidth: true
+                text: timerDialog.durationValue
+                placeholderText: "e.g. 2m"
+                selectByMouse: true
+                color: "#f5f6f8"
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#384458"
+                }
+                onTextChanged: timerDialog.durationValue = text
+                Keys.onReturnPressed: timerDialog.accept()
+                Keys.onEnterPressed: timerDialog.accept()
+            }
+
+            // Quick preset buttons
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                Button {
+                    text: "30s"
+                    onClicked: {
+                        timerDialog.durationValue = "30s"
+                        timerDialog.accept()
+                    }
+                    background: Rectangle {
+                        color: parent.pressed ? "#384458" : "#2a3240"
+                        radius: 4
+                        border.color: "#4b5b72"
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        color: "#f5f6f8"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+
+                Button {
+                    text: "1m"
+                    onClicked: {
+                        timerDialog.durationValue = "1m"
+                        timerDialog.accept()
+                    }
+                    background: Rectangle {
+                        color: parent.pressed ? "#384458" : "#2a3240"
+                        radius: 4
+                        border.color: "#4b5b72"
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        color: "#f5f6f8"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+
+                Button {
+                    text: "2m"
+                    onClicked: {
+                        timerDialog.durationValue = "2m"
+                        timerDialog.accept()
+                    }
+                    background: Rectangle {
+                        color: parent.pressed ? "#384458" : "#2a3240"
+                        radius: 4
+                        border.color: "#4b5b72"
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        color: "#f5f6f8"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+
+                Button {
+                    text: "5m"
+                    onClicked: {
+                        timerDialog.durationValue = "5m"
+                        timerDialog.accept()
+                    }
+                    background: Rectangle {
+                        color: parent.pressed ? "#384458" : "#2a3240"
+                        radius: 4
+                        border.color: "#4b5b72"
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        color: "#f5f6f8"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+            }
+        }
+
+        footer: DialogButtonBox {
+            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+        }
+
+        onAccepted: {
+            if (diagramModel && timerDialog.taskIndex >= 0 && timerDialog.durationValue.trim().length > 0) {
+                diagramModel.setTaskCountdownTimer(timerDialog.taskIndex, timerDialog.durationValue)
+            }
+            timerDialog.close()
+        }
+        onRejected: timerDialog.close()
+
+        onClosed: {
+            timerDialog.taskIndex = -1
+            timerDialog.durationValue = ""
+        }
+    }
+
+    // Context menu for active timer
+    Menu {
+        id: timerContextMenu
+        property int taskIndex: -1
+
+        MenuItem {
+            text: "Restart Timer"
+            onTriggered: {
+                if (diagramModel && timerContextMenu.taskIndex >= 0) {
+                    diagramModel.restartTaskCountdownTimer(timerContextMenu.taskIndex)
+                }
+            }
+        }
+
+        MenuItem {
+            text: "Clear Timer"
+            onTriggered: {
+                if (diagramModel && timerContextMenu.taskIndex >= 0) {
+                    diagramModel.clearTaskCountdownTimer(timerContextMenu.taskIndex)
+                }
+            }
+        }
+    }
+
+    function openQuickTaskDialog(point) {
+        quickTaskDialog.targetX = point.x
+        quickTaskDialog.targetY = point.y
+        quickTaskDialog.open()
+    }
+
+    function addQuickTaskAtCenter() {
+        openQuickTaskDialog(diagramCenterPoint())
+    }
+
+    Menu {
+        id: edgeDropMenu
+        title: "Create & Connect"
+
+        MenuItem {
+            text: "→ Task"
+            onTriggered: {
+                // Copy pending state to dialog before menu closes
+                edgeDropTaskDialog.sourceId = root.pendingEdgeSourceId
+                edgeDropTaskDialog.sourceType = "task"
+                edgeDropTaskDialog.dropX = root.pendingEdgeDropX
+                edgeDropTaskDialog.dropY = root.pendingEdgeDropY
+                edgeDropTaskDialog.open()
+            }
+        }
+
+        MenuItem {
+            text: "→ Obstacle"
+            onTriggered: {
+                if (diagramModel && root.pendingEdgeSourceId) {
+                    diagramModel.addPresetItemAndConnect(
+                        root.pendingEdgeSourceId,
+                        "obstacle",
+                        snapValue(root.pendingEdgeDropX),
+                        snapValue(root.pendingEdgeDropY),
+                        "Obstacle"
+                    )
+                }
+                root.pendingEdgeSourceId = ""
+            }
+        }
+
+        MenuItem {
+            text: "→ Wish"
+            onTriggered: {
+                if (diagramModel && root.pendingEdgeSourceId) {
+                    diagramModel.addPresetItemAndConnect(
+                        root.pendingEdgeSourceId,
+                        "wish",
+                        snapValue(root.pendingEdgeDropX),
+                        snapValue(root.pendingEdgeDropY),
+                        "Wish"
+                    )
+                }
+                root.pendingEdgeSourceId = ""
+            }
+        }
+
+        MenuItem {
+            text: "→ ChatGPT"
+            onTriggered: {
+                if (diagramModel && root.pendingEdgeSourceId) {
+                    diagramModel.addPresetItemAndConnect(
+                        root.pendingEdgeSourceId,
+                        "chatgpt",
+                        snapValue(root.pendingEdgeDropX),
+                        snapValue(root.pendingEdgeDropY),
+                        "Ask ChatGPT"
+                    )
+                }
+                root.pendingEdgeSourceId = ""
+            }
+        }
+
+        MenuSeparator {}
+
+        MenuItem {
+            text: "→ Box"
+            onTriggered: {
+                if (diagramModel && root.pendingEdgeSourceId) {
+                    diagramModel.addPresetItemAndConnect(
+                        root.pendingEdgeSourceId,
+                        "box",
+                        snapValue(root.pendingEdgeDropX),
+                        snapValue(root.pendingEdgeDropY),
+                        "Box"
+                    )
+                }
+                root.pendingEdgeSourceId = ""
+            }
+        }
+
+        MenuItem {
+            text: "→ Note"
+            onTriggered: {
+                if (diagramModel && root.pendingEdgeSourceId) {
+                    diagramModel.addPresetItemAndConnect(
+                        root.pendingEdgeSourceId,
+                        "note",
+                        snapValue(root.pendingEdgeDropX),
+                        snapValue(root.pendingEdgeDropY),
+                        "Note"
+                    )
+                }
+                root.pendingEdgeSourceId = ""
+            }
+        }
+
+        MenuItem {
+            text: "→ Database"
+            onTriggered: {
+                if (diagramModel && root.pendingEdgeSourceId) {
+                    diagramModel.addPresetItemAndConnect(
+                        root.pendingEdgeSourceId,
+                        "database",
+                        snapValue(root.pendingEdgeDropX),
+                        snapValue(root.pendingEdgeDropY),
+                        "Database"
+                    )
+                }
+                root.pendingEdgeSourceId = ""
+            }
+        }
+
+        MenuItem {
+            text: "→ Server"
+            onTriggered: {
+                if (diagramModel && root.pendingEdgeSourceId) {
+                    diagramModel.addPresetItemAndConnect(
+                        root.pendingEdgeSourceId,
+                        "server",
+                        snapValue(root.pendingEdgeDropX),
+                        snapValue(root.pendingEdgeDropY),
+                        "Server"
+                    )
+                }
+                root.pendingEdgeSourceId = ""
+            }
+        }
+
+        MenuItem {
+            text: "→ Cloud"
+            onTriggered: {
+                if (diagramModel && root.pendingEdgeSourceId) {
+                    diagramModel.addPresetItemAndConnect(
+                        root.pendingEdgeSourceId,
+                        "cloud",
+                        snapValue(root.pendingEdgeDropX),
+                        snapValue(root.pendingEdgeDropY),
+                        "Cloud"
+                    )
+                }
+                root.pendingEdgeSourceId = ""
+            }
+        }
+
+        onClosed: {
+            // Clear pending state if menu closed without action
+            root.pendingEdgeSourceId = ""
+        }
+    }
+
+    Dialog {
+        id: edgeDropTaskDialog
+        modal: true
+        title: sourceType === "task" ? "Create Connected Task" : ("Create Connected " + sourceType.charAt(0).toUpperCase() + sourceType.slice(1))
+
+        // Store our own copy of pending state (menu clears root state on close)
+        property string sourceId: ""
+        property string sourceType: "task"  // Type of item to create
+        property real dropX: 0
+        property real dropY: 0
+
+        onOpened: edgeDropTaskField.forceActiveFocus()
+
+        contentItem: ColumnLayout {
+            width: 320
+            spacing: 12
+
+            Label {
+                text: {
+                    if (edgeDropTaskDialog.sourceType === "task" && taskModel)
+                        return "Create a new task connected from the source item."
+                    else
+                        return "Create a new " + edgeDropTaskDialog.sourceType + " connected from the source item."
+                }
+                color: "#8a93a5"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            TextField {
+                id: edgeDropTaskField
+                Layout.fillWidth: true
+                placeholderText: edgeDropTaskDialog.sourceType === "task" ? "Task name" : (edgeDropTaskDialog.sourceType.charAt(0).toUpperCase() + edgeDropTaskDialog.sourceType.slice(1) + " label")
+                selectByMouse: true
+                color: "#f5f6f8"
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#384458"
+                }
+                Keys.onReturnPressed: edgeDropTaskDialog.accept()
+                Keys.onEnterPressed: edgeDropTaskDialog.accept()
+            }
+        }
+
+        footer: DialogButtonBox {
+            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+        }
+
+        onAccepted: {
+            if (diagramModel && edgeDropTaskDialog.sourceId && edgeDropTaskField.text.trim().length > 0) {
+                if (edgeDropTaskDialog.sourceType === "task" && taskModel) {
+                    diagramModel.addTaskFromTextAndConnect(
+                        edgeDropTaskDialog.sourceId,
+                        snapValue(edgeDropTaskDialog.dropX),
+                        snapValue(edgeDropTaskDialog.dropY),
+                        edgeDropTaskField.text
+                    )
+                } else {
+                    // Create item of the same type as source
+                    diagramModel.addPresetItemAndConnect(
+                        edgeDropTaskDialog.sourceId,
+                        edgeDropTaskDialog.sourceType === "task" ? "box" : edgeDropTaskDialog.sourceType,
+                        snapValue(edgeDropTaskDialog.dropX),
+                        snapValue(edgeDropTaskDialog.dropY),
+                        edgeDropTaskField.text
+                    )
+                }
+            }
+            edgeDropTaskDialog.close()
+        }
+        onRejected: edgeDropTaskDialog.close()
+
+        onClosed: {
+            edgeDropTaskField.text = ""
+            edgeDropTaskDialog.sourceId = ""
+            edgeDropTaskDialog.sourceType = "task"
+        }
+    }
+
+    FileDialog {
+        id: saveDialog
+        title: "Save Project As"
+        fileMode: FileDialog.SaveFile
+        nameFilters: ["Progress files (*.progress)", "All files (*)"]
+        defaultSuffix: "progress"
+        onAccepted: {
+            if (projectManager) {
+                projectManager.saveProject(selectedFile)
+            }
+        }
+    }
+
+    FileDialog {
+        id: loadDialog
+        title: "Load Project"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["Progress files (*.progress)", "All files (*)"]
+        onAccepted: {
+            if (projectManager) {
+                projectManager.loadProject(selectedFile)
+            }
+        }
+    }
+
+    FileDialog {
+        id: subDiagramFileDialog
+        title: "Select Sub-diagram"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["Progress files (*.progress)", "All files (*)"]
+        onAccepted: {
+            if (diagramModel && diagramLayer.contextMenuItemId) {
+                diagramModel.setSubDiagramPath(diagramLayer.contextMenuItemId, selectedFile)
+            }
+        }
+    }
+
+    FileDialog {
+        id: newSubDiagramFileDialog
+        title: "Create New Sub-diagram"
+        fileMode: FileDialog.SaveFile
+        nameFilters: ["Progress files (*.progress)", "All files (*)"]
+        defaultSuffix: "progress"
+        onAccepted: {
+            if (diagramModel && diagramLayer.contextMenuItemId) {
+                diagramModel.createAndLinkSubDiagram(diagramLayer.contextMenuItemId, selectedFile)
+            }
+        }
+    }
+
+    ColumnLayout {
+        anchors.fill: parent
+        anchors.margins: 16
+        spacing: 12
+
+        // Progress measurement tiles
+        RowLayout {
+            spacing: 12
+            Layout.alignment: Qt.AlignHCenter
+            visible: taskModel !== null
+
+            Rectangle {
+                width: 120
+                height: 54
+                radius: 8
+                color: "#1b2028"
+                border.color: "#2e3744"
+
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    spacing: 2
+
+                    Label {
+                        property real percentage: taskModel ? taskModel.percentageComplete : 0
+                        text: percentage.toFixed(0) + "%"
+                        font.pixelSize: 18
+                        font.bold: true
+                        color: "#4a9eff"
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+
+                    Label {
+                        text: "Complete"
+                        font.pixelSize: 10
+                        color: "#8a93a5"
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+                }
+            }
+
+            Rectangle {
+                width: 120
+                height: 54
+                radius: 8
+                color: "#1b2028"
+                border.color: "#2e3744"
+
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    spacing: 2
+
+                    Label {
+                        property real totalTime: taskModel ? taskModel.totalEstimatedTime : 0
+                        text: formatTime(totalTime)
+                        font.pixelSize: 18
+                        font.bold: true
+                        color: "#ffa94d"
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+
+                    Label {
+                        text: "Time Left"
+                        font.pixelSize: 10
+                        color: "#8a93a5"
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+                }
+            }
+
+            Rectangle {
+                width: 120
+                height: 54
+                radius: 8
+                color: "#1b2028"
+                border.color: "#2e3744"
+
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    spacing: 2
+
+                    Label {
+                        property real avgTime: taskModel ? taskModel.averageTaskTime : 0
+                        text: formatTime(avgTime)
+                        font.pixelSize: 18
+                        font.bold: true
+                        color: "#9aa6b8"
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+
+                    Label {
+                        text: "Avg Time"
+                        font.pixelSize: 10
+                        color: "#8a93a5"
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+                }
+            }
+
+            Rectangle {
+                width: 120
+                height: 54
+                radius: 8
+                color: "#1b2028"
+                border.color: "#2e3744"
+
+                ColumnLayout {
+                    anchors.centerIn: parent
+                    spacing: 2
+
+                    Label {
+                        property string completionTime: taskModel ? taskModel.estimatedCompletionTimeOfDay : ""
+                        text: completionTime !== "" ? completionTime : "N/A"
+                        font.pixelSize: 18
+                        font.bold: true
+                        color: "#82c3a5"
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+
+                    Label {
+                        text: "Done By"
+                        font.pixelSize: 10
+                        color: "#8a93a5"
+                        Layout.alignment: Qt.AlignHCenter
+                    }
+                }
+            }
+        }
+
+        // Tab Bar for multiple diagrams
+        RowLayout {
+            id: tabBarRow
+            Layout.fillWidth: true
+            spacing: 4
+            visible: tabModel !== null
+
+            Flickable {
+                id: tabFlickable
+                Layout.fillWidth: true
+                Layout.maximumWidth: parent.width - 36  // Leave space for add button
+                height: 28
+                contentWidth: tabRowContent.width
+                clip: true
+                boundsBehavior: Flickable.StopAtBounds
+
+                Row {
+                    id: tabRowContent
+                    spacing: 2
+
+                    Repeater {
+                        model: tabModel
+
+                        delegate: Rectangle {
+                            id: tabButton
+                            property bool isActive: tabModel ? index === tabModel.currentTabIndex : false
+                            width: Math.min(Math.max(tabName.implicitWidth + tabPercent.implicitWidth + 24, 48), 180)
+                            height: 28
+                            radius: 5
+                            color: isActive ? "#3b485c" : (tabMouseArea.containsMouse ? "#2a3444" : "#1b2028")
+                            border.color: isActive ? "#4a9eff" : "#2e3744"
+                            border.width: 1
+
+                            RowLayout {
+                                id: tabLabelRow
+                                anchors.fill: parent
+                                anchors.margins: 6
+                                spacing: 6
+
+                                Text {
+                                    id: tabName
+                                    Layout.fillWidth: true
+                                    text: model.name
+                                    color: isActive ? "#ffffff" : "#9aa6b8"
+                                    font.pixelSize: 11
+                                    font.bold: isActive
+                                    elide: Text.ElideRight
+                                    horizontalAlignment: Text.AlignLeft
+                                }
+
+                                Text {
+                                    id: tabPercent
+                                    text: Math.round(model.completionPercent) + "%"
+                                    color: isActive ? "#c8d6e5" : "#7f8a9a"
+                                    font.pixelSize: 10
+                                    font.bold: isActive
+                                }
+                            }
+
+                            ToolTip {
+                                visible: tabMouseArea.containsMouse && tabName.truncated
+                                text: model.name + " (" + Math.round(model.completionPercent) + "%)"
+                                delay: 500
+                            }
+
+                            MouseArea {
+                                id: tabMouseArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                onClicked: function(mouse) {
+                                    if (mouse.button === Qt.RightButton) {
+                                        tabContextMenu.tabIndex = index
+                                        tabContextMenu.tabName = model.name
+                                        tabContextMenu.popup()
+                                    } else {
+                                        if (projectManager)
+                                            projectManager.switchTab(index)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.NoButton
+                    onWheel: function(wheel) {
+                        if (tabFlickable.contentWidth <= tabFlickable.width)
+                            return
+                        var delta = wheel.angleDelta.y !== 0 ? wheel.angleDelta.y : wheel.angleDelta.x
+                        tabFlickable.contentX = Math.max(0, Math.min(tabFlickable.contentWidth - tabFlickable.width, tabFlickable.contentX - delta))
+                        wheel.accepted = true
+                    }
+                }
+
+                ScrollBar.horizontal: ScrollBar {
+                    policy: ScrollBar.AsNeeded
+                    height: 6
+                }
+            }
+
+            // Add tab button
+            Rectangle {
+                width: 28
+                height: 28
+                radius: 6
+                color: addTabMouseArea.containsMouse ? "#2a3444" : "#1b2028"
+                border.color: "#2e3744"
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "+"
+                    color: "#9aa6b8"
+                    font.pixelSize: 16
+                    font.bold: true
+                }
+
+                MouseArea {
+                    id: addTabMouseArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onClicked: {
+                        if (tabModel) {
+                            tabModel.addTab("")
+                            // Switch to the newly created tab
+                            if (projectManager)
+                                projectManager.switchTab(tabModel.tabCount - 1)
+                        }
+                    }
+                }
+            }
+
+            Item { Layout.fillWidth: true }
+        }
+
+        // Tab context menu
+        Menu {
+            id: tabContextMenu
+            property int tabIndex: -1
+            property string tabName: ""
+
+            MenuItem {
+                text: "Move Left"
+                enabled: tabModel ? tabContextMenu.tabIndex > 0 : false
+                onTriggered: {
+                    if (tabModel && tabContextMenu.tabIndex > 0)
+                        tabModel.moveTab(tabContextMenu.tabIndex, tabContextMenu.tabIndex - 1)
+                }
+            }
+            MenuItem {
+                text: "Move Right"
+                enabled: tabModel ? tabContextMenu.tabIndex < tabModel.tabCount - 1 : false
+                onTriggered: {
+                    if (tabModel && tabContextMenu.tabIndex < tabModel.tabCount - 1)
+                        tabModel.moveTab(tabContextMenu.tabIndex, tabContextMenu.tabIndex + 1)
+                }
+            }
+            MenuItem {
+                text: "Rename..."
+                onTriggered: {
+                    renameTabDialog.tabIndex = tabContextMenu.tabIndex
+                    renameTabDialog.currentName = tabContextMenu.tabName
+                    renameTabDialog.open()
+                }
+            }
+            MenuItem {
+                text: "Delete"
+                enabled: tabModel ? tabModel.tabCount > 1 : false
+                onTriggered: {
+                    if (tabModel && tabModel.tabCount > 1)
+                        tabModel.removeTab(tabContextMenu.tabIndex)
+                }
+            }
+        }
+
+        // Rename tab dialog
+        Dialog {
+            id: renameTabDialog
+            property int tabIndex: -1
+            property string currentName: ""
+            title: "Rename Tab"
+            modal: true
+            anchors.centerIn: parent
+            width: 300
+            standardButtons: Dialog.Ok | Dialog.Cancel
+
+            TextField {
+                id: renameTabField
+                width: parent.width
+                text: renameTabDialog.currentName
+                placeholderText: "Tab name"
+                selectByMouse: true
+                onAccepted: renameTabDialog.accept()
+            }
+
+            onOpened: {
+                renameTabField.text = currentName
+                renameTabField.selectAll()
+                renameTabField.forceActiveFocus()
+            }
+
+            onAccepted: {
+                if (tabModel && renameTabField.text.trim())
+                    tabModel.renameTab(tabIndex, renameTabField.text.trim())
+            }
+        }
+
+        Dialog {
+            id: clipboardPasteDialog
+            property real pasteX: 0
+            property real pasteY: 0
+            title: "Paste from Clipboard"
+            modal: true
+            anchors.centerIn: parent
+            width: 320
+
+            contentItem: ColumnLayout {
+                width: 300
+                spacing: 12
+
+                Label {
+                    text: "Clipboard has multiple lines. Create tasks or boxes?"
+                    color: "#8a93a5"
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+
+                RowLayout {
+                    spacing: 10
+                    Layout.alignment: Qt.AlignHCenter
+
+                    Button {
+                        text: "Tasks"
+                        onClicked: {
+                            if (diagramModel)
+                                diagramModel.pasteTextFromClipboard(clipboardPasteDialog.pasteX, clipboardPasteDialog.pasteY, true)
+                            clipboardPasteDialog.close()
+                        }
+                    }
+
+                    Button {
+                        text: "Boxes"
+                        onClicked: {
+                            if (diagramModel)
+                                diagramModel.pasteTextFromClipboard(clipboardPasteDialog.pasteX, clipboardPasteDialog.pasteY, false)
+                            clipboardPasteDialog.close()
+                        }
+                    }
+
+                    Button {
+                        text: "Cancel"
+                        onClicked: clipboardPasteDialog.close()
+                    }
+                }
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: 12
+
+            Label {
+                text: "ActionDraw"
+                color: "#f5f6f8"
+                font.pixelSize: 20
+            }
+
+            Rectangle {
+                width: 1
+                height: 24
+                color: "#3b485c"
+            }
+
+            Button {
+                id: drawModeButton
+                text: diagramModel && diagramModel.drawingMode ? "✏ Drawing" : "✏ Draw"
+                highlighted: diagramModel && diagramModel.drawingMode
+                onClicked: {
+                    if (diagramModel)
+                        diagramModel.setDrawingMode(!diagramModel.drawingMode)
+                }
+            }
+
+            Button {
+                id: colorPickerButton
+                text: ""
+                enabled: diagramModel !== null
+                implicitWidth: 32
+                implicitHeight: 32
+                background: Rectangle {
+                    color: diagramModel ? diagramModel.brushColor : "#ffffff"
+                    border.color: "#5b6878"
+                    border.width: 2
+                    radius: 4
+                }
+                onClicked: colorMenu.open()
+
+                Menu {
+                    id: colorMenu
+                    parent: colorPickerButton
+                    y: colorPickerButton.height
+
+                    MenuItem {
+                        text: "White"
+                        Rectangle { anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter; width: 16; height: 16; radius: 8; color: "#ffffff" }
+                        onTriggered: diagramModel && diagramModel.setBrushColor("#ffffff")
+                    }
+                    MenuItem {
+                        text: "Red"
+                        Rectangle { anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter; width: 16; height: 16; radius: 8; color: "#ff5555" }
+                        onTriggered: diagramModel && diagramModel.setBrushColor("#ff5555")
+                    }
+                    MenuItem {
+                        text: "Orange"
+                        Rectangle { anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter; width: 16; height: 16; radius: 8; color: "#ff9944" }
+                        onTriggered: diagramModel && diagramModel.setBrushColor("#ff9944")
+                    }
+                    MenuItem {
+                        text: "Yellow"
+                        Rectangle { anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter; width: 16; height: 16; radius: 8; color: "#ffee55" }
+                        onTriggered: diagramModel && diagramModel.setBrushColor("#ffee55")
+                    }
+                    MenuItem {
+                        text: "Green"
+                        Rectangle { anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter; width: 16; height: 16; radius: 8; color: "#55ff55" }
+                        onTriggered: diagramModel && diagramModel.setBrushColor("#55ff55")
+                    }
+                    MenuItem {
+                        text: "Cyan"
+                        Rectangle { anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter; width: 16; height: 16; radius: 8; color: "#55ffff" }
+                        onTriggered: diagramModel && diagramModel.setBrushColor("#55ffff")
+                    }
+                    MenuItem {
+                        text: "Blue"
+                        Rectangle { anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter; width: 16; height: 16; radius: 8; color: "#5588ff" }
+                        onTriggered: diagramModel && diagramModel.setBrushColor("#5588ff")
+                    }
+                    MenuItem {
+                        text: "Purple"
+                        Rectangle { anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter; width: 16; height: 16; radius: 8; color: "#aa55ff" }
+                        onTriggered: diagramModel && diagramModel.setBrushColor("#aa55ff")
+                    }
+                    MenuItem {
+                        text: "Pink"
+                        Rectangle { anchors.right: parent.right; anchors.rightMargin: 8; anchors.verticalCenter: parent.verticalCenter; width: 16; height: 16; radius: 8; color: "#ff55aa" }
+                        onTriggered: diagramModel && diagramModel.setBrushColor("#ff55aa")
+                    }
+                }
+            }
+
+            RowLayout {
+                spacing: 4
+
+                Label {
+                    text: "Size:"
+                    color: "#a8b8c8"
+                }
+
+                Slider {
+                    id: brushSizeSlider
+                    Layout.preferredWidth: 80
+                    from: 1
+                    to: 20
+                    stepSize: 1
+                    value: diagramModel ? diagramModel.brushWidth : 3
+                    onValueChanged: {
+                        if (diagramModel && Math.abs(diagramModel.brushWidth - value) > 0.1)
+                            diagramModel.setBrushWidth(value)
+                    }
+                }
+
+                Label {
+                    text: Math.round(brushSizeSlider.value)
+                    color: "#f5f6f8"
+                    Layout.preferredWidth: 20
+                }
+            }
+
+            Item { Layout.fillWidth: true }
+
+            RowLayout {
+                spacing: 6
+                Layout.alignment: Qt.AlignVCenter
+
+                Label {
+                    text: "Zoom"
+                    color: "#f5f6f8"
+                }
+
+                Button {
+                    text: "-"
+                    onClicked: root.applyZoomFactor(0.9, viewport.width / 2, viewport.height / 2)
+                }
+
+                Slider {
+                    id: zoomSlider
+                    Layout.preferredWidth: 140
+                    from: root.minZoom
+                    to: root.maxZoom
+                    stepSize: 0.01
+                    value: root.zoomLevel
+                    onValueChanged: {
+                        if (Math.abs(root.zoomLevel - value) > 0.0001) {
+                            root.setZoomDirect(value, viewport.width / 2, viewport.height / 2)
+                        }
+                    }
+                }
+
+                Button {
+                    text: "+"
+                    onClicked: root.applyZoomFactor(1.1, viewport.width / 2, viewport.height / 2)
+                }
+
+                Button {
+                    text: "Reset"
+                    onClicked: root.resetView()
+                }
+            }
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            radius: 10
+            color: "#161c24"
+            border.color: "#243040"
+
+            Flickable {
+                id: viewport
+                anchors.fill: parent
+                contentWidth: root.boardWidth * root.zoomLevel
+                contentHeight: root.boardHeight * root.zoomLevel
+                clip: true
+                interactive: !diagramModel || !diagramModel.drawingMode
+
+                WheelHandler {
+                    target: null
+                    acceptedModifiers: Qt.ControlModifier
+                    onWheel: {
+                        var delta = wheel.angleDelta.y / 120
+                        if (delta === 0)
+                            return
+                        var factor = Math.pow(1.1, delta)
+                        root.applyZoomFactor(factor, wheel.x, wheel.y)
+                    }
+                }
+
+                PinchHandler {
+                    id: viewportPinch
+                    target: null
+                    property real lastScale: 1.0
+                    onActiveChanged: {
+                        if (active)
+                            lastScale = 1.0
+                    }
+                    onScaleChanged: {
+                        if (!active)
+                            return
+                        var factor = scale / lastScale
+                        root.applyZoomFactor(factor, centroid.position.x, centroid.position.y)
+                        lastScale = scale
+                    }
+                }
+
+                Item {
+                    id: diagramLayer
+                    width: root.boardWidth
+                    height: root.boardHeight
+                    transformOrigin: Item.TopLeft
+                    scale: root.zoomLevel
+
+                    property real contextMenuX: 0
+                    property real contextMenuY: 0
+                    property string contextMenuItemId: ""
+
+                    Menu {
+                        id: canvasContextMenu
+
+                        MenuItem {
+                            text: "Box"
+                            onTriggered: {
+                                var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
+                                diagramModel.addBox(snapped.x, snapped.y, "")
+                            }
+                        }
+                        MenuItem {
+                            text: "New Task"
+                            onTriggered: {
+                                var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
+                                root.openQuickTaskDialog(snapped)
+                            }
+                        }
+                        MenuItem {
+                            text: "Free Text"
+                            onTriggered: {
+                                var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
+                                root.openFreeTextDialog(snapped, "", "")
+                            }
+                        }
+                        MenuItem {
+                            text: "Obstacle"
+                            onTriggered: {
+                                var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
+                                root.openPresetDialog("obstacle", snapped, "", undefined)
+                            }
+                        }
+                    }
+
+                    Menu {
+                        id: itemContextMenu
+
+                        MenuItem {
+                            text: "New Sub-diagram..."
+                            onTriggered: newSubDiagramFileDialog.open()
+                        }
+                        MenuItem {
+                            text: "Link Existing Sub-diagram..."
+                            onTriggered: subDiagramFileDialog.open()
+                        }
+                        MenuItem {
+                            id: renameNoteMenuItem
+                            text: "Rename Label..."
+                            visible: {
+                                if (!diagramModel || !diagramLayer.contextMenuItemId)
+                                    return false
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                return item && (item.type === "note" || item.type === "wish" || item.type === "obstacle")
+                            }
+                            height: visible ? implicitHeight : 0
+                            onTriggered: {
+                                root.renameItemById(diagramLayer.contextMenuItemId)
+                            }
+                        }
+                        MenuItem {
+                            id: openSubDiagramMenuItem
+                            text: "Open Sub-diagram"
+                            visible: {
+                                if (!diagramModel || !diagramLayer.contextMenuItemId)
+                                    return false
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                return item && item.subDiagramPath && item.subDiagramPath !== ""
+                            }
+                            height: visible ? implicitHeight : 0
+                            onTriggered: diagramModel.openSubDiagram(diagramLayer.contextMenuItemId)
+                        }
+                        MenuItem {
+                            id: openChatGptMenuItem
+                            text: "Open ChatGPT"
+                            visible: {
+                                if (!diagramModel || !diagramLayer.contextMenuItemId)
+                                    return false
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                return item && item.type === "chatgpt"
+                            }
+                            height: visible ? implicitHeight : 0
+                            onTriggered: diagramModel.openChatGpt(diagramLayer.contextMenuItemId)
+                        }
+                        MenuSeparator {}
+                        MenuItem {
+                            text: "Delete"
+                            onTriggered: diagramModel.removeItem(diagramLayer.contextMenuItemId)
+                        }
+                    }
+
+                    Canvas {
+                        id: gridCanvas
+                        anchors.fill: parent
+                        visible: root.showGrid
+                        opacity: root.showGrid ? 1 : 0
+                        z: 0
+
+                        onPaint: {
+                            var ctx = getContext("2d")
+                            ctx.clearRect(0, 0, width, height)
+                            if (!root.showGrid)
+                                return
+                            var spacing = root.gridSpacing
+                            ctx.strokeStyle = "rgba(255, 255, 255, 0.05)"
+                            ctx.lineWidth = 1
+                            ctx.beginPath()
+                            for (var x = 0; x <= width; x += spacing) {
+                                ctx.moveTo(x, 0)
+                                ctx.lineTo(x, height)
+                            }
+                            for (var y = 0; y <= height; y += spacing) {
+                                ctx.moveTo(0, y)
+                                ctx.lineTo(width, y)
+                            }
+                            ctx.stroke()
+                        }
+                    }
+
+                    Canvas {
+                        id: edgeCanvas
+                        anchors.fill: parent
+                        z: 1
+                        property string hoveredEdgeId: ""
+                        property string selectedEdgeId: ""
+
+                        function distanceToSegment(px, py, x1, y1, x2, y2) {
+                            var dx = x2 - x1
+                            var dy = y2 - y1
+                            var lengthSq = dx * dx + dy * dy
+                            if (lengthSq === 0)
+                                return Math.sqrt((px - x1) * (px - x1) + (py - y1) * (py - y1))
+                            var t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / lengthSq))
+                            var projX = x1 + t * dx
+                            var projY = y1 + t * dy
+                            return Math.sqrt((px - projX) * (px - projX) + (py - projY) * (py - projY))
+                        }
+
+                        function findEdgeAt(mx, my) {
+                            if (!diagramModel)
+                                return ""
+                            var edges = diagramModel.edges
+                            var threshold = 8
+                            for (var i = edges.length - 1; i >= 0; --i) {
+                                var edge = edges[i]
+                                var fromItem = diagramModel.getItemSnapshot(edge.fromId)
+                                var toItem = diagramModel.getItemSnapshot(edge.toId)
+                                if ((!fromItem.x && fromItem.x !== 0) || (!toItem.x && toItem.x !== 0))
+                                    continue
+                                var fromX = fromItem.x + fromItem.width / 2
+                                var fromY = fromItem.y + fromItem.height / 2
+                                var toX = toItem.x + toItem.width / 2
+                                var toY = toItem.y + toItem.height / 2
+                                var dist = distanceToSegment(mx, my, fromX, fromY, toX, toY)
+                                if (dist <= threshold)
+                                    return edge.id
+                            }
+                            return ""
+                        }
+
+                        onPaint: {
+                            var ctx = getContext("2d")
+                            ctx.clearRect(0, 0, width, height)
+                            if (!diagramModel)
+                                return
+
+                            var edges = diagramModel.edges
+                            for (var i = 0; i < edges.length; ++i) {
+                                var edge = edges[i]
+                                var fromItem = diagramModel.getItemSnapshot(edge.fromId)
+                                var toItem = diagramModel.getItemSnapshot(edge.toId)
+                                if (!fromItem.x && fromItem.x !== 0)
+                                    continue
+                                if (!toItem.x && toItem.x !== 0)
+                                    continue
+
+                                var fromX = fromItem.x + fromItem.width / 2
+                                var fromY = fromItem.y + fromItem.height / 2
+                                var toX = toItem.x + toItem.width / 2
+                                var toY = toItem.y + toItem.height / 2
+
+                                var isHovered = edgeCanvas.hoveredEdgeId === edge.id
+                                var isSelected = edgeCanvas.selectedEdgeId === edge.id
+                                if (isSelected) {
+                                    ctx.strokeStyle = "#ff6b6b"
+                                    ctx.lineWidth = 3
+                                } else if (isHovered) {
+                                    ctx.strokeStyle = "#a8b8d8"
+                                    ctx.lineWidth = 3
+                                } else {
+                                    ctx.strokeStyle = "#7b88a8"
+                                    ctx.lineWidth = 2
+                                }
+
+                                ctx.beginPath()
+                                ctx.moveTo(fromX, fromY)
+                                ctx.lineTo(toX, toY)
+                                ctx.stroke()
+
+                                var angle = Math.atan2(toY - fromY, toX - fromX)
+                                var arrowSize = 10
+                                var arrowAngle = Math.PI / 6
+
+                                ctx.beginPath()
+                                ctx.moveTo(toX, toY)
+                                ctx.lineTo(
+                                    toX - arrowSize * Math.cos(angle - arrowAngle),
+                                    toY - arrowSize * Math.sin(angle - arrowAngle)
+                                )
+                                ctx.lineTo(
+                                    toX - arrowSize * Math.cos(angle + arrowAngle),
+                                    toY - arrowSize * Math.sin(angle + arrowAngle)
+                                )
+                                ctx.closePath()
+                                if (isSelected) {
+                                    ctx.fillStyle = "#ff6b6b"
+                                } else if (isHovered) {
+                                    ctx.fillStyle = "#a8b8d8"
+                                } else {
+                                    ctx.fillStyle = "#7b88a8"
+                                }
+                                ctx.fill()
+
+                                // Draw edge description text at midpoint
+                                if (edge.description && edge.description.length > 0) {
+                                    var midX = (fromX + toX) / 2
+                                    var midY = (fromY + toY) / 2
+                                    ctx.font = "12px sans-serif"
+                                    ctx.fillStyle = "#f5f6f8"
+                                    ctx.textAlign = "center"
+                                    ctx.textBaseline = "bottom"
+                                    // Offset text slightly above the line
+                                    var offsetY = -6
+                                    ctx.fillText(edge.description, midX, midY + offsetY)
+                                }
+                            }
+
+                            if (diagramModel.edgeDrawingFrom.length > 0 && diagramModel.isDraggingEdge) {
+                                var origin = diagramModel.getItemSnapshot(diagramModel.edgeDrawingFrom)
+                                if (origin.x || origin.x === 0) {
+                                    var originX = origin.x + origin.width / 2
+                                    var originY = origin.y + origin.height / 2
+                                    ctx.setLineDash([6, 4])
+                                    ctx.strokeStyle = "#82c3a5"
+                                    ctx.beginPath()
+                                    ctx.moveTo(originX, originY)
+                                    ctx.lineTo(diagramModel.edgeDragX, diagramModel.edgeDragY)
+                                    ctx.stroke()
+                                    ctx.setLineDash([])
+                                }
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            acceptedButtons: Qt.LeftButton | Qt.RightButton
+                            propagateComposedEvents: true
+                            z: -1
+
+                            onPositionChanged: function(mouse) {
+                                var edgeId = edgeCanvas.findEdgeAt(mouse.x, mouse.y)
+                                if (edgeCanvas.hoveredEdgeId !== edgeId) {
+                                    edgeCanvas.hoveredEdgeId = edgeId
+                                    edgeCanvas.requestPaint()
+                                }
+                            }
+
+                            onExited: {
+                                if (edgeCanvas.hoveredEdgeId !== "") {
+                                    edgeCanvas.hoveredEdgeId = ""
+                                    edgeCanvas.requestPaint()
+                                }
+                            }
+
+                            onClicked: function(mouse) {
+                                var edgeId = edgeCanvas.findEdgeAt(mouse.x, mouse.y)
+                                if (edgeId === "") {
+                                    if (edgeCanvas.selectedEdgeId !== "") {
+                                        edgeCanvas.selectedEdgeId = ""
+                                        edgeCanvas.requestPaint()
+                                    }
+                                    mouse.accepted = false
+                                    return
+                                }
+                                if (mouse.button === Qt.RightButton) {
+                                    // Right-click to delete immediately
+                                    diagramModel.removeEdge(edgeId)
+                                    edgeCanvas.selectedEdgeId = ""
+                                    edgeCanvas.hoveredEdgeId = ""
+                                } else {
+                                    // Left-click to select/deselect
+                                    if (edgeCanvas.selectedEdgeId === edgeId) {
+                                        edgeCanvas.selectedEdgeId = ""
+                                    } else {
+                                        edgeCanvas.selectedEdgeId = edgeId
+                                    }
+                                    root.selectedItemId = ""
+                                    edgeCanvas.requestPaint()
+                                }
+                            }
+
+                            onDoubleClicked: function(mouse) {
+                                var edgeId = edgeCanvas.findEdgeAt(mouse.x, mouse.y)
+                                if (edgeId !== "") {
+                                    // Double-click to edit description
+                                    edgeDescriptionDialog.openWithEdge(edgeId)
+                                } else {
+                                    mouse.accepted = false
+                                }
+                            }
+                        }
+                    }
+
+                    Connections {
+                        target: diagramModel
+                        function onEdgesChanged() { edgeCanvas.requestPaint() }
+                        function onItemsChanged() { edgeCanvas.requestPaint(); root.updateBoardBounds() }
+                        function onDrawingChanged() { drawingCanvas.requestPaint() }
+                    }
+
+                    Connections {
+                        target: root
+                        function onShowGridChanged() { gridCanvas.requestPaint() }
+                        function onGridSpacingChanged() { gridCanvas.requestPaint() }
+                    }
+
+                    Canvas {
+                        id: drawingCanvas
+                        anchors.fill: parent
+                        z: 2
+
+                        function drawStroke(ctx, stroke) {
+                            if (!stroke.points || stroke.points.length < 1)
+                                return
+                            ctx.strokeStyle = stroke.color
+                            ctx.lineWidth = stroke.width
+                            ctx.lineCap = "round"
+                            ctx.lineJoin = "round"
+                            ctx.beginPath()
+                            ctx.moveTo(stroke.points[0].x, stroke.points[0].y)
+                            if (stroke.points.length === 1) {
+                                // Single point - draw a dot
+                                ctx.arc(stroke.points[0].x, stroke.points[0].y, stroke.width / 2, 0, 2 * Math.PI)
+                                ctx.fillStyle = stroke.color
+                                ctx.fill()
+                            } else {
+                                for (var i = 1; i < stroke.points.length; ++i) {
+                                    ctx.lineTo(stroke.points[i].x, stroke.points[i].y)
+                                }
+                                ctx.stroke()
+                            }
+                        }
+
+                        onPaint: {
+                            var ctx = getContext("2d")
+                            ctx.clearRect(0, 0, width, height)
+                            if (!diagramModel)
+                                return
+
+                            // Draw all completed strokes
+                            var allStrokes = diagramModel.strokes
+                            for (var i = 0; i < allStrokes.length; ++i) {
+                                drawStroke(ctx, allStrokes[i])
+                            }
+
+                            // Draw current stroke being drawn
+                            var current = diagramModel.getCurrentStroke()
+                            if (current && current.points && current.points.length >= 1) {
+                                drawStroke(ctx, current)
+                            }
+                        }
+
+                        MouseArea {
+                            id: drawingMouseArea
+                            anchors.fill: parent
+                            enabled: diagramModel && diagramModel.drawingMode
+                            hoverEnabled: false
+                            acceptedButtons: Qt.LeftButton
+                            z: 100
+
+                            property bool isDrawing: false
+
+                            onPressed: function(mouse) {
+                                if (!diagramModel || !diagramModel.drawingMode)
+                                    return
+                                isDrawing = true
+                                diagramModel.startStroke(mouse.x, mouse.y)
+                                drawingCanvas.requestPaint()
+                            }
+
+                            onPositionChanged: function(mouse) {
+                                if (!diagramModel || !isDrawing)
+                                    return
+                                diagramModel.continueStroke(mouse.x, mouse.y)
+                                drawingCanvas.requestPaint()
+                            }
+
+                            onReleased: function(mouse) {
+                                if (!diagramModel)
+                                    return
+                                isDrawing = false
+                                diagramModel.endStroke()
+                                drawingCanvas.requestPaint()
+                            }
+
+                            onCanceled: {
+                                isDrawing = false
+                                if (diagramModel)
+                                    diagramModel.endStroke()
+                                drawingCanvas.requestPaint()
+                            }
+                        }
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        acceptedButtons: Qt.LeftButton | Qt.RightButton
+                        enabled: !diagramModel || !diagramModel.drawingMode
+                        onDoubleClicked: function(mouse) {
+                            if (mouse.button === Qt.LeftButton) {
+                                var pos = mapToItem(diagramLayer, mouse.x, mouse.y)
+                                var snapped = root.snapPoint(pos)
+                                diagramModel.addBox(snapped.x, snapped.y, "")
+                            }
+                        }
+                        onClicked: function(mouse) {
+                            if (mouse.button === Qt.RightButton) {
+                                var pos = mapToItem(diagramLayer, mouse.x, mouse.y)
+                                diagramLayer.contextMenuX = pos.x
+                                diagramLayer.contextMenuY = pos.y
+                                canvasContextMenu.popup()
+                            }
+                        }
+                    }
+
+                    Repeater {
+                        model: diagramModel
+
+                        Rectangle {
+                            id: itemRect
+                            property string itemId: model.itemId
+                            property string itemType: model.itemType
+                            property int taskIndex: model.taskIndex
+                            property bool taskCompleted: model.taskCompleted
+                            property bool taskCurrent: model.taskCurrent
+                            property int subDiagramProgress: model.subDiagramProgress
+                            property bool isTask: itemRect.itemType === "task" && itemRect.taskIndex >= 0
+                            property real dragStartX: 0
+                            property real dragStartY: 0
+                            property real pinchStartWidth: model.width
+                            property real pinchStartHeight: model.height
+                            property bool isEdgeDropTarget: diagramModel && diagramModel.edgeHoverTargetId === itemRect.itemId
+                            property bool hovered: itemHover.hovered
+                            property real taskCountdownRemaining: model.taskCountdownRemaining
+                            property real taskCountdownProgress: model.taskCountdownProgress
+                            property bool taskCountdownExpired: model.taskCountdownExpired
+                            property bool taskCountdownActive: model.taskCountdownActive
+                            x: model.x
+                            y: model.y
+                            width: model.width
+                            height: model.height
+                            radius: itemRect.itemType === "cloud" ? Math.min(width, height) / 2 : 12
+                            color: itemRect.isTask && itemRect.taskCompleted ? Qt.darker(model.color, 1.5) : model.color
+                            border.width: itemRect.taskCountdownExpired ? 4 : (itemRect.taskCurrent ? 4 : (isEdgeDropTarget ? 3 : 1))
+                            border.color: itemRect.taskCountdownExpired ? "#e74c3c" : (itemRect.taskCurrent ? "#ffcc00" : (isEdgeDropTarget ? "#74d9a0" : (itemDrag.active ? Qt.lighter(model.color, 1.4) : Qt.darker(model.color, 1.6))))
+                            z: itemRect.taskCurrent ? 15 : (isEdgeDropTarget ? 10 : 5)
+                            scale: isEdgeDropTarget ? 1.08 : 1.0
+                            transformOrigin: Item.Center
+
+                            // Glow effect for current task
+                            Rectangle {
+                                visible: itemRect.taskCurrent
+                                anchors.centerIn: parent
+                                width: parent.width + 12
+                                height: parent.height + 12
+                                radius: parent.radius + 6
+                                color: "transparent"
+                                border.width: 3
+                                border.color: "#ffcc00"
+                                opacity: 0.5
+                                z: -1
+                            }
+
+                            // Sub-diagram progress badge
+                            Rectangle {
+                                id: subDiagramBadge
+                                visible: itemRect.subDiagramProgress >= 0
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                anchors.rightMargin: 6
+                                anchors.bottomMargin: 6
+                                width: subDiagramText.width + 12
+                                height: 20
+                                radius: 10
+                                color: itemRect.subDiagramProgress === 100 ? "#4caf50" : "#2196f3"
+                                z: 25
+
+                                Text {
+                                    id: subDiagramText
+                                    anchors.centerIn: parent
+                                    text: itemRect.subDiagramProgress + "%"
+                                    color: "#ffffff"
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                }
+                            }
+
+                            Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
+                            Behavior on border.width { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
+                            Behavior on x { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
+                            Behavior on y { NumberAnimation { duration: 80; easing.type: Easing.OutQuad } }
+
+                            Rectangle {
+                                anchors.fill: parent
+                                color: Qt.rgba(0, 0, 0, itemDrag.active ? 0.08 : 0)
+                                radius: itemRect.radius
+                            }
+
+                            HoverHandler {
+                                id: itemHover
+                            }
+
+                            Rectangle {
+                                id: taskCheck
+                                visible: itemRect.isTask
+                                width: 20
+                                height: 20
+                                radius: 10
+                                anchors.left: parent.left
+                                anchors.top: parent.top
+                                anchors.leftMargin: 8
+                                anchors.topMargin: 8
+                                color: itemRect.taskCompleted ? "#82c3a5" : "#1a2230"
+                                border.color: itemRect.taskCompleted ? "#6fbf9a" : "#4b5b72"
+                                border.width: 2
+                                z: 20
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: itemRect.taskCompleted ? "✓" : ""
+                                    color: itemRect.taskCompleted ? "#1b2028" : "#8a93a5"
+                                    font.pixelSize: 12
+                                    font.bold: true
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        if (diagramModel)
+                                            diagramModel.setTaskCompleted(itemRect.taskIndex, !itemRect.taskCompleted)
+                                    }
+                                }
+                            }
+
+                            // "Current" button - star icon to mark as current task
+                            Rectangle {
+                                id: currentButton
+                                visible: itemRect.isTask
+                                width: 20
+                                height: 20
+                                radius: 10
+                                anchors.left: taskCheck.right
+                                anchors.top: parent.top
+                                anchors.leftMargin: 4
+                                anchors.topMargin: 8
+                                color: itemRect.taskCurrent ? "#ffcc00" : "#1a2230"
+                                border.color: itemRect.taskCurrent ? "#e6b800" : "#4b5b72"
+                                border.width: 2
+                                z: 20
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "★"
+                                    color: itemRect.taskCurrent ? "#1b2028" : "#8a93a5"
+                                    font.pixelSize: 11
+                                    font.bold: true
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    onClicked: {
+                                        if (diagramModel)
+                                            diagramModel.setCurrentTask(itemRect.taskIndex)
+                                    }
+                                }
+                            }
+
+                            // Timer button - clock icon for countdown timer
+                            Rectangle {
+                                id: timerButton
+                                visible: itemRect.isTask
+                                width: 20
+                                height: 20
+                                radius: 10
+                                anchors.left: currentButton.right
+                                anchors.top: parent.top
+                                anchors.leftMargin: 4
+                                anchors.topMargin: 8
+                                color: itemRect.taskCountdownActive ? "#3498db" : "#1a2230"
+                                border.color: itemRect.taskCountdownActive ? "#2980b9" : "#4b5b72"
+                                border.width: 2
+                                z: 20
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "⏱"
+                                    color: itemRect.taskCountdownActive ? "#ffffff" : "#8a93a5"
+                                    font.pixelSize: 10
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                    onClicked: function(mouse) {
+                                        if (itemRect.taskCountdownActive) {
+                                            // Show context menu for active timer
+                                            timerContextMenu.taskIndex = itemRect.taskIndex
+                                            timerContextMenu.popup()
+                                        } else {
+                                            // Show timer dialog for new timer
+                                            timerDialog.taskIndex = itemRect.taskIndex
+                                            timerDialog.durationValue = ""
+                                            timerDialog.open()
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Countdown progress bar at bottom of task
+                            Item {
+                                id: countdownBar
+                                visible: itemRect.isTask && itemRect.taskCountdownActive
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 8
+                                anchors.bottomMargin: 6
+                                height: 16
+                                z: 20
+
+                                // Time remaining text
+                                Text {
+                                    id: countdownText
+                                    anchors.right: parent.right
+                                    anchors.bottom: countdownBarBg.top
+                                    anchors.bottomMargin: 2
+                                    text: {
+                                        var remaining = itemRect.taskCountdownRemaining
+                                        if (remaining < 0) return ""
+                                        var mins = Math.floor(remaining / 60)
+                                        var secs = Math.floor(remaining % 60)
+                                        return mins + ":" + (secs < 10 ? "0" : "") + secs
+                                    }
+                                    color: itemRect.taskCountdownExpired ? "#e74c3c" : "#f5f6f8"
+                                    font.pixelSize: 10
+                                    font.bold: true
+                                }
+
+                                // Progress bar background
+                                Rectangle {
+                                    id: countdownBarBg
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    height: 4
+                                    radius: 2
+                                    color: "#1a2230"
+                                }
+
+                                // Progress bar fill
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.bottom: parent.bottom
+                                    height: 4
+                                    radius: 2
+                                    width: countdownBarBg.width * Math.max(0, itemRect.taskCountdownProgress)
+                                    color: {
+                                        var progress = itemRect.taskCountdownProgress
+                                        if (progress > 0.5) return "#2ecc71"  // Green
+                                        if (progress > 0.25) return "#f39c12"  // Orange
+                                        return "#e74c3c"  // Red
+                                    }
+                                }
+                            }
+
+                            Item {
+                                anchors.fill: parent
+                                visible: itemRect.itemType === "database"
+
+                                Rectangle {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    anchors.top: parent.top
+                                    anchors.topMargin: 6
+                                    width: parent.width - 12
+                                    height: parent.height * 0.25
+                                    radius: height / 2
+                                    color: Qt.lighter(model.color, 1.3)
+                                    opacity: 0.9
+                                }
+
+                                Rectangle {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    anchors.bottom: parent.bottom
+                                    anchors.bottomMargin: 6
+                                    width: parent.width - 12
+                                    height: parent.height * 0.22
+                                    radius: height / 2
+                                    color: Qt.darker(model.color, 1.2)
+                                    opacity: 0.7
+                                }
+                            }
+
+                            Item {
+                                anchors.fill: parent
+                                visible: itemRect.itemType === "server"
+
+                                Column {
+                                    anchors.fill: parent
+                                    anchors.margins: 12
+                                    spacing: 8
+
+                                    Rectangle {
+                                        height: 6
+                                        radius: 3
+                                        color: Qt.darker(model.color, 1.4)
+                                        opacity: 0.5
+                                    }
+
+                                    Row {
+                                        spacing: 8
+                                        anchors.horizontalCenter: parent.horizontalCenter
+
+                                        Rectangle {
+                                            width: 12
+                                            height: 12
+                                            radius: 6
+                                            color: "#5af58a"
+                                        }
+
+                                        Rectangle {
+                                            width: 12
+                                            height: 12
+                                            radius: 6
+                                            color: "#ffe266"
+                                        }
+
+                                        Rectangle {
+                                            width: 12
+                                            height: 12
+                                            radius: 6
+                                            color: "#f66d5a"
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        height: 6
+                                        radius: 3
+                                        color: Qt.lighter(model.color, 1.2)
+                                        opacity: 0.5
+                                    }
+                                }
+                            }
+
+                            Item {
+                                anchors.fill: parent
+                                visible: itemRect.itemType === "cloud"
+
+                                Rectangle {
+                                    width: parent.width * 0.55
+                                    height: parent.height * 0.55
+                                    radius: height / 2
+                                    anchors.centerIn: parent
+                                    color: Qt.lighter(model.color, 1.25)
+                                    opacity: 0.9
+                                }
+
+                                Rectangle {
+                                    width: parent.width * 0.45
+                                    height: parent.height * 0.45
+                                    radius: height / 2
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: parent.width * 0.08
+                                    color: Qt.lighter(model.color, 1.4)
+                                    opacity: 0.85
+                                }
+
+                                Rectangle {
+                                    width: parent.width * 0.45
+                                    height: parent.height * 0.45
+                                    radius: height / 2
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: parent.width * 0.08
+                                    color: Qt.lighter(model.color, 1.4)
+                                    opacity: 0.85
+                                }
+                            }
+
+                            Rectangle {
+                                width: 22
+                                height: 22
+                                anchors.top: parent.top
+                                anchors.right: parent.right
+                                anchors.topMargin: 8
+                                anchors.rightMargin: 8
+                                color: Qt.lighter(model.color, 1.3)
+                                border.color: Qt.darker(model.color, 1.2)
+                                rotation: 45
+                                visible: itemRect.itemType === "note"
+                                radius: 2
+                                transformOrigin: Item.Center
+                            }
+
+                            Item {
+                                anchors.fill: parent
+                                visible: itemRect.itemType === "obstacle"
+
+                                Rectangle {
+                                    id: flagPole
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 16
+                                    anchors.top: parent.top
+                                    anchors.topMargin: 10
+                                    anchors.bottom: parent.bottom
+                                    anchors.bottomMargin: 10
+                                    width: 4
+                                    radius: 2
+                                    color: Qt.darker(model.color, 1.5)
+                                }
+
+                                Rectangle {
+                                    anchors.left: flagPole.right
+                                    anchors.top: parent.top
+                                    anchors.topMargin: 12
+                                    width: parent.width * 0.55
+                                    height: parent.height * 0.45
+                                    color: Qt.lighter(model.color, 1.15)
+                                    border.color: Qt.darker(model.color, 1.2)
+                                    border.width: 1
+                                    radius: 4
+
+                                    Canvas {
+                                        anchors.fill: parent
+                                        onPaint: {
+                                            var ctx = getContext("2d")
+                                            ctx.clearRect(0, 0, width, height)
+                                            ctx.strokeStyle = Qt.darker(model.color, 1.3)
+                                            ctx.lineWidth = 1.5
+                                            ctx.beginPath()
+                                            ctx.moveTo(6, height * 0.3)
+                                            ctx.lineTo(width - 6, height * 0.3)
+                                            ctx.moveTo(6, height * 0.55)
+                                            ctx.lineTo(width - 6, height * 0.55)
+                                            ctx.moveTo(6, height * 0.8)
+                                            ctx.lineTo(width * 0.6, height * 0.8)
+                                            ctx.stroke()
+                                        }
+                                    }
+                                }
+                            }
+
+                            Item {
+                                anchors.fill: parent
+                                visible: itemRect.itemType === "wish"
+
+                                Item {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    anchors.top: parent.top
+                                    anchors.topMargin: 8
+                                    width: Math.min(parent.width, parent.height) * 0.5
+                                    height: width
+
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: width / 2
+                                        color: Qt.lighter(model.color, 1.2)
+                                        border.color: Qt.darker(model.color, 1.3)
+                                        border.width: 2
+
+                                        Rectangle {
+                                            x: parent.width * 0.28
+                                            y: parent.height * 0.32
+                                            width: parent.width * 0.12
+                                            height: parent.height * 0.12
+                                            radius: width / 2
+                                            color: "#2d3436"
+                                        }
+
+                                        Rectangle {
+                                            x: parent.width * 0.60
+                                            y: parent.height * 0.32
+                                            width: parent.width * 0.12
+                                            height: parent.height * 0.12
+                                            radius: width / 2
+                                            color: "#2d3436"
+                                        }
+
+                                        Canvas {
+                                            anchors.fill: parent
+                                            onPaint: {
+                                                var ctx = getContext("2d")
+                                                ctx.clearRect(0, 0, width, height)
+                                                ctx.strokeStyle = "#2d3436"
+                                                ctx.lineWidth = 2.5
+                                                ctx.lineCap = "round"
+                                                ctx.beginPath()
+                                                var smileY = height * 0.58
+                                                var smileRadius = width * 0.25
+                                                ctx.arc(width / 2, smileY, smileRadius, 0.15 * Math.PI, 0.85 * Math.PI, false)
+                                                ctx.stroke()
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Item {
+                                anchors.fill: parent
+                                visible: itemRect.itemType === "chatgpt"
+
+                                Rectangle {
+                                    width: 26
+                                    height: 26
+                                    radius: 13
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top
+                                    anchors.leftMargin: 8
+                                    anchors.topMargin: 8
+                                    color: Qt.lighter(model.color, 1.25)
+                                    border.color: Qt.darker(model.color, 1.4)
+                                    border.width: 1
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "GPT"
+                                        color: model.textColor
+                                        font.pixelSize: 9
+                                        font.bold: true
+                                    }
+                                }
+
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top
+                                    anchors.leftMargin: 40
+                                    anchors.topMargin: 14
+                                    width: parent.width * 0.5
+                                    height: 6
+                                    radius: 3
+                                    color: Qt.lighter(model.color, 1.35)
+                                    opacity: 0.8
+                                }
+                            }
+
+                            Item {
+                                anchors.fill: parent
+                                visible: itemRect.itemType === "freetext"
+
+                                Rectangle {
+                                    id: freeTextHeader
+                                    anchors.top: parent.top
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    height: 8
+                                    color: Qt.darker(model.color, 1.15)
+                                    radius: itemRect.radius
+                                    Rectangle {
+                                        anchors.bottom: parent.bottom
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        height: parent.radius
+                                        color: parent.color
+                                    }
+                                }
+
+                                Rectangle {
+                                    anchors.top: parent.top
+                                    anchors.left: parent.left
+                                    anchors.topMargin: 12
+                                    anchors.leftMargin: 10
+                                    width: 6
+                                    height: 6
+                                    radius: 3
+                                    color: "#e17055"
+                                }
+
+                                Rectangle {
+                                    anchors.top: parent.top
+                                    anchors.left: parent.left
+                                    anchors.topMargin: 12
+                                    anchors.leftMargin: 22
+                                    width: 6
+                                    height: 6
+                                    radius: 3
+                                    color: "#fdcb6e"
+                                }
+
+                                Rectangle {
+                                    anchors.top: parent.top
+                                    anchors.left: parent.left
+                                    anchors.topMargin: 12
+                                    anchors.leftMargin: 34
+                                    width: 6
+                                    height: 6
+                                    radius: 3
+                                    color: "#00b894"
+                                }
+
+                                Rectangle {
+                                    anchors.bottom: parent.bottom
+                                    anchors.right: parent.right
+                                    anchors.bottomMargin: 6
+                                    anchors.rightMargin: 6
+                                    width: 16
+                                    height: 16
+                                    color: "transparent"
+                                    Canvas {
+                                        anchors.fill: parent
+                                        onPaint: {
+                                            var ctx = getContext("2d")
+                                            ctx.clearRect(0, 0, width, height)
+                                            ctx.strokeStyle = Qt.darker(model.color, 1.25)
+                                            ctx.lineWidth = 1.5
+                                            ctx.beginPath()
+                                            ctx.moveTo(0, height)
+                                            ctx.lineTo(width, 0)
+                                            ctx.moveTo(width * 0.4, height)
+                                            ctx.lineTo(width, height * 0.4)
+                                            ctx.stroke()
+                                        }
+                                    }
+                                }
+                            }
+
+                            Item {
+                                anchors.fill: parent
+                                visible: itemRect.itemType === "image" && model.imageData.length > 0
+
+                                Image {
+                                    id: pastedImage
+                                    anchors.fill: parent
+                                    anchors.margins: 4
+                                    source: model.imageData.length > 0 ? "data:image/png;base64," + model.imageData : ""
+                                    fillMode: Image.PreserveAspectFit
+                                    smooth: true
+                                    mipmap: true
+                                }
+
+                                // Resize handle for images
+                                Rectangle {
+                                    id: imageResizeHandle
+                                    width: 16
+                                    height: 16
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    anchors.rightMargin: 2
+                                    anchors.bottomMargin: 2
+                                    color: "#3a4555"
+                                    border.color: "#5a6575"
+                                    radius: 3
+                                    visible: itemRect.itemType === "image"
+
+                                    Canvas {
+                                        anchors.fill: parent
+                                        onPaint: {
+                                            var ctx = getContext("2d")
+                                            ctx.clearRect(0, 0, width, height)
+                                            ctx.strokeStyle = "#8a93a5"
+                                            ctx.lineWidth = 1.5
+                                            ctx.beginPath()
+                                            ctx.moveTo(4, height - 4)
+                                            ctx.lineTo(width - 4, 4)
+                                            ctx.moveTo(8, height - 4)
+                                            ctx.lineTo(width - 4, 8)
+                                            ctx.stroke()
+                                        }
+                                    }
+
+                                    property real resizeStartWidth: 0
+                                    property real resizeStartHeight: 0
+                                    property point resizeStartPos: Qt.point(0, 0)
+
+                                    DragHandler {
+                                        id: imageResizeDrag
+                                        target: null
+                                        acceptedButtons: Qt.LeftButton
+                                        cursorShape: Qt.SizeFDiagCursor
+                                        onActiveChanged: {
+                                            if (active) {
+                                                imageResizeHandle.resizeStartWidth = model.width
+                                                imageResizeHandle.resizeStartHeight = model.height
+                                            }
+                                        }
+                                        onTranslationChanged: {
+                                            if (!active || !diagramModel)
+                                                return
+                                            var deltaX = translation.x / root.zoomLevel
+                                            var deltaY = translation.y / root.zoomLevel
+                                            var newWidth = Math.max(60, imageResizeHandle.resizeStartWidth + deltaX)
+                                            var newHeight = Math.max(40, imageResizeHandle.resizeStartHeight + deltaY)
+                                            if (root.snapToGrid) {
+                                                newWidth = Math.max(root.gridSpacing, Math.round(newWidth / root.gridSpacing) * root.gridSpacing)
+                                                newHeight = Math.max(root.gridSpacing, Math.round(newHeight / root.gridSpacing) * root.gridSpacing)
+                                            }
+                                            diagramModel.resizeItem(itemRect.itemId, newWidth, newHeight)
+                                            edgeCanvas.requestPaint()
+                                        }
+                                    }
+                                }
+                            }
+
+                            Item {
+                                id: resizeHandles
+                                anchors.fill: parent
+                                visible: itemRect.itemType !== "image" && (itemRect.hovered || itemDrag.active)
+                                z: 30
+                                property real startX: 0
+                                property real startY: 0
+                                property real startWidth: 0
+                                property real startHeight: 0
+                                property real minWidth: 40
+                                property real minHeight: 30
+
+                                function beginResize() {
+                                    startX = model.x
+                                    startY = model.y
+                                    startWidth = model.width
+                                    startHeight = model.height
+                                }
+
+                                function applyResize(deltaX, deltaY, handle) {
+                                    if (!diagramModel)
+                                        return
+                                    var dx = deltaX / root.zoomLevel
+                                    var dy = deltaY / root.zoomLevel
+                                    var left = startX
+                                    var top = startY
+                                    var right = startX + startWidth
+                                    var bottom = startY + startHeight
+
+                                    var useLeft = handle.indexOf("Left") >= 0
+                                    var useTop = handle.indexOf("Top") >= 0
+
+                                    if (useLeft) {
+                                        left = left + dx
+                                    } else {
+                                        right = right + dx
+                                    }
+
+                                    if (useTop) {
+                                        top = top + dy
+                                    } else {
+                                        bottom = bottom + dy
+                                    }
+
+                                    var newWidth = right - left
+                                    var newHeight = bottom - top
+
+                                    if (newWidth < minWidth) {
+                                        if (useLeft) {
+                                            left = right - minWidth
+                                        } else {
+                                            right = left + minWidth
+                                        }
+                                    }
+
+                                    if (newHeight < minHeight) {
+                                        if (useTop) {
+                                            top = bottom - minHeight
+                                        } else {
+                                            bottom = top + minHeight
+                                        }
+                                    }
+
+                                    newWidth = right - left
+                                    newHeight = bottom - top
+
+                                    if (root.snapToGrid) {
+                                        var snappedWidth = Math.max(minWidth, Math.round(newWidth / root.gridSpacing) * root.gridSpacing)
+                                        var snappedHeight = Math.max(minHeight, Math.round(newHeight / root.gridSpacing) * root.gridSpacing)
+                                        if (useLeft) {
+                                            left = right - snappedWidth
+                                        } else {
+                                            right = left + snappedWidth
+                                        }
+                                        if (useTop) {
+                                            top = bottom - snappedHeight
+                                        } else {
+                                            bottom = top + snappedHeight
+                                        }
+                                    }
+
+                                    diagramModel.moveItem(itemRect.itemId, left, top)
+                                    diagramModel.resizeItem(itemRect.itemId, right - left, bottom - top)
+                                    edgeCanvas.requestPaint()
+                                }
+
+                                Rectangle {
+                                    id: resizeTopLeft
+                                    width: 12
+                                    height: 12
+                                    anchors.left: parent.left
+                                    anchors.top: parent.top
+                                    anchors.leftMargin: -2
+                                    anchors.topMargin: -2
+                                    color: "#2b3646"
+                                    border.color: "#5a6575"
+                                    radius: 3
+
+                                    DragHandler {
+                                        target: null
+                                        acceptedButtons: Qt.LeftButton
+                                        cursorShape: Qt.SizeFDiagCursor
+                                        onActiveChanged: if (active) resizeHandles.beginResize()
+                                        onTranslationChanged: if (active) resizeHandles.applyResize(translation.x, translation.y, "TopLeft")
+                                    }
+                                }
+
+                                Rectangle {
+                                    id: resizeTopRight
+                                    width: 12
+                                    height: 12
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    anchors.rightMargin: -2
+                                    anchors.topMargin: -2
+                                    color: "#2b3646"
+                                    border.color: "#5a6575"
+                                    radius: 3
+
+                                    DragHandler {
+                                        target: null
+                                        acceptedButtons: Qt.LeftButton
+                                        cursorShape: Qt.SizeBDiagCursor
+                                        onActiveChanged: if (active) resizeHandles.beginResize()
+                                        onTranslationChanged: if (active) resizeHandles.applyResize(translation.x, translation.y, "TopRight")
+                                    }
+                                }
+
+                                Rectangle {
+                                    id: resizeBottomLeft
+                                    width: 12
+                                    height: 12
+                                    anchors.left: parent.left
+                                    anchors.bottom: parent.bottom
+                                    anchors.leftMargin: -2
+                                    anchors.bottomMargin: -2
+                                    color: "#2b3646"
+                                    border.color: "#5a6575"
+                                    radius: 3
+
+                                    DragHandler {
+                                        target: null
+                                        acceptedButtons: Qt.LeftButton
+                                        cursorShape: Qt.SizeBDiagCursor
+                                        onActiveChanged: if (active) resizeHandles.beginResize()
+                                        onTranslationChanged: if (active) resizeHandles.applyResize(translation.x, translation.y, "BottomLeft")
+                                    }
+                                }
+
+                                Rectangle {
+                                    id: resizeBottomRight
+                                    width: 12
+                                    height: 12
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    anchors.rightMargin: -2
+                                    anchors.bottomMargin: -2
+                                    color: "#2b3646"
+                                    border.color: "#5a6575"
+                                    radius: 3
+
+                                    DragHandler {
+                                        target: null
+                                        acceptedButtons: Qt.LeftButton
+                                        cursorShape: Qt.SizeFDiagCursor
+                                        onActiveChanged: if (active) resizeHandles.beginResize()
+                                        onTranslationChanged: if (active) resizeHandles.applyResize(translation.x, translation.y, "BottomRight")
+                                    }
+                                }
+                            }
+
+                            Text {
+                                id: itemLabel
+                                visible: itemRect.itemType !== "freetext" && itemRect.itemType !== "obstacle" && itemRect.itemType !== "wish" && itemRect.itemType !== "image"
+                                anchors.centerIn: parent
+                                width: parent.width - 36
+                                height: parent.height - 24
+                                text: model.text
+                                color: itemRect.isTask && itemRect.taskCompleted ? "#c9d7ce" : model.textColor
+                                wrapMode: Text.WordWrap
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                                textFormat: Text.PlainText
+                                font.pixelSize: 14
+                                font.bold: itemRect.itemType === "task"
+                                font.strikeout: itemRect.isTask && itemRect.taskCompleted
+                                maximumLineCount: Math.max(1, Math.floor(height / (font.pixelSize * 1.3)))
+                                elide: Text.ElideRight
+                                clip: true
+
+                                ToolTip.visible: labelHover.containsMouse
+                                ToolTip.delay: 400
+                                ToolTip.timeout: 2000
+                                ToolTip.text: model.text + (itemRect.itemType === "note" && model.noteMarkdown ? "\n\n" + model.noteMarkdown : "")
+
+                                MouseArea {
+                                    id: labelHover
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.NoButton
+                                }
+                            }
+
+                            Text {
+                                visible: itemRect.itemType === "obstacle"
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                anchors.rightMargin: 8
+                                anchors.bottomMargin: 8
+                                anchors.left: parent.left
+                                anchors.leftMargin: 28
+                                text: model.text
+                                color: model.textColor
+                                wrapMode: Text.WordWrap
+                                horizontalAlignment: Text.AlignLeft
+                                verticalAlignment: Text.AlignBottom
+                                textFormat: Text.PlainText
+                                font.pixelSize: 12
+                                font.bold: true
+                                height: parent.height - (anchors.bottomMargin + 12)
+                                maximumLineCount: Math.max(1, Math.floor(height / (font.pixelSize * 1.3)))
+                                elide: Text.ElideRight
+                                clip: true
+
+                                ToolTip.visible: obstacleHover.containsMouse
+                                ToolTip.delay: 400
+                                ToolTip.timeout: 2000
+                                ToolTip.text: model.text + (model.noteMarkdown ? "\n\n" + model.noteMarkdown : "")
+
+                                MouseArea {
+                                    id: obstacleHover
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.NoButton
+                                }
+                            }
+
+                            Text {
+                                visible: itemRect.itemType === "wish"
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 8
+                                anchors.bottomMargin: 8
+                                text: model.text
+                                color: model.textColor
+                                wrapMode: Text.WordWrap
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignBottom
+                                textFormat: Text.PlainText
+                                font.pixelSize: 12
+                                font.bold: true
+                                height: parent.height - (anchors.bottomMargin + 12)
+                                maximumLineCount: Math.max(1, Math.floor(height / (font.pixelSize * 1.3)))
+                                elide: Text.ElideRight
+                                clip: true
+
+                                ToolTip.visible: wishHover.containsMouse
+                                ToolTip.delay: 400
+                                ToolTip.timeout: 2000
+                                ToolTip.text: model.text + (model.noteMarkdown ? "\n\n" + model.noteMarkdown : "")
+
+                                MouseArea {
+                                    id: wishHover
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.NoButton
+                                }
+                            }
+
+                            Text {
+                                visible: itemRect.itemType === "freetext"
+                                anchors.fill: parent
+                                anchors.topMargin: 24
+                                anchors.leftMargin: 12
+                                anchors.rightMargin: 12
+                                anchors.bottomMargin: 8
+                                text: model.text
+                                color: model.textColor
+                                wrapMode: Text.Wrap
+                                horizontalAlignment: Text.AlignLeft
+                                verticalAlignment: Text.AlignTop
+                                textFormat: Text.PlainText
+                                font.pixelSize: 13
+                                maximumLineCount: Math.max(1, Math.floor(height / (font.pixelSize * 1.35)))
+                                elide: Text.ElideRight
+                                clip: true
+
+                                ToolTip.visible: freeTextHover.containsMouse
+                                ToolTip.delay: 400
+                                ToolTip.timeout: 2000
+                                ToolTip.text: model.text
+
+                                MouseArea {
+                                    id: freeTextHover
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.NoButton
+                                }
+                            }
+
+                            DragHandler {
+                                id: itemDrag
+                                target: null
+                                acceptedButtons: Qt.LeftButton
+                                cursorShape: Qt.ClosedHandCursor
+                                onActiveChanged: {
+                                    if (!diagramModel)
+                                        return
+                                    if (active) {
+                                        itemRect.dragStartX = model.x
+                                        itemRect.dragStartY = model.y
+                                    }
+                                }
+                                onTranslationChanged: {
+                                    if (!diagramModel || !active)
+                                        return
+                                    var newX = itemRect.dragStartX + translation.x / root.zoomLevel
+                                    var newY = itemRect.dragStartY + translation.y / root.zoomLevel
+                                    newX = root.snapValue(newX)
+                                    newY = root.snapValue(newY)
+                                    diagramModel.moveItem(itemRect.itemId, newX, newY)
+                                    edgeCanvas.requestPaint()
+                                }
+                            }
+
+                            PinchHandler {
+                                id: itemPinch
+                                target: null
+                                onActiveChanged: {
+                                    if (active) {
+                                        itemRect.pinchStartWidth = model.width
+                                        itemRect.pinchStartHeight = model.height
+                                    }
+                                }
+                                onScaleChanged: {
+                                    if (!active || !diagramModel)
+                                        return
+                                    var newWidth = Math.max(60, itemRect.pinchStartWidth * scale)
+                                    var newHeight = Math.max(40, itemRect.pinchStartHeight * scale)
+                                    if (root.snapToGrid) {
+                                        newWidth = Math.max(root.gridSpacing, Math.round(newWidth / root.gridSpacing) * root.gridSpacing)
+                                        newHeight = Math.max(root.gridSpacing, Math.round(newHeight / root.gridSpacing) * root.gridSpacing)
+                                    }
+                                    diagramModel.resizeItem(itemRect.itemId, newWidth, newHeight)
+                                    edgeCanvas.requestPaint()
+                                }
+                            }
+
+                            TapHandler {
+                                acceptedButtons: Qt.LeftButton
+                                gesturePolicy: TapHandler.DragThreshold
+                                onTapped: {
+                                    root.selectedItemId = itemRect.itemId
+                                    if (edgeCanvas)
+                                        edgeCanvas.selectedEdgeId = ""
+                                }
+                                onDoubleTapped: function(eventPoint) {
+                                    // Check if double-click is on the edge handle (26x26 button, 6px from top-right)
+                                    var localPos = eventPoint.position
+                                    var handleLeft = itemRect.width - 6 - 26
+                                    var handleRight = itemRect.width - 6
+                                    var handleTop = 6
+                                    var handleBottom = 6 + 26
+                                    var onEdgeHandle = (localPos.x >= handleLeft) && (localPos.x <= handleRight) &&
+                                                       (localPos.y >= handleTop) && (localPos.y <= handleBottom)
+
+                                    if (onEdgeHandle) {
+                                        // Double-click on edge handle - create connected item of same type
+                                        var newX = model.x + model.width + 40
+                                        var newY = model.y
+                                        edgeDropTaskDialog.sourceId = itemRect.itemId
+                                        edgeDropTaskDialog.sourceType = itemRect.itemType
+                                        edgeDropTaskDialog.dropX = newX
+                                        edgeDropTaskDialog.dropY = newY
+                                        edgeDropTaskDialog.open()
+                                    } else if (itemRect.itemType === "chatgpt") {
+                                        diagramModel.openChatGpt(itemRect.itemId)
+                                    } else if (itemRect.itemType === "note" || itemRect.itemType === "wish" || itemRect.itemType === "obstacle") {
+                                        if (markdownNoteManager) {
+                                            markdownNoteManager.openNote(itemRect.itemId)
+                                        }
+                                    } else if (itemRect.itemType === "task" && itemRect.taskIndex < 0) {
+                                        // Task not yet linked to task list - create new task
+                                        newTaskDialog.openWithItem(itemRect.itemId, model.text)
+                                    } else if (itemRect.itemType === "task" && itemRect.taskIndex >= 0) {
+                                        // Task linked to task list - rename it (syncs both ways)
+                                        taskRenameDialog.openWithItem(itemRect.itemId, model.text)
+                                    } else if (itemRect.itemType === "freetext") {
+                                        // Free text uses dedicated dialog with TextArea
+                                        root.openFreeTextDialog(Qt.point(model.x, model.y), itemRect.itemId, model.text)
+                                    } else if (itemRect.itemType !== "task") {
+                                        root.openPresetDialog(itemRect.itemType, Qt.point(model.x, model.y), itemRect.itemId, model.text)
+                                    }
+                                }
+                            }
+
+                            TapHandler {
+                                acceptedButtons: Qt.RightButton
+                                onTapped: {
+                                    root.selectedItemId = itemRect.itemId
+                                    diagramLayer.contextMenuItemId = itemRect.itemId
+                                    itemContextMenu.popup()
+                                }
+                            }
+
+                            Rectangle {
+                                id: edgeHandle
+                                width: 26
+                                height: 26
+                                radius: 4
+                                anchors.top: parent.top
+                                anchors.topMargin: 6
+                                anchors.right: parent.right
+                                anchors.rightMargin: 6
+                                color: edgeDrag.active ? "#4c627f" : "#2a3444"
+                                border.color: edgeDrag.active ? "#74a0d9" : "#3b485c"
+                                property point dragPoint: Qt.point(model.x, model.y)
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "→"
+                                    color: "#d2d9e7"
+                                    font.pixelSize: 16
+                                }
+
+                                DragHandler {
+                                    id: edgeDrag
+                                    target: null
+                                    acceptedButtons: Qt.LeftButton
+                                    cursorShape: Qt.CrossCursor
+                                    onActiveChanged: {
+                                        if (!diagramModel)
+                                            return
+                                        if (active) {
+                                            var startPos = edgeHandle.mapToItem(diagramLayer, edgeHandle.width / 2, edgeHandle.height / 2)
+                                            edgeHandle.dragPoint = Qt.point(startPos.x, startPos.y)
+                                            diagramModel.startEdgeDrawing(itemRect.itemId)
+                                            diagramModel.updateEdgeDragPosition(edgeHandle.dragPoint.x, edgeHandle.dragPoint.y)
+                                            edgeCanvas.requestPaint()
+                                        } else {
+                                            var dropId = diagramModel.edgeHoverTargetId
+                                            if (dropId && dropId !== itemRect.itemId) {
+                                                diagramModel.finishEdgeDrawing(dropId)
+                                            } else {
+                                                // Dropped into empty space - show suggestion menu
+                                                root.showEdgeDropSuggestions(
+                                                    itemRect.itemId,
+                                                    edgeHandle.dragPoint.x,
+                                                    edgeHandle.dragPoint.y
+                                                )
+                                                diagramModel.cancelEdgeDrawing()
+                                            }
+                                            edgeCanvas.requestPaint()
+                                        }
+                                    }
+                                    onCentroidChanged: {
+                                        if (!diagramModel || !active)
+                                            return
+                                        var pos = itemRect.mapToItem(diagramLayer, centroid.position.x, centroid.position.y)
+                                        edgeHandle.dragPoint = Qt.point(pos.x, pos.y)
+                                        diagramModel.updateEdgeDragPosition(edgeHandle.dragPoint.x, edgeHandle.dragPoint.y)
+                                        edgeCanvas.requestPaint()
+                                    }
+                                }
+
+                            }
+
+                            Rectangle {
+                                id: deleteButton
+                                width: 24
+                                height: 24
+                                radius: 4
+                                anchors.right: parent.right
+                                anchors.rightMargin: 6
+                                anchors.bottom: parent.bottom
+                                anchors.bottomMargin: 6
+                                color: "#3a1010"
+                                border.color: "#612020"
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "×"
+                                    color: "#ff7b7b"
+                                    font.pixelSize: 16
+                                }
+
+                                TapHandler {
+                                    acceptedButtons: Qt.LeftButton
+                                    onTapped: {
+                                        if (diagramModel) {
+                                            diagramModel.removeItem(itemRect.itemId)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Keyboard shortcuts hint bar
+        Rectangle {
+            Layout.fillWidth: true
+            height: 28
+            color: "#0d1117"
+            border.color: "#21262d"
+            radius: 4
+
+            Row {
+                anchors.centerIn: parent
+                spacing: 24
+
+                Text {
+                    text: "Ctrl+Enter  New Task"
+                    color: "#6e7681"
+                    font.pixelSize: 11
+                }
+
+                Text {
+                    text: "Ctrl+V  Paste"
+                    color: "#6e7681"
+                    font.pixelSize: 11
+                }
+
+                Text {
+                    text: "Ctrl+S  Save"
+                    color: "#6e7681"
+                    font.pixelSize: 11
+                }
+
+                Text {
+                    text: "F2  Rename"
+                    color: "#6e7681"
+                    font.pixelSize: 11
+                }
+
+                Text {
+                    text: "Ctrl+Scroll  Zoom"
+                    color: "#6e7681"
+                    font.pixelSize: 11
+                }
+            }
+        }
+    }
+
+    // Save notification toast
+    Rectangle {
+        id: saveNotification
+        property alias text: saveNotificationText.text
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 40
+        width: saveNotificationText.width + 32
+        height: 40
+        radius: 20
+        color: "#2d7a4d"
+        opacity: 0
+        z: 1000
+
+        Text {
+            id: saveNotificationText
+            anchors.centerIn: parent
+            text: ""
+            color: "#ffffff"
+            font.pixelSize: 14
+            font.bold: true
+        }
+
+        Behavior on opacity {
+            NumberAnimation { duration: 200 }
+        }
+    }
+
+    Timer {
+        id: saveNotificationTimer
+        interval: 2000
+        onTriggered: saveNotification.opacity = 0
+    }
+
+    Connections {
+        target: projectManager
+        enabled: projectManager !== null
+        function onSaveCompleted(filePath) {
+            root.showSaveNotification("Project saved")
+        }
+        function onLoadCompleted(filePath) {
+            root.updateBoardBounds()
+            Qt.callLater(root.scrollToContent)
+        }
+        function onTabSwitched() {
+            root.updateBoardBounds()
+            Qt.callLater(root.scrollToContent)
+        }
+    }
+
+    Component.onCompleted: { updateBoardBounds(); Qt.callLater(resetView) }
+}
+"""
