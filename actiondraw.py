@@ -2038,7 +2038,7 @@ ApplicationWindow {
             MenuSeparator {}
 
             MenuItem {
-                text: "Save"
+                text: "Save\t\t\tCtrl+S"
                 enabled: projectManager !== null
                 onTriggered: root.performSave()
             }
@@ -2098,13 +2098,13 @@ ApplicationWindow {
             title: "Edit"
 
             MenuItem {
-                text: "Copy"
+                text: "Copy\t\t\tCtrl+C"
                 enabled: diagramModel !== null && (root.selectedItemId.length > 0 || (edgeCanvas && edgeCanvas.selectedEdgeId.length > 0))
                 onTriggered: root.copySelectionToClipboard()
             }
 
             MenuItem {
-                text: "Paste"
+                text: "Paste\t\t\tCtrl+V"
                 enabled: diagramModel !== null && (diagramModel.hasClipboardDiagram() || diagramModel.hasClipboardImage())
                 onTriggered: root.pasteFromClipboard()
             }
@@ -2203,9 +2203,9 @@ ApplicationWindow {
             }
 
             MenuItem {
-                text: "New Task..."
+                text: "New Task...\t\tCtrl+Enter"
                 enabled: diagramModel !== null
-                onTriggered: root.addQuickTaskAtCenter()
+                onTriggered: root.addTaskOrConnectedTask()
             }
         }
 
@@ -2394,6 +2394,33 @@ ApplicationWindow {
         sequence: "F2"
         enabled: diagramModel !== null
         onActivated: root.renameSelectedItem()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Return"
+        enabled: diagramModel !== null
+        onActivated: root.addTaskOrConnectedTask()
+    }
+
+    function addTaskOrConnectedTask() {
+        if (!diagramModel)
+            return
+        if (root.selectedItemId && root.selectedItemId.length > 0) {
+            // Add connected task from selected item
+            var item = diagramModel.getItemSnapshot(root.selectedItemId)
+            if (item && (item.x || item.x === 0)) {
+                var dropX = item.x + (item.width || 100) + 50
+                var dropY = item.y
+                edgeDropTaskDialog.sourceId = root.selectedItemId
+                edgeDropTaskDialog.sourceType = "task"
+                edgeDropTaskDialog.dropX = dropX
+                edgeDropTaskDialog.dropY = dropY
+                edgeDropTaskDialog.open()
+            }
+        } else {
+            // No selection - add new task at center
+            addQuickTaskAtCenter()
+        }
     }
 
     function showEdgeDropSuggestions(sourceId, dropX, dropY) {
@@ -5777,6 +5804,50 @@ ApplicationWindow {
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // Keyboard shortcuts hint bar
+        Rectangle {
+            Layout.fillWidth: true
+            height: 28
+            color: "#0d1117"
+            border.color: "#21262d"
+            radius: 4
+
+            Row {
+                anchors.centerIn: parent
+                spacing: 24
+
+                Text {
+                    text: "Ctrl+Enter  New Task"
+                    color: "#6e7681"
+                    font.pixelSize: 11
+                }
+
+                Text {
+                    text: "Ctrl+V  Paste"
+                    color: "#6e7681"
+                    font.pixelSize: 11
+                }
+
+                Text {
+                    text: "Ctrl+S  Save"
+                    color: "#6e7681"
+                    font.pixelSize: 11
+                }
+
+                Text {
+                    text: "F2  Rename"
+                    color: "#6e7681"
+                    font.pixelSize: 11
+                }
+
+                Text {
+                    text: "Ctrl+Scroll  Zoom"
+                    color: "#6e7681"
+                    font.pixelSize: 11
                 }
             }
         }
