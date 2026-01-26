@@ -45,4 +45,5 @@ Issues = "https://github.com/oyvinrog/progress/issues"
 actiondraw = "actiondraw:main"
 
 [tool.setuptools]
-py-modules = ["actiondraw", "task_model", "markdown_note_editor"]
+packages = ["actiondraw"]
+py-modules = ["task_model", "markdown_note_editor"]
