@@ -753,6 +753,21 @@ class DiagramModel(
         """Return the currently focused task index, or -1 if none."""
         return self._current_task_index
 
+    @Slot(result="QVariant")
+    def getCurrentTaskPosition(self) -> Optional[Dict[str, float]]:
+        """Return the position of the current task item, or None if no current task."""
+        if self._current_task_index < 0:
+            return None
+        for item in self._items:
+            if item.task_index == self._current_task_index:
+                return {
+                    "x": item.x,
+                    "y": item.y,
+                    "width": item.width,
+                    "height": item.height,
+                }
+        return None
+
     # --- Utilities ----------------------------------------------------------
     def getItem(self, item_id: str) -> Optional[DiagramItem]:
         for item in self._items:

@@ -240,7 +240,9 @@ def main():
     print("=" * 50)
     
     files_to_check = [
-        'actiondraw.py',
+        'actiondraw/__init__.py',
+        'actiondraw/model.py',
+        'actiondraw/qml.py',
         'task_model.py',
         'test_actiondraw.py',
     ]
