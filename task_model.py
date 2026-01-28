@@ -90,6 +90,13 @@ class TaskModel(QAbstractListModel):
         """Expose the current number of tasks to QML."""
         return len(self._tasks)
 
+    @Slot(int, result=str)
+    def getTaskTitle(self, index: int) -> str:
+        """Get the title of a task by index."""
+        if 0 <= index < len(self._tasks):
+            return self._tasks[index].title
+        return ""
+
     def data(self, index: QModelIndex, role: int = Qt.DisplayRole):  # type: ignore[override]
         if not index.isValid() or not (0 <= index.row() < len(self._tasks)):
             return None
@@ -165,6 +172,14 @@ class TaskModel(QAbstractListModel):
             return 0.0
         completed = sum(1 for t in self._tasks if t.completed)
         return (completed / len(self._tasks)) * 100.0
+
+    @Property(str, notify=totalEstimateChanged)
+    def currentActiveTaskTitle(self) -> str:
+        """Get the title of the first incomplete task (currently being worked on)."""
+        for task in self._tasks:
+            if not task.completed:
+                return task.title
+        return ""
 
     @Property(str, notify=totalEstimateChanged)
     def estimatedCompletionTimeOfDay(self) -> str:
@@ -726,6 +741,7 @@ class TabModel(QAbstractListModel):
     NameRole = Qt.UserRole + 1
     IndexRole = Qt.UserRole + 2
     CompletionRole = Qt.UserRole + 3
+    ActiveTaskTitleRole = Qt.UserRole + 4
 
     tabsChanged = Signal()
     currentTabChanged = Signal()
@@ -750,6 +766,8 @@ class TabModel(QAbstractListModel):
             return index.row()
         if role == self.CompletionRole:
             return self._calculateTabCompletion(tab)
+        if role == self.ActiveTaskTitleRole:
+            return self._getActiveTaskTitle(tab)
         return None
 
     def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
@@ -757,6 +775,7 @@ class TabModel(QAbstractListModel):
             self.NameRole: b"name",
             self.IndexRole: b"tabIndex",
             self.CompletionRole: b"completionPercent",
+            self.ActiveTaskTitleRole: b"activeTaskTitle",
         }
 
     @Property(int, notify=currentTabIndexChanged)
@@ -779,6 +798,18 @@ class TabModel(QAbstractListModel):
             return 0.0
         completed = sum(1 for task in tasks if task.get("completed"))
         return (completed / len(tasks)) * 100.0
+
+    def _getActiveTaskTitle(self, tab: Tab) -> str:
+        """Get the title of the active (current) task for a tab."""
+        if not tab.diagram or not tab.tasks:
+            return ""
+        current_task_index = tab.diagram.get("current_task_index", -1)
+        if current_task_index < 0:
+            return ""
+        tasks = tab.tasks.get("tasks", [])
+        if current_task_index < len(tasks):
+            return tasks[current_task_index].get("title", "")
+        return ""
 
     @Slot(str)
     def addTab(self, name: str = "") -> None:
@@ -1239,6 +1270,24 @@ class ProjectManager(QObject):
         self._tab_model.setCurrentTab(index)
 
         # Load new tab data into models
+        tab_data = self._tab_model.getCurrentTabData()
+        self._task_model.from_dict(tab_data.tasks)
+        self._diagram_model.from_dict(tab_data.diagram)
+        if self._current_file_path:
+            self._diagram_model.setProjectPath(self._current_file_path)
+
+        self.tabSwitched.emit()
+
+    @Slot()
+    def reloadCurrentTab(self) -> None:
+        """Reload the current tab's data without saving first.
+
+        Use this after tab deletion to load the new current tab's data
+        without overwriting it with stale data from the deleted tab.
+        """
+        if self._tab_model is None:
+            return
+
         tab_data = self._tab_model.getCurrentTabData()
         self._task_model.from_dict(tab_data.tasks)
         self._diagram_model.from_dict(tab_data.diagram)

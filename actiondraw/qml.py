@@ -1592,270 +1592,261 @@ ApplicationWindow {
         }
     }
 
-    ColumnLayout {
+    RowLayout {
         anchors.fill: parent
         anchors.margins: 16
         spacing: 12
 
-        // Progress measurement tiles
-        RowLayout {
-            spacing: 12
-            Layout.alignment: Qt.AlignHCenter
-            visible: taskModel !== null
-
-            Rectangle {
-                width: 120
-                height: 54
-                radius: 8
-                color: "#1b2028"
-                border.color: "#2e3744"
-
-                ColumnLayout {
-                    anchors.centerIn: parent
-                    spacing: 2
-
-                    Label {
-                        property real percentage: taskModel ? taskModel.percentageComplete : 0
-                        text: percentage.toFixed(0) + "%"
-                        font.pixelSize: 18
-                        font.bold: true
-                        color: "#4a9eff"
-                        Layout.alignment: Qt.AlignHCenter
-                    }
-
-                    Label {
-                        text: "Complete"
-                        font.pixelSize: 10
-                        color: "#8a93a5"
-                        Layout.alignment: Qt.AlignHCenter
-                    }
-                }
-            }
-
-            Rectangle {
-                width: 120
-                height: 54
-                radius: 8
-                color: "#1b2028"
-                border.color: "#2e3744"
-
-                ColumnLayout {
-                    anchors.centerIn: parent
-                    spacing: 2
-
-                    Label {
-                        property real totalTime: taskModel ? taskModel.totalEstimatedTime : 0
-                        text: formatTime(totalTime)
-                        font.pixelSize: 18
-                        font.bold: true
-                        color: "#ffa94d"
-                        Layout.alignment: Qt.AlignHCenter
-                    }
-
-                    Label {
-                        text: "Time Left"
-                        font.pixelSize: 10
-                        color: "#8a93a5"
-                        Layout.alignment: Qt.AlignHCenter
-                    }
-                }
-            }
-
-            Rectangle {
-                width: 120
-                height: 54
-                radius: 8
-                color: "#1b2028"
-                border.color: "#2e3744"
-
-                ColumnLayout {
-                    anchors.centerIn: parent
-                    spacing: 2
-
-                    Label {
-                        property real avgTime: taskModel ? taskModel.averageTaskTime : 0
-                        text: formatTime(avgTime)
-                        font.pixelSize: 18
-                        font.bold: true
-                        color: "#9aa6b8"
-                        Layout.alignment: Qt.AlignHCenter
-                    }
-
-                    Label {
-                        text: "Avg Time"
-                        font.pixelSize: 10
-                        color: "#8a93a5"
-                        Layout.alignment: Qt.AlignHCenter
-                    }
-                }
-            }
-
-            Rectangle {
-                width: 120
-                height: 54
-                radius: 8
-                color: "#1b2028"
-                border.color: "#2e3744"
-
-                ColumnLayout {
-                    anchors.centerIn: parent
-                    spacing: 2
-
-                    Label {
-                        property string completionTime: taskModel ? taskModel.estimatedCompletionTimeOfDay : ""
-                        text: completionTime !== "" ? completionTime : "N/A"
-                        font.pixelSize: 18
-                        font.bold: true
-                        color: "#82c3a5"
-                        Layout.alignment: Qt.AlignHCenter
-                    }
-
-                    Label {
-                        text: "Done By"
-                        font.pixelSize: 10
-                        color: "#8a93a5"
-                        Layout.alignment: Qt.AlignHCenter
-                    }
-                }
-            }
-        }
-
-        // Tab Bar for multiple diagrams
-        RowLayout {
-            id: tabBarRow
-            Layout.fillWidth: true
-            spacing: 4
+        // Left sidebar - vertical tab panel
+        Rectangle {
+            Layout.fillHeight: true
+            Layout.preferredWidth: 220
+            radius: 8
+            color: "#1b2028"
+            border.color: "#2e3744"
             visible: tabModel !== null
 
-            Flickable {
-                id: tabFlickable
-                Layout.fillWidth: true
-                Layout.maximumWidth: parent.width - 36  // Leave space for add button
-                height: 28
-                contentWidth: tabRowContent.width
-                clip: true
-                boundsBehavior: Flickable.StopAtBounds
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 8
+                spacing: 4
 
-                Row {
-                    id: tabRowContent
-                    spacing: 2
+                Flickable {
+                    id: tabFlickable
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    contentHeight: tabColumnContent.height
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
 
-                    Repeater {
-                        model: tabModel
+                    Column {
+                        id: tabColumnContent
+                        width: tabFlickable.width
+                        spacing: 2
 
-                        delegate: Rectangle {
-                            id: tabButton
-                            property bool isActive: tabModel ? index === tabModel.currentTabIndex : false
-                            width: Math.min(Math.max(tabName.implicitWidth + tabPercent.implicitWidth + 24, 48), 180)
-                            height: 28
-                            radius: 5
-                            color: isActive ? "#3b485c" : (tabMouseArea.containsMouse ? "#2a3444" : "#1b2028")
-                            border.color: isActive ? "#4a9eff" : "#2e3744"
-                            border.width: 1
+                        Repeater {
+                            model: tabModel
 
-                            RowLayout {
-                                id: tabLabelRow
-                                anchors.fill: parent
-                                anchors.margins: 6
-                                spacing: 6
+                            delegate: Rectangle {
+                                id: tabButton
+                                property bool isActive: tabModel ? index === tabModel.currentTabIndex : false
+                                property string activeTaskTitle: model.activeTaskTitle || ""
+                                width: tabColumnContent.width
+                                height: 32
+                                radius: 5
+                                color: isActive ? "#3b485c" : (tabMouseArea.containsMouse ? "#2a3444" : "transparent")
+                                border.color: isActive ? "#4a9eff" : "transparent"
+                                border.width: 1
 
-                                Text {
-                                    id: tabName
-                                    Layout.fillWidth: true
-                                    text: model.name
-                                    color: isActive ? "#ffffff" : "#9aa6b8"
-                                    font.pixelSize: 11
-                                    font.bold: isActive
-                                    elide: Text.ElideRight
-                                    horizontalAlignment: Text.AlignLeft
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 8
+                                    anchors.rightMargin: 8
+                                    anchors.topMargin: 4
+                                    anchors.bottomMargin: 4
+                                    spacing: 0
+
+                                    RowLayout {
+                                        spacing: 6
+
+                                        Text {
+                                            id: tabName
+                                            text: model.name
+                                            color: isActive ? "#ffffff" : "#9aa6b8"
+                                            font.pixelSize: 11
+                                            font.bold: isActive
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                        }
+
+                                        Text {
+                                            id: tabPercent
+                                            text: Math.round(model.completionPercent) + "%"
+                                            color: isActive ? "#4a9eff" : "#7f8a9a"
+                                            font.pixelSize: 10
+                                            font.bold: true
+                                        }
+                                    }
+
+                                    Text {
+                                        id: tabActiveTask
+                                        visible: tabButton.activeTaskTitle !== ""
+                                        text: tabButton.activeTaskTitle
+                                        color: isActive ? "#82c3a5" : "#6a7a6a"
+                                        font.pixelSize: 9
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
+                                    }
                                 }
 
-                                Text {
-                                    id: tabPercent
-                                    text: Math.round(model.completionPercent) + "%"
-                                    color: isActive ? "#c8d6e5" : "#7f8a9a"
-                                    font.pixelSize: 10
-                                    font.bold: isActive
+                                ToolTip {
+                                    visible: tabMouseArea.containsMouse && (tabName.truncated || tabActiveTask.truncated)
+                                    text: model.name + " (" + Math.round(model.completionPercent) + "%)" + (tabButton.activeTaskTitle ? "\n" + tabButton.activeTaskTitle : "")
+                                    delay: 500
                                 }
-                            }
 
-                            ToolTip {
-                                visible: tabMouseArea.containsMouse && tabName.truncated
-                                text: model.name + " (" + Math.round(model.completionPercent) + "%)"
-                                delay: 500
-                            }
-
-                            MouseArea {
-                                id: tabMouseArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                acceptedButtons: Qt.LeftButton | Qt.RightButton
-                                onClicked: function(mouse) {
-                                    if (mouse.button === Qt.RightButton) {
-                                        tabContextMenu.tabIndex = index
-                                        tabContextMenu.tabName = model.name
-                                        tabContextMenu.popup()
-                                    } else {
-                                        if (projectManager)
-                                            projectManager.switchTab(index)
+                                MouseArea {
+                                    id: tabMouseArea
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                    onClicked: function(mouse) {
+                                        if (mouse.button === Qt.RightButton) {
+                                            tabContextMenu.tabIndex = index
+                                            tabContextMenu.tabName = model.name
+                                            tabContextMenu.popup()
+                                        } else {
+                                            if (projectManager)
+                                                projectManager.switchTab(index)
+                                        }
                                     }
                                 }
                             }
                         }
                     }
-                }
 
-                MouseArea {
-                    anchors.fill: parent
-                    acceptedButtons: Qt.NoButton
-                    onWheel: function(wheel) {
-                        if (tabFlickable.contentWidth <= tabFlickable.width)
-                            return
-                        var delta = wheel.angleDelta.y !== 0 ? wheel.angleDelta.y : wheel.angleDelta.x
-                        tabFlickable.contentX = Math.max(0, Math.min(tabFlickable.contentWidth - tabFlickable.width, tabFlickable.contentX - delta))
-                        wheel.accepted = true
+                    ScrollBar.vertical: ScrollBar {
+                        policy: ScrollBar.AsNeeded
+                        width: 6
                     }
                 }
 
-                ScrollBar.horizontal: ScrollBar {
-                    policy: ScrollBar.AsNeeded
-                    height: 6
-                }
-            }
+                // Add tab button at bottom
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 28
+                    radius: 5
+                    color: addTabMouseArea.containsMouse ? "#2a3444" : "transparent"
 
-            // Add tab button
-            Rectangle {
-                width: 28
-                height: 28
-                radius: 6
-                color: addTabMouseArea.containsMouse ? "#2a3444" : "#1b2028"
-                border.color: "#2e3744"
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 8
 
-                Text {
-                    anchors.centerIn: parent
-                    text: "+"
-                    color: "#9aa6b8"
-                    font.pixelSize: 16
-                    font.bold: true
-                }
+                        Text {
+                            text: "+ Add Tab"
+                            color: "#7f8a9a"
+                            font.pixelSize: 11
+                        }
+                    }
 
-                MouseArea {
-                    id: addTabMouseArea
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    onClicked: {
-                        if (tabModel) {
-                            tabModel.addTab("")
-                            // Switch to the newly created tab
-                            if (projectManager)
-                                projectManager.switchTab(tabModel.tabCount - 1)
+                    MouseArea {
+                        id: addTabMouseArea
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onClicked: {
+                            if (tabModel) {
+                                tabModel.addTab("")
+                                if (projectManager)
+                                    projectManager.switchTab(tabModel.tabCount - 1)
+                            }
                         }
                     }
                 }
             }
-
-            Item { Layout.fillWidth: true }
         }
+
+        // Main content area (right side)
+        ColumnLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: 12
+
+            // Progress stats row
+            RowLayout {
+                spacing: 12
+                Layout.fillWidth: true
+                visible: taskModel !== null
+
+                // Progress stats - percentage with tagged active task
+                Rectangle {
+                    visible: taskModel !== null
+                    Layout.minimumWidth: progressStatsRow.implicitWidth + 16
+                    Layout.maximumWidth: 400
+                    height: 32
+                    radius: 6
+                    color: "#1b2028"
+                    border.color: "#2e3744"
+
+                    RowLayout {
+                        id: progressStatsRow
+                        anchors.centerIn: parent
+                        spacing: 8
+
+                        Label {
+                            property real percentage: taskModel ? taskModel.percentageComplete : 0
+                            text: percentage.toFixed(0) + "%"
+                            font.pixelSize: 14
+                            font.bold: true
+                            color: "#4a9eff"
+                        }
+
+                        Label {
+                            property int activeIdx: diagramModel ? diagramModel.currentTaskIndex : -1
+                            property string activeTask: (activeIdx >= 0 && taskModel) ? taskModel.getTaskTitle(activeIdx) : ""
+                            visible: activeTask !== ""
+                            text: "· " + activeTask
+                            font.pixelSize: 12
+                            color: "#82c3a5"
+                            elide: Text.ElideRight
+                            Layout.maximumWidth: 200
+                        }
+                    }
+                }
+
+                // Time stats
+                Rectangle {
+                    visible: taskModel !== null
+                    width: 70
+                    height: 32
+                    radius: 6
+                    color: "#1b2028"
+                    border.color: "#2e3744"
+
+                    RowLayout {
+                        anchors.centerIn: parent
+                        spacing: 4
+
+                        Label {
+                            property real totalTime: taskModel ? taskModel.totalEstimatedTime : 0
+                            text: formatTime(totalTime)
+                            font.pixelSize: 12
+                            font.bold: true
+                            color: "#ffa94d"
+                        }
+
+                        Label {
+                            text: "left"
+                            font.pixelSize: 10
+                            color: "#8a93a5"
+                        }
+                    }
+                }
+
+                // Done by time
+                Rectangle {
+                    visible: taskModel !== null
+                    width: 70
+                    height: 32
+                    radius: 6
+                    color: "#1b2028"
+                    border.color: "#2e3744"
+
+                    RowLayout {
+                        anchors.centerIn: parent
+                        spacing: 4
+
+                        Label {
+                            property string completionTime: taskModel ? taskModel.estimatedCompletionTimeOfDay : ""
+                            text: completionTime !== "" ? completionTime : "N/A"
+                            font.pixelSize: 12
+                            font.bold: true
+                            color: "#82c3a5"
+                        }
+                    }
+                }
+
+                Item { Layout.fillWidth: true }
+            }
 
         // Tab context menu
         Menu {
@@ -1891,8 +1882,14 @@ ApplicationWindow {
                 text: "Delete"
                 enabled: tabModel ? tabModel.tabCount > 1 : false
                 onTriggered: {
-                    if (tabModel && tabModel.tabCount > 1)
+                    if (tabModel && tabModel.tabCount > 1) {
+                        var wasCurrentTab = (tabContextMenu.tabIndex === tabModel.currentTabIndex)
                         tabModel.removeTab(tabContextMenu.tabIndex)
+                        // If we deleted the current tab, reload the new current tab's data
+                        // without saving (to avoid overwriting with stale data)
+                        if (wasCurrentTab && projectManager)
+                            projectManager.reloadCurrentTab()
+                    }
                 }
             }
         }
@@ -3855,7 +3852,8 @@ ApplicationWindow {
                 }
             }
         }
-    }
+        }  // Close main content ColumnLayout
+    }  // Close outer RowLayout
 
     // Save notification toast
     Rectangle {
