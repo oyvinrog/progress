@@ -887,14 +887,14 @@ class TabModel(QAbstractListModel):
             self._tabs[self._current_tab_index].tasks = tasks
             self._tabs[self._current_tab_index].diagram = diagram
             model_index = self.index(self._current_tab_index, 0)
-            self.dataChanged.emit(model_index, model_index, [self.CompletionRole])
+            self.dataChanged.emit(model_index, model_index, [self.CompletionRole, self.ActiveTaskTitleRole])
 
     def updateCurrentTabTasks(self, tasks: Dict[str, Any]) -> None:
         """Update only the current tab's tasks data."""
         if 0 <= self._current_tab_index < len(self._tabs):
             self._tabs[self._current_tab_index].tasks = tasks
             model_index = self.index(self._current_tab_index, 0)
-            self.dataChanged.emit(model_index, model_index, [self.CompletionRole])
+            self.dataChanged.emit(model_index, model_index, [self.CompletionRole, self.ActiveTaskTitleRole])
 
     def getAllTabs(self) -> List[Tab]:
         """Get all tabs."""
@@ -987,6 +987,9 @@ class ProjectManager(QObject):
             self._task_model.taskCompletionChanged.connect(self._refreshCurrentTabTasks)
             self._task_model.taskCountChanged.connect(self._refreshCurrentTabTasks)
             self._task_model.taskRenamed.connect(self._refreshCurrentTabTasks)
+            # Connect diagram model's currentTaskChanged to update tab sidebar
+            if hasattr(self._diagram_model, 'currentTaskChanged'):
+                self._diagram_model.currentTaskChanged.connect(self._refreshCurrentTabDiagram)
 
     def _load_recent_projects(self) -> List[str]:
         """Load recent projects list from settings."""
@@ -1095,6 +1098,14 @@ class ProjectManager(QObject):
     def _refreshCurrentTabTasks(self, *args) -> None:
         if self._tab_model is not None and not self._task_model._loading:
             self._tab_model.updateCurrentTabTasks(self._task_model.to_dict())
+
+    def _refreshCurrentTabDiagram(self) -> None:
+        """Update the current tab's diagram data (including active task)."""
+        if self._tab_model is not None:
+            self._tab_model.setCurrentTabData(
+                self._task_model.to_dict(),
+                self._diagram_model.to_dict()
+            )
 
     @Slot(str)
     def saveProject(self, file_path: str) -> None:
