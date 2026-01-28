@@ -332,7 +332,15 @@ ApplicationWindow {
 
     function scrollToContent() {
         if (!diagramModel || diagramModel.count === 0) return
-        // Scroll to show content with some padding
+        // If there's a current task, center on it
+        var taskPos = diagramModel.getCurrentTaskPosition()
+        if (taskPos) {
+            var centerX = taskPos.x + taskPos.width / 2
+            var centerY = taskPos.y + taskPos.height / 2
+            centerOnPoint(centerX, centerY)
+            return
+        }
+        // Otherwise scroll to show content with some padding
         var minX = diagramModel.minItemX
         var minY = diagramModel.minItemY
         var padding = 50
