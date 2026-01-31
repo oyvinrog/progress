@@ -2900,5 +2900,178 @@ class TestSerializeItemForClipboard:
         assert result["noteMarkdown"] == "# Heading\n\nContent"
 
 
+class TestConvertItemType:
+    """Tests for DiagramModel.convertItemType method."""
+
+    def test_convert_box_to_note(self, empty_diagram_model):
+        """Converting a box to a note changes type and colors."""
+        item_id = empty_diagram_model.addBox(100.0, 100.0, "My Box")
+        empty_diagram_model.convertItemType(item_id, "note")
+
+        item = empty_diagram_model.getItem(item_id)
+        assert item.item_type.value == "note"
+        assert item.color == "#f7e07b"
+        assert item.text_color == "#1b2028"
+
+    def test_convert_to_same_type_noop(self, empty_diagram_model):
+        """Converting to the same type does nothing."""
+        item_id = empty_diagram_model.addBox(100.0, 100.0, "Test")
+        original_item = empty_diagram_model.getItem(item_id)
+        original_color = original_item.color
+
+        empty_diagram_model.convertItemType(item_id, "box")
+
+        item = empty_diagram_model.getItem(item_id)
+        assert item.item_type.value == "box"
+        assert item.color == original_color
+
+    def test_convert_invalid_preset_noop(self, empty_diagram_model):
+        """Converting with invalid preset name does nothing."""
+        item_id = empty_diagram_model.addBox(100.0, 100.0, "Test")
+
+        empty_diagram_model.convertItemType(item_id, "nonexistent_preset")
+
+        item = empty_diagram_model.getItem(item_id)
+        assert item.item_type.value == "box"
+
+    def test_convert_invalid_item_id_noop(self, empty_diagram_model):
+        """Converting with invalid item id does nothing."""
+        empty_diagram_model.addBox(100.0, 100.0, "Test")
+        # Should not raise
+        empty_diagram_model.convertItemType("invalid_id", "note")
+
+    def test_convert_to_task_creates_task_entry(self, diagram_model_with_task_model):
+        """Converting to task creates entry in task model."""
+        model = diagram_model_with_task_model
+        task_model = model._task_model
+        item_id = model.addPresetItem("note", 100.0, 100.0)
+        model.setItemText(item_id, "My New Task")
+
+        initial_task_count = task_model.rowCount()
+        model.convertItemType(item_id, "task")
+
+        item = model.getItem(item_id)
+        assert item.item_type.value == "task"
+        assert item.task_index >= 0
+        assert task_model.rowCount() == initial_task_count + 1
+        assert task_model.getTaskTitle(item.task_index) == "My New Task"
+
+    def test_convert_task_to_note_removes_task_entry(self, diagram_model_with_task_model):
+        """Converting a task to another type removes from task model."""
+        model = diagram_model_with_task_model
+        task_model = model._task_model
+        item_id = model.addTask(0, 100.0, 100.0)  # Create task at index 0
+
+        initial_task_count = task_model.rowCount()
+        model.convertItemType(item_id, "note")
+
+        item = model.getItem(item_id)
+        assert item.item_type.value == "note"
+        assert item.task_index == -1
+        assert task_model.rowCount() == initial_task_count - 1
+
+    def test_convert_task_updates_other_task_indices(self, app):
+        """Converting a task adjusts indices of subsequent tasks."""
+        task_model = TaskModel()
+        # Add 3 tasks first
+        task_model.addTask("Task 0", -1)
+        task_model.addTask("Task 1", -1)
+        task_model.addTask("Task 2", -1)
+
+        model = DiagramModel(task_model=task_model)
+
+        id0 = model.addTask(0, 100.0, 100.0)
+        id1 = model.addTask(1, 100.0, 150.0)
+        id2 = model.addTask(2, 100.0, 200.0)
+
+        # Convert task at index 0 to note
+        model.convertItemType(id0, "note")
+
+        # Task indices should be decremented for items with higher indices
+        item1 = model.getItem(id1)
+        item2 = model.getItem(id2)
+        assert item1.task_index == 0  # Was 1, now 0
+        assert item2.task_index == 1  # Was 2, now 1
+
+    def test_convert_task_with_current_task_higher_emits_role(self, app):
+        """When current task index is one higher than converted item, TaskCurrentRole is emitted."""
+        task_model = TaskModel()
+        # Add tasks
+        task_model.addTask("Task 0", -1)
+        task_model.addTask("Task 1", -1)
+
+        model = DiagramModel(task_model=task_model)
+
+        id0 = model.addTask(0, 100.0, 100.0)
+        id1 = model.addTask(1, 100.0, 150.0)
+
+        # Set current task to index 1 (the second task)
+        model.setCurrentTask(1)
+        assert model.currentTaskIndex == 1
+
+        # Convert task at index 0 to note
+        # This should:
+        # 1. Remove task 0 from task model
+        # 2. Decrement _current_task_index from 1 to 0
+        # 3. Emit TaskCurrentRole for the converted item (so UI clears its "current" state)
+        model.convertItemType(id0, "note")
+
+        item0 = model.getItem(id0)
+        item1 = model.getItem(id1)
+
+        # Verify state is correct
+        assert item0.task_index == -1
+        assert item1.task_index == 0
+        assert model.currentTaskIndex == 0
+
+        # The key assertion: item0 should not appear as current task
+        index0 = model.index(0, 0)
+        is_current = model.data(index0, model.TaskCurrentRole)
+        assert is_current == False
+
+    def test_convert_current_task_clears_current_index(self, app):
+        """Converting the current task clears currentTaskIndex."""
+        task_model = TaskModel()
+        task_model.addTask("Task 0", -1)
+
+        model = DiagramModel(task_model=task_model)
+        id0 = model.addTask(0, 100.0, 100.0)
+
+        model.setCurrentTask(0)  # Set first task as current
+        assert model.currentTaskIndex == 0
+
+        model.convertItemType(id0, "note")
+
+        assert model.currentTaskIndex == -1
+
+    def test_convert_to_task_without_task_model_noop(self, empty_diagram_model):
+        """Converting to task without task model does nothing."""
+        item_id = empty_diagram_model.addBox(100.0, 100.0, "Test")
+        empty_diagram_model.convertItemType(item_id, "task")
+
+        item = empty_diagram_model.getItem(item_id)
+        assert item.item_type.value == "box"  # Unchanged
+
+    def test_convert_preserves_text(self, empty_diagram_model):
+        """Converting preserves the item's text."""
+        item_id = empty_diagram_model.addBox(100.0, 100.0, "Original Text")
+        empty_diagram_model.convertItemType(item_id, "wish")
+
+        item = empty_diagram_model.getItem(item_id)
+        assert item.text == "Original Text"
+
+    def test_convert_case_insensitive(self, empty_diagram_model):
+        """Preset name lookup is case insensitive."""
+        item_id = empty_diagram_model.addBox(100.0, 100.0, "Test")
+
+        empty_diagram_model.convertItemType(item_id, "NOTE")
+        item = empty_diagram_model.getItem(item_id)
+        assert item.item_type.value == "note"
+
+        empty_diagram_model.convertItemType(item_id, "ObStAcLe")
+        item = empty_diagram_model.getItem(item_id)
+        assert item.item_type.value == "obstacle"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
