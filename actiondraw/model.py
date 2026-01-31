@@ -594,12 +594,19 @@ class DiagramModel(
                 # Use existing text or default
                 text = item.text.strip() if item.text else "Task"
 
-                # Add to the task model
-                self._task_model.addTask(text, -1)
-                task_count = self._task_model.rowCount()
-                if task_count == 0:
-                    return
-                new_index = task_count - 1
+                # Add to the task model, ensuring we get the inserted index
+                add_task_with_parent = getattr(self._task_model, "addTaskWithParent", None)
+                if callable(add_task_with_parent):
+                    new_index = add_task_with_parent(text, -1)
+                    if new_index < 0:
+                        return
+                else:
+                    task_count_before = self._task_model.rowCount()
+                    self._task_model.addTask(text, -1)
+                    task_count_after = self._task_model.rowCount()
+                    if task_count_after == task_count_before:
+                        return
+                    new_index = task_count_after - 1
 
                 # Update item properties
                 item.item_type = DiagramItemType.TASK
