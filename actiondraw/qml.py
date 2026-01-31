@@ -105,6 +105,12 @@ ApplicationWindow {
                 onTriggered: root.pasteFromClipboard()
             }
 
+            MenuItem {
+                text: "Edit Note...\t\tCtrl+M"
+                enabled: diagramModel !== null && root.selectedItemId.length > 0
+                onTriggered: root.openMarkdownNoteForSelection()
+            }
+
             MenuSeparator {}
 
             MenuItem {
@@ -421,6 +427,12 @@ ApplicationWindow {
         onActivated: root.addTaskOrConnectedTask()
     }
 
+    Shortcut {
+        sequence: "Ctrl+M"
+        enabled: diagramModel !== null
+        onActivated: root.openMarkdownNoteForSelection()
+    }
+
     function addTaskOrConnectedTask() {
         if (!diagramModel)
             return
@@ -440,6 +452,14 @@ ApplicationWindow {
             // No selection - add new task at center
             addQuickTaskAtCenter()
         }
+    }
+
+    function openMarkdownNoteForSelection() {
+        if (!diagramModel || !markdownNoteManager)
+            return
+        if (!root.selectedItemId || root.selectedItemId.length === 0)
+            return
+        markdownNoteManager.openNote(root.selectedItemId)
     }
 
     function showEdgeDropSuggestions(sourceId, dropX, dropY) {
@@ -2235,6 +2255,19 @@ ApplicationWindow {
                             }
                         }
                         MenuItem {
+                            text: "Note (Markdown)"
+                            onTriggered: {
+                                if (!diagramModel) return
+                                var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
+                                var newId = diagramModel.addPresetItem("note", snapped.x, snapped.y)
+                                if (newId) {
+                                    root.selectedItemId = newId
+                                    if (markdownNoteManager)
+                                        markdownNoteManager.openNote(newId)
+                                }
+                            }
+                        }
+                        MenuItem {
                             text: "New Task"
                             onTriggered: {
                                 var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
@@ -2312,6 +2345,14 @@ ApplicationWindow {
                             }
                             height: visible ? implicitHeight : 0
                             onTriggered: diagramModel.openChatGpt(diagramLayer.contextMenuItemId)
+                        }
+                        MenuItem {
+                            text: "Edit Note...\t\tCtrl+M"
+                            enabled: diagramModel !== null && diagramLayer.contextMenuItemId.length > 0
+                            onTriggered: {
+                                root.selectedItemId = diagramLayer.contextMenuItemId
+                                root.openMarkdownNoteForSelection()
+                            }
                         }
                         MenuSeparator {}
                         Menu {
@@ -2898,6 +2939,30 @@ ApplicationWindow {
                                             timerDialog.open()
                                         }
                                     }
+                                }
+                            }
+
+                            Rectangle {
+                                id: noteBadge
+                                visible: model.noteMarkdown && model.noteMarkdown.trim().length > 0
+                                width: 18
+                                height: 18
+                                radius: 4
+                                anchors.left: itemRect.isTask ? timerButton.right : parent.left
+                                anchors.leftMargin: itemRect.isTask ? 6 : 8
+                                anchors.top: parent.top
+                                anchors.topMargin: 8
+                                color: "#f5d96b"
+                                border.color: "#d9b84f"
+                                border.width: 1
+                                z: 22
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "N"
+                                    color: "#1b2028"
+                                    font.pixelSize: 11
+                                    font.bold: true
                                 }
                             }
 
@@ -3579,7 +3644,7 @@ ApplicationWindow {
                                 ToolTip.visible: labelHover.containsMouse
                                 ToolTip.delay: 400
                                 ToolTip.timeout: 2000
-                                ToolTip.text: model.text + (itemRect.itemType === "note" && model.noteMarkdown ? "\n\n" + model.noteMarkdown : "")
+                                ToolTip.text: model.text + (model.noteMarkdown ? "\n\n" + model.noteMarkdown : "")
 
                                 MouseArea {
                                     id: labelHover
@@ -3678,7 +3743,7 @@ ApplicationWindow {
                                 ToolTip.visible: freeTextHover.containsMouse
                                 ToolTip.delay: 400
                                 ToolTip.timeout: 2000
-                                ToolTip.text: model.text
+                                ToolTip.text: model.text + (model.noteMarkdown ? "\n\n" + model.noteMarkdown : "")
 
                                 MouseArea {
                                     id: freeTextHover
