@@ -2154,6 +2154,31 @@ ApplicationWindow {
             color: "#161c24"
             border.color: "#243040"
 
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.NoButton
+                hoverEnabled: true
+                propagateComposedEvents: true
+                z: 10
+                onWheel: function(wheel) {
+                    if (!(wheel.modifiers & Qt.ControlModifier)) {
+                        wheel.accepted = false
+                        return
+                    }
+                    var steps = 0
+                    if (wheel.angleDelta.y !== 0) {
+                        steps = wheel.angleDelta.y / 120
+                    } else if (wheel.pixelDelta.y !== 0) {
+                        steps = wheel.pixelDelta.y / 50
+                    }
+                    if (steps === 0)
+                        return
+                    var factor = Math.pow(1.1, steps)
+                    root.applyZoomFactor(factor, wheel.x, wheel.y)
+                    wheel.accepted = true
+                }
+            }
+
             Flickable {
                 id: viewport
                 anchors.fill: parent
@@ -2161,18 +2186,6 @@ ApplicationWindow {
                 contentHeight: root.boardHeight * root.zoomLevel
                 clip: true
                 interactive: !diagramModel || !diagramModel.drawingMode
-
-                WheelHandler {
-                    target: null
-                    acceptedModifiers: Qt.ControlModifier
-                    onWheel: {
-                        var delta = wheel.angleDelta.y / 120
-                        if (delta === 0)
-                            return
-                        var factor = Math.pow(1.1, delta)
-                        root.applyZoomFactor(factor, wheel.x, wheel.y)
-                    }
-                }
 
                 PinchHandler {
                     id: viewportPinch
