@@ -525,6 +525,94 @@ class DiagramModel(
         if self._task_model is not None:
             self._task_model.restartCountdownTimer(task_index)
 
+    @Slot(str, str)
+    def convertItemType(self, item_id: str, preset_name: str) -> None:
+        """Convert an item to a different type using a preset."""
+        preset_name = preset_name.lower()
+
+        # Handle task conversion specially since it needs task model integration
+        if preset_name == "task":
+            self._convertToTask(item_id)
+            return
+
+        preset = ITEM_PRESETS.get(preset_name)
+        if not preset:
+            return
+
+        for row, item in enumerate(self._items):
+            if item.id == item_id:
+                new_type = preset["type"]
+                # Skip if already the same type
+                if item.item_type == new_type:
+                    return
+
+                # Update item properties
+                item.item_type = new_type
+                item.color = str(preset["color"])
+                item.text_color = str(preset["text_color"])
+
+                # Clear task association if converting away from task
+                if item.task_index >= 0:
+                    item.task_index = -1
+
+                index = self.index(row, 0)
+                self.dataChanged.emit(
+                    index,
+                    index,
+                    [
+                        self.TypeRole,
+                        self.ColorRole,
+                        self.TextColorRole,
+                        self.TaskIndexRole,
+                    ],
+                )
+                self.itemsChanged.emit()
+                return
+
+    def _convertToTask(self, item_id: str) -> None:
+        """Convert an item to a task, creating an entry in the task list."""
+        if not self._task_model:
+            return
+
+        for row, item in enumerate(self._items):
+            if item.id == item_id:
+                # Skip if already a task
+                if item.item_type == DiagramItemType.TASK:
+                    return
+
+                # Use existing text or default
+                text = item.text.strip() if item.text else "Task"
+
+                # Add to the task model
+                self._task_model.addTask(text, -1)
+                task_count = self._task_model.rowCount()
+                if task_count == 0:
+                    return
+                new_index = task_count - 1
+
+                # Update item properties
+                item.item_type = DiagramItemType.TASK
+                item.task_index = new_index
+                item.color = "#82c3a5"
+                item.text_color = "#1b2028"
+                if not item.text.strip():
+                    item.text = text
+
+                index = self.index(row, 0)
+                self.dataChanged.emit(
+                    index,
+                    index,
+                    [
+                        self.TypeRole,
+                        self.TaskIndexRole,
+                        self.ColorRole,
+                        self.TextColorRole,
+                        self.TextRole,
+                    ],
+                )
+                self.itemsChanged.emit()
+                return
+
     @Slot(str, float, float)
     def resizeItem(self, item_id: str, width: float, height: float) -> None:
         new_width = max(40.0, width)

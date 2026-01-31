@@ -2277,6 +2277,49 @@ ApplicationWindow {
                             onTriggered: diagramModel.openChatGpt(diagramLayer.contextMenuItemId)
                         }
                         MenuSeparator {}
+                        Menu {
+                            title: "Convert to..."
+                            MenuItem {
+                                text: "Box"
+                                onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "box")
+                            }
+                            MenuItem {
+                                text: "Task"
+                                onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "task")
+                            }
+                            MenuItem {
+                                text: "Database"
+                                onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "database")
+                            }
+                            MenuItem {
+                                text: "Server"
+                                onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "server")
+                            }
+                            MenuItem {
+                                text: "Cloud"
+                                onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "cloud")
+                            }
+                            MenuItem {
+                                text: "Note"
+                                onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "note")
+                            }
+                            MenuItem {
+                                text: "Free Text"
+                                onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "freetext")
+                            }
+                            MenuItem {
+                                text: "Obstacle"
+                                onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "obstacle")
+                            }
+                            MenuItem {
+                                text: "Wish"
+                                onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "wish")
+                            }
+                            MenuItem {
+                                text: "ChatGPT"
+                                onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "chatgpt")
+                            }
+                        }
                         MenuItem {
                             text: "Delete"
                             onTriggered: diagramModel.removeItem(diagramLayer.contextMenuItemId)
