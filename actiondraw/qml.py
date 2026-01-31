@@ -3785,6 +3785,34 @@ ApplicationWindow {
                                 color: edgeDrag.active ? "#4c627f" : "#2a3444"
                                 border.color: edgeDrag.active ? "#74a0d9" : "#3b485c"
                                 property point dragPoint: Qt.point(model.x, model.y)
+                                property bool hoverActive: false
+
+                                Timer {
+                                    id: edgeHoverMenuTimer
+                                    interval: 250
+                                    repeat: false
+                                    onTriggered: {
+                                        if (!diagramModel || !edgeHandle.hoverActive || edgeDrag.active || edgeDropMenu.visible)
+                                            return
+                                        var dropX = model.x + model.width + 40
+                                        var dropY = model.y
+                                        root.showEdgeDropSuggestions(itemRect.itemId, dropX, dropY)
+                                    }
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.NoButton
+                                    onEntered: {
+                                        edgeHandle.hoverActive = true
+                                        edgeHoverMenuTimer.restart()
+                                    }
+                                    onExited: {
+                                        edgeHandle.hoverActive = false
+                                        edgeHoverMenuTimer.stop()
+                                    }
+                                }
 
                                 Text {
                                     anchors.centerIn: parent
