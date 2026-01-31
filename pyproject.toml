@@ -47,3 +47,6 @@ actiondraw = "actiondraw:main"
 [tool.setuptools]
 packages = ["actiondraw"]
 py-modules = ["task_model", "markdown_note_editor"]
+
+[tool.setuptools.package-data]
+actiondraw = ["qml_ui/**/*.qml"]
