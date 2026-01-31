@@ -315,16 +315,24 @@ ApplicationWindow {
 
     property int minBoardSize: 2000
     property int boardMargin: 500
+    property real currentMinItemX: 0
+    property real currentMinItemY: 0
     property real currentMaxItemX: 0
     property real currentMaxItemY: 0
-    property int boardWidth: Math.max(minBoardSize, currentMaxItemX + boardMargin)
-    property int boardHeight: Math.max(minBoardSize, currentMaxItemY + boardMargin)
+    property real originOffsetX: boardMargin - currentMinItemX
+    property real originOffsetY: boardMargin - currentMinItemY
+    property int boardWidth: Math.max(minBoardSize, (currentMaxItemX - currentMinItemX) + (boardMargin * 2))
+    property int boardHeight: Math.max(minBoardSize, (currentMaxItemY - currentMinItemY) + (boardMargin * 2))
 
     function updateBoardBounds() {
         if (diagramModel) {
+            currentMinItemX = diagramModel.minItemX
+            currentMinItemY = diagramModel.minItemY
             currentMaxItemX = diagramModel.maxItemX
             currentMaxItemY = diagramModel.maxItemY
         } else {
+            currentMinItemX = 0
+            currentMinItemY = 0
             currentMaxItemX = 0
             currentMaxItemY = 0
         }
@@ -344,8 +352,8 @@ ApplicationWindow {
         var minX = diagramModel.minItemX
         var minY = diagramModel.minItemY
         var padding = 50
-        var targetX = Math.max(0, (minX - padding) * root.zoomLevel)
-        var targetY = Math.max(0, (minY - padding) * root.zoomLevel)
+        var targetX = Math.max(0, (minX - padding + root.originOffsetX) * root.zoomLevel)
+        var targetY = Math.max(0, (minY - padding + root.originOffsetY) * root.zoomLevel)
         viewport.contentX = targetX
         viewport.contentY = targetY
     }
@@ -453,8 +461,8 @@ ApplicationWindow {
     }
 
     function diagramCenterPoint() {
-        var cx = (viewport.contentX + viewport.width / 2) / root.zoomLevel
-        var cy = (viewport.contentY + viewport.height / 2) / root.zoomLevel
+        var cx = (viewport.contentX + viewport.width / 2) / root.zoomLevel - root.originOffsetX
+        var cy = (viewport.contentY + viewport.height / 2) / root.zoomLevel - root.originOffsetY
         return snapPoint(Qt.point(cx, cy))
     }
 
@@ -553,11 +561,11 @@ ApplicationWindow {
         var fy = focusY === undefined ? viewport.height / 2 : focusY
         var focusContentX = viewport.contentX + fx
         var focusContentY = viewport.contentY + fy
-        var focusDiagramX = focusContentX / root.zoomLevel
-        var focusDiagramY = focusContentY / root.zoomLevel
+        var focusDiagramX = (focusContentX / root.zoomLevel) - root.originOffsetX
+        var focusDiagramY = (focusContentY / root.zoomLevel) - root.originOffsetY
         root.zoomLevel = clamped
-        var newContentX = focusDiagramX * root.zoomLevel - fx
-        var newContentY = focusDiagramY * root.zoomLevel - fy
+        var newContentX = (focusDiagramX + root.originOffsetX) * root.zoomLevel - fx
+        var newContentY = (focusDiagramY + root.originOffsetY) * root.zoomLevel - fy
         var maxX = Math.max(0, viewport.contentWidth - viewport.width)
         var maxY = Math.max(0, viewport.contentHeight - viewport.height)
         viewport.contentX = Math.min(Math.max(newContentX, 0), maxX)
@@ -577,8 +585,8 @@ ApplicationWindow {
     }
 
     function centerOnPoint(x, y) {
-        var targetX = x * root.zoomLevel - viewport.width / 2
-        var targetY = y * root.zoomLevel - viewport.height / 2
+        var targetX = (x + root.originOffsetX) * root.zoomLevel - viewport.width / 2
+        var targetY = (y + root.originOffsetY) * root.zoomLevel - viewport.height / 2
         var maxX = Math.max(0, viewport.contentWidth - viewport.width)
         var maxY = Math.max(0, viewport.contentHeight - viewport.height)
         viewport.contentX = Math.min(Math.max(targetX, 0), maxX)
@@ -587,7 +595,7 @@ ApplicationWindow {
 
     function resetView() {
         setZoomInternal(1.0)
-        centerOnPoint(root.boardSize / 2, root.boardSize / 2)
+        centerOnPoint((root.boardWidth / 2) - root.originOffsetX, (root.boardHeight / 2) - root.originOffsetY)
     }
 
     Dialog {
@@ -2185,6 +2193,8 @@ ApplicationWindow {
 
                 Item {
                     id: diagramLayer
+                    x: root.originOffsetX
+                    y: root.originOffsetY
                     width: root.boardWidth
                     height: root.boardHeight
                     transformOrigin: Item.TopLeft
