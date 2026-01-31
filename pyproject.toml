@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "actiondraw"
-version = "0.1.1"
+version = "0.1.2"
 description = "A diagramming module built with PySide6 and QML"
 readme = "README.md"
 authors = [
@@ -47,3 +47,6 @@ actiondraw = "actiondraw:main"
 [tool.setuptools]
 packages = ["actiondraw"]
 py-modules = ["task_model", "markdown_note_editor"]
+
+[tool.setuptools.package-data]
+actiondraw = ["qml_ui/**/*.qml"]

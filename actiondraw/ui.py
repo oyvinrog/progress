@@ -5,10 +5,11 @@ from __future__ import annotations
 import os
 import sys
 
+from PySide6.QtCore import QUrl
 from PySide6.QtQml import QQmlApplicationEngine
 
 from .model import DiagramModel
-from .qml import ACTIONDRAW_QML
+from .qml import ACTIONDRAW_QML_PATH, QML_DIR
 
 
 def create_actiondraw_window(
@@ -30,7 +31,8 @@ def create_actiondraw_window(
     engine.rootContext().setContextProperty("markdownNoteManager", markdown_note_manager)
     engine.rootContext().setContextProperty("tabModel", tab_model)
     engine._markdown_note_manager = markdown_note_manager
-    engine.loadData(ACTIONDRAW_QML.encode("utf-8"))
+    engine.addImportPath(str(QML_DIR))
+    engine.load(QUrl.fromLocalFile(str(ACTIONDRAW_QML_PATH)))
     return engine
 
 

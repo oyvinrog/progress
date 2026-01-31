@@ -525,6 +525,142 @@ class DiagramModel(
         if self._task_model is not None:
             self._task_model.restartCountdownTimer(task_index)
 
+    @Slot(str, str)
+    def convertItemType(self, item_id: str, preset_name: str) -> None:
+        """Convert an item to a different type using a preset."""
+        preset_name = preset_name.lower()
+
+        # Handle task conversion specially since it needs task model integration
+        if preset_name == "task":
+            self._convertToTask(item_id)
+            return
+
+        preset = ITEM_PRESETS.get(preset_name)
+        if not preset:
+            return
+
+        for row, item in enumerate(self._items):
+            if item.id == item_id:
+                new_type = preset["type"]
+                # Skip if already the same type
+                if item.item_type == new_type:
+                    return
+
+                # Update item properties
+                item.item_type = new_type
+                item.color = str(preset["color"])
+                item.text_color = str(preset["text_color"])
+
+                # Clear task association if converting away from task
+                had_task = item.task_index >= 0
+                if had_task:
+                    removed_task_index = item.task_index
+                    old_current_index = self._current_task_index
+                    if (
+                        self._task_model is not None
+                        and 0 <= removed_task_index < self._task_model.rowCount()
+                    ):
+                        # Find item that was current task BEFORE decrementing indices
+                        old_current_item_row = None
+                        if old_current_index >= 0 and old_current_index != removed_task_index:
+                            for idx, other_item in enumerate(self._items):
+                                if other_item.task_index == old_current_index:
+                                    old_current_item_row = idx
+                                    break
+
+                        self._task_model.removeAt(removed_task_index)
+                        for idx, other_item in enumerate(self._items):
+                            if other_item.task_index > removed_task_index:
+                                other_item.task_index -= 1
+                                other_index = self.index(idx, 0)
+                                self.dataChanged.emit(other_index, other_index, [self.TaskIndexRole])
+                        if old_current_index == removed_task_index:
+                            self._current_task_index = -1
+                        elif old_current_index > removed_task_index:
+                            self._current_task_index = old_current_index - 1
+                        if self._current_task_index != old_current_index:
+                            self.currentTaskChanged.emit()
+                            # Emit TaskCurrentRole for the item that was the current task
+                            if old_current_item_row is not None:
+                                other_index = self.index(old_current_item_row, 0)
+                                self.dataChanged.emit(other_index, other_index, [self.TaskCurrentRole])
+                            # Emit for the new current task item if there is one
+                            if self._current_task_index >= 0:
+                                for idx, other_item in enumerate(self._items):
+                                    if other_item.task_index == self._current_task_index:
+                                        other_index = self.index(idx, 0)
+                                        self.dataChanged.emit(other_index, other_index, [self.TaskCurrentRole])
+                                        break
+                    item.task_index = -1
+
+                index = self.index(row, 0)
+                roles = [
+                    self.TypeRole,
+                    self.ColorRole,
+                    self.TextColorRole,
+                    self.TaskIndexRole,
+                ]
+                if had_task:
+                    roles.append(self.TaskCurrentRole)
+                self.dataChanged.emit(
+                    index,
+                    index,
+                    roles,
+                )
+                self.itemsChanged.emit()
+                return
+
+    def _convertToTask(self, item_id: str) -> None:
+        """Convert an item to a task, creating an entry in the task list."""
+        if not self._task_model:
+            return
+
+        for row, item in enumerate(self._items):
+            if item.id == item_id:
+                # Skip if already a task
+                if item.item_type == DiagramItemType.TASK:
+                    return
+
+                # Use existing text or default
+                text = item.text.strip() if item.text else "Task"
+
+                # Add to the task model, ensuring we get the inserted index
+                add_task_with_parent = getattr(self._task_model, "addTaskWithParent", None)
+                if callable(add_task_with_parent):
+                    new_index = add_task_with_parent(text, -1)
+                    if new_index < 0:
+                        return
+                else:
+                    task_count_before = self._task_model.rowCount()
+                    self._task_model.addTask(text, -1)
+                    task_count_after = self._task_model.rowCount()
+                    if task_count_after == task_count_before:
+                        return
+                    new_index = task_count_after - 1
+
+                # Update item properties
+                item.item_type = DiagramItemType.TASK
+                item.task_index = new_index
+                item.color = "#82c3a5"
+                item.text_color = "#1b2028"
+                if not item.text.strip():
+                    item.text = text
+
+                index = self.index(row, 0)
+                self.dataChanged.emit(
+                    index,
+                    index,
+                    [
+                        self.TypeRole,
+                        self.TaskIndexRole,
+                        self.ColorRole,
+                        self.TextColorRole,
+                        self.TextRole,
+                    ],
+                )
+                self.itemsChanged.emit()
+                return
+
     @Slot(str, float, float)
     def resizeItem(self, item_id: str, width: float, height: float) -> None:
         new_width = max(40.0, width)
@@ -797,6 +933,7 @@ class DiagramModel(
             "height": item.height,
             "text": item.text,
             "subDiagramPath": item.sub_diagram_path,
+            "taskIndex": item.task_index,
         }
 
     def getItemAt(self, x: float, y: float) -> Optional[str]:
