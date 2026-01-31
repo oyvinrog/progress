@@ -553,6 +553,17 @@ class DiagramModel(
 
                 # Clear task association if converting away from task
                 if item.task_index >= 0:
+                    removed_task_index = item.task_index
+                    if (
+                        self._task_model is not None
+                        and 0 <= removed_task_index < self._task_model.rowCount()
+                    ):
+                        self._task_model.removeAt(removed_task_index)
+                        for idx, other_item in enumerate(self._items):
+                            if other_item.task_index > removed_task_index:
+                                other_item.task_index -= 1
+                                other_index = self.index(idx, 0)
+                                self.dataChanged.emit(other_index, other_index, [self.TaskIndexRole])
                     item.task_index = -1
 
                 index = self.index(row, 0)
