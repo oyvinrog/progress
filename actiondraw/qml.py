@@ -341,7 +341,12 @@ ApplicationWindow {
     }
 
     function scrollToContent() {
-        if (!diagramModel || diagramModel.count === 0) return
+        if (!diagramModel)
+            return
+        if (diagramModel.count === 0) {
+            root.resetView()
+            return
+        }
         // If there's a current task, center on it
         var taskPos = diagramModel.getCurrentTaskPosition()
         if (taskPos) {
