@@ -639,6 +639,58 @@ class TaskModel(QAbstractListModel):
         self.totalEstimateChanged.emit()
         self.taskCountChanged.emit()
 
+    def _task_to_dict(
+        self,
+        task: Task,
+        indent_level: Optional[int] = None,
+        parent_index: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        task_dict = {
+            "title": task.title,
+            "completed": task.completed,
+            "time_spent": task.time_spent,
+            "parent_index": task.parent_index if parent_index is None else parent_index,
+            "indent_level": task.indent_level if indent_level is None else indent_level,
+            "custom_estimate": task.custom_estimate,
+        }
+        if task.countdown_duration is not None:
+            task_dict["countdown_duration"] = task.countdown_duration
+        if task.countdown_start is not None:
+            task_dict["countdown_start"] = task.countdown_start
+        return task_dict
+
+    def getSubtasksData(self, parent_row: int) -> Dict[str, Any]:
+        """Return child tasks of a parent as a to_dict-style payload."""
+        if parent_row < 0 or parent_row >= len(self._tasks):
+            return {"tasks": []}
+
+        parent_indent = self._tasks[parent_row].indent_level
+        start = parent_row + 1
+        if start >= len(self._tasks) or self._tasks[start].indent_level <= parent_indent:
+            return {"tasks": []}
+
+        tasks_data: List[Dict[str, Any]] = []
+        base_indent = parent_indent + 1
+        last_index_by_indent: List[int] = []
+
+        for i in range(start, len(self._tasks)):
+            child = self._tasks[i]
+            if child.indent_level <= parent_indent:
+                break
+
+            normalized_indent = max(0, child.indent_level - base_indent)
+            while len(last_index_by_indent) <= normalized_indent:
+                last_index_by_indent.append(-1)
+
+            parent_index = -1 if normalized_indent == 0 else last_index_by_indent[normalized_indent - 1]
+            tasks_data.append(self._task_to_dict(child, normalized_indent, parent_index))
+
+            last_index_by_indent[normalized_indent] = len(tasks_data) - 1
+            if len(last_index_by_indent) > normalized_indent + 1:
+                last_index_by_indent = last_index_by_indent[: normalized_indent + 1]
+
+        return {"tasks": tasks_data}
+
     def clear(self) -> None:
         """Clear all tasks from the model."""
         if not self._tasks:
@@ -670,20 +722,7 @@ class TaskModel(QAbstractListModel):
         """
         tasks_data = []
         for task in self._tasks:
-            task_dict = {
-                "title": task.title,
-                "completed": task.completed,
-                "time_spent": task.time_spent,
-                "parent_index": task.parent_index,
-                "indent_level": task.indent_level,
-                "custom_estimate": task.custom_estimate,
-            }
-            # Only save countdown fields if set
-            if task.countdown_duration is not None:
-                task_dict["countdown_duration"] = task.countdown_duration
-            if task.countdown_start is not None:
-                task_dict["countdown_start"] = task.countdown_start
-            tasks_data.append(task_dict)
+            tasks_data.append(self._task_to_dict(task))
         return {"tasks": tasks_data}
 
     def from_dict(self, data: Dict[str, Any]) -> None:
@@ -887,6 +926,14 @@ class TabModel(QAbstractListModel):
             self._tabs[self._current_tab_index].tasks = tasks
             self._tabs[self._current_tab_index].diagram = diagram
             model_index = self.index(self._current_tab_index, 0)
+            self.dataChanged.emit(model_index, model_index, [self.CompletionRole, self.ActiveTaskTitleRole])
+
+    def setTabData(self, index: int, tasks: Dict[str, Any], diagram: Dict[str, Any]) -> None:
+        """Update a specific tab's data."""
+        if 0 <= index < len(self._tabs):
+            self._tabs[index].tasks = tasks
+            self._tabs[index].diagram = diagram
+            model_index = self.index(index, 0)
             self.dataChanged.emit(model_index, model_index, [self.CompletionRole, self.ActiveTaskTitleRole])
 
     def updateCurrentTabTasks(self, tasks: Dict[str, Any]) -> None:
@@ -1263,6 +1310,38 @@ class ProjectManager(QObject):
             error_msg = f"Corrupted project file: {e}"
             self.errorOccurred.emit(error_msg)
             print(error_msg)
+
+    @Slot(int)
+    def drillToTab(self, task_index: int) -> None:
+        """Switch to (or create) a tab for a task's subtasks."""
+        if self._tab_model is None:
+            return
+        if task_index < 0 or task_index >= self._task_model.rowCount():
+            return
+
+        task_title = self._task_model.getTaskTitle(task_index).strip()
+        if not task_title:
+            return
+
+        target_index = -1
+        for idx, tab in enumerate(self._tab_model.getAllTabs()):
+            if tab.name == task_title:
+                target_index = idx
+                break
+
+        if target_index == -1:
+            subtasks_data = self._task_model.getSubtasksData(task_index)
+            diagram_data = {
+                "items": [],
+                "edges": [],
+                "strokes": [],
+                "current_task_index": -1,
+            }
+            self._tab_model.addTab(task_title)
+            target_index = self._tab_model.tabCount - 1
+            self._tab_model.setTabData(target_index, subtasks_data, diagram_data)
+
+        self.switchTab(target_index)
 
     @Slot(int)
     def switchTab(self, index: int) -> None:

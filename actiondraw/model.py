@@ -885,6 +885,7 @@ class DiagramModel(
             "height": item.height,
             "text": item.text,
             "subDiagramPath": item.sub_diagram_path,
+            "taskIndex": item.task_index,
         }
 
     def getItemAt(self, x: float, y: float) -> Optional[str]:

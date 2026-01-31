@@ -2335,6 +2335,22 @@ ApplicationWindow {
                             onTriggered: diagramModel.openSubDiagram(diagramLayer.contextMenuItemId)
                         }
                         MenuItem {
+                            id: drillToTabMenuItem
+                            text: "Drill to Tab"
+                            visible: {
+                                if (!diagramModel || !projectManager || !tabModel || !diagramLayer.contextMenuItemId)
+                                    return false
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                return item && item.type === "task" && item.taskIndex >= 0
+                            }
+                            height: visible ? implicitHeight : 0
+                            onTriggered: {
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                if (item && item.taskIndex >= 0 && projectManager)
+                                    projectManager.drillToTab(item.taskIndex)
+                            }
+                        }
+                        MenuItem {
                             id: openChatGptMenuItem
                             text: "Open ChatGPT"
                             visible: {
