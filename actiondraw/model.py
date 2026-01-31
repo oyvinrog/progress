@@ -552,7 +552,8 @@ class DiagramModel(
                 item.text_color = str(preset["text_color"])
 
                 # Clear task association if converting away from task
-                if item.task_index >= 0:
+                had_task = item.task_index >= 0
+                if had_task:
                     removed_task_index = item.task_index
                     old_current_index = self._current_task_index
                     if (
@@ -581,15 +582,18 @@ class DiagramModel(
                     item.task_index = -1
 
                 index = self.index(row, 0)
+                roles = [
+                    self.TypeRole,
+                    self.ColorRole,
+                    self.TextColorRole,
+                    self.TaskIndexRole,
+                ]
+                if had_task:
+                    roles.append(self.TaskCurrentRole)
                 self.dataChanged.emit(
                     index,
                     index,
-                    [
-                        self.TypeRole,
-                        self.ColorRole,
-                        self.TextColorRole,
-                        self.TaskIndexRole,
-                    ],
+                    roles,
                 )
                 self.itemsChanged.emit()
                 return
