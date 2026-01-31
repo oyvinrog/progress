@@ -1028,6 +1028,8 @@ ApplicationWindow {
                             property real pinchStartHeight: model.height
                             property bool isEdgeDropTarget: diagramModel && diagramModel.edgeHoverTargetId === itemRect.itemId
                             property bool hovered: itemHover.hovered
+                            property bool resizing: false
+                            property bool selected: root.selectedItemId === itemRect.itemId
                             property real taskCountdownRemaining: model.taskCountdownRemaining
                             property real taskCountdownProgress: model.taskCountdownProgress
                             property bool taskCountdownExpired: model.taskCountdownExpired
@@ -1661,7 +1663,7 @@ ApplicationWindow {
                                     color: "#3a4555"
                                     border.color: "#5a6575"
                                     radius: 3
-                                    visible: itemRect.itemType === "image"
+                                    visible: itemRect.itemType === "image" && (itemRect.hovered || itemRect.selected || itemRect.resizing)
 
                                     Canvas {
                                         anchors.fill: parent
@@ -1690,8 +1692,11 @@ ApplicationWindow {
                                         cursorShape: Qt.SizeFDiagCursor
                                         onActiveChanged: {
                                             if (active) {
+                                                itemRect.resizing = true
                                                 imageResizeHandle.resizeStartWidth = model.width
                                                 imageResizeHandle.resizeStartHeight = model.height
+                                            } else {
+                                                itemRect.resizing = false
                                             }
                                         }
                                         onTranslationChanged: {
@@ -1715,7 +1720,7 @@ ApplicationWindow {
                             Item {
                                 id: resizeHandles
                                 anchors.fill: parent
-                                visible: itemRect.itemType !== "image" && (itemRect.hovered || itemDrag.active)
+                                visible: itemRect.itemType !== "image" && (itemRect.hovered || itemRect.selected || itemDrag.active || itemRect.resizing)
                                 z: 30
                                 property real startX: 0
                                 property real startY: 0
@@ -1814,7 +1819,10 @@ ApplicationWindow {
                                         target: null
                                         acceptedButtons: Qt.LeftButton
                                         cursorShape: Qt.SizeFDiagCursor
-                                        onActiveChanged: if (active) resizeHandles.beginResize()
+                                        onActiveChanged: {
+                                            itemRect.resizing = active
+                                            if (active) resizeHandles.beginResize()
+                                        }
                                         onTranslationChanged: if (active) resizeHandles.applyResize(translation.x, translation.y, "TopLeft")
                                     }
                                 }
@@ -1835,7 +1843,10 @@ ApplicationWindow {
                                         target: null
                                         acceptedButtons: Qt.LeftButton
                                         cursorShape: Qt.SizeBDiagCursor
-                                        onActiveChanged: if (active) resizeHandles.beginResize()
+                                        onActiveChanged: {
+                                            itemRect.resizing = active
+                                            if (active) resizeHandles.beginResize()
+                                        }
                                         onTranslationChanged: if (active) resizeHandles.applyResize(translation.x, translation.y, "TopRight")
                                     }
                                 }
@@ -1856,7 +1867,10 @@ ApplicationWindow {
                                         target: null
                                         acceptedButtons: Qt.LeftButton
                                         cursorShape: Qt.SizeBDiagCursor
-                                        onActiveChanged: if (active) resizeHandles.beginResize()
+                                        onActiveChanged: {
+                                            itemRect.resizing = active
+                                            if (active) resizeHandles.beginResize()
+                                        }
                                         onTranslationChanged: if (active) resizeHandles.applyResize(translation.x, translation.y, "BottomLeft")
                                     }
                                 }
@@ -1877,7 +1891,10 @@ ApplicationWindow {
                                         target: null
                                         acceptedButtons: Qt.LeftButton
                                         cursorShape: Qt.SizeFDiagCursor
-                                        onActiveChanged: if (active) resizeHandles.beginResize()
+                                        onActiveChanged: {
+                                            itemRect.resizing = active
+                                            if (active) resizeHandles.beginResize()
+                                        }
                                         onTranslationChanged: if (active) resizeHandles.applyResize(translation.x, translation.y, "BottomRight")
                                     }
                                 }
@@ -2017,6 +2034,7 @@ ApplicationWindow {
                             DragHandler {
                                 id: itemDrag
                                 target: null
+                                enabled: !itemRect.resizing
                                 acceptedButtons: Qt.LeftButton
                                 cursorShape: Qt.ClosedHandCursor
                                 onActiveChanged: {
