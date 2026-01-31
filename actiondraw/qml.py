@@ -2235,6 +2235,13 @@ ApplicationWindow {
                                 root.openPresetDialog("obstacle", snapped, "", undefined)
                             }
                         }
+                        MenuItem {
+                            text: "Wish"
+                            onTriggered: {
+                                var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
+                                root.openPresetDialog("wish", snapped, "", undefined)
+                            }
+                        }
                     }
 
                     Menu {
