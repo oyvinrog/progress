@@ -319,10 +319,12 @@ ApplicationWindow {
     property real currentMinItemY: 0
     property real currentMaxItemX: 0
     property real currentMaxItemY: 0
-    property real originOffsetX: boardMargin - currentMinItemX
-    property real originOffsetY: boardMargin - currentMinItemY
-    property int boardWidth: Math.max(minBoardSize, (currentMaxItemX - currentMinItemX) + (boardMargin * 2))
-    property int boardHeight: Math.max(minBoardSize, (currentMaxItemY - currentMinItemY) + (boardMargin * 2))
+    property real boundMinItemX: Math.min(currentMinItemX, 0)
+    property real boundMinItemY: Math.min(currentMinItemY, 0)
+    property real originOffsetX: boardMargin - boundMinItemX
+    property real originOffsetY: boardMargin - boundMinItemY
+    property int boardWidth: Math.max(minBoardSize, (currentMaxItemX - boundMinItemX) + (boardMargin * 2))
+    property int boardHeight: Math.max(minBoardSize, (currentMaxItemY - boundMinItemY) + (boardMargin * 2))
 
     function updateBoardBounds() {
         if (diagramModel) {
