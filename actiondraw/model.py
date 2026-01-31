@@ -560,6 +560,14 @@ class DiagramModel(
                         self._task_model is not None
                         and 0 <= removed_task_index < self._task_model.rowCount()
                     ):
+                        # Find item that was current task BEFORE decrementing indices
+                        old_current_item_row = None
+                        if old_current_index >= 0 and old_current_index != removed_task_index:
+                            for idx, other_item in enumerate(self._items):
+                                if other_item.task_index == old_current_index:
+                                    old_current_item_row = idx
+                                    break
+
                         self._task_model.removeAt(removed_task_index)
                         for idx, other_item in enumerate(self._items):
                             if other_item.task_index > removed_task_index:
@@ -572,13 +580,17 @@ class DiagramModel(
                             self._current_task_index = old_current_index - 1
                         if self._current_task_index != old_current_index:
                             self.currentTaskChanged.emit()
-                            for idx, other_item in enumerate(self._items):
-                                if other_item.task_index >= 0 and (
-                                    other_item.task_index == old_current_index
-                                    or other_item.task_index == self._current_task_index
-                                ):
-                                    other_index = self.index(idx, 0)
-                                    self.dataChanged.emit(other_index, other_index, [self.TaskCurrentRole])
+                            # Emit TaskCurrentRole for the item that was the current task
+                            if old_current_item_row is not None:
+                                other_index = self.index(old_current_item_row, 0)
+                                self.dataChanged.emit(other_index, other_index, [self.TaskCurrentRole])
+                            # Emit for the new current task item if there is one
+                            if self._current_task_index >= 0:
+                                for idx, other_item in enumerate(self._items):
+                                    if other_item.task_index == self._current_task_index:
+                                        other_index = self.index(idx, 0)
+                                        self.dataChanged.emit(other_index, other_index, [self.TaskCurrentRole])
+                                        break
                     item.task_index = -1
 
                 index = self.index(row, 0)
