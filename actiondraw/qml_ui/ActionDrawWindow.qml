@@ -184,18 +184,18 @@ ApplicationWindow {
             return
         var sourceId = ""
         var item = null
-        if (root.lastCreatedTaskId && root.lastCreatedTaskId.length > 0) {
+        if (root.selectedItemId && root.selectedItemId.length > 0) {
+            item = diagramModel.getItemSnapshot(root.selectedItemId)
+            if (item && (item.x || item.x === 0)) {
+                sourceId = root.selectedItemId
+            }
+        }
+        if (!sourceId && root.lastCreatedTaskId && root.lastCreatedTaskId.length > 0) {
             item = diagramModel.getItemSnapshot(root.lastCreatedTaskId)
             if (item && (item.x || item.x === 0)) {
                 sourceId = root.lastCreatedTaskId
             } else {
                 root.lastCreatedTaskId = ""
-            }
-        }
-        if (!sourceId && root.selectedItemId && root.selectedItemId.length > 0) {
-            item = diagramModel.getItemSnapshot(root.selectedItemId)
-            if (item && (item.x || item.x === 0)) {
-                sourceId = root.selectedItemId
             }
         }
         if (sourceId) {
@@ -208,7 +208,7 @@ ApplicationWindow {
             dialogs.edgeDropTaskDialog.dropY = dropY
             dialogs.edgeDropTaskDialog.open()
         } else {
-            // No suitable source - add new task at center.
+            // No selection - add new task at center.
             addQuickTaskAtCenter()
         }
     }

@@ -506,8 +506,10 @@ Item {
                     root.snapValue(quickTaskDialog.targetX),
                     root.snapValue(quickTaskDialog.targetY)
                 )
-                if (newId && newId.length > 0)
+                if (newId && newId.length > 0) {
                     root.lastCreatedTaskId = newId
+                    root.selectedItemId = newId
+                }
             }
             quickTaskDialog.close()
         }
@@ -950,8 +952,10 @@ Item {
                         root.snapValue(edgeDropTaskDialog.dropY),
                         edgeDropTaskField.text
                     )
-                    if (newId && newId.length > 0)
+                    if (newId && newId.length > 0) {
                         root.lastCreatedTaskId = newId
+                        root.selectedItemId = newId
+                    }
                 } else {
                     diagramModel.addPresetItemAndConnect(
                         edgeDropTaskDialog.sourceId,
