@@ -139,6 +139,7 @@ ApplicationWindow {
     property real pendingEdgeDropX: 0
     property real pendingEdgeDropY: 0
     property string selectedItemId: ""
+    property string lastCreatedTaskId: ""
 
     Shortcut {
         sequence: "Ctrl+S"
@@ -181,20 +182,33 @@ ApplicationWindow {
     function addTaskOrConnectedTask() {
         if (!diagramModel)
             return
-        if (root.selectedItemId && root.selectedItemId.length > 0) {
-            // Add connected task from selected item
-            var item = diagramModel.getItemSnapshot(root.selectedItemId)
+        var sourceId = ""
+        var item = null
+        if (root.lastCreatedTaskId && root.lastCreatedTaskId.length > 0) {
+            item = diagramModel.getItemSnapshot(root.lastCreatedTaskId)
             if (item && (item.x || item.x === 0)) {
-                var dropX = item.x + (item.width || 100) + 50
-                var dropY = item.y
-                dialogs.edgeDropTaskDialog.sourceId = root.selectedItemId
-                dialogs.edgeDropTaskDialog.sourceType = "task"
-                dialogs.edgeDropTaskDialog.dropX = dropX
-                dialogs.edgeDropTaskDialog.dropY = dropY
-                dialogs.edgeDropTaskDialog.open()
+                sourceId = root.lastCreatedTaskId
+            } else {
+                root.lastCreatedTaskId = ""
             }
+        }
+        if (!sourceId && root.selectedItemId && root.selectedItemId.length > 0) {
+            item = diagramModel.getItemSnapshot(root.selectedItemId)
+            if (item && (item.x || item.x === 0)) {
+                sourceId = root.selectedItemId
+            }
+        }
+        if (sourceId) {
+            // Add connected task from last-created task when available.
+            var dropX = item.x + (item.width || 100) + 50
+            var dropY = item.y
+            dialogs.edgeDropTaskDialog.sourceId = sourceId
+            dialogs.edgeDropTaskDialog.sourceType = "task"
+            dialogs.edgeDropTaskDialog.dropX = dropX
+            dialogs.edgeDropTaskDialog.dropY = dropY
+            dialogs.edgeDropTaskDialog.open()
         } else {
-            // No selection - add new task at center
+            // No suitable source - add new task at center.
             addQuickTaskAtCenter()
         }
     }

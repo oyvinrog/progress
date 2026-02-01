@@ -501,11 +501,13 @@ Item {
 
         onAccepted: {
             if (diagramModel && quickTaskField.text.trim().length > 0) {
-                diagramModel.addTaskFromText(
+                var newId = diagramModel.addTaskFromText(
                     quickTaskField.text,
                     root.snapValue(quickTaskDialog.targetX),
                     root.snapValue(quickTaskDialog.targetY)
                 )
+                if (newId && newId.length > 0)
+                    root.lastCreatedTaskId = newId
             }
             quickTaskDialog.close()
         }
@@ -942,12 +944,14 @@ Item {
         onAccepted: {
             if (diagramModel && edgeDropTaskDialog.sourceId && edgeDropTaskField.text.trim().length > 0) {
                 if (edgeDropTaskDialog.sourceType === "task" && taskModel) {
-                    diagramModel.addTaskFromTextAndConnect(
+                    var newId = diagramModel.addTaskFromTextAndConnect(
                         edgeDropTaskDialog.sourceId,
                         root.snapValue(edgeDropTaskDialog.dropX),
                         root.snapValue(edgeDropTaskDialog.dropY),
                         edgeDropTaskField.text
                     )
+                    if (newId && newId.length > 0)
+                        root.lastCreatedTaskId = newId
                 } else {
                     diagramModel.addPresetItemAndConnect(
                         edgeDropTaskDialog.sourceId,
