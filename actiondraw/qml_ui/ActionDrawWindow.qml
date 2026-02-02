@@ -622,6 +622,25 @@ ApplicationWindow {
                             onTriggered: diagramModel.openChatGpt(diagramLayer.contextMenuItemId)
                         }
                         MenuItem {
+                            id: breakDownMenuItem
+                            text: "Break Down..."
+                            visible: {
+                                if (!diagramModel || !diagramLayer.contextMenuItemId)
+                                    return false
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                return item && item.type !== "image"
+                            }
+                            height: visible ? implicitHeight : 0
+                            onTriggered: {
+                                if (!diagramModel || !diagramLayer.contextMenuItemId)
+                                    return
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                dialogs.breakdownDialog.sourceItemId = diagramLayer.contextMenuItemId
+                                dialogs.breakdownDialog.sourceTypeLabel = item && item.type ? item.type : ""
+                                dialogs.breakdownDialog.open()
+                            }
+                        }
+                        MenuItem {
                             text: "Edit Note...\t\tCtrl+M"
                             enabled: diagramModel !== null && diagramLayer.contextMenuItemId.length > 0
                             onTriggered: {

@@ -20,6 +20,7 @@ Item {
     property alias taskDialog: taskDialog
     property alias newTaskDialog: newTaskDialog
     property alias quickTaskDialog: quickTaskDialog
+    property alias breakdownDialog: breakdownDialog
     property alias taskRenameDialog: taskRenameDialog
     property alias timerDialog: timerDialog
     property alias timerContextMenu: timerContextMenu
@@ -517,6 +518,63 @@ Item {
 
         onClosed: {
             quickTaskField.text = ""
+        }
+    }
+
+    Dialog {
+        id: breakdownDialog
+        modal: true
+        title: "Break Down"
+        property string sourceItemId: ""
+        property string sourceTypeLabel: ""
+
+        onOpened: breakdownTextArea.forceActiveFocus()
+
+        contentItem: ColumnLayout {
+            width: 360
+            spacing: 12
+
+            Label {
+                text: breakdownDialog.sourceTypeLabel.length > 0
+                    ? "Create " + breakdownDialog.sourceTypeLabel + " items. One per line or comma-separated."
+                    : "Create items. One per line or comma-separated."
+                color: "#8a93a5"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            TextArea {
+                id: breakdownTextArea
+                Layout.fillWidth: true
+                Layout.preferredHeight: 140
+                placeholderText: "One per line"
+                selectByMouse: true
+                color: "#f5f6f8"
+                wrapMode: TextEdit.Wrap
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#384458"
+                }
+            }
+        }
+
+        footer: DialogButtonBox {
+            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+        }
+
+        onAccepted: {
+            if (diagramModel && breakdownDialog.sourceItemId.length > 0) {
+                diagramModel.breakDownItem(breakdownDialog.sourceItemId, breakdownTextArea.text)
+            }
+            breakdownDialog.close()
+        }
+        onRejected: breakdownDialog.close()
+
+        onClosed: {
+            breakdownDialog.sourceItemId = ""
+            breakdownDialog.sourceTypeLabel = ""
+            breakdownTextArea.text = ""
         }
     }
 

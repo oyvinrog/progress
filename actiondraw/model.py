@@ -5,6 +5,8 @@ This module provides the main Qt model for diagram items and edges.
 
 from __future__ import annotations
 
+import math
+import re
 import urllib.parse
 import webbrowser
 from itertools import count
@@ -858,6 +860,56 @@ class DiagramModel(
         )
         self._append_item(item)
         return item_id
+
+    def _parse_breakdown_entries(self, raw_list: str) -> List[str]:
+        if not raw_list:
+            return []
+        parts = re.split(r"[,\n;]+", raw_list)
+        entries = []
+        for part in parts:
+            text = part.strip()
+            if text:
+                entries.append(text)
+        return entries
+
+    @Slot(str, str)
+    def breakDownItem(self, item_id: str, raw_list: str) -> None:
+        item = self.getItem(item_id)
+        if not item:
+            return
+
+        entries = self._parse_breakdown_entries(raw_list)
+        if not entries:
+            return
+
+        preset_name = item.item_type.value
+        if preset_name != "task" and preset_name not in ITEM_PRESETS:
+            return
+
+        spacing = 40.0
+        base_width = item.width
+        base_height = item.height
+        cols = max(1, int(math.ceil(math.sqrt(len(entries)))))
+        start_x = item.x + base_width + spacing
+        start_y = item.y
+
+        new_ids: List[str] = []
+        for idx, entry in enumerate(entries):
+            row = idx // cols
+            col = idx % cols
+            x = start_x + col * (base_width + spacing)
+            y = start_y + row * (base_height + spacing)
+            if preset_name == "task":
+                new_id = self.addTaskFromText(entry, x, y)
+            else:
+                new_id = self.addPresetItemWithText(preset_name, x, y, entry)
+            if new_id:
+                new_ids.append(new_id)
+
+        if len(new_ids) < 2:
+            return
+        for i in range(len(new_ids) - 1):
+            self.addEdge(new_ids[i], new_ids[i + 1])
 
     @Slot(int, bool)
     def setTaskCompleted(self, task_index: int, completed: bool) -> None:
