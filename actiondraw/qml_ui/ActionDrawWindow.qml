@@ -508,6 +508,7 @@ ApplicationWindow {
 
                         MenuItem {
                             text: "Box"
+                            icon.name: "insert-object"
                             onTriggered: {
                                 var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
                                 diagramModel.addBox(snapped.x, snapped.y, "")
@@ -515,6 +516,7 @@ ApplicationWindow {
                         }
                         MenuItem {
                             text: "Note (Markdown)"
+                            icon.name: "document-edit"
                             onTriggered: {
                                 if (!diagramModel) return
                                 var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
@@ -528,6 +530,7 @@ ApplicationWindow {
                         }
                         MenuItem {
                             text: "New Task"
+                            icon.name: "list-add"
                             onTriggered: {
                                 var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
                                 root.openQuickTaskDialog(snapped)
@@ -535,6 +538,7 @@ ApplicationWindow {
                         }
                         MenuItem {
                             text: "Free Text"
+                            icon.name: "accessories-text-editor"
                             onTriggered: {
                                 var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
                                 root.openFreeTextDialog(snapped, "", "")
@@ -542,6 +546,7 @@ ApplicationWindow {
                         }
                         MenuItem {
                             text: "Obstacle"
+                            icon.name: "dialog-warning"
                             onTriggered: {
                                 var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
                                 root.openPresetDialog("obstacle", snapped, "", undefined)
@@ -549,6 +554,7 @@ ApplicationWindow {
                         }
                         MenuItem {
                             text: "Wish"
+                            icon.name: "emblem-favorite"
                             onTriggered: {
                                 var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
                                 root.openPresetDialog("wish", snapped, "", undefined)
@@ -561,15 +567,18 @@ ApplicationWindow {
 
                         MenuItem {
                             text: "New Sub-diagram..."
+                            icon.name: "document-new"
                             onTriggered: dialogs.newSubDiagramFileDialog.open()
                         }
                         MenuItem {
                             text: "Link Existing Sub-diagram..."
+                            icon.name: "insert-link"
                             onTriggered: dialogs.subDiagramFileDialog.open()
                         }
                         MenuItem {
                             id: renameNoteMenuItem
                             text: "Rename Label..."
+                            icon.name: "edit-rename"
                             visible: {
                                 if (!diagramModel || !diagramLayer.contextMenuItemId)
                                     return false
@@ -584,6 +593,7 @@ ApplicationWindow {
                         MenuItem {
                             id: openSubDiagramMenuItem
                             text: "Open Sub-diagram"
+                            icon.name: "document-open"
                             visible: {
                                 if (!diagramModel || !diagramLayer.contextMenuItemId)
                                     return false
@@ -596,6 +606,7 @@ ApplicationWindow {
                         MenuItem {
                             id: drillToTabMenuItem
                             text: "Drill to Tab"
+                            icon.name: "go-next"
                             visible: {
                                 if (!diagramModel || !projectManager || !tabModel || !diagramLayer.contextMenuItemId)
                                     return false
@@ -612,6 +623,7 @@ ApplicationWindow {
                         MenuItem {
                             id: openChatGptMenuItem
                             text: "Open ChatGPT"
+                            icon.name: "help-contents"
                             visible: {
                                 if (!diagramModel || !diagramLayer.contextMenuItemId)
                                     return false
@@ -624,6 +636,7 @@ ApplicationWindow {
                         MenuItem {
                             id: breakDownMenuItem
                             text: "Break Down..."
+                            icon.name: "view-list-details"
                             visible: {
                                 if (!diagramModel || !diagramLayer.contextMenuItemId)
                                     return false
@@ -642,6 +655,7 @@ ApplicationWindow {
                         }
                         MenuItem {
                             text: "Edit Note...\t\tCtrl+M"
+                            icon.name: "document-edit"
                             enabled: diagramModel !== null && diagramLayer.contextMenuItemId.length > 0
                             onTriggered: {
                                 root.selectedItemId = diagramLayer.contextMenuItemId
@@ -653,47 +667,58 @@ ApplicationWindow {
                             title: "Convert to..."
                             MenuItem {
                                 text: "Box"
+                                icon.name: "insert-object"
                                 onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "box")
                             }
                             MenuItem {
                                 text: "Task"
+                                icon.name: "view-task"
                                 onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "task")
                             }
                             MenuItem {
                                 text: "Database"
+                                icon.name: "server-database"
                                 onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "database")
                             }
                             MenuItem {
                                 text: "Server"
+                                icon.name: "network-server"
                                 onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "server")
                             }
                             MenuItem {
                                 text: "Cloud"
+                                icon.name: "network-workgroup"
                                 onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "cloud")
                             }
                             MenuItem {
                                 text: "Note"
+                                icon.name: "document-edit"
                                 onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "note")
                             }
                             MenuItem {
                                 text: "Free Text"
+                                icon.name: "accessories-text-editor"
                                 onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "freetext")
                             }
                             MenuItem {
                                 text: "Obstacle"
+                                icon.name: "dialog-warning"
                                 onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "obstacle")
                             }
                             MenuItem {
                                 text: "Wish"
+                                icon.name: "emblem-favorite"
                                 onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "wish")
                             }
                             MenuItem {
                                 text: "ChatGPT"
+                                icon.name: "help-contents"
                                 onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "chatgpt")
                             }
                         }
                         MenuItem {
                             text: "Delete"
+                            icon.name: "edit-delete"
                             onTriggered: diagramModel.removeItem(diagramLayer.contextMenuItemId)
                         }
                     }
