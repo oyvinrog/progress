@@ -886,19 +886,22 @@ class DiagramModel(
         if preset_name != "task" and preset_name not in ITEM_PRESETS:
             return
 
+        # Collect incoming and outgoing edges before removing the item
+        incoming_edges = [(e.from_id, e.description) for e in self._edges if e.to_id == item_id]
+        outgoing_edges = [(e.to_id, e.description) for e in self._edges if e.from_id == item_id]
+
         spacing = 40.0
         base_width = item.width
         base_height = item.height
-        cols = max(1, int(math.ceil(math.sqrt(len(entries)))))
-        start_x = item.x + base_width + spacing
+        # Position new items starting at the original item's position
+        start_x = item.x
         start_y = item.y
 
         new_ids: List[str] = []
         for idx, entry in enumerate(entries):
-            row = idx // cols
-            col = idx % cols
-            x = start_x + col * (base_width + spacing)
-            y = start_y + row * (base_height + spacing)
+            # Arrange horizontally
+            x = start_x + idx * (base_width + spacing)
+            y = start_y
             if preset_name == "task":
                 new_id = self.addTaskFromText(entry, x, y)
             else:
@@ -906,10 +909,36 @@ class DiagramModel(
             if new_id:
                 new_ids.append(new_id)
 
-        if len(new_ids) < 2:
+        if not new_ids:
             return
+
+        # Connect new items sequentially
         for i in range(len(new_ids) - 1):
             self.addEdge(new_ids[i], new_ids[i + 1])
+
+        # Reconnect incoming edges to the first new node
+        first_new_id = new_ids[0]
+        for from_id, description in incoming_edges:
+            self.addEdge(from_id, first_new_id)
+            if description:
+                # Find the newly added edge and set its description
+                for edge in self._edges:
+                    if edge.from_id == from_id and edge.to_id == first_new_id:
+                        edge.description = description
+                        break
+
+        # Reconnect outgoing edges from the last new node
+        last_new_id = new_ids[-1]
+        for to_id, description in outgoing_edges:
+            self.addEdge(last_new_id, to_id)
+            if description:
+                for edge in self._edges:
+                    if edge.from_id == last_new_id and edge.to_id == to_id:
+                        edge.description = description
+                        break
+
+        # Remove the original item (this also removes its edges)
+        self.removeItem(item_id)
 
     @Slot(int, bool)
     def setTaskCompleted(self, task_index: int, completed: bool) -> None:
