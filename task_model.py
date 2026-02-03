@@ -48,6 +48,7 @@ class Tab:
     name: str
     tasks: Dict[str, Any]  # TaskModel.to_dict() data
     diagram: Dict[str, Any]  # DiagramModel.to_dict() data
+    priority: int = 0  # 0 = no priority, 1-3 = priority levels
 
 
 class TaskModel(QAbstractListModel):
@@ -781,6 +782,7 @@ class TabModel(QAbstractListModel):
     IndexRole = Qt.UserRole + 2
     CompletionRole = Qt.UserRole + 3
     ActiveTaskTitleRole = Qt.UserRole + 4
+    PriorityRole = Qt.UserRole + 5
 
     tabsChanged = Signal()
     currentTabChanged = Signal()
@@ -807,6 +809,8 @@ class TabModel(QAbstractListModel):
             return self._calculateTabCompletion(tab)
         if role == self.ActiveTaskTitleRole:
             return self._getActiveTaskTitle(tab)
+        if role == self.PriorityRole:
+            return tab.priority
         return None
 
     def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
@@ -815,6 +819,7 @@ class TabModel(QAbstractListModel):
             self.IndexRole: b"tabIndex",
             self.CompletionRole: b"completionPercent",
             self.ActiveTaskTitleRole: b"activeTaskTitle",
+            self.PriorityRole: b"priority",
         }
 
     @Property(int, notify=currentTabIndexChanged)
@@ -903,6 +908,18 @@ class TabModel(QAbstractListModel):
         self.dataChanged.emit(model_index, model_index, [self.NameRole])
         if index == self._current_tab_index:
             self.currentTabChanged.emit()
+
+    @Slot(int, int)
+    def setPriority(self, index: int, priority: int) -> None:
+        """Set the priority for a tab (0 = none, 1-3 = priority levels)."""
+        if index < 0 or index >= len(self._tabs):
+            return
+        if priority < 0 or priority > 3:
+            return
+
+        self._tabs[index].priority = priority
+        model_index = self.index(index, 0)
+        self.dataChanged.emit(model_index, model_index, [self.PriorityRole])
 
     @Slot(int)
     def setCurrentTab(self, index: int) -> None:
@@ -1183,6 +1200,7 @@ class ProjectManager(QObject):
                         "name": tab.name,
                         "tasks": tab.tasks,
                         "diagram": tab.diagram,
+                        "priority": tab.priority,
                     })
 
                 project_data = {
@@ -1270,7 +1288,8 @@ class ProjectManager(QObject):
                     tabs.append(Tab(
                         name=tab_data.get("name", "Tab"),
                         tasks=tab_data.get("tasks", {"tasks": []}),
-                        diagram=tab_data.get("diagram", {"items": [], "edges": [], "strokes": []})
+                        diagram=tab_data.get("diagram", {"items": [], "edges": [], "strokes": []}),
+                        priority=tab_data.get("priority", 0)
                     ))
                 active_tab = project_data.get("active_tab", 0)
 
