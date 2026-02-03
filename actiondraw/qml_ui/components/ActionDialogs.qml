@@ -209,10 +209,13 @@ Item {
     Dialog {
         id: freeTextDialog
         modal: true
+        width: dialogWidth + 40
         property real targetX: 0
         property real targetY: 0
         property string editingItemId: ""
         property string textValue: ""
+        property real dialogWidth: 400
+        property real dialogHeight: 220
         title: freeTextDialog.editingItemId.length === 0 ? "Free Text" : "Edit Free Text"
 
         onOpened: {
@@ -222,12 +225,12 @@ Item {
         }
 
         contentItem: ColumnLayout {
-            width: 360
+            Layout.fillWidth: true
             spacing: 12
 
             ScrollView {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 160
+                Layout.preferredHeight: freeTextDialog.dialogHeight
 
                 TextArea {
                     id: freeTextArea
@@ -243,6 +246,58 @@ Item {
                         border.color: "#384458"
                     }
                     onTextChanged: freeTextDialog.textValue = text
+                }
+            }
+
+            Rectangle {
+                id: freeTextResizeHandle
+                Layout.alignment: Qt.AlignRight
+                width: 20
+                height: 20
+                color: freeTextResizeHover.hovered ? "#3a4555" : "transparent"
+                radius: 3
+
+                property real startWidth: 0
+                property real startHeight: 0
+
+                Canvas {
+                    anchors.fill: parent
+                    anchors.margins: 4
+                    onPaint: {
+                        var ctx = getContext("2d")
+                        ctx.clearRect(0, 0, width, height)
+                        ctx.strokeStyle = "#6a7a8a"
+                        ctx.lineWidth = 1.5
+                        ctx.beginPath()
+                        ctx.moveTo(0, height)
+                        ctx.lineTo(width, 0)
+                        ctx.moveTo(width * 0.5, height)
+                        ctx.lineTo(width, height * 0.5)
+                        ctx.stroke()
+                    }
+                }
+
+                HoverHandler {
+                    id: freeTextResizeHover
+                    cursorShape: Qt.SizeFDiagCursor
+                }
+
+                DragHandler {
+                    id: freeTextResizeDrag
+                    target: null
+                    cursorShape: Qt.SizeFDiagCursor
+                    onActiveChanged: {
+                        if (active) {
+                            freeTextResizeHandle.startWidth = freeTextDialog.dialogWidth
+                            freeTextResizeHandle.startHeight = freeTextDialog.dialogHeight
+                        }
+                    }
+                    onTranslationChanged: {
+                        if (active) {
+                            freeTextDialog.dialogWidth = Math.max(300, freeTextResizeHandle.startWidth + translation.x)
+                            freeTextDialog.dialogHeight = Math.max(120, freeTextResizeHandle.startHeight + translation.y)
+                        }
+                    }
                 }
             }
         }

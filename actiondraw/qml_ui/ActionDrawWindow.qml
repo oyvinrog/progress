@@ -1618,6 +1618,7 @@ ApplicationWindow {
                             Item {
                                 anchors.fill: parent
                                 visible: itemRect.itemType === "freetext"
+                                z: 35
 
                                 Rectangle {
                                     id: freeTextHeader
@@ -1670,15 +1671,28 @@ ApplicationWindow {
                                 }
 
                                 Rectangle {
+                                    id: freetextResizeHandle
                                     anchors.bottom: parent.bottom
                                     anchors.right: parent.right
-                                    anchors.bottomMargin: 6
-                                    anchors.rightMargin: 6
-                                    width: 16
-                                    height: 16
-                                    color: "transparent"
+                                    anchors.bottomMargin: 2
+                                    anchors.rightMargin: 2
+                                    width: 24
+                                    height: 24
+                                    color: freetextResizeDrag.active || freetextResizeHover.containsMouse ? "#3a4555" : "transparent"
+                                    radius: 3
+                                    z: 100
+
+                                    HoverHandler {
+                                        id: freetextResizeHover
+                                        cursorShape: Qt.SizeFDiagCursor
+                                    }
+
+                                    property real resizeStartWidth: 0
+                                    property real resizeStartHeight: 0
+
                                     Canvas {
                                         anchors.fill: parent
+                                        anchors.margins: 2
                                         onPaint: {
                                             var ctx = getContext("2d")
                                             ctx.clearRect(0, 0, width, height)
@@ -1690,6 +1704,36 @@ ApplicationWindow {
                                             ctx.moveTo(width * 0.4, height)
                                             ctx.lineTo(width, height * 0.4)
                                             ctx.stroke()
+                                        }
+                                    }
+
+                                    DragHandler {
+                                        id: freetextResizeDrag
+                                        target: null
+                                        acceptedButtons: Qt.LeftButton
+                                        cursorShape: Qt.SizeFDiagCursor
+                                        onActiveChanged: {
+                                            if (active) {
+                                                itemRect.resizing = true
+                                                freetextResizeHandle.resizeStartWidth = model.width
+                                                freetextResizeHandle.resizeStartHeight = model.height
+                                            } else {
+                                                itemRect.resizing = false
+                                            }
+                                        }
+                                        onTranslationChanged: {
+                                            if (!active || !diagramModel)
+                                                return
+                                            var deltaX = translation.x / root.zoomLevel
+                                            var deltaY = translation.y / root.zoomLevel
+                                            var newWidth = Math.max(60, freetextResizeHandle.resizeStartWidth + deltaX)
+                                            var newHeight = Math.max(40, freetextResizeHandle.resizeStartHeight + deltaY)
+                                            if (root.snapToGrid) {
+                                                newWidth = Math.max(root.gridSpacing, Math.round(newWidth / root.gridSpacing) * root.gridSpacing)
+                                                newHeight = Math.max(root.gridSpacing, Math.round(newHeight / root.gridSpacing) * root.gridSpacing)
+                                            }
+                                            diagramModel.resizeItem(itemRect.itemId, newWidth, newHeight)
+                                            edgeCanvas.requestPaint()
                                         }
                                     }
                                 }
