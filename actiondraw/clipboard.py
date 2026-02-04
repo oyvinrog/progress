@@ -36,7 +36,6 @@ class ClipboardMixin:
     _append_item: Callable[[DiagramItem], None]
     addEdge: Callable[[str, str], None]
     getItem: Callable[[str], Optional[DiagramItem]]
-    _update_sub_diagram_watches: Callable[[], None]
 
     def _serialize_item_for_clipboard(self, item: DiagramItem) -> Dict[str, Any]:
         return {
@@ -51,8 +50,8 @@ class ClipboardMixin:
             "color": item.color,
             "textColor": item.text_color,
             "imageData": item.image_data,
-            "subDiagramPath": item.sub_diagram_path,
             "noteMarkdown": item.note_markdown,
+            "folderPath": item.folder_path,
         }
 
     def _write_clipboard_payload(self, payload: Dict[str, Any]) -> bool:
@@ -360,8 +359,8 @@ class ClipboardMixin:
                 color=str(item_data.get("color", "#4a9eff")),
                 text_color=str(item_data.get("textColor", "#f5f6f8")),
                 image_data=str(item_data.get("imageData", "")),
-                sub_diagram_path=str(item_data.get("subDiagramPath", "")),
                 note_markdown=str(item_data.get("noteMarkdown", "")),
+                folder_path=str(item_data.get("folderPath", "")),
             )
             self._append_item(item)
             old_id = str(item_data.get("id", ""))
@@ -390,7 +389,6 @@ class ClipboardMixin:
                 edges_added = True
         if edges_added:
             self.edgesChanged.emit()
-        self._update_sub_diagram_watches()
         return True
 
     @Slot(float, float, result=str)

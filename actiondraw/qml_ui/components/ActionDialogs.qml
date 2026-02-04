@@ -20,6 +20,7 @@ Item {
     property alias taskDialog: taskDialog
     property alias newTaskDialog: newTaskDialog
     property alias quickTaskDialog: quickTaskDialog
+    property alias breakdownDialog: breakdownDialog
     property alias taskRenameDialog: taskRenameDialog
     property alias timerDialog: timerDialog
     property alias timerContextMenu: timerContextMenu
@@ -27,8 +28,7 @@ Item {
     property alias edgeDropTaskDialog: edgeDropTaskDialog
     property alias saveDialog: saveDialog
     property alias loadDialog: loadDialog
-    property alias subDiagramFileDialog: subDiagramFileDialog
-    property alias newSubDiagramFileDialog: newSubDiagramFileDialog
+    property alias folderDialog: folderDialog
     property alias clipboardPasteDialog: clipboardPasteDialog
 
     anchors.fill: parent
@@ -208,10 +208,13 @@ Item {
     Dialog {
         id: freeTextDialog
         modal: true
+        width: dialogWidth + 40
         property real targetX: 0
         property real targetY: 0
         property string editingItemId: ""
         property string textValue: ""
+        property real dialogWidth: 400
+        property real dialogHeight: 220
         title: freeTextDialog.editingItemId.length === 0 ? "Free Text" : "Edit Free Text"
 
         onOpened: {
@@ -221,12 +224,12 @@ Item {
         }
 
         contentItem: ColumnLayout {
-            width: 360
+            Layout.fillWidth: true
             spacing: 12
 
             ScrollView {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 160
+                Layout.preferredHeight: freeTextDialog.dialogHeight
 
                 TextArea {
                     id: freeTextArea
@@ -242,6 +245,58 @@ Item {
                         border.color: "#384458"
                     }
                     onTextChanged: freeTextDialog.textValue = text
+                }
+            }
+
+            Rectangle {
+                id: freeTextResizeHandle
+                Layout.alignment: Qt.AlignRight
+                width: 20
+                height: 20
+                color: freeTextResizeHover.hovered ? "#3a4555" : "transparent"
+                radius: 3
+
+                property real startWidth: 0
+                property real startHeight: 0
+
+                Canvas {
+                    anchors.fill: parent
+                    anchors.margins: 4
+                    onPaint: {
+                        var ctx = getContext("2d")
+                        ctx.clearRect(0, 0, width, height)
+                        ctx.strokeStyle = "#6a7a8a"
+                        ctx.lineWidth = 1.5
+                        ctx.beginPath()
+                        ctx.moveTo(0, height)
+                        ctx.lineTo(width, 0)
+                        ctx.moveTo(width * 0.5, height)
+                        ctx.lineTo(width, height * 0.5)
+                        ctx.stroke()
+                    }
+                }
+
+                HoverHandler {
+                    id: freeTextResizeHover
+                    cursorShape: Qt.SizeFDiagCursor
+                }
+
+                DragHandler {
+                    id: freeTextResizeDrag
+                    target: null
+                    cursorShape: Qt.SizeFDiagCursor
+                    onActiveChanged: {
+                        if (active) {
+                            freeTextResizeHandle.startWidth = freeTextDialog.dialogWidth
+                            freeTextResizeHandle.startHeight = freeTextDialog.dialogHeight
+                        }
+                    }
+                    onTranslationChanged: {
+                        if (active) {
+                            freeTextDialog.dialogWidth = Math.max(300, freeTextResizeHandle.startWidth + translation.x)
+                            freeTextDialog.dialogHeight = Math.max(120, freeTextResizeHandle.startHeight + translation.y)
+                        }
+                    }
                 }
             }
         }
@@ -517,6 +572,63 @@ Item {
 
         onClosed: {
             quickTaskField.text = ""
+        }
+    }
+
+    Dialog {
+        id: breakdownDialog
+        modal: true
+        title: "Break Down"
+        property string sourceItemId: ""
+        property string sourceTypeLabel: ""
+
+        onOpened: breakdownTextArea.forceActiveFocus()
+
+        contentItem: ColumnLayout {
+            width: 360
+            spacing: 12
+
+            Label {
+                text: breakdownDialog.sourceTypeLabel.length > 0
+                    ? "Create " + breakdownDialog.sourceTypeLabel + " items. One per line or comma-separated."
+                    : "Create items. One per line or comma-separated."
+                color: "#8a93a5"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            TextArea {
+                id: breakdownTextArea
+                Layout.fillWidth: true
+                Layout.preferredHeight: 140
+                placeholderText: "One per line"
+                selectByMouse: true
+                color: "#f5f6f8"
+                wrapMode: TextEdit.Wrap
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#384458"
+                }
+            }
+        }
+
+        footer: DialogButtonBox {
+            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+        }
+
+        onAccepted: {
+            if (diagramModel && breakdownDialog.sourceItemId.length > 0) {
+                diagramModel.breakDownItem(breakdownDialog.sourceItemId, breakdownTextArea.text)
+            }
+            breakdownDialog.close()
+        }
+        onRejected: breakdownDialog.close()
+
+        onClosed: {
+            breakdownDialog.sourceItemId = ""
+            breakdownDialog.sourceTypeLabel = ""
+            breakdownTextArea.text = ""
         }
     }
 
@@ -1002,27 +1114,12 @@ Item {
         }
     }
 
-    FileDialog {
-        id: subDiagramFileDialog
-        title: "Select Sub-diagram"
-        fileMode: FileDialog.OpenFile
-        nameFilters: ["Progress files (*.progress)", "All files (*)"]
+    FolderDialog {
+        id: folderDialog
+        title: "Select Folder"
         onAccepted: {
             if (diagramModel && diagramLayer && diagramLayer.contextMenuItemId) {
-                diagramModel.setSubDiagramPath(diagramLayer.contextMenuItemId, selectedFile)
-            }
-        }
-    }
-
-    FileDialog {
-        id: newSubDiagramFileDialog
-        title: "Create New Sub-diagram"
-        fileMode: FileDialog.SaveFile
-        nameFilters: ["Progress files (*.progress)", "All files (*)"]
-        defaultSuffix: "progress"
-        onAccepted: {
-            if (diagramModel && diagramLayer && diagramLayer.contextMenuItemId) {
-                diagramModel.createAndLinkSubDiagram(diagramLayer.contextMenuItemId, selectedFile)
+                diagramModel.setFolderPath(diagramLayer.contextMenuItemId, selectedFolder)
             }
         }
     }

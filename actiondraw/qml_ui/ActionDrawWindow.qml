@@ -508,6 +508,7 @@ ApplicationWindow {
 
                         MenuItem {
                             text: "Box"
+                            icon.name: "insert-object"
                             onTriggered: {
                                 var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
                                 diagramModel.addBox(snapped.x, snapped.y, "")
@@ -515,6 +516,7 @@ ApplicationWindow {
                         }
                         MenuItem {
                             text: "Note (Markdown)"
+                            icon.name: "document-edit"
                             onTriggered: {
                                 if (!diagramModel) return
                                 var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
@@ -528,6 +530,7 @@ ApplicationWindow {
                         }
                         MenuItem {
                             text: "New Task"
+                            icon.name: "list-add"
                             onTriggered: {
                                 var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
                                 root.openQuickTaskDialog(snapped)
@@ -535,6 +538,7 @@ ApplicationWindow {
                         }
                         MenuItem {
                             text: "Free Text"
+                            icon.name: "accessories-text-editor"
                             onTriggered: {
                                 var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
                                 root.openFreeTextDialog(snapped, "", "")
@@ -542,6 +546,7 @@ ApplicationWindow {
                         }
                         MenuItem {
                             text: "Obstacle"
+                            icon.name: "dialog-warning"
                             onTriggered: {
                                 var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
                                 root.openPresetDialog("obstacle", snapped, "", undefined)
@@ -549,6 +554,7 @@ ApplicationWindow {
                         }
                         MenuItem {
                             text: "Wish"
+                            icon.name: "emblem-favorite"
                             onTriggered: {
                                 var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
                                 root.openPresetDialog("wish", snapped, "", undefined)
@@ -560,16 +566,9 @@ ApplicationWindow {
                         id: itemContextMenu
 
                         MenuItem {
-                            text: "New Sub-diagram..."
-                            onTriggered: dialogs.newSubDiagramFileDialog.open()
-                        }
-                        MenuItem {
-                            text: "Link Existing Sub-diagram..."
-                            onTriggered: dialogs.subDiagramFileDialog.open()
-                        }
-                        MenuItem {
                             id: renameNoteMenuItem
                             text: "Rename Label..."
+                            icon.name: "edit-rename"
                             visible: {
                                 if (!diagramModel || !diagramLayer.contextMenuItemId)
                                     return false
@@ -582,20 +581,9 @@ ApplicationWindow {
                             }
                         }
                         MenuItem {
-                            id: openSubDiagramMenuItem
-                            text: "Open Sub-diagram"
-                            visible: {
-                                if (!diagramModel || !diagramLayer.contextMenuItemId)
-                                    return false
-                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
-                                return item && item.subDiagramPath && item.subDiagramPath !== ""
-                            }
-                            height: visible ? implicitHeight : 0
-                            onTriggered: diagramModel.openSubDiagram(diagramLayer.contextMenuItemId)
-                        }
-                        MenuItem {
                             id: drillToTabMenuItem
                             text: "Drill to Tab"
+                            icon.name: "go-next"
                             visible: {
                                 if (!diagramModel || !projectManager || !tabModel || !diagramLayer.contextMenuItemId)
                                     return false
@@ -612,6 +600,7 @@ ApplicationWindow {
                         MenuItem {
                             id: openChatGptMenuItem
                             text: "Open ChatGPT"
+                            icon.name: "help-contents"
                             visible: {
                                 if (!diagramModel || !diagramLayer.contextMenuItemId)
                                     return false
@@ -622,7 +611,59 @@ ApplicationWindow {
                             onTriggered: diagramModel.openChatGpt(diagramLayer.contextMenuItemId)
                         }
                         MenuItem {
+                            text: "Link Folder..."
+                            icon.name: "folder"
+                            onTriggered: dialogs.folderDialog.open()
+                        }
+                        MenuItem {
+                            id: openFolderMenuItem
+                            text: "Open Folder"
+                            icon.name: "folder-open"
+                            visible: {
+                                if (!diagramModel || !diagramLayer.contextMenuItemId)
+                                    return false
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                return item && item.folderPath && item.folderPath !== ""
+                            }
+                            height: visible ? implicitHeight : 0
+                            onTriggered: diagramModel.openFolder(diagramLayer.contextMenuItemId)
+                        }
+                        MenuItem {
+                            id: clearFolderMenuItem
+                            text: "Clear Folder"
+                            icon.name: "edit-clear"
+                            visible: {
+                                if (!diagramModel || !diagramLayer.contextMenuItemId)
+                                    return false
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                return item && item.folderPath && item.folderPath !== ""
+                            }
+                            height: visible ? implicitHeight : 0
+                            onTriggered: diagramModel.clearFolderPath(diagramLayer.contextMenuItemId)
+                        }
+                        MenuItem {
+                            id: breakDownMenuItem
+                            text: "Break Down..."
+                            icon.name: "view-list-details"
+                            visible: {
+                                if (!diagramModel || !diagramLayer.contextMenuItemId)
+                                    return false
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                return item && item.type !== "image"
+                            }
+                            height: visible ? implicitHeight : 0
+                            onTriggered: {
+                                if (!diagramModel || !diagramLayer.contextMenuItemId)
+                                    return
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                dialogs.breakdownDialog.sourceItemId = diagramLayer.contextMenuItemId
+                                dialogs.breakdownDialog.sourceTypeLabel = item && item.type ? item.type : ""
+                                dialogs.breakdownDialog.open()
+                            }
+                        }
+                        MenuItem {
                             text: "Edit Note...\t\tCtrl+M"
+                            icon.name: "document-edit"
                             enabled: diagramModel !== null && diagramLayer.contextMenuItemId.length > 0
                             onTriggered: {
                                 root.selectedItemId = diagramLayer.contextMenuItemId
@@ -634,47 +675,58 @@ ApplicationWindow {
                             title: "Convert to..."
                             MenuItem {
                                 text: "Box"
+                                icon.name: "insert-object"
                                 onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "box")
                             }
                             MenuItem {
                                 text: "Task"
+                                icon.name: "view-task"
                                 onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "task")
                             }
                             MenuItem {
                                 text: "Database"
+                                icon.name: "server-database"
                                 onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "database")
                             }
                             MenuItem {
                                 text: "Server"
+                                icon.name: "network-server"
                                 onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "server")
                             }
                             MenuItem {
                                 text: "Cloud"
+                                icon.name: "network-workgroup"
                                 onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "cloud")
                             }
                             MenuItem {
                                 text: "Note"
+                                icon.name: "document-edit"
                                 onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "note")
                             }
                             MenuItem {
                                 text: "Free Text"
+                                icon.name: "accessories-text-editor"
                                 onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "freetext")
                             }
                             MenuItem {
                                 text: "Obstacle"
+                                icon.name: "dialog-warning"
                                 onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "obstacle")
                             }
                             MenuItem {
                                 text: "Wish"
+                                icon.name: "emblem-favorite"
                                 onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "wish")
                             }
                             MenuItem {
                                 text: "ChatGPT"
+                                icon.name: "help-contents"
                                 onTriggered: diagramModel.convertItemType(diagramLayer.contextMenuItemId, "chatgpt")
                             }
                         }
                         MenuItem {
                             text: "Delete"
+                            icon.name: "edit-delete"
                             onTriggered: diagramModel.removeItem(diagramLayer.contextMenuItemId)
                         }
                     }
@@ -1034,7 +1086,7 @@ ApplicationWindow {
                             property int taskIndex: model.taskIndex
                             property bool taskCompleted: model.taskCompleted
                             property bool taskCurrent: model.taskCurrent
-                            property int subDiagramProgress: model.subDiagramProgress
+                            property string folderPath: model.folderPath
                             property bool isTask: itemRect.itemType === "task" && itemRect.taskIndex >= 0
                             property real dragStartX: 0
                             property real dragStartY: 0
@@ -1074,27 +1126,48 @@ ApplicationWindow {
                                 z: -1
                             }
 
-                            // Sub-diagram progress badge
+                            // Folder icon badge
                             Rectangle {
-                                id: subDiagramBadge
-                                visible: itemRect.subDiagramProgress >= 0
-                                anchors.right: parent.right
+                                id: folderBadge
+                                visible: itemRect.folderPath !== ""
+                                anchors.left: parent.left
                                 anchors.bottom: parent.bottom
-                                anchors.rightMargin: 6
+                                anchors.leftMargin: 6
                                 anchors.bottomMargin: 6
-                                width: subDiagramText.width + 12
+                                width: 24
                                 height: 20
-                                radius: 10
-                                color: itemRect.subDiagramProgress === 100 ? "#4caf50" : "#2196f3"
+                                radius: 4
+                                color: "#e8a838"
                                 z: 25
 
-                                Text {
-                                    id: subDiagramText
+                                Canvas {
                                     anchors.centerIn: parent
-                                    text: itemRect.subDiagramProgress + "%"
-                                    color: "#ffffff"
-                                    font.pixelSize: 11
-                                    font.bold: true
+                                    width: 16
+                                    height: 12
+                                    onPaint: {
+                                        var ctx = getContext("2d")
+                                        ctx.clearRect(0, 0, width, height)
+                                        ctx.fillStyle = "#ffffff"
+                                        // Folder tab
+                                        ctx.beginPath()
+                                        ctx.moveTo(0, 2)
+                                        ctx.lineTo(0, height)
+                                        ctx.lineTo(width, height)
+                                        ctx.lineTo(width, 4)
+                                        ctx.lineTo(7, 4)
+                                        ctx.lineTo(5.5, 2)
+                                        ctx.closePath()
+                                        ctx.fill()
+                                    }
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        if (diagramModel)
+                                            diagramModel.openFolder(itemRect.itemId)
+                                    }
                                 }
                             }
 
@@ -1574,6 +1647,7 @@ ApplicationWindow {
                             Item {
                                 anchors.fill: parent
                                 visible: itemRect.itemType === "freetext"
+                                z: 35
 
                                 Rectangle {
                                     id: freeTextHeader
@@ -1626,15 +1700,28 @@ ApplicationWindow {
                                 }
 
                                 Rectangle {
+                                    id: freetextResizeHandle
                                     anchors.bottom: parent.bottom
                                     anchors.right: parent.right
-                                    anchors.bottomMargin: 6
-                                    anchors.rightMargin: 6
-                                    width: 16
-                                    height: 16
-                                    color: "transparent"
+                                    anchors.bottomMargin: 2
+                                    anchors.rightMargin: 2
+                                    width: 24
+                                    height: 24
+                                    color: freetextResizeDrag.active || freetextResizeHover.containsMouse ? "#3a4555" : "transparent"
+                                    radius: 3
+                                    z: 100
+
+                                    HoverHandler {
+                                        id: freetextResizeHover
+                                        cursorShape: Qt.SizeFDiagCursor
+                                    }
+
+                                    property real resizeStartWidth: 0
+                                    property real resizeStartHeight: 0
+
                                     Canvas {
                                         anchors.fill: parent
+                                        anchors.margins: 2
                                         onPaint: {
                                             var ctx = getContext("2d")
                                             ctx.clearRect(0, 0, width, height)
@@ -1646,6 +1733,36 @@ ApplicationWindow {
                                             ctx.moveTo(width * 0.4, height)
                                             ctx.lineTo(width, height * 0.4)
                                             ctx.stroke()
+                                        }
+                                    }
+
+                                    DragHandler {
+                                        id: freetextResizeDrag
+                                        target: null
+                                        acceptedButtons: Qt.LeftButton
+                                        cursorShape: Qt.SizeFDiagCursor
+                                        onActiveChanged: {
+                                            if (active) {
+                                                itemRect.resizing = true
+                                                freetextResizeHandle.resizeStartWidth = model.width
+                                                freetextResizeHandle.resizeStartHeight = model.height
+                                            } else {
+                                                itemRect.resizing = false
+                                            }
+                                        }
+                                        onTranslationChanged: {
+                                            if (!active || !diagramModel)
+                                                return
+                                            var deltaX = translation.x / root.zoomLevel
+                                            var deltaY = translation.y / root.zoomLevel
+                                            var newWidth = Math.max(60, freetextResizeHandle.resizeStartWidth + deltaX)
+                                            var newHeight = Math.max(40, freetextResizeHandle.resizeStartHeight + deltaY)
+                                            if (root.snapToGrid) {
+                                                newWidth = Math.max(root.gridSpacing, Math.round(newWidth / root.gridSpacing) * root.gridSpacing)
+                                                newHeight = Math.max(root.gridSpacing, Math.round(newHeight / root.gridSpacing) * root.gridSpacing)
+                                            }
+                                            diagramModel.resizeItem(itemRect.itemId, newWidth, newHeight)
+                                            edgeCanvas.requestPaint()
                                         }
                                     }
                                 }

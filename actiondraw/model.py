@@ -5,6 +5,11 @@ This module provides the main Qt model for diagram items and edges.
 
 from __future__ import annotations
 
+import math
+import os
+import platform
+import re
+import subprocess
 import urllib.parse
 import webbrowser
 from itertools import count
@@ -23,7 +28,6 @@ from .clipboard import ClipboardMixin
 from .constants import ITEM_PRESETS
 from .drawing import DrawingMixin
 from .layout import LayoutMixin
-from .subdiagram import SubDiagramMixin
 from .types import DiagramEdge, DiagramItem, DiagramItemType, DrawingPoint, DrawingStroke
 
 
@@ -31,7 +35,6 @@ class DiagramModel(
     ClipboardMixin,
     DrawingMixin,
     LayoutMixin,
-    SubDiagramMixin,
     QAbstractListModel,
 ):
     """Qt model exposing diagram items to QML."""
@@ -49,13 +52,12 @@ class DiagramModel(
     TaskCompletedRole = Qt.UserRole + 11
     ImageDataRole = Qt.UserRole + 12
     TaskCurrentRole = Qt.UserRole + 13
-    SubDiagramPathRole = Qt.UserRole + 14
-    SubDiagramProgressRole = Qt.UserRole + 15
-    NoteMarkdownRole = Qt.UserRole + 16
-    TaskCountdownRemainingRole = Qt.UserRole + 17
-    TaskCountdownProgressRole = Qt.UserRole + 18
-    TaskCountdownExpiredRole = Qt.UserRole + 19
-    TaskCountdownActiveRole = Qt.UserRole + 20
+    NoteMarkdownRole = Qt.UserRole + 14
+    TaskCountdownRemainingRole = Qt.UserRole + 15
+    TaskCountdownProgressRole = Qt.UserRole + 16
+    TaskCountdownExpiredRole = Qt.UserRole + 17
+    TaskCountdownActiveRole = Qt.UserRole + 18
+    FolderPathRole = Qt.UserRole + 19
 
     itemsChanged = Signal()
     edgesChanged = Signal()
@@ -78,7 +80,6 @@ class DiagramModel(
 
         # Initialize mixins
         self._init_drawing()
-        self._init_subdiagram()
 
         # Connect to task model's signals for bidirectional sync
         if self._task_model is not None:
@@ -159,10 +160,6 @@ class DiagramModel(
             return item.image_data
         if role == self.TaskCurrentRole:
             return item.task_index >= 0 and item.task_index == self._current_task_index
-        if role == self.SubDiagramPathRole:
-            return item.sub_diagram_path
-        if role == self.SubDiagramProgressRole:
-            return self._calculate_sub_diagram_progress(item.sub_diagram_path)
         if role == self.NoteMarkdownRole:
             return item.note_markdown
         if role == self.TaskCountdownRemainingRole:
@@ -173,6 +170,8 @@ class DiagramModel(
             return self._isTaskCountdownExpired(item.task_index)
         if role == self.TaskCountdownActiveRole:
             return self._isTaskCountdownActive(item.task_index)
+        if role == self.FolderPathRole:
+            return item.folder_path
         return None
 
     def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
@@ -190,13 +189,12 @@ class DiagramModel(
             self.TaskCompletedRole: b"taskCompleted",
             self.ImageDataRole: b"imageData",
             self.TaskCurrentRole: b"taskCurrent",
-            self.SubDiagramPathRole: b"subDiagramPath",
-            self.SubDiagramProgressRole: b"subDiagramProgress",
             self.NoteMarkdownRole: b"noteMarkdown",
             self.TaskCountdownRemainingRole: b"taskCountdownRemaining",
             self.TaskCountdownProgressRole: b"taskCountdownProgress",
             self.TaskCountdownExpiredRole: b"taskCountdownExpired",
             self.TaskCountdownActiveRole: b"taskCountdownActive",
+            self.FolderPathRole: b"folderPath",
         }
 
     # --- Properties exposed to QML -----------------------------------------
@@ -410,6 +408,54 @@ class DiagramModel(
         query = urllib.parse.quote_plus(prompt)
         url = f"https://chatgpt.com/?q={query}"
         return webbrowser.open(url)
+
+    @Slot(str, str)
+    def setFolderPath(self, item_id: str, path: str) -> None:
+        """Set the folder path for a diagram item."""
+        if path.startswith("file://"):
+            path = path[7:]
+        for row, item in enumerate(self._items):
+            if item.id == item_id:
+                if item.folder_path == path:
+                    return
+                item.folder_path = path
+                index = self.index(row, 0)
+                self.dataChanged.emit(index, index, [self.FolderPathRole])
+                self.itemsChanged.emit()
+                return
+
+    @Slot(str, result=str)
+    def getFolderPath(self, item_id: str) -> str:
+        """Get the folder path for a diagram item."""
+        for item in self._items:
+            if item.id == item_id:
+                return item.folder_path
+        return ""
+
+    @Slot(str, result=bool)
+    def openFolder(self, item_id: str) -> bool:
+        """Open the linked folder in the OS file browser."""
+        item = self.getItem(item_id)
+        if not item or not item.folder_path:
+            return False
+
+        path = item.folder_path
+        if not os.path.isdir(path):
+            return False
+
+        system = platform.system()
+        if system == "Darwin":
+            subprocess.Popen(["open", path])
+        elif system == "Windows":
+            subprocess.Popen(["explorer", path])
+        else:
+            subprocess.Popen(["xdg-open", path])
+        return True
+
+    @Slot(str)
+    def clearFolderPath(self, item_id: str) -> None:
+        """Clear the folder path for a diagram item."""
+        self.setFolderPath(item_id, "")
 
     @Slot(str, str)
     def renameTaskItem(self, item_id: str, new_text: str) -> None:
@@ -859,6 +905,85 @@ class DiagramModel(
         self._append_item(item)
         return item_id
 
+    def _parse_breakdown_entries(self, raw_list: str) -> List[str]:
+        if not raw_list:
+            return []
+        parts = re.split(r"[,\n;]+", raw_list)
+        entries = []
+        for part in parts:
+            text = part.strip()
+            if text:
+                entries.append(text)
+        return entries
+
+    @Slot(str, str)
+    def breakDownItem(self, item_id: str, raw_list: str) -> None:
+        item = self.getItem(item_id)
+        if not item:
+            return
+
+        entries = self._parse_breakdown_entries(raw_list)
+        if not entries:
+            return
+
+        preset_name = item.item_type.value
+        if preset_name != "task" and preset_name not in ITEM_PRESETS:
+            return
+
+        # Collect incoming and outgoing edges before removing the item
+        incoming_edges = [(e.from_id, e.description) for e in self._edges if e.to_id == item_id]
+        outgoing_edges = [(e.to_id, e.description) for e in self._edges if e.from_id == item_id]
+
+        spacing = 40.0
+        base_width = item.width
+        base_height = item.height
+        # Position new items starting at the original item's position
+        start_x = item.x
+        start_y = item.y
+
+        new_ids: List[str] = []
+        for idx, entry in enumerate(entries):
+            # Arrange horizontally
+            x = start_x + idx * (base_width + spacing)
+            y = start_y
+            if preset_name == "task":
+                new_id = self.addTaskFromText(entry, x, y)
+            else:
+                new_id = self.addPresetItemWithText(preset_name, x, y, entry)
+            if new_id:
+                new_ids.append(new_id)
+
+        if not new_ids:
+            return
+
+        # Connect new items sequentially
+        for i in range(len(new_ids) - 1):
+            self.addEdge(new_ids[i], new_ids[i + 1])
+
+        # Reconnect incoming edges to the first new node
+        first_new_id = new_ids[0]
+        for from_id, description in incoming_edges:
+            self.addEdge(from_id, first_new_id)
+            if description:
+                # Find the newly added edge and set its description
+                for edge in self._edges:
+                    if edge.from_id == from_id and edge.to_id == first_new_id:
+                        edge.description = description
+                        break
+
+        # Reconnect outgoing edges from the last new node
+        last_new_id = new_ids[-1]
+        for to_id, description in outgoing_edges:
+            self.addEdge(last_new_id, to_id)
+            if description:
+                for edge in self._edges:
+                    if edge.from_id == last_new_id and edge.to_id == to_id:
+                        edge.description = description
+                        break
+
+        # Remove the original item (this also removes its edges)
+        self.removeItem(item_id)
+
     @Slot(int, bool)
     def setTaskCompleted(self, task_index: int, completed: bool) -> None:
         """Set a task's completion state via the task model."""
@@ -932,8 +1057,8 @@ class DiagramModel(
             "width": item.width,
             "height": item.height,
             "text": item.text,
-            "subDiagramPath": item.sub_diagram_path,
             "taskIndex": item.task_index,
+            "folderPath": item.folder_path,
         }
 
     def getItemAt(self, x: float, y: float) -> Optional[str]:
@@ -1005,11 +1130,10 @@ class DiagramModel(
             # Only store image_data if it's an image item (to avoid bloating files)
             if item.item_type == DiagramItemType.IMAGE and item.image_data:
                 item_dict["image_data"] = item.image_data
-            # Only store sub_diagram_path if set
-            if item.sub_diagram_path:
-                item_dict["sub_diagram_path"] = item.sub_diagram_path
             if item.note_markdown:
                 item_dict["note_markdown"] = item.note_markdown
+            if item.folder_path:
+                item_dict["folder_path"] = item.folder_path
             items_data.append(item_dict)
 
         edges_data = []
@@ -1090,8 +1214,8 @@ class DiagramModel(
                     color=item_data.get("color", "#4a9eff"),
                     text_color=item_data.get("text_color", "#f5f6f8"),
                     image_data=item_data.get("image_data", ""),
-                    sub_diagram_path=item_data.get("sub_diagram_path", ""),
                     note_markdown=item_data.get("note_markdown", ""),
+                    folder_path=item_data.get("folder_path", ""),
                 )
                 new_items.append(item)
 
@@ -1149,6 +1273,3 @@ class DiagramModel(
         self.edgesChanged.emit()
         self.drawingChanged.emit()
         self.currentTaskChanged.emit()
-
-        # Update file watcher for sub-diagrams
-        self._update_sub_diagram_watches()

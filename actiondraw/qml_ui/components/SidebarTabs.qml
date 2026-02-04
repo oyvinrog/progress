@@ -39,6 +39,7 @@ Rectangle {
                         id: tabButton
                         property bool isActive: tabModel ? index === tabModel.currentTabIndex : false
                         property string activeTaskTitle: model.activeTaskTitle || ""
+                        property int tabPriority: model.priority || 0
                         width: tabColumnContent.width
                         height: 32
                         radius: 5
@@ -56,6 +57,25 @@ Rectangle {
 
                             RowLayout {
                                 spacing: 6
+
+                                Rectangle {
+                                    id: priorityBadge
+                                    visible: tabButton.tabPriority > 0
+                                    width: 16
+                                    height: 16
+                                    radius: 3
+                                    color: tabButton.tabPriority === 1 ? "#e53935" :
+                                           tabButton.tabPriority === 2 ? "#fb8c00" :
+                                           tabButton.tabPriority === 3 ? "#43a047" : "transparent"
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: tabButton.tabPriority
+                                        color: "#ffffff"
+                                        font.pixelSize: 10
+                                        font.bold: true
+                                    }
+                                }
 
                                 Text {
                                     id: tabName
@@ -88,8 +108,13 @@ Rectangle {
                         }
 
                         ToolTip {
-                            visible: tabMouseArea.containsMouse && (tabName.truncated || tabActiveTask.truncated)
-                            text: model.name + " (" + Math.round(model.completionPercent) + "%)" + (tabButton.activeTaskTitle ? "\n" + tabButton.activeTaskTitle : "")
+                            visible: tabMouseArea.containsMouse && (tabName.truncated || tabActiveTask.truncated || tabButton.tabPriority > 0)
+                            text: {
+                                var priorityText = tabButton.tabPriority === 1 ? "[Priority 1 - High] " :
+                                                   tabButton.tabPriority === 2 ? "[Priority 2 - Medium] " :
+                                                   tabButton.tabPriority === 3 ? "[Priority 3 - Low] " : ""
+                                return priorityText + model.name + " (" + Math.round(model.completionPercent) + "%)" + (tabButton.activeTaskTitle ? "\n" + tabButton.activeTaskTitle : "")
+                            }
                             delay: 500
                         }
 
@@ -155,6 +180,42 @@ Rectangle {
         id: tabContextMenu
         property int tabIndex: -1
         property string tabName: ""
+
+        Menu {
+            title: "Set Priority"
+
+            MenuItem {
+                text: "1 - High"
+                onTriggered: {
+                    if (tabModel)
+                        tabModel.setPriority(tabContextMenu.tabIndex, 1)
+                }
+            }
+            MenuItem {
+                text: "2 - Medium"
+                onTriggered: {
+                    if (tabModel)
+                        tabModel.setPriority(tabContextMenu.tabIndex, 2)
+                }
+            }
+            MenuItem {
+                text: "3 - Low"
+                onTriggered: {
+                    if (tabModel)
+                        tabModel.setPriority(tabContextMenu.tabIndex, 3)
+                }
+            }
+            MenuSeparator {}
+            MenuItem {
+                text: "Clear Priority"
+                onTriggered: {
+                    if (tabModel)
+                        tabModel.setPriority(tabContextMenu.tabIndex, 0)
+                }
+            }
+        }
+
+        MenuSeparator {}
 
         MenuItem {
             text: "Move Left"
