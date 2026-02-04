@@ -1309,7 +1309,6 @@ class ProjectManager(QObject):
             active_tab_data = tabs[active_tab]
             self._task_model.from_dict(active_tab_data.tasks)
             self._diagram_model.from_dict(active_tab_data.diagram)
-            self._diagram_model.setProjectPath(file_path)
 
             self._current_file_path = file_path
             self.currentFilePathChanged.emit()
@@ -1382,8 +1381,6 @@ class ProjectManager(QObject):
         tab_data = self._tab_model.getCurrentTabData()
         self._task_model.from_dict(tab_data.tasks)
         self._diagram_model.from_dict(tab_data.diagram)
-        if self._current_file_path:
-            self._diagram_model.setProjectPath(self._current_file_path)
 
         self.tabSwitched.emit()
 
@@ -1400,7 +1397,5 @@ class ProjectManager(QObject):
         tab_data = self._tab_model.getCurrentTabData()
         self._task_model.from_dict(tab_data.tasks)
         self._diagram_model.from_dict(tab_data.diagram)
-        if self._current_file_path:
-            self._diagram_model.setProjectPath(self._current_file_path)
 
         self.tabSwitched.emit()

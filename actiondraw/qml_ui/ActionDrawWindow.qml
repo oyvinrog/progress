@@ -566,16 +566,6 @@ ApplicationWindow {
                         id: itemContextMenu
 
                         MenuItem {
-                            text: "New Sub-diagram..."
-                            icon.name: "document-new"
-                            onTriggered: dialogs.newSubDiagramFileDialog.open()
-                        }
-                        MenuItem {
-                            text: "Link Existing Sub-diagram..."
-                            icon.name: "insert-link"
-                            onTriggered: dialogs.subDiagramFileDialog.open()
-                        }
-                        MenuItem {
                             id: renameNoteMenuItem
                             text: "Rename Label..."
                             icon.name: "edit-rename"
@@ -589,19 +579,6 @@ ApplicationWindow {
                             onTriggered: {
                                 root.renameItemById(diagramLayer.contextMenuItemId)
                             }
-                        }
-                        MenuItem {
-                            id: openSubDiagramMenuItem
-                            text: "Open Sub-diagram"
-                            icon.name: "document-open"
-                            visible: {
-                                if (!diagramModel || !diagramLayer.contextMenuItemId)
-                                    return false
-                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
-                                return item && item.subDiagramPath && item.subDiagramPath !== ""
-                            }
-                            height: visible ? implicitHeight : 0
-                            onTriggered: diagramModel.openSubDiagram(diagramLayer.contextMenuItemId)
                         }
                         MenuItem {
                             id: drillToTabMenuItem
@@ -1109,7 +1086,6 @@ ApplicationWindow {
                             property int taskIndex: model.taskIndex
                             property bool taskCompleted: model.taskCompleted
                             property bool taskCurrent: model.taskCurrent
-                            property int subDiagramProgress: model.subDiagramProgress
                             property string folderPath: model.folderPath
                             property bool isTask: itemRect.itemType === "task" && itemRect.taskIndex >= 0
                             property real dragStartX: 0
@@ -1148,30 +1124,6 @@ ApplicationWindow {
                                 border.color: "#ffcc00"
                                 opacity: 0.5
                                 z: -1
-                            }
-
-                            // Sub-diagram progress badge
-                            Rectangle {
-                                id: subDiagramBadge
-                                visible: itemRect.subDiagramProgress >= 0
-                                anchors.right: parent.right
-                                anchors.bottom: parent.bottom
-                                anchors.rightMargin: 6
-                                anchors.bottomMargin: 6
-                                width: subDiagramText.width + 12
-                                height: 20
-                                radius: 10
-                                color: itemRect.subDiagramProgress === 100 ? "#4caf50" : "#2196f3"
-                                z: 25
-
-                                Text {
-                                    id: subDiagramText
-                                    anchors.centerIn: parent
-                                    text: itemRect.subDiagramProgress + "%"
-                                    color: "#ffffff"
-                                    font.pixelSize: 11
-                                    font.bold: true
-                                }
                             }
 
                             // Folder icon badge

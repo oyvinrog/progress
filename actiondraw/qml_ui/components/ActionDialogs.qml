@@ -28,8 +28,6 @@ Item {
     property alias edgeDropTaskDialog: edgeDropTaskDialog
     property alias saveDialog: saveDialog
     property alias loadDialog: loadDialog
-    property alias subDiagramFileDialog: subDiagramFileDialog
-    property alias newSubDiagramFileDialog: newSubDiagramFileDialog
     property alias folderDialog: folderDialog
     property alias clipboardPasteDialog: clipboardPasteDialog
 
@@ -1112,31 +1110,6 @@ Item {
         onAccepted: {
             if (projectManager) {
                 projectManager.loadProject(selectedFile)
-            }
-        }
-    }
-
-    FileDialog {
-        id: subDiagramFileDialog
-        title: "Select Sub-diagram"
-        fileMode: FileDialog.OpenFile
-        nameFilters: ["Progress files (*.progress)", "All files (*)"]
-        onAccepted: {
-            if (diagramModel && diagramLayer && diagramLayer.contextMenuItemId) {
-                diagramModel.setSubDiagramPath(diagramLayer.contextMenuItemId, selectedFile)
-            }
-        }
-    }
-
-    FileDialog {
-        id: newSubDiagramFileDialog
-        title: "Create New Sub-diagram"
-        fileMode: FileDialog.SaveFile
-        nameFilters: ["Progress files (*.progress)", "All files (*)"]
-        defaultSuffix: "progress"
-        onAccepted: {
-            if (diagramModel && diagramLayer && diagramLayer.contextMenuItemId) {
-                diagramModel.createAndLinkSubDiagram(diagramLayer.contextMenuItemId, selectedFile)
             }
         }
     }

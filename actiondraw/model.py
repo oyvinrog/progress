@@ -28,7 +28,6 @@ from .clipboard import ClipboardMixin
 from .constants import ITEM_PRESETS
 from .drawing import DrawingMixin
 from .layout import LayoutMixin
-from .subdiagram import SubDiagramMixin
 from .types import DiagramEdge, DiagramItem, DiagramItemType, DrawingPoint, DrawingStroke
 
 
@@ -36,7 +35,6 @@ class DiagramModel(
     ClipboardMixin,
     DrawingMixin,
     LayoutMixin,
-    SubDiagramMixin,
     QAbstractListModel,
 ):
     """Qt model exposing diagram items to QML."""
@@ -54,14 +52,12 @@ class DiagramModel(
     TaskCompletedRole = Qt.UserRole + 11
     ImageDataRole = Qt.UserRole + 12
     TaskCurrentRole = Qt.UserRole + 13
-    SubDiagramPathRole = Qt.UserRole + 14
-    SubDiagramProgressRole = Qt.UserRole + 15
-    NoteMarkdownRole = Qt.UserRole + 16
-    TaskCountdownRemainingRole = Qt.UserRole + 17
-    TaskCountdownProgressRole = Qt.UserRole + 18
-    TaskCountdownExpiredRole = Qt.UserRole + 19
-    TaskCountdownActiveRole = Qt.UserRole + 20
-    FolderPathRole = Qt.UserRole + 21
+    NoteMarkdownRole = Qt.UserRole + 14
+    TaskCountdownRemainingRole = Qt.UserRole + 15
+    TaskCountdownProgressRole = Qt.UserRole + 16
+    TaskCountdownExpiredRole = Qt.UserRole + 17
+    TaskCountdownActiveRole = Qt.UserRole + 18
+    FolderPathRole = Qt.UserRole + 19
 
     itemsChanged = Signal()
     edgesChanged = Signal()
@@ -84,7 +80,6 @@ class DiagramModel(
 
         # Initialize mixins
         self._init_drawing()
-        self._init_subdiagram()
 
         # Connect to task model's signals for bidirectional sync
         if self._task_model is not None:
@@ -165,10 +160,6 @@ class DiagramModel(
             return item.image_data
         if role == self.TaskCurrentRole:
             return item.task_index >= 0 and item.task_index == self._current_task_index
-        if role == self.SubDiagramPathRole:
-            return item.sub_diagram_path
-        if role == self.SubDiagramProgressRole:
-            return self._calculate_sub_diagram_progress(item.sub_diagram_path)
         if role == self.NoteMarkdownRole:
             return item.note_markdown
         if role == self.TaskCountdownRemainingRole:
@@ -198,8 +189,6 @@ class DiagramModel(
             self.TaskCompletedRole: b"taskCompleted",
             self.ImageDataRole: b"imageData",
             self.TaskCurrentRole: b"taskCurrent",
-            self.SubDiagramPathRole: b"subDiagramPath",
-            self.SubDiagramProgressRole: b"subDiagramProgress",
             self.NoteMarkdownRole: b"noteMarkdown",
             self.TaskCountdownRemainingRole: b"taskCountdownRemaining",
             self.TaskCountdownProgressRole: b"taskCountdownProgress",
@@ -1068,7 +1057,6 @@ class DiagramModel(
             "width": item.width,
             "height": item.height,
             "text": item.text,
-            "subDiagramPath": item.sub_diagram_path,
             "taskIndex": item.task_index,
             "folderPath": item.folder_path,
         }
@@ -1142,9 +1130,6 @@ class DiagramModel(
             # Only store image_data if it's an image item (to avoid bloating files)
             if item.item_type == DiagramItemType.IMAGE and item.image_data:
                 item_dict["image_data"] = item.image_data
-            # Only store sub_diagram_path if set
-            if item.sub_diagram_path:
-                item_dict["sub_diagram_path"] = item.sub_diagram_path
             if item.note_markdown:
                 item_dict["note_markdown"] = item.note_markdown
             if item.folder_path:
@@ -1229,7 +1214,6 @@ class DiagramModel(
                     color=item_data.get("color", "#4a9eff"),
                     text_color=item_data.get("text_color", "#f5f6f8"),
                     image_data=item_data.get("image_data", ""),
-                    sub_diagram_path=item_data.get("sub_diagram_path", ""),
                     note_markdown=item_data.get("note_markdown", ""),
                     folder_path=item_data.get("folder_path", ""),
                 )
@@ -1289,6 +1273,3 @@ class DiagramModel(
         self.edgesChanged.emit()
         self.drawingChanged.emit()
         self.currentTaskChanged.emit()
-
-        # Update file watcher for sub-diagrams
-        self._update_sub_diagram_watches()
