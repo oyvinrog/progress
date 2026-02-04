@@ -30,6 +30,7 @@ Item {
     property alias loadDialog: loadDialog
     property alias subDiagramFileDialog: subDiagramFileDialog
     property alias newSubDiagramFileDialog: newSubDiagramFileDialog
+    property alias folderDialog: folderDialog
     property alias clipboardPasteDialog: clipboardPasteDialog
 
     anchors.fill: parent
@@ -1136,6 +1137,16 @@ Item {
         onAccepted: {
             if (diagramModel && diagramLayer && diagramLayer.contextMenuItemId) {
                 diagramModel.createAndLinkSubDiagram(diagramLayer.contextMenuItemId, selectedFile)
+            }
+        }
+    }
+
+    FolderDialog {
+        id: folderDialog
+        title: "Select Folder"
+        onAccepted: {
+            if (diagramModel && diagramLayer && diagramLayer.contextMenuItemId) {
+                diagramModel.setFolderPath(diagramLayer.contextMenuItemId, selectedFolder)
             }
         }
     }

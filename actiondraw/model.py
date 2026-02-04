@@ -6,7 +6,10 @@ This module provides the main Qt model for diagram items and edges.
 from __future__ import annotations
 
 import math
+import os
+import platform
 import re
+import subprocess
 import urllib.parse
 import webbrowser
 from itertools import count
@@ -58,6 +61,7 @@ class DiagramModel(
     TaskCountdownProgressRole = Qt.UserRole + 18
     TaskCountdownExpiredRole = Qt.UserRole + 19
     TaskCountdownActiveRole = Qt.UserRole + 20
+    FolderPathRole = Qt.UserRole + 21
 
     itemsChanged = Signal()
     edgesChanged = Signal()
@@ -175,6 +179,8 @@ class DiagramModel(
             return self._isTaskCountdownExpired(item.task_index)
         if role == self.TaskCountdownActiveRole:
             return self._isTaskCountdownActive(item.task_index)
+        if role == self.FolderPathRole:
+            return item.folder_path
         return None
 
     def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
@@ -199,6 +205,7 @@ class DiagramModel(
             self.TaskCountdownProgressRole: b"taskCountdownProgress",
             self.TaskCountdownExpiredRole: b"taskCountdownExpired",
             self.TaskCountdownActiveRole: b"taskCountdownActive",
+            self.FolderPathRole: b"folderPath",
         }
 
     # --- Properties exposed to QML -----------------------------------------
@@ -412,6 +419,54 @@ class DiagramModel(
         query = urllib.parse.quote_plus(prompt)
         url = f"https://chatgpt.com/?q={query}"
         return webbrowser.open(url)
+
+    @Slot(str, str)
+    def setFolderPath(self, item_id: str, path: str) -> None:
+        """Set the folder path for a diagram item."""
+        if path.startswith("file://"):
+            path = path[7:]
+        for row, item in enumerate(self._items):
+            if item.id == item_id:
+                if item.folder_path == path:
+                    return
+                item.folder_path = path
+                index = self.index(row, 0)
+                self.dataChanged.emit(index, index, [self.FolderPathRole])
+                self.itemsChanged.emit()
+                return
+
+    @Slot(str, result=str)
+    def getFolderPath(self, item_id: str) -> str:
+        """Get the folder path for a diagram item."""
+        for item in self._items:
+            if item.id == item_id:
+                return item.folder_path
+        return ""
+
+    @Slot(str, result=bool)
+    def openFolder(self, item_id: str) -> bool:
+        """Open the linked folder in the OS file browser."""
+        item = self.getItem(item_id)
+        if not item or not item.folder_path:
+            return False
+
+        path = item.folder_path
+        if not os.path.isdir(path):
+            return False
+
+        system = platform.system()
+        if system == "Darwin":
+            subprocess.Popen(["open", path])
+        elif system == "Windows":
+            subprocess.Popen(["explorer", path])
+        else:
+            subprocess.Popen(["xdg-open", path])
+        return True
+
+    @Slot(str)
+    def clearFolderPath(self, item_id: str) -> None:
+        """Clear the folder path for a diagram item."""
+        self.setFolderPath(item_id, "")
 
     @Slot(str, str)
     def renameTaskItem(self, item_id: str, new_text: str) -> None:
@@ -1015,6 +1070,7 @@ class DiagramModel(
             "text": item.text,
             "subDiagramPath": item.sub_diagram_path,
             "taskIndex": item.task_index,
+            "folderPath": item.folder_path,
         }
 
     def getItemAt(self, x: float, y: float) -> Optional[str]:
@@ -1091,6 +1147,8 @@ class DiagramModel(
                 item_dict["sub_diagram_path"] = item.sub_diagram_path
             if item.note_markdown:
                 item_dict["note_markdown"] = item.note_markdown
+            if item.folder_path:
+                item_dict["folder_path"] = item.folder_path
             items_data.append(item_dict)
 
         edges_data = []
@@ -1173,6 +1231,7 @@ class DiagramModel(
                     image_data=item_data.get("image_data", ""),
                     sub_diagram_path=item_data.get("sub_diagram_path", ""),
                     note_markdown=item_data.get("note_markdown", ""),
+                    folder_path=item_data.get("folder_path", ""),
                 )
                 new_items.append(item)
 

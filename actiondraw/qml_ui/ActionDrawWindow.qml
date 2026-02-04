@@ -634,6 +634,37 @@ ApplicationWindow {
                             onTriggered: diagramModel.openChatGpt(diagramLayer.contextMenuItemId)
                         }
                         MenuItem {
+                            text: "Link Folder..."
+                            icon.name: "folder"
+                            onTriggered: dialogs.folderDialog.open()
+                        }
+                        MenuItem {
+                            id: openFolderMenuItem
+                            text: "Open Folder"
+                            icon.name: "folder-open"
+                            visible: {
+                                if (!diagramModel || !diagramLayer.contextMenuItemId)
+                                    return false
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                return item && item.folderPath && item.folderPath !== ""
+                            }
+                            height: visible ? implicitHeight : 0
+                            onTriggered: diagramModel.openFolder(diagramLayer.contextMenuItemId)
+                        }
+                        MenuItem {
+                            id: clearFolderMenuItem
+                            text: "Clear Folder"
+                            icon.name: "edit-clear"
+                            visible: {
+                                if (!diagramModel || !diagramLayer.contextMenuItemId)
+                                    return false
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                return item && item.folderPath && item.folderPath !== ""
+                            }
+                            height: visible ? implicitHeight : 0
+                            onTriggered: diagramModel.clearFolderPath(diagramLayer.contextMenuItemId)
+                        }
+                        MenuItem {
                             id: breakDownMenuItem
                             text: "Break Down..."
                             icon.name: "view-list-details"
@@ -1079,6 +1110,7 @@ ApplicationWindow {
                             property bool taskCompleted: model.taskCompleted
                             property bool taskCurrent: model.taskCurrent
                             property int subDiagramProgress: model.subDiagramProgress
+                            property string folderPath: model.folderPath
                             property bool isTask: itemRect.itemType === "task" && itemRect.taskIndex >= 0
                             property real dragStartX: 0
                             property real dragStartY: 0
@@ -1139,6 +1171,51 @@ ApplicationWindow {
                                     color: "#ffffff"
                                     font.pixelSize: 11
                                     font.bold: true
+                                }
+                            }
+
+                            // Folder icon badge
+                            Rectangle {
+                                id: folderBadge
+                                visible: itemRect.folderPath !== ""
+                                anchors.left: parent.left
+                                anchors.bottom: parent.bottom
+                                anchors.leftMargin: 6
+                                anchors.bottomMargin: 6
+                                width: 24
+                                height: 20
+                                radius: 4
+                                color: "#e8a838"
+                                z: 25
+
+                                Canvas {
+                                    anchors.centerIn: parent
+                                    width: 16
+                                    height: 12
+                                    onPaint: {
+                                        var ctx = getContext("2d")
+                                        ctx.clearRect(0, 0, width, height)
+                                        ctx.fillStyle = "#ffffff"
+                                        // Folder tab
+                                        ctx.beginPath()
+                                        ctx.moveTo(0, 2)
+                                        ctx.lineTo(0, height)
+                                        ctx.lineTo(width, height)
+                                        ctx.lineTo(width, 4)
+                                        ctx.lineTo(7, 4)
+                                        ctx.lineTo(5.5, 2)
+                                        ctx.closePath()
+                                        ctx.fill()
+                                    }
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        if (diagramModel)
+                                            diagramModel.openFolder(itemRect.itemId)
+                                    }
                                 }
                             }
 

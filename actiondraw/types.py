@@ -44,6 +44,7 @@ class DiagramItem:
     image_data: str = ""  # Base64-encoded PNG data for IMAGE type
     sub_diagram_path: str = ""  # Path to linked sub-diagram .progress file
     note_markdown: str = ""  # Markdown note content for note-like items
+    folder_path: str = ""  # Path to linked folder
 
 
 @dataclass
