@@ -7,7 +7,9 @@ ApplicationWindow {
     visible: true
     width: 1100
     height: 800
-    color: "#10141c"
+    color: "#090f15"
+    font.family: "Trebuchet MS"
+    font.pixelSize: 13
     title: {
         if (projectManager && projectManager.currentFilePath) {
             var name = projectManager.currentFilePath.split("/").pop()
@@ -34,6 +36,37 @@ ApplicationWindow {
         saveDialog: dialogs.saveDialog
         loadDialog: dialogs.loadDialog
         taskDialog: dialogs.taskDialog
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        z: -20
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: "#0a131c" }
+            GradientStop { position: 1.0; color: "#111d29" }
+        }
+    }
+
+    Rectangle {
+        width: Math.min(root.width * 0.75, 780)
+        height: width
+        radius: width / 2
+        x: -width * 0.28
+        y: -height * 0.45
+        z: -19
+        color: "#1d4c66"
+        opacity: 0.16
+    }
+
+    Rectangle {
+        width: Math.min(root.width * 0.65, 640)
+        height: width
+        radius: width / 2
+        x: root.width - width * 0.7
+        y: root.height - height * 0.45
+        z: -19
+        color: "#2f6b54"
+        opacity: 0.12
     }
 
     function showWindow() {
@@ -407,8 +440,8 @@ ApplicationWindow {
 
     RowLayout {
         anchors.fill: parent
-        anchors.margins: 16
-        spacing: 12
+        anchors.margins: 18
+        spacing: 14
 
         SidebarTabs {
             tabModel: tabModelRef
@@ -419,7 +452,7 @@ ApplicationWindow {
         ColumnLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 12
+            spacing: 14
 
             ProgressStatsRow {
                 root: root
@@ -436,9 +469,19 @@ ApplicationWindow {
             Rectangle {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            radius: 10
-            color: "#161c24"
-            border.color: "#243040"
+            radius: 14
+            color: "#101a24"
+            border.color: "#2f465b"
+            border.width: 1
+
+            Rectangle {
+                anchors.fill: parent
+                anchors.margins: 1
+                radius: 13
+                color: "transparent"
+                border.color: "#1a2d3d"
+                border.width: 1
+            }
 
             MouseArea {
                 anchors.fill: parent
@@ -447,7 +490,8 @@ ApplicationWindow {
                 propagateComposedEvents: true
                 z: 10
                 onWheel: function(wheel) {
-                    if (!(wheel.modifiers & Qt.ControlModifier)) {
+                    var zoomModifier = (wheel.modifiers & Qt.ControlModifier) || (wheel.modifiers & Qt.MetaModifier)
+                    if (!zoomModifier) {
                         wheel.accepted = false
                         return
                     }
@@ -2406,44 +2450,54 @@ ApplicationWindow {
         // Keyboard shortcuts hint bar
         Rectangle {
             Layout.fillWidth: true
-            height: 28
-            color: "#0d1117"
-            border.color: "#21262d"
-            radius: 4
+            height: 36
+            color: "#121e2a"
+            border.color: "#2a3e52"
+            border.width: 1
+            radius: 10
 
-            Row {
-                anchors.centerIn: parent
-                spacing: 24
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 12
+                anchors.rightMargin: 12
+                spacing: 10
 
-                Text {
-                    text: "Ctrl+Enter  New Task"
-                    color: "#6e7681"
+                Label {
+                    text: "Shortcuts"
+                    color: "#8ea6bc"
                     font.pixelSize: 11
+                    font.bold: true
                 }
 
-                Text {
-                    text: "Ctrl+V  Paste"
-                    color: "#6e7681"
-                    font.pixelSize: 11
+                Repeater {
+                    model: [
+                        "Ctrl+Enter  New Task",
+                        "Ctrl+V  Paste",
+                        "Ctrl+S  Save",
+                        "F2  Rename",
+                        "Ctrl+Scroll  Zoom"
+                    ]
+
+                    delegate: Rectangle {
+                        radius: 6
+                        color: "#17283a"
+                        border.color: "#324a60"
+                        border.width: 1
+                        implicitHeight: 22
+                        implicitWidth: keyText.implicitWidth + 16
+
+                        Text {
+                            id: keyText
+                            anchors.centerIn: parent
+                            text: modelData
+                            color: "#c4d3e2"
+                            font.pixelSize: 10
+                            font.bold: true
+                        }
+                    }
                 }
 
-                Text {
-                    text: "Ctrl+S  Save"
-                    color: "#6e7681"
-                    font.pixelSize: 11
-                }
-
-                Text {
-                    text: "F2  Rename"
-                    color: "#6e7681"
-                    font.pixelSize: 11
-                }
-
-                Text {
-                    text: "Ctrl+Scroll  Zoom"
-                    color: "#6e7681"
-                    font.pixelSize: 11
-                }
+                Item { Layout.fillWidth: true }
             }
         }
         }  // Close main content ColumnLayout
@@ -2459,7 +2513,9 @@ ApplicationWindow {
         width: saveNotificationText.width + 32
         height: 40
         radius: 20
-        color: "#2d7a4d"
+        color: "#1f6a83"
+        border.color: "#56c9ee"
+        border.width: 1
         opacity: 0
         z: 1000
 
