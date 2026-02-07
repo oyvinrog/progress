@@ -374,6 +374,35 @@ class TestEdges:
         assert len(empty_diagram_model.edges) == 0
 
 
+class TestFolderLinks:
+    def test_set_folder_path_normalizes_windows_file_url(self, empty_diagram_model, monkeypatch):
+        import actiondraw.model as model_module
+
+        item_id = empty_diagram_model.addBox(10.0, 10.0, "Folder Item")
+        monkeypatch.setattr(model_module.os, "name", "nt", raising=False)
+
+        empty_diagram_model.setFolderPath(item_id, "file:///C:/Users/Test%20Folder")
+
+        assert empty_diagram_model.getFolderPath(item_id) == "C:/Users/Test Folder"
+
+    def test_open_folder_windows_uses_startfile(self, empty_diagram_model, monkeypatch):
+        import actiondraw.model as model_module
+
+        item_id = empty_diagram_model.addBox(10.0, 10.0, "Folder Item")
+        # Simulate legacy stored Windows path format.
+        empty_diagram_model.setFolderPath(item_id, "/C:/Users/Test Folder")
+
+        monkeypatch.setattr(model_module.os, "name", "nt", raising=False)
+        monkeypatch.setattr(model_module.platform, "system", lambda: "Windows")
+        monkeypatch.setattr(model_module.os.path, "isdir", lambda path: path == "C:/Users/Test Folder")
+
+        opened = []
+        monkeypatch.setattr(model_module.os, "startfile", lambda path: opened.append(path), raising=False)
+
+        assert empty_diagram_model.openFolder(item_id) is True
+        assert opened == ["C:/Users/Test Folder"]
+
+
 class TestQueries:
     def test_get_item(self, empty_diagram_model):
         item_id = empty_diagram_model.addBox(10.0, 20.0, "Box")

@@ -19,6 +19,7 @@ from PySide6.QtCore import (
     QAbstractListModel,
     QModelIndex,
     Property,
+    QUrl,
     Qt,
     Signal,
     Slot,
@@ -412,8 +413,7 @@ class DiagramModel(
     @Slot(str, str)
     def setFolderPath(self, item_id: str, path: str) -> None:
         """Set the folder path for a diagram item."""
-        if path.startswith("file://"):
-            path = path[7:]
+        path = self._normalize_local_path(path)
         for row, item in enumerate(self._items):
             if item.id == item_id:
                 if item.folder_path == path:
@@ -439,18 +439,42 @@ class DiagramModel(
         if not item or not item.folder_path:
             return False
 
-        path = item.folder_path
+        # Normalize at open-time to support older saved paths too.
+        path = self._normalize_local_path(item.folder_path)
         if not os.path.isdir(path):
             return False
 
-        system = platform.system()
-        if system == "Darwin":
-            subprocess.Popen(["open", path])
-        elif system == "Windows":
-            subprocess.Popen(["explorer", path])
-        else:
-            subprocess.Popen(["xdg-open", path])
-        return True
+        try:
+            system = platform.system()
+            if system == "Darwin":
+                subprocess.Popen(["open", path])
+            elif system == "Windows":
+                if hasattr(os, "startfile"):
+                    os.startfile(path)
+                else:
+                    subprocess.Popen(["explorer", path])
+            else:
+                subprocess.Popen(["xdg-open", path])
+            return True
+        except OSError:
+            return False
+
+    def _normalize_local_path(self, path: str) -> str:
+        """Convert local file URLs and legacy Windows URL paths into local paths."""
+        if not path:
+            return ""
+
+        normalized = path.strip()
+        if normalized.startswith("file:"):
+            url = QUrl(normalized)
+            if url.isLocalFile():
+                normalized = url.toLocalFile()
+            else:
+                normalized = urllib.parse.unquote(url.path())
+
+        if os.name == "nt" and normalized.startswith("/") and len(normalized) > 2 and normalized[2] == ":":
+            normalized = normalized[1:]
+        return normalized
 
     @Slot(str)
     def clearFolderPath(self, item_id: str) -> None:
