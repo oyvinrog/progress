@@ -239,24 +239,73 @@ Item {
             Layout.fillWidth: true
             spacing: 12
 
-            ScrollView {
+            SplitView {
                 Layout.fillWidth: true
                 Layout.preferredHeight: freeTextDialog.dialogHeight
+                orientation: Qt.Horizontal
 
-                TextArea {
-                    id: freeTextArea
-                    text: freeTextDialog.textValue
-                    placeholderText: "Write your text here..."
-                    wrapMode: TextEdit.Wrap
-                    selectByMouse: true
-                    color: "#f5f6f8"
-                    font.pixelSize: 14
-                    background: Rectangle {
-                        color: "#1b2028"
-                        radius: 6
-                        border.color: "#384458"
+                ScrollView {
+                    SplitView.fillWidth: true
+                    SplitView.fillHeight: true
+
+                    TextArea {
+                        id: freeTextArea
+                        text: freeTextDialog.textValue
+                        placeholderText: "Write your text here..."
+                        wrapMode: TextEdit.Wrap
+                        selectByMouse: true
+                        color: "#f5f6f8"
+                        font.pixelSize: 14
+                        background: Rectangle {
+                            color: "#1b2028"
+                            radius: 6
+                            border.color: "#384458"
+                        }
+                        onTextChanged: freeTextDialog.textValue = text
                     }
-                    onTextChanged: freeTextDialog.textValue = text
+                }
+
+                Rectangle {
+                    SplitView.fillWidth: true
+                    SplitView.fillHeight: true
+                    color: "#0f1624"
+                    radius: 6
+                    border.color: "#384458"
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        spacing: 6
+
+                        Label {
+                            text: "Preview"
+                            color: "#aab7cf"
+                            font.pixelSize: 12
+                            font.bold: true
+                        }
+
+                        ScrollView {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            background: Rectangle {
+                                color: "#0b1220"
+                                radius: 4
+                                border.color: "#2b3646"
+                            }
+
+                            Text {
+                                width: parent.width
+                                text: freeTextArea.text
+                                textFormat: Text.MarkdownText
+                                wrapMode: Text.WordWrap
+                                color: "#f5f6f8"
+                                leftPadding: 10
+                                rightPadding: 10
+                                topPadding: 8
+                                bottomPadding: 8
+                            }
+                        }
+                    }
                 }
             }
 

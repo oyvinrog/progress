@@ -2132,21 +2132,32 @@ ApplicationWindow {
                             }
 
                             Text {
+                                id: freeTextLabel
                                 visible: itemRect.itemType === "freetext"
                                 anchors.fill: parent
                                 anchors.topMargin: 24
                                 anchors.leftMargin: 12
                                 anchors.rightMargin: 12
                                 anchors.bottomMargin: 8
+                                readonly property bool useMarkdown: {
+                                    var editingThisItem = dialogs && dialogs.freeTextDialog
+                                        && dialogs.freeTextDialog.visible
+                                        && dialogs.freeTextDialog.editingItemId === itemRect.itemId
+                                    if (editingThisItem)
+                                        return true
+                                    if (!diagramModel)
+                                        return itemRect.selected || itemRect.hovered
+                                    return diagramModel.count <= 80 || itemRect.selected || itemRect.hovered
+                                }
                                 text: model.text
                                 color: model.textColor
                                 wrapMode: Text.Wrap
                                 horizontalAlignment: Text.AlignLeft
                                 verticalAlignment: Text.AlignTop
-                                textFormat: Text.PlainText
+                                textFormat: freeTextLabel.useMarkdown ? Text.MarkdownText : Text.PlainText
                                 font.pixelSize: 13
-                                maximumLineCount: Math.max(1, Math.floor(height / (font.pixelSize * 1.35)))
-                                elide: Text.ElideRight
+                                maximumLineCount: freeTextLabel.useMarkdown ? 1000 : Math.max(1, Math.floor(height / (font.pixelSize * 1.35)))
+                                elide: freeTextLabel.useMarkdown ? Text.ElideNone : Text.ElideRight
                                 clip: true
 
                                 ToolTip.visible: freeTextHover.containsMouse
