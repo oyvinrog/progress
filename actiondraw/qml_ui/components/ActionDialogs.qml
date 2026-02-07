@@ -217,6 +217,18 @@ Item {
         property real dialogHeight: 220
         title: freeTextDialog.editingItemId.length === 0 ? "Free Text" : "Edit Free Text"
 
+        Shortcut {
+            sequence: "Ctrl+Return"
+            enabled: freeTextDialog.visible
+            onActivated: freeTextDialog.accept()
+        }
+
+        Shortcut {
+            sequence: "Ctrl+Enter"
+            enabled: freeTextDialog.visible
+            onActivated: freeTextDialog.accept()
+        }
+
         onOpened: {
             freeTextArea.forceActiveFocus()
             if (freeTextDialog.editingItemId.length > 0)
@@ -302,7 +314,14 @@ Item {
         }
 
         footer: DialogButtonBox {
+            id: freeTextDialogButtons
             standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+
+            Component.onCompleted: {
+                var okButton = freeTextDialogButtons.standardButton(DialogButtonBox.Ok)
+                if (okButton)
+                    okButton.text = "Save (Ctrl+Enter)"
+            }
         }
 
         onAccepted: {

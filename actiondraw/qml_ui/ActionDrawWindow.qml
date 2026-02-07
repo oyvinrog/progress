@@ -169,7 +169,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Ctrl+Return"
-        enabled: diagramModel !== null
+        enabled: diagramModel !== null && !dialogs.freeTextDialog.visible
         onActivated: root.addTaskOrConnectedTask()
     }
 
