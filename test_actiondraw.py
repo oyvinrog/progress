@@ -591,6 +591,30 @@ class TestTaskIntegration:
         assert task_model.data(task_model.index(0, 0), task_model.CompletedRole) is True
         assert diagram_model_with_task_model.data(index, diagram_model_with_task_model.TaskCompletedRole) is True
 
+    def test_completion_advances_current_task_when_single_outgoing(self, diagram_model_with_task_model):
+        source = diagram_model_with_task_model.addTask(0, 0.0, 0.0)
+        target = diagram_model_with_task_model.addTask(1, 100.0, 0.0)
+        diagram_model_with_task_model.addEdge(source, target)
+
+        diagram_model_with_task_model.setCurrentTask(0)
+        assert diagram_model_with_task_model.currentTaskIndex == 0
+
+        diagram_model_with_task_model.setTaskCompleted(0, True)
+        assert diagram_model_with_task_model.currentTaskIndex == 1
+
+    def test_completion_does_not_choose_when_multiple_outgoing(self, diagram_model_with_task_model):
+        source = diagram_model_with_task_model.addTask(0, 0.0, 0.0)
+        target_one = diagram_model_with_task_model.addTask(1, 100.0, 0.0)
+        target_two = diagram_model_with_task_model.addTask(2, 200.0, 0.0)
+        diagram_model_with_task_model.addEdge(source, target_one)
+        diagram_model_with_task_model.addEdge(source, target_two)
+
+        diagram_model_with_task_model.setCurrentTask(0)
+        assert diagram_model_with_task_model.currentTaskIndex == 0
+
+        diagram_model_with_task_model.setTaskCompleted(0, True)
+        assert diagram_model_with_task_model.currentTaskIndex == -1
+
 
 class TestBidirectionalRename:
     """Test bidirectional name syncing between diagram and task list."""
