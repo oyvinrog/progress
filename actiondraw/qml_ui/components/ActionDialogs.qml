@@ -239,6 +239,14 @@ Item {
             Layout.fillWidth: true
             spacing: 12
 
+            Label {
+                Layout.fillWidth: true
+                text: "Markdown supported. Example: ## Heading, **bold**, - list"
+                color: "#8fa2c5"
+                font.pixelSize: 12
+                wrapMode: Text.WordWrap
+            }
+
             SplitView {
                 Layout.fillWidth: true
                 Layout.preferredHeight: freeTextDialog.dialogHeight
