@@ -6,18 +6,88 @@ Rectangle {
     id: sidebar
     property var tabModel
     property var projectManager
+    property int expandedWidth: 252
+    property int collapsedWidth: 48
+    readonly property bool keepExpanded: tabContextMenu.visible || renameTabDialog.visible
+    readonly property bool isExpanded: sidebarHoverHandler.hovered || keepExpanded
 
     Layout.fillHeight: true
-    Layout.preferredWidth: 220
-    radius: 8
-    color: "#1b2028"
-    border.color: "#2e3744"
+    Layout.preferredWidth: isExpanded ? expandedWidth : collapsedWidth
+    Behavior on Layout.preferredWidth {
+        NumberAnimation {
+            duration: 140
+            easing.type: Easing.OutCubic
+        }
+    }
+
+    radius: 12
+    color: "#131f2a"
+    border.color: "#2b3f53"
+    border.width: 1
     visible: tabModel !== null
+    clip: true
+
+    Rectangle {
+        anchors.fill: parent
+        radius: parent.radius
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: "#1a2a38" }
+            GradientStop { position: 1.0; color: "#101a24" }
+        }
+        opacity: 0.32
+    }
+
+    HoverHandler {
+        id: sidebarHoverHandler
+    }
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 8
-        spacing: 4
+        anchors.margins: sidebar.isExpanded ? 10 : 6
+        spacing: 8
+
+        Rectangle {
+            Layout.fillWidth: true
+            height: 34
+            radius: 8
+            color: "#192736"
+            border.color: "#31485e"
+            border.width: 1
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 10
+                anchors.rightMargin: 10
+                spacing: 8
+
+                Text {
+                    text: sidebar.isExpanded ? "Project Tabs" : ">"
+                    color: "#dbe7f3"
+                    font.pixelSize: sidebar.isExpanded ? 12 : 14
+                    font.bold: true
+                    Layout.alignment: Qt.AlignVCenter
+                }
+
+                Item { Layout.fillWidth: true }
+
+                Rectangle {
+                    visible: sidebar.isExpanded
+                    radius: 6
+                    color: "#103047"
+                    border.color: "#2f5871"
+                    implicitWidth: 30
+                    implicitHeight: 20
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: tabModel ? tabModel.tabCount : 0
+                        color: "#8dd4ff"
+                        font.pixelSize: 11
+                        font.bold: true
+                    }
+                }
+            }
+        }
 
         Flickable {
             id: tabFlickable
@@ -30,7 +100,7 @@ Rectangle {
             Column {
                 id: tabColumnContent
                 width: tabFlickable.width
-                spacing: 2
+                spacing: 4
 
                 Repeater {
                     model: tabModel
@@ -41,19 +111,23 @@ Rectangle {
                         property string activeTaskTitle: model.activeTaskTitle || ""
                         property int tabPriority: model.priority || 0
                         width: tabColumnContent.width
-                        height: 32
-                        radius: 5
-                        color: isActive ? "#3b485c" : (tabMouseArea.containsMouse ? "#2a3444" : "transparent")
-                        border.color: isActive ? "#4a9eff" : "transparent"
+                        height: tabButton.activeTaskTitle !== "" && sidebar.isExpanded ? 54 : 40
+                        radius: 9
+                        color: isActive ? "#1f3b54" : (tabMouseArea.containsMouse ? "#1a2f42" : "#132535")
+                        border.color: isActive ? "#64c1ff" : "#2a4358"
                         border.width: 1
+
+                        Behavior on color {
+                            ColorAnimation { duration: 110 }
+                        }
 
                         ColumnLayout {
                             anchors.fill: parent
-                            anchors.leftMargin: 8
-                            anchors.rightMargin: 8
-                            anchors.topMargin: 4
-                            anchors.bottomMargin: 4
-                            spacing: 0
+                            anchors.leftMargin: 10
+                            anchors.rightMargin: 10
+                            anchors.topMargin: 6
+                            anchors.bottomMargin: 6
+                            spacing: 2
 
                             RowLayout {
                                 spacing: 6
@@ -63,10 +137,10 @@ Rectangle {
                                     visible: tabButton.tabPriority > 0
                                     width: 16
                                     height: 16
-                                    radius: 3
-                                    color: tabButton.tabPriority === 1 ? "#e53935" :
-                                           tabButton.tabPriority === 2 ? "#fb8c00" :
-                                           tabButton.tabPriority === 3 ? "#43a047" : "transparent"
+                                    radius: 4
+                                    color: tabButton.tabPriority === 1 ? "#d84f4f" :
+                                           tabButton.tabPriority === 2 ? "#e1943c" :
+                                           tabButton.tabPriority === 3 ? "#4da268" : "transparent"
 
                                     Text {
                                         anchors.centerIn: parent
@@ -80,27 +154,39 @@ Rectangle {
                                 Text {
                                     id: tabName
                                     text: model.name
-                                    color: isActive ? "#ffffff" : "#9aa6b8"
+                                    color: isActive ? "#ffffff" : "#b0c2d4"
                                     font.pixelSize: 11
                                     font.bold: isActive
                                     elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                    visible: sidebar.isExpanded
+                                }
+
+                                Text {
+                                    text: model.name.length > 0 ? model.name.charAt(0).toUpperCase() : "T"
+                                    visible: !sidebar.isExpanded
+                                    color: isActive ? "#ffffff" : "#b0c2d4"
+                                    font.pixelSize: 12
+                                    font.bold: true
+                                    horizontalAlignment: Text.AlignHCenter
                                     Layout.fillWidth: true
                                 }
 
                                 Text {
                                     id: tabPercent
                                     text: Math.round(model.completionPercent) + "%"
-                                    color: isActive ? "#4a9eff" : "#7f8a9a"
+                                    color: isActive ? "#88d5ff" : "#8ca5ba"
                                     font.pixelSize: 10
                                     font.bold: true
+                                    visible: sidebar.isExpanded
                                 }
                             }
 
                             Text {
                                 id: tabActiveTask
-                                visible: tabButton.activeTaskTitle !== ""
+                                visible: sidebar.isExpanded && tabButton.activeTaskTitle !== ""
                                 text: tabButton.activeTaskTitle
-                                color: isActive ? "#82c3a5" : "#6a7a6a"
+                                color: isActive ? "#9be4bc" : "#7ea98f"
                                 font.pixelSize: 9
                                 elide: Text.ElideRight
                                 Layout.fillWidth: true
@@ -108,7 +194,7 @@ Rectangle {
                         }
 
                         ToolTip {
-                            visible: tabMouseArea.containsMouse && (tabName.truncated || tabActiveTask.truncated || tabButton.tabPriority > 0)
+                            visible: tabMouseArea.containsMouse && (!sidebar.isExpanded || tabName.truncated || tabActiveTask.truncated || tabButton.tabPriority > 0)
                             text: {
                                 var priorityText = tabButton.tabPriority === 1 ? "[Priority 1 - High] " :
                                                    tabButton.tabPriority === 2 ? "[Priority 2 - Medium] " :
@@ -146,18 +232,24 @@ Rectangle {
 
         Rectangle {
             Layout.fillWidth: true
-            height: 28
-            radius: 5
-            color: addTabMouseArea.containsMouse ? "#2a3444" : "transparent"
+            height: 34
+            radius: 8
+            color: addTabMouseArea.containsMouse ? "#24425a" : "#193044"
+            border.color: "#325771"
+            border.width: 1
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 8
+                anchors.leftMargin: 10
+                anchors.rightMargin: 10
 
                 Text {
-                    text: "+ Add Tab"
-                    color: "#7f8a9a"
-                    font.pixelSize: 11
+                    text: sidebar.isExpanded ? "+ Add Tab" : "+"
+                    color: "#d2e4f3"
+                    font.pixelSize: sidebar.isExpanded ? 11 : 16
+                    font.bold: true
+                    horizontalAlignment: Text.AlignHCenter
+                    Layout.fillWidth: !sidebar.isExpanded
                 }
             }
 

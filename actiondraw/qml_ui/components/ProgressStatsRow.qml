@@ -14,24 +14,31 @@ RowLayout {
 
     Rectangle {
         visible: taskModel !== null
-        Layout.minimumWidth: progressStatsRow.implicitWidth + 16
-        Layout.maximumWidth: 400
-        height: 32
-        radius: 6
-        color: "#1b2028"
-        border.color: "#2e3744"
+        Layout.minimumWidth: progressStatsRow.implicitWidth + 28
+        Layout.maximumWidth: 480
+        height: 44
+        radius: 10
+        color: "#14202b"
+        border.color: "#2c3f53"
+        border.width: 1
 
         RowLayout {
             id: progressStatsRow
             anchors.centerIn: parent
-            spacing: 8
+            spacing: 10
 
             Label {
                 property real percentage: taskModel ? taskModel.percentageComplete : 0
                 text: percentage.toFixed(0) + "%"
-                font.pixelSize: 14
+                font.pixelSize: 16
                 font.bold: true
-                color: "#4a9eff"
+                color: "#67b8ff"
+            }
+
+            Label {
+                text: "complete"
+                color: "#86a0b6"
+                font.pixelSize: 11
             }
 
             Label {
@@ -40,59 +47,67 @@ RowLayout {
                 visible: activeTask !== ""
                 text: "\u00b7 " + activeTask
                 font.pixelSize: 12
-                color: "#82c3a5"
+                color: "#8fd8b1"
                 elide: Text.ElideRight
-                Layout.maximumWidth: 200
+                Layout.maximumWidth: 250
             }
         }
     }
 
     Rectangle {
         visible: taskModel !== null
-        width: 70
-        height: 32
-        radius: 6
-        color: "#1b2028"
-        border.color: "#2e3744"
+        width: 120
+        height: 44
+        radius: 10
+        color: "#14202b"
+        border.color: "#2c3f53"
+        border.width: 1
 
         RowLayout {
             anchors.centerIn: parent
-            spacing: 4
+            spacing: 6
 
             Label {
                 property real totalTime: taskModel ? taskModel.totalEstimatedTime : 0
                 text: root.formatTime(totalTime)
-                font.pixelSize: 12
+                font.pixelSize: 13
                 font.bold: true
-                color: "#ffa94d"
+                color: "#ffbf72"
             }
 
             Label {
                 text: "left"
-                font.pixelSize: 10
-                color: "#8a93a5"
+                font.pixelSize: 11
+                color: "#8da6bc"
             }
         }
     }
 
     Rectangle {
         visible: taskModel !== null
-        width: 70
-        height: 32
-        radius: 6
-        color: "#1b2028"
-        border.color: "#2e3744"
+        width: 138
+        height: 44
+        radius: 10
+        color: "#14202b"
+        border.color: "#2c3f53"
+        border.width: 1
 
         RowLayout {
             anchors.centerIn: parent
-            spacing: 4
+            spacing: 6
+
+            Label {
+                text: "ETA"
+                font.pixelSize: 11
+                color: "#8da6bc"
+            }
 
             Label {
                 property string completionTime: taskModel ? taskModel.estimatedCompletionTimeOfDay : ""
                 text: completionTime !== "" ? completionTime : "N/A"
-                font.pixelSize: 12
+                font.pixelSize: 13
                 font.bold: true
-                color: "#82c3a5"
+                color: "#8fd8b1"
             }
         }
     }
