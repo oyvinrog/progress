@@ -2349,7 +2349,7 @@ ApplicationWindow {
                                     onCentroidChanged: {
                                         if (!diagramModel || !active)
                                             return
-                                        var pos = itemRect.mapToItem(diagramLayer, centroid.position.x, centroid.position.y)
+                                        var pos = edgeHandle.mapToItem(diagramLayer, centroid.position.x, centroid.position.y)
                                         edgeHandle.dragPoint = Qt.point(pos.x, pos.y)
                                         diagramModel.updateEdgeDragPosition(edgeHandle.dragPoint.x, edgeHandle.dragPoint.y)
                                         edgeCanvas.requestPaint()
