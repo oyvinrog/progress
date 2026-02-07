@@ -6,17 +6,32 @@ Rectangle {
     id: sidebar
     property var tabModel
     property var projectManager
+    property int expandedWidth: 220
+    property int collapsedWidth: 36
+    readonly property bool keepExpanded: tabContextMenu.visible || renameTabDialog.visible
+    readonly property bool isExpanded: sidebarHoverHandler.hovered || keepExpanded
 
     Layout.fillHeight: true
-    Layout.preferredWidth: 220
+    Layout.preferredWidth: isExpanded ? expandedWidth : collapsedWidth
+    Behavior on Layout.preferredWidth {
+        NumberAnimation {
+            duration: 120
+            easing.type: Easing.OutCubic
+        }
+    }
     radius: 8
     color: "#1b2028"
     border.color: "#2e3744"
     visible: tabModel !== null
+    clip: true
+
+    HoverHandler {
+        id: sidebarHoverHandler
+    }
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 8
+        anchors.margins: sidebar.isExpanded ? 8 : 4
         spacing: 4
 
         Flickable {
