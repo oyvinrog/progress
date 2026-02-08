@@ -1149,7 +1149,7 @@ ApplicationWindow {
                             width: model.width
                             height: model.height
                             radius: itemRect.itemType === "cloud" ? Math.min(width, height) / 2 : 12
-                            color: itemRect.isTask && itemRect.taskCompleted ? Qt.darker(model.color, 1.5) : model.color
+                            color: itemRect.itemType === "image" ? "transparent" : (itemRect.isTask && itemRect.taskCompleted ? Qt.darker(model.color, 1.5) : model.color)
                             border.width: itemRect.taskCountdownExpired ? 4 : (itemRect.taskCurrent ? 4 : (isEdgeDropTarget ? 3 : 1))
                             border.color: itemRect.taskCountdownExpired ? "#e74c3c" : (itemRect.taskCurrent ? "#ffcc00" : (isEdgeDropTarget ? "#74d9a0" : (itemDrag.active ? Qt.lighter(model.color, 1.4) : Qt.darker(model.color, 1.6))))
                             z: itemRect.taskCurrent ? 15 : (isEdgeDropTarget ? 10 : 5)
@@ -1859,6 +1859,7 @@ ApplicationWindow {
                                     property real resizeStartWidth: 0
                                     property real resizeStartHeight: 0
                                     property point resizeStartPos: Qt.point(0, 0)
+                                    property real resizeAspectRatio: 1.0
 
                                     DragHandler {
                                         id: imageResizeDrag
@@ -1870,6 +1871,7 @@ ApplicationWindow {
                                                 itemRect.resizing = true
                                                 imageResizeHandle.resizeStartWidth = model.width
                                                 imageResizeHandle.resizeStartHeight = model.height
+                                                imageResizeHandle.resizeAspectRatio = model.height > 0 ? model.width / model.height : 1.0
                                             } else {
                                                 itemRect.resizing = false
                                             }
@@ -1879,11 +1881,26 @@ ApplicationWindow {
                                                 return
                                             var deltaX = translation.x / root.zoomLevel
                                             var deltaY = translation.y / root.zoomLevel
-                                            var newWidth = Math.max(60, imageResizeHandle.resizeStartWidth + deltaX)
-                                            var newHeight = Math.max(40, imageResizeHandle.resizeStartHeight + deltaY)
+                                            var startWidth = Math.max(1, imageResizeHandle.resizeStartWidth)
+                                            var startHeight = Math.max(1, imageResizeHandle.resizeStartHeight)
+                                            var widthScale = (startWidth + deltaX) / startWidth
+                                            var heightScale = (startHeight + deltaY) / startHeight
+                                            var dominantByWidth = Math.abs(deltaX / startWidth) >= Math.abs(deltaY / startHeight)
+                                            var uniformScale = dominantByWidth ? widthScale : heightScale
+                                            var minScale = Math.max(60 / startWidth, 40 / startHeight)
+                                            uniformScale = Math.max(uniformScale, minScale)
+
+                                            var newWidth = Math.max(60, startWidth * uniformScale)
+                                            var newHeight = Math.max(40, startHeight * uniformScale)
                                             if (root.snapToGrid) {
-                                                newWidth = Math.max(root.gridSpacing, Math.round(newWidth / root.gridSpacing) * root.gridSpacing)
-                                                newHeight = Math.max(root.gridSpacing, Math.round(newHeight / root.gridSpacing) * root.gridSpacing)
+                                                var aspect = Math.max(0.01, imageResizeHandle.resizeAspectRatio)
+                                                if (aspect >= 1.0) {
+                                                    newWidth = Math.max(root.gridSpacing, Math.round(newWidth / root.gridSpacing) * root.gridSpacing)
+                                                    newHeight = Math.max(40, newWidth / aspect)
+                                                } else {
+                                                    newHeight = Math.max(root.gridSpacing, Math.round(newHeight / root.gridSpacing) * root.gridSpacing)
+                                                    newWidth = Math.max(60, newHeight * aspect)
+                                                }
                                             }
                                             diagramModel.resizeItem(itemRect.itemId, newWidth, newHeight)
                                             edgeCanvas.requestPaint()
