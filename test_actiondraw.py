@@ -1682,6 +1682,19 @@ class TestMultiTabSupport:
         index = task_model.index(0, 0)
         assert task_model.data(index, task_model.TitleRole) == "Tab 1 Task"
 
+    def test_project_manager_drill_to_task_sets_current(self, app):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        task_model.addTask("Drill target", -1)
+        diagram_model = DiagramModel(task_model=task_model)
+        diagram_model.addTask(0, 40.0, 60.0)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        project_manager.drillToTask(0)
+        assert diagram_model.currentTaskIndex == 0
+
 
 class TestCountdownTimer:
     """Tests for the countdown timer feature."""
@@ -1962,6 +1975,210 @@ class TestCountdownTimer:
 
         assert remaining == -1.0
         assert active == False
+
+
+class TestTaskReminders:
+    """Tests for task reminder date/time notifications."""
+
+    @pytest.fixture
+    def task_model_with_reminder(self, app):
+        model = TaskModel()
+        model.addTask("Task with reminder", -1)
+        return model
+
+    @pytest.fixture
+    def diagram_model_with_reminder_task(self, app, task_model_with_reminder):
+        model = DiagramModel(task_model=task_model_with_reminder)
+        model.addTask(0, 100.0, 100.0)
+        return model, task_model_with_reminder
+
+    def test_reminder_defaults(self, task_model_with_reminder):
+        index = task_model_with_reminder.index(0, 0)
+        active = task_model_with_reminder.data(index, task_model_with_reminder.ReminderActiveRole)
+        reminder_at = task_model_with_reminder.data(index, task_model_with_reminder.ReminderAtRole)
+        assert active == False
+        assert reminder_at == ""
+
+    def test_set_reminder_valid(self, task_model_with_reminder):
+        from datetime import datetime, timedelta
+
+        reminder_dt = datetime.now() + timedelta(hours=1)
+        reminder_str = reminder_dt.strftime("%Y-%m-%d %H:%M")
+        assert task_model_with_reminder.setReminderAt(0, reminder_str) is True
+
+        index = task_model_with_reminder.index(0, 0)
+        active = task_model_with_reminder.data(index, task_model_with_reminder.ReminderActiveRole)
+        reminder_at = task_model_with_reminder.data(index, task_model_with_reminder.ReminderAtRole)
+        assert active == True
+        assert reminder_at == reminder_str
+
+    def test_set_reminder_invalid(self, task_model_with_reminder):
+        assert task_model_with_reminder.setReminderAt(0, "not-a-date") is False
+        index = task_model_with_reminder.index(0, 0)
+        active = task_model_with_reminder.data(index, task_model_with_reminder.ReminderActiveRole)
+        assert active == False
+
+    def test_clear_reminder(self, task_model_with_reminder):
+        from datetime import datetime, timedelta
+
+        reminder_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        assert task_model_with_reminder.setReminderAt(0, reminder_str) is True
+        task_model_with_reminder.clearReminderAt(0)
+
+        index = task_model_with_reminder.index(0, 0)
+        active = task_model_with_reminder.data(index, task_model_with_reminder.ReminderActiveRole)
+        reminder_at = task_model_with_reminder.data(index, task_model_with_reminder.ReminderAtRole)
+        assert active == False
+        assert reminder_at == ""
+
+    def test_due_reminder_emits_signal_and_clears(self, task_model_with_reminder):
+        from datetime import datetime, timedelta
+
+        reminder_str = (datetime.now() - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M")
+        assert task_model_with_reminder.setReminderAt(0, reminder_str) is True
+
+        due = []
+        task_model_with_reminder.taskReminderDue.connect(lambda idx, title: due.append((idx, title)))
+        task_model_with_reminder._updateActiveTasks()
+
+        assert due == [(0, "Task with reminder")]
+        index = task_model_with_reminder.index(0, 0)
+        active = task_model_with_reminder.data(index, task_model_with_reminder.ReminderActiveRole)
+        assert active == False
+
+    def test_reminder_serialization(self, task_model_with_reminder):
+        from datetime import datetime, timedelta
+
+        reminder_str = (datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
+        assert task_model_with_reminder.setReminderAt(0, reminder_str) is True
+        data = task_model_with_reminder.to_dict()
+        task_data = data["tasks"][0]
+        assert "reminder_at" in task_data
+
+    def test_reminder_deserialization(self, app):
+        import time
+
+        model = TaskModel()
+        data = {
+            "tasks": [{
+                "title": "Reminder Task",
+                "completed": False,
+                "time_spent": 0.0,
+                "parent_index": -1,
+                "indent_level": 0,
+                "custom_estimate": None,
+                "reminder_at": time.time() + 3600,
+            }]
+        }
+
+        model.from_dict(data)
+        index = model.index(0, 0)
+        active = model.data(index, model.ReminderActiveRole)
+        reminder_at = model.data(index, model.ReminderAtRole)
+        assert active == True
+        assert isinstance(reminder_at, str)
+        assert reminder_at != ""
+
+    def test_diagram_reminder_roles_exist(self, diagram_model_with_reminder_task):
+        model, _ = diagram_model_with_reminder_task
+        role_names = model.roleNames()
+        assert b"taskReminderActive" in role_names.values()
+        assert b"taskReminderAt" in role_names.values()
+
+    def test_diagram_reminder_reflects_task_model(self, diagram_model_with_reminder_task):
+        from datetime import datetime, timedelta
+
+        diagram_model, task_model = diagram_model_with_reminder_task
+        reminder_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        assert task_model.setReminderAt(0, reminder_str) is True
+
+        index = diagram_model.index(0, 0)
+        active = diagram_model.data(index, diagram_model.TaskReminderActiveRole)
+        reminder_at = diagram_model.data(index, diagram_model.TaskReminderAtRole)
+        assert active == True
+        assert reminder_at == reminder_str
+
+    def test_diagram_clear_reminder_slot(self, diagram_model_with_reminder_task):
+        from datetime import datetime, timedelta
+
+        diagram_model, task_model = diagram_model_with_reminder_task
+        reminder_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        assert task_model.setReminderAt(0, reminder_str) is True
+
+        diagram_model.clearTaskReminderAt(0)
+        index = task_model.index(0, 0)
+        active = task_model.data(index, task_model.ReminderActiveRole)
+        assert active == False
+
+    def test_diagram_set_reminder_slot_returns_status(self, diagram_model_with_reminder_task):
+        from datetime import datetime, timedelta
+
+        diagram_model, task_model = diagram_model_with_reminder_task
+        reminder_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+
+        assert diagram_model.setTaskReminderAt(0, reminder_str) is True
+        assert diagram_model.setTaskReminderAt(0, "invalid") is False
+
+        index = task_model.index(0, 0)
+        active = task_model.data(index, task_model.ReminderActiveRole)
+        assert active == True
+
+    def test_project_manager_emits_current_tab_reminder_due(self, app):
+        from datetime import datetime, timedelta
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        task_model.addTask("Current Reminder", -1)
+        reminder_str = (datetime.now() - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M")
+        assert task_model.setReminderAt(0, reminder_str) is True
+
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        due = []
+        project_manager.taskReminderDue.connect(lambda tab_idx, task_idx, title: due.append((tab_idx, task_idx, title)))
+        task_model._updateActiveTasks()
+
+        assert due == [(0, 0, "Current Reminder")]
+
+    def test_project_manager_emits_background_tab_reminder_due(self, app):
+        import time
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        task_model.addTask("Tab 1 Task", -1)
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        tab_model.addTab("Tab 2")
+        tab_model.setTabData(
+            1,
+            {
+                "tasks": [{
+                    "title": "Background Reminder",
+                    "completed": False,
+                    "time_spent": 0.0,
+                    "parent_index": -1,
+                    "indent_level": 0,
+                    "custom_estimate": None,
+                    "reminder_at": time.time() - 1,
+                }]
+            },
+            {"items": [], "edges": [], "strokes": [], "current_task_index": -1},
+        )
+
+        due = []
+        project_manager.taskReminderDue.connect(lambda tab_idx, task_idx, title: due.append((tab_idx, task_idx, title)))
+        project_manager._checkBackgroundTabReminders()
+
+        assert due == [(1, 0, "Background Reminder")]
+
+        # Reminder is cleared after firing
+        tabs = tab_model.getAllTabs()
+        task_data = tabs[1].tasks["tasks"][0]
+        assert "reminder_at" not in task_data
 
 
 class TestLinkedSubtabMetadata:

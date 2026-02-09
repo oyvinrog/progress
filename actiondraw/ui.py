@@ -52,7 +52,12 @@ def main() -> int:
     tab_model = TabModel()
     project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
-    engine = create_actiondraw_window(diagram_model, task_model, project_manager, tab_model=tab_model)
+    engine = create_actiondraw_window(
+        diagram_model,
+        task_model,
+        project_manager,
+        tab_model=tab_model,
+    )
     if not engine.rootObjects():
         return 1
 

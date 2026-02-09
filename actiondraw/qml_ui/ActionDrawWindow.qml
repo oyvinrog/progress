@@ -74,6 +74,17 @@ ApplicationWindow {
         root.requestActivate()
     }
 
+    function drillToTask(taskIndex) {
+        if (!diagramModel || taskIndex < 0)
+            return
+        if (diagramModel.focusTask) {
+            diagramModel.focusTask(taskIndex)
+        } else {
+            diagramModel.setCurrentTask(taskIndex)
+        }
+        Qt.callLater(root.scrollToContent)
+    }
+
     function formatTime(minutes) {
         if (minutes === 0) return "N/A"
         if (minutes < 1) return (minutes * 60).toFixed(0) + "s"
@@ -95,6 +106,30 @@ ApplicationWindow {
         saveNotification.text = message
         saveNotification.opacity = 1
         saveNotificationTimer.restart()
+    }
+
+    function showNextReminderAlert() {
+        if (root.reminderPopupBusy)
+            return
+        if (!root.reminderQueue || root.reminderQueue.length === 0)
+            return
+        root.reminderPopupBusy = true
+        var nextReminder = root.reminderQueue.shift()
+        root.pendingReminderTabIndex = nextReminder.tabIndex
+        root.pendingReminderTaskIndex = nextReminder.taskIndex
+        root.pendingReminderTaskTitle = nextReminder.taskTitle
+        reminderPopup.open()
+    }
+
+    function showReminderAlert(tabIndex, taskIndex, taskTitle) {
+        var reminder = {
+            tabIndex: tabIndex,
+            taskIndex: taskIndex,
+            taskTitle: taskTitle && taskTitle.length > 0 ? taskTitle : "Task",
+        }
+        root.reminderQueue.push(reminder)
+        if (!reminderPopup.visible)
+            root.showNextReminderAlert()
     }
 
     property int minBoardSize: 2000
@@ -182,6 +217,11 @@ ApplicationWindow {
     property real pendingEdgeDropY: 0
     property string selectedItemId: ""
     property string lastCreatedTaskId: ""
+    property int pendingReminderTabIndex: 0
+    property int pendingReminderTaskIndex: -1
+    property string pendingReminderTaskTitle: ""
+    property var reminderQueue: []
+    property bool reminderPopupBusy: false
 
     Shortcut {
         sequence: "Ctrl+S"
@@ -1234,6 +1274,8 @@ ApplicationWindow {
                             property real taskCountdownProgress: model.taskCountdownProgress
                             property bool taskCountdownExpired: model.taskCountdownExpired
                             property bool taskCountdownActive: model.taskCountdownActive
+                            property bool taskReminderActive: model.taskReminderActive
+                            property string taskReminderAt: model.taskReminderAt
                             property real linkedSubtabCompletion: model.linkedSubtabCompletion
                             property string linkedSubtabActiveAction: model.linkedSubtabActiveAction
                             property bool hasLinkedSubtab: model.hasLinkedSubtab
@@ -1478,7 +1520,7 @@ ApplicationWindow {
                                 width: 18
                                 height: 18
                                 radius: 4
-                                anchors.left: itemRect.isTask ? timerButton.right : parent.left
+                                anchors.left: itemRect.isTask ? reminderButton.right : parent.left
                                 anchors.leftMargin: itemRect.isTask ? 6 : 8
                                 anchors.top: parent.top
                                 anchors.topMargin: 8
@@ -1493,6 +1535,47 @@ ApplicationWindow {
                                     color: "#1b2028"
                                     font.pixelSize: 11
                                     font.bold: true
+                                }
+                            }
+
+                            // Reminder button - bell icon for date/time reminders
+                            Rectangle {
+                                id: reminderButton
+                                visible: itemRect.isTask
+                                width: 20
+                                height: 20
+                                radius: 10
+                                anchors.left: timerButton.right
+                                anchors.top: parent.top
+                                anchors.leftMargin: 4
+                                anchors.topMargin: 8
+                                color: itemRect.taskReminderActive ? "#e67e22" : "#1a2230"
+                                border.color: itemRect.taskReminderActive ? "#d35400" : "#4b5b72"
+                                border.width: 2
+                                z: 20
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "⏰"
+                                    color: itemRect.taskReminderActive ? "#ffffff" : "#8a93a5"
+                                    font.pixelSize: 10
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                    onClicked: function(mouse) {
+                                        dialogs.reminderContextMenu.taskIndex = itemRect.taskIndex
+                                        dialogs.reminderContextMenu.reminderAt = itemRect.taskReminderAt
+                                        if (mouse.button === Qt.RightButton || itemRect.taskReminderActive) {
+                                            dialogs.reminderContextMenu.popup()
+                                        } else {
+                                            dialogs.reminderDialog.taskIndex = itemRect.taskIndex
+                                            dialogs.reminderDialog.dateValue = ""
+                                            dialogs.reminderDialog.timeValue = ""
+                                            dialogs.reminderDialog.open()
+                                        }
+                                    }
                                 }
                             }
 
@@ -2700,6 +2783,71 @@ ApplicationWindow {
         onTriggered: saveNotification.opacity = 0
     }
 
+    Popup {
+        id: reminderPopup
+        modal: false
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        x: (root.width - width) / 2
+        y: 70
+        width: Math.min(root.width - 40, 420)
+
+        background: Rectangle {
+            radius: 10
+            color: "#162536"
+            border.color: "#e67e22"
+            border.width: 2
+        }
+
+        contentItem: ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 12
+            spacing: 10
+
+            Text {
+                text: "Reminder Due"
+                color: "#ffd7b0"
+                font.pixelSize: 14
+                font.bold: true
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: root.pendingReminderTaskTitle && root.pendingReminderTaskTitle.length > 0 ? root.pendingReminderTaskTitle : "Task"
+                color: "#f5f6f8"
+                wrapMode: Text.WordWrap
+            }
+
+            RowLayout {
+                spacing: 8
+
+                Button {
+                    text: "Open Task"
+                    onClicked: {
+                        var tabIndex = root.pendingReminderTabIndex
+                        var taskIndex = root.pendingReminderTaskIndex
+                        reminderPopup.close()
+                        if (projectManager && projectManager.openReminderTask) {
+                            projectManager.openReminderTask(tabIndex, taskIndex)
+                        } else {
+                            root.drillToTask(taskIndex)
+                        }
+                    }
+                }
+
+                Button {
+                    text: "Dismiss"
+                    onClicked: reminderPopup.close()
+                }
+            }
+        }
+
+        onClosed: {
+            root.reminderPopupBusy = false
+            root.showNextReminderAlert()
+        }
+    }
+
     Connections {
         target: projectManager
         enabled: projectManager !== null
@@ -2715,6 +2863,19 @@ ApplicationWindow {
             root.updateBoardBounds()
             root.refreshLinkingTabsPanel()
             Qt.callLater(root.scrollToContent)
+        }
+        function onTaskDrillRequested(taskIndex) {
+            root.showWindow()
+            root.drillToTask(taskIndex)
+        }
+    }
+
+    Connections {
+        target: projectManager
+        enabled: projectManager !== null
+        function onTaskReminderDue(tabIndex, taskIndex, taskTitle) {
+            root.showWindow()
+            root.showReminderAlert(tabIndex, taskIndex, taskTitle)
         }
     }
 

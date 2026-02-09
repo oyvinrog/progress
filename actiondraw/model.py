@@ -62,6 +62,8 @@ class DiagramModel(
     LinkedSubtabCompletionRole = Qt.UserRole + 20
     LinkedSubtabActiveActionRole = Qt.UserRole + 21
     HasLinkedSubtabRole = Qt.UserRole + 22
+    TaskReminderActiveRole = Qt.UserRole + 23
+    TaskReminderAtRole = Qt.UserRole + 24
 
     itemsChanged = Signal()
     edgesChanged = Signal()
@@ -91,6 +93,7 @@ class DiagramModel(
             self._task_model.taskRenamed.connect(self.onTaskRenamed)
             self._task_model.taskCompletionChanged.connect(self.onTaskCompletionChanged)
             self._task_model.taskCountdownChanged.connect(self.onTaskCountdownChanged)
+            self._task_model.taskReminderChanged.connect(self.onTaskReminderChanged)
 
         self._edge_drag_x: float = 0.0
         self._edge_drag_y: float = 0.0
@@ -184,6 +187,10 @@ class DiagramModel(
             return self._getLinkedSubtabActiveAction(item.task_index)
         if role == self.HasLinkedSubtabRole:
             return self._hasLinkedSubtab(item.task_index)
+        if role == self.TaskReminderActiveRole:
+            return self._isTaskReminderActive(item.task_index)
+        if role == self.TaskReminderAtRole:
+            return self._getTaskReminderAt(item.task_index)
         return None
 
     def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
@@ -210,6 +217,8 @@ class DiagramModel(
             self.LinkedSubtabCompletionRole: b"linkedSubtabCompletion",
             self.LinkedSubtabActiveActionRole: b"linkedSubtabActiveAction",
             self.HasLinkedSubtabRole: b"hasLinkedSubtab",
+            self.TaskReminderActiveRole: b"taskReminderActive",
+            self.TaskReminderAtRole: b"taskReminderAt",
         }
 
     def setTabModel(self, tab_model) -> None:
@@ -656,6 +665,35 @@ class DiagramModel(
                     self.TaskCountdownActiveRole
                 ])
 
+    @Slot(int)
+    def onTaskReminderChanged(self, task_index: int) -> None:
+        """Handle reminder updates from the task list."""
+        for row, item in enumerate(self._items):
+            if item.task_index == task_index:
+                index = self.index(row, 0)
+                self.dataChanged.emit(index, index, [
+                    self.TaskReminderActiveRole,
+                    self.TaskReminderAtRole,
+                ])
+
+    def _isTaskReminderActive(self, task_index: int) -> bool:
+        """Return True if task has an active reminder."""
+        if self._task_model is None:
+            return False
+        if task_index < 0 or task_index >= self._task_model.rowCount():
+            return False
+        idx = self._task_model.index(task_index, 0)
+        return bool(self._task_model.data(idx, self._task_model.ReminderActiveRole))
+
+    def _getTaskReminderAt(self, task_index: int) -> str:
+        """Get the reminder datetime string for a task."""
+        if self._task_model is None:
+            return ""
+        if task_index < 0 or task_index >= self._task_model.rowCount():
+            return ""
+        idx = self._task_model.index(task_index, 0)
+        return str(self._task_model.data(idx, self._task_model.ReminderAtRole) or "")
+
     def _getTaskCountdownRemaining(self, task_index: int) -> float:
         """Get seconds remaining on task countdown, or -1 if no timer."""
         if self._task_model is None:
@@ -709,6 +747,19 @@ class DiagramModel(
         """Restart the countdown timer for a task from QML."""
         if self._task_model is not None:
             self._task_model.restartCountdownTimer(task_index)
+
+    @Slot(int, str, result=bool)
+    def setTaskReminderAt(self, task_index: int, reminder_at_str: str) -> bool:
+        """Set a reminder datetime for a task from QML."""
+        if self._task_model is not None:
+            return bool(self._task_model.setReminderAt(task_index, reminder_at_str))
+        return False
+
+    @Slot(int)
+    def clearTaskReminderAt(self, task_index: int) -> None:
+        """Clear the reminder datetime for a task from QML."""
+        if self._task_model is not None:
+            self._task_model.clearReminderAt(task_index)
 
     @Slot(str, str)
     def convertItemType(self, item_id: str, preset_name: str) -> None:
@@ -1143,6 +1194,24 @@ class DiagramModel(
             self._current_task_index = task_index
         self.currentTaskChanged.emit()
         # Notify all task items that their current state may have changed
+        for row, item in enumerate(self._items):
+            if item.task_index >= 0 and (item.task_index == old_index or item.task_index == self._current_task_index):
+                index = self.index(row, 0)
+                self.dataChanged.emit(index, index, [self.TaskCurrentRole])
+
+    @Slot(int)
+    def focusTask(self, task_index: int) -> None:
+        """Focus a task without toggle-off behavior."""
+        if self._task_model is not None:
+            if task_index < 0 or task_index >= self._task_model.rowCount():
+                return
+
+        old_index = self._current_task_index
+        if task_index == old_index:
+            return
+        self._current_task_index = task_index
+        self.currentTaskChanged.emit()
+
         for row, item in enumerate(self._items):
             if item.task_index >= 0 and (item.task_index == old_index or item.task_index == self._current_task_index):
                 index = self.index(row, 0)

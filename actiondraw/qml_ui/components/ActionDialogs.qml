@@ -24,6 +24,8 @@ Item {
     property alias taskRenameDialog: taskRenameDialog
     property alias timerDialog: timerDialog
     property alias timerContextMenu: timerContextMenu
+    property alias reminderDialog: reminderDialog
+    property alias reminderContextMenu: reminderContextMenu
     property alias edgeDropMenu: edgeDropMenu
     property alias edgeDropTaskDialog: edgeDropTaskDialog
     property alias saveDialog: saveDialog
@@ -928,6 +930,162 @@ Item {
             onTriggered: {
                 if (diagramModel && timerContextMenu.taskIndex >= 0) {
                     diagramModel.clearTaskCountdownTimer(timerContextMenu.taskIndex)
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: reminderDialog
+        modal: true
+        title: "Set Reminder"
+        property int taskIndex: -1
+        property string dateValue: ""
+        property string timeValue: ""
+
+        function parseReminderParts(value) {
+            var trimmed = value ? value.trim() : ""
+            if (!trimmed.length)
+                return { date: "", time: "" }
+            var parts = trimmed.split(" ")
+            if (parts.length < 2)
+                return { date: "", time: "" }
+            var datePart = parts[0]
+            var timePart = parts[1]
+            if (timePart.length >= 5)
+                timePart = timePart.slice(0, 5)
+            return { date: datePart, time: timePart }
+        }
+
+        function setToOffsetMinutes(minutesFromNow) {
+            var dt = new Date()
+            dt.setMinutes(dt.getMinutes() + minutesFromNow)
+            reminderDialog.dateValue = Qt.formatDateTime(dt, "yyyy-MM-dd")
+            reminderDialog.timeValue = Qt.formatDateTime(dt, "HH:mm")
+        }
+
+        onOpened: {
+            if (reminderDialog.dateValue.trim().length === 0 || reminderDialog.timeValue.trim().length === 0) {
+                setToOffsetMinutes(60)
+            }
+            reminderDateField.forceActiveFocus()
+        }
+
+        contentItem: ColumnLayout {
+            width: 300
+            spacing: 12
+
+            Label {
+                text: "Set a local date and time reminder."
+                color: "#8a93a5"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            TextField {
+                id: reminderDateField
+                Layout.fillWidth: true
+                text: reminderDialog.dateValue
+                placeholderText: "YYYY-MM-DD"
+                selectByMouse: true
+                color: "#f5f6f8"
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#384458"
+                }
+                onTextChanged: reminderDialog.dateValue = text
+            }
+
+            TextField {
+                id: reminderTimeField
+                Layout.fillWidth: true
+                text: reminderDialog.timeValue
+                placeholderText: "HH:MM"
+                selectByMouse: true
+                color: "#f5f6f8"
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#384458"
+                }
+                onTextChanged: reminderDialog.timeValue = text
+                Keys.onReturnPressed: reminderDialog.accept()
+                Keys.onEnterPressed: reminderDialog.accept()
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                Button {
+                    text: "+15m"
+                    onClicked: reminderDialog.setToOffsetMinutes(15)
+                }
+                Button {
+                    text: "+1h"
+                    onClicked: reminderDialog.setToOffsetMinutes(60)
+                }
+                Button {
+                    text: "+1d"
+                    onClicked: reminderDialog.setToOffsetMinutes(24 * 60)
+                }
+            }
+        }
+
+        footer: DialogButtonBox {
+            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+        }
+
+        onAccepted: {
+            if (diagramModel && reminderDialog.taskIndex >= 0) {
+                var reminderValue = reminderDialog.dateValue.trim() + " " + reminderDialog.timeValue.trim()
+                if (reminderDialog.dateValue.trim().length > 0 && reminderDialog.timeValue.trim().length > 0) {
+                    var saved = diagramModel.setTaskReminderAt(reminderDialog.taskIndex, reminderValue)
+                    if (!saved) {
+                        if (root && root.showSaveNotification)
+                            root.showSaveNotification("Invalid reminder. Use YYYY-MM-DD and HH:MM")
+                        return
+                    }
+                }
+            }
+            reminderDialog.close()
+        }
+        onRejected: reminderDialog.close()
+
+        onClosed: {
+            reminderDialog.taskIndex = -1
+            reminderDialog.dateValue = ""
+            reminderDialog.timeValue = ""
+        }
+    }
+
+    Menu {
+        id: reminderContextMenu
+        property int taskIndex: -1
+        property string reminderAt: ""
+
+        function openEditor() {
+            if (reminderContextMenu.taskIndex < 0)
+                return
+            reminderDialog.taskIndex = reminderContextMenu.taskIndex
+            var parts = reminderDialog.parseReminderParts(reminderContextMenu.reminderAt)
+            reminderDialog.dateValue = parts.date
+            reminderDialog.timeValue = parts.time
+            reminderDialog.open()
+        }
+
+        MenuItem {
+            text: reminderContextMenu.reminderAt && reminderContextMenu.reminderAt.length > 0 ? "Update Reminder" : "Set Reminder"
+            onTriggered: reminderContextMenu.openEditor()
+        }
+
+        MenuItem {
+            text: "Clear Reminder"
+            visible: reminderContextMenu.reminderAt && reminderContextMenu.reminderAt.length > 0
+            onTriggered: {
+                if (diagramModel && reminderContextMenu.taskIndex >= 0) {
+                    diagramModel.clearTaskReminderAt(reminderContextMenu.taskIndex)
                 }
             }
         }
