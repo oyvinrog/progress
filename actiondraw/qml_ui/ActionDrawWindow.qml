@@ -1279,6 +1279,42 @@ ApplicationWindow {
                             property real linkedSubtabCompletion: model.linkedSubtabCompletion
                             property string linkedSubtabActiveAction: model.linkedSubtabActiveAction
                             property bool hasLinkedSubtab: model.hasLinkedSubtab
+                            property real labelLeftInset: {
+                                var inset = 12
+                                if (itemRect.itemType === "chatgpt")
+                                    inset = Math.max(inset, 40)
+                                return inset
+                            }
+                            property real labelRightInset: {
+                                var inset = 12
+                                if (linkedSubtabBadge.visible)
+                                    inset = Math.max(inset, linkedSubtabBadge.width + linkedSubtabBadge.anchors.rightMargin + 6)
+                                if (itemRect.itemType === "note")
+                                    inset = Math.max(inset, 34)
+                                return inset
+                            }
+                            property real labelTopInset: {
+                                var inset = 12
+                                if (itemRect.isTask)
+                                    inset = Math.max(inset, 36)
+                                if (noteBadge.visible && !itemRect.isTask)
+                                    inset = Math.max(inset, noteBadge.height + noteBadge.anchors.topMargin + 4)
+                                if (linkedSubtabBadge.visible)
+                                    inset = Math.max(inset, linkedSubtabBadge.height + linkedSubtabBadge.anchors.topMargin + 4)
+                                if (itemRect.itemType === "chatgpt")
+                                    inset = Math.max(inset, 38)
+                                if (itemRect.itemType === "note")
+                                    inset = Math.max(inset, 32)
+                                return inset
+                            }
+                            property real labelBottomInset: {
+                                var inset = 12
+                                if (folderBadge.visible)
+                                    inset = Math.max(inset, folderBadge.height + folderBadge.anchors.bottomMargin + 4)
+                                if (countdownBar.visible)
+                                    inset = Math.max(inset, countdownBar.height + 18)
+                                return inset
+                            }
                             x: model.x
                             y: model.y
                             width: model.width
@@ -2314,9 +2350,14 @@ ApplicationWindow {
                             Text {
                                 id: itemLabel
                                 visible: itemRect.itemType !== "freetext" && itemRect.itemType !== "obstacle" && itemRect.itemType !== "wish" && itemRect.itemType !== "image"
-                                anchors.centerIn: parent
-                                width: parent.width - 36
-                                height: parent.height - 24
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
+                                anchors.leftMargin: itemRect.labelLeftInset
+                                anchors.rightMargin: itemRect.labelRightInset
+                                anchors.topMargin: itemRect.labelTopInset
+                                anchors.bottomMargin: itemRect.labelBottomInset
                                 readonly property bool useMarkdown: {
                                     if (itemRect.itemType === "task")
                                         return false
