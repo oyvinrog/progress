@@ -2317,17 +2317,29 @@ ApplicationWindow {
                                 anchors.centerIn: parent
                                 width: parent.width - 36
                                 height: parent.height - 24
+                                readonly property bool useMarkdown: {
+                                    if (itemRect.itemType === "task")
+                                        return false
+                                    var editingThisItem = dialogs && dialogs.boxDialog
+                                        && dialogs.boxDialog.visible
+                                        && dialogs.boxDialog.editingItemId === itemRect.itemId
+                                    if (editingThisItem)
+                                        return true
+                                    if (!diagramModel)
+                                        return itemRect.selected || itemRect.hovered
+                                    return diagramModel.count <= 80 || itemRect.selected || itemRect.hovered
+                                }
                                 text: model.text
                                 color: itemRect.isTask && itemRect.taskCompleted ? "#c9d7ce" : model.textColor
                                 wrapMode: Text.WordWrap
                                 horizontalAlignment: Text.AlignHCenter
                                 verticalAlignment: Text.AlignVCenter
-                                textFormat: Text.PlainText
+                                textFormat: itemLabel.useMarkdown ? Text.MarkdownText : Text.PlainText
                                 font.pixelSize: 14
                                 font.bold: itemRect.itemType === "task"
                                 font.strikeout: itemRect.isTask && itemRect.taskCompleted
-                                maximumLineCount: Math.max(1, Math.floor(height / (font.pixelSize * 1.3)))
-                                elide: Text.ElideRight
+                                maximumLineCount: itemLabel.useMarkdown ? 1000 : Math.max(1, Math.floor(height / (font.pixelSize * 1.3)))
+                                elide: itemLabel.useMarkdown ? Text.ElideNone : Text.ElideRight
                                 clip: true
 
                                 ToolTip.visible: labelHover.containsMouse

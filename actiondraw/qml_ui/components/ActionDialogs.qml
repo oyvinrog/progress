@@ -143,44 +143,133 @@ Item {
     Dialog {
         id: boxDialog
         modal: true
+        width: 620
         property real targetX: 0
         property real targetY: 0
         property string editingItemId: ""
         property string textValue: ""
         property string presetName: "box"
+        property real dialogHeight: 180
         title: boxDialog.editingItemId.length === 0 ? root.presetTitle(boxDialog.presetName) : "Edit Label"
 
+        Shortcut {
+            sequence: "Ctrl+Return"
+            enabled: boxDialog.visible
+            onActivated: boxDialog.accept()
+        }
+
+        Shortcut {
+            sequence: "Ctrl+Enter"
+            enabled: boxDialog.visible
+            onActivated: boxDialog.accept()
+        }
+
         onOpened: {
-            boxTextField.forceActiveFocus()
+            boxTextArea.forceActiveFocus()
             if (boxDialog.editingItemId.length > 0)
-                boxTextField.selectAll()
+                boxTextArea.selectAll()
         }
 
         contentItem: ColumnLayout {
-            width: 320
+            width: boxDialog.width - 32
+            Layout.fillWidth: true
             spacing: 12
 
-            TextField {
-                id: boxTextField
+            Label {
                 Layout.fillWidth: true
-                text: boxDialog.textValue
-                placeholderText: "Label"
-                selectByMouse: true
-                color: "#f5f6f8"
-                background: Rectangle {
-                    color: "#1b2028"
-                    radius: 4
-                    border.color: "#384458"
+                text: "Markdown supported. Example: ## Heading, **bold**, - list"
+                color: "#8fa2c5"
+                font.pixelSize: 12
+                wrapMode: Text.WordWrap
+            }
+
+            SplitView {
+                id: boxEditorSplit
+                Layout.fillWidth: true
+                Layout.preferredHeight: boxDialog.dialogHeight
+                orientation: Qt.Horizontal
+
+                ScrollView {
+                    id: boxEditorInputPane
+                    SplitView.fillWidth: true
+                    SplitView.fillHeight: true
+                    SplitView.minimumWidth: 220
+                    SplitView.preferredWidth: Math.max(260, (boxEditorSplit.width - 10) / 2)
+
+                    TextArea {
+                        id: boxTextArea
+                        text: boxDialog.textValue
+                        placeholderText: "Label"
+                        wrapMode: TextEdit.Wrap
+                        selectByMouse: true
+                        color: "#f5f6f8"
+                        font.pixelSize: 14
+                        background: Rectangle {
+                            color: "#1b2028"
+                            radius: 6
+                            border.color: "#384458"
+                        }
+                        onTextChanged: boxDialog.textValue = text
+                    }
                 }
-                onTextChanged: boxDialog.textValue = text
-                Keys.onReturnPressed: boxDialog.accept()
-                Keys.onEnterPressed: boxDialog.accept()
+
+                Rectangle {
+                    id: boxEditorPreviewPane
+                    SplitView.fillWidth: true
+                    SplitView.fillHeight: true
+                    SplitView.minimumWidth: 220
+                    SplitView.preferredWidth: Math.max(260, (boxEditorSplit.width - 10) / 2)
+                    color: "#0f1624"
+                    radius: 6
+                    border.color: "#384458"
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        spacing: 6
+
+                        Label {
+                            text: "Preview"
+                            color: "#aab7cf"
+                            font.pixelSize: 12
+                            font.bold: true
+                        }
+
+                        ScrollView {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            background: Rectangle {
+                                color: "#0b1220"
+                                radius: 4
+                                border.color: "#2b3646"
+                            }
+
+                            Text {
+                                width: parent.width
+                                text: boxTextArea.text
+                                textFormat: Text.MarkdownText
+                                wrapMode: Text.WordWrap
+                                color: "#f5f6f8"
+                                leftPadding: 10
+                                rightPadding: 10
+                                topPadding: 8
+                                bottomPadding: 8
+                            }
+                        }
+                    }
+                }
             }
         }
 
         footer: DialogButtonBox {
             id: boxDialogButtonBox
             standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+
+            Component.onCompleted: {
+                var okButton = boxDialogButtonBox.standardButton(DialogButtonBox.Ok)
+                if (okButton)
+                    okButton.text = "Save (Ctrl+Enter)"
+            }
         }
 
         onAccepted: {

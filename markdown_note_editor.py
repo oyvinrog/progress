@@ -14,8 +14,10 @@ import QtQuick.Layouts 1.15
 ApplicationWindow {
     id: editorRoot
     visible: false
-    width: 640
+    width: 760
     height: 520
+    minimumWidth: 680
+    minimumHeight: 420
     color: "#111826"
     title: noteTitle
 
@@ -39,6 +41,7 @@ ApplicationWindow {
         }
 
         SplitView {
+            id: noteSplit
             Layout.fillWidth: true
             Layout.fillHeight: true
             orientation: Qt.Horizontal
@@ -47,6 +50,8 @@ ApplicationWindow {
                 id: editor
                 SplitView.fillWidth: true
                 SplitView.fillHeight: true
+                SplitView.minimumWidth: 280
+                SplitView.preferredWidth: Math.max(320, (noteSplit.width - 10) / 2)
                 text: editorRoot.noteText
                 wrapMode: TextArea.Wrap
                 color: "#f8fafc"
@@ -61,6 +66,8 @@ ApplicationWindow {
             Rectangle {
                 SplitView.fillWidth: true
                 SplitView.fillHeight: true
+                SplitView.minimumWidth: 280
+                SplitView.preferredWidth: Math.max(320, (noteSplit.width - 10) / 2)
                 color: "#0b1220"
                 radius: 8
                 border.color: "#2b3646"
