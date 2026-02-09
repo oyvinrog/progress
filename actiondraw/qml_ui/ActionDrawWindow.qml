@@ -74,6 +74,17 @@ ApplicationWindow {
         root.requestActivate()
     }
 
+    function drillToTask(taskIndex) {
+        if (!diagramModel || taskIndex < 0)
+            return
+        if (diagramModel.focusTask) {
+            diagramModel.focusTask(taskIndex)
+        } else {
+            diagramModel.setCurrentTask(taskIndex)
+        }
+        Qt.callLater(root.scrollToContent)
+    }
+
     function formatTime(minutes) {
         if (minutes === 0) return "N/A"
         if (minutes < 1) return (minutes * 60).toFixed(0) + "s"
@@ -97,12 +108,37 @@ ApplicationWindow {
         saveNotificationTimer.restart()
     }
 
+    function showNextReminderAlert() {
+        if (root.reminderPopupBusy)
+            return
+        if (!root.reminderQueue || root.reminderQueue.length === 0)
+            return
+        root.reminderPopupBusy = true
+        var nextReminder = root.reminderQueue.shift()
+        root.pendingReminderTabIndex = nextReminder.tabIndex
+        root.pendingReminderTaskIndex = nextReminder.taskIndex
+        root.pendingReminderTaskTitle = nextReminder.taskTitle
+        reminderPopup.open()
+    }
+
+    function showReminderAlert(tabIndex, taskIndex, taskTitle) {
+        var reminder = {
+            tabIndex: tabIndex,
+            taskIndex: taskIndex,
+            taskTitle: taskTitle && taskTitle.length > 0 ? taskTitle : "Task",
+        }
+        root.reminderQueue.push(reminder)
+        if (!reminderPopup.visible)
+            root.showNextReminderAlert()
+    }
+
     property int minBoardSize: 2000
     property int boardMargin: 500
     property real currentMinItemX: 0
     property real currentMinItemY: 0
     property real currentMaxItemX: 0
     property real currentMaxItemY: 0
+    property var linkingTabsToCurrent: []
     property real boundMinItemX: Math.min(currentMinItemX, 0)
     property real boundMinItemY: Math.min(currentMinItemY, 0)
     property real originOffsetX: boardMargin - boundMinItemX
@@ -122,6 +158,14 @@ ApplicationWindow {
             currentMaxItemX = 0
             currentMaxItemY = 0
         }
+    }
+
+    function refreshLinkingTabsPanel() {
+        if (!tabModel || !tabModel.getTabsLinkingToCurrentTab) {
+            linkingTabsToCurrent = []
+            return
+        }
+        linkingTabsToCurrent = tabModel.getTabsLinkingToCurrentTab()
     }
 
     function scrollToContent() {
@@ -173,6 +217,11 @@ ApplicationWindow {
     property real pendingEdgeDropY: 0
     property string selectedItemId: ""
     property string lastCreatedTaskId: ""
+    property int pendingReminderTabIndex: 0
+    property int pendingReminderTaskIndex: -1
+    property string pendingReminderTaskTitle: ""
+    property var reminderQueue: []
+    property bool reminderPopupBusy: false
 
     Shortcut {
         sequence: "Ctrl+S"
@@ -473,6 +522,87 @@ ApplicationWindow {
             color: "#101a24"
             border.color: "#2f465b"
             border.width: 1
+
+            Rectangle {
+                id: linkingTabsPanel
+                visible: root.linkingTabsToCurrent && root.linkingTabsToCurrent.length > 0
+                anchors.top: parent.top
+                anchors.right: parent.right
+                anchors.topMargin: 10
+                anchors.rightMargin: 10
+                width: Math.min(parent.width * 0.34, 280)
+                height: linksColumn.implicitHeight + 18
+                radius: 10
+                color: "#13212d"
+                border.color: "#34536a"
+                border.width: 1
+                z: 30
+
+                Column {
+                    id: linksColumn
+                    anchors.fill: parent
+                    anchors.margins: 9
+                    spacing: 6
+
+                    Text {
+                        text: "Linked From Tabs"
+                        color: "#9ed1f2"
+                        font.pixelSize: 10
+                        font.bold: true
+                    }
+
+                    Repeater {
+                        model: root.linkingTabsToCurrent
+
+                        delegate: Rectangle {
+                            width: linksColumn.width
+                            height: linkActiveText.visible ? 40 : 24
+                            radius: 6
+                            color: linkMouse.containsMouse ? "#1f3547" : "#182b3a"
+                            border.color: "#33546a"
+                            border.width: 1
+
+                            Column {
+                                anchors.fill: parent
+                                anchors.leftMargin: 7
+                                anchors.rightMargin: 7
+                                anchors.topMargin: 4
+                                anchors.bottomMargin: 4
+                                spacing: 1
+
+                                Text {
+                                    id: linkTitleText
+                                    text: modelData.name + " (" + Math.round(modelData.completionPercent) + "%)"
+                                    color: "#d9ebf8"
+                                    font.pixelSize: 10
+                                    font.bold: true
+                                    elide: Text.ElideRight
+                                }
+
+                                Text {
+                                    id: linkActiveText
+                                    visible: modelData.activeTaskTitle && modelData.activeTaskTitle.length > 0
+                                    text: "Active: " + modelData.activeTaskTitle
+                                    color: "#8dc8a5"
+                                    font.pixelSize: 9
+                                    elide: Text.ElideRight
+                                }
+                            }
+
+                            MouseArea {
+                                id: linkMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (projectManager)
+                                        projectManager.switchTab(modelData.tabIndex)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             Rectangle {
                 anchors.fill: parent
@@ -1144,12 +1274,53 @@ ApplicationWindow {
                             property real taskCountdownProgress: model.taskCountdownProgress
                             property bool taskCountdownExpired: model.taskCountdownExpired
                             property bool taskCountdownActive: model.taskCountdownActive
+                            property bool taskReminderActive: model.taskReminderActive
+                            property string taskReminderAt: model.taskReminderAt
+                            property real linkedSubtabCompletion: model.linkedSubtabCompletion
+                            property string linkedSubtabActiveAction: model.linkedSubtabActiveAction
+                            property bool hasLinkedSubtab: model.hasLinkedSubtab
+                            property real labelLeftInset: {
+                                var inset = 12
+                                if (itemRect.itemType === "chatgpt")
+                                    inset = Math.max(inset, 40)
+                                return inset
+                            }
+                            property real labelRightInset: {
+                                var inset = 12
+                                if (linkedSubtabBadge.visible)
+                                    inset = Math.max(inset, linkedSubtabBadge.width + linkedSubtabBadge.anchors.rightMargin + 6)
+                                if (itemRect.itemType === "note")
+                                    inset = Math.max(inset, 34)
+                                return inset
+                            }
+                            property real labelTopInset: {
+                                var inset = 12
+                                if (itemRect.isTask)
+                                    inset = Math.max(inset, 36)
+                                if (noteBadge.visible && !itemRect.isTask)
+                                    inset = Math.max(inset, noteBadge.height + noteBadge.anchors.topMargin + 4)
+                                if (linkedSubtabBadge.visible)
+                                    inset = Math.max(inset, linkedSubtabBadge.height + linkedSubtabBadge.anchors.topMargin + 4)
+                                if (itemRect.itemType === "chatgpt")
+                                    inset = Math.max(inset, 38)
+                                if (itemRect.itemType === "note")
+                                    inset = Math.max(inset, 32)
+                                return inset
+                            }
+                            property real labelBottomInset: {
+                                var inset = 12
+                                if (folderBadge.visible)
+                                    inset = Math.max(inset, folderBadge.height + folderBadge.anchors.bottomMargin + 4)
+                                if (countdownBar.visible)
+                                    inset = Math.max(inset, countdownBar.height + 18)
+                                return inset
+                            }
                             x: model.x
                             y: model.y
                             width: model.width
                             height: model.height
                             radius: itemRect.itemType === "cloud" ? Math.min(width, height) / 2 : 12
-                            color: itemRect.isTask && itemRect.taskCompleted ? Qt.darker(model.color, 1.5) : model.color
+                            color: itemRect.itemType === "image" ? "transparent" : (itemRect.isTask && itemRect.taskCompleted ? Qt.darker(model.color, 1.5) : model.color)
                             border.width: itemRect.taskCountdownExpired ? 4 : (itemRect.taskCurrent ? 4 : (isEdgeDropTarget ? 3 : 1))
                             border.color: itemRect.taskCountdownExpired ? "#e74c3c" : (itemRect.taskCurrent ? "#ffcc00" : (isEdgeDropTarget ? "#74d9a0" : (itemDrag.active ? Qt.lighter(model.color, 1.4) : Qt.darker(model.color, 1.6))))
                             z: itemRect.taskCurrent ? 15 : (isEdgeDropTarget ? 10 : 5)
@@ -1211,6 +1382,49 @@ ApplicationWindow {
                                     onClicked: {
                                         if (diagramModel)
                                             diagramModel.openFolder(itemRect.itemId)
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                id: linkedSubtabBadge
+                                visible: itemRect.isTask && itemRect.hasLinkedSubtab
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.rightMargin: 8
+                                anchors.topMargin: 8
+                                width: Math.min(parent.width * 0.55, 148)
+                                height: linkedSubtabAction.visible ? 34 : 20
+                                radius: 6
+                                color: "#12374d"
+                                border.color: "#2f6d8f"
+                                border.width: 1
+                                z: 24
+
+                                Column {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 6
+                                    anchors.rightMargin: 6
+                                    anchors.topMargin: 3
+                                    anchors.bottomMargin: 3
+                                    spacing: 1
+
+                                    Text {
+                                        id: linkedSubtabPercent
+                                        text: Math.round(itemRect.linkedSubtabCompletion) + "% subtab"
+                                        color: "#8fd9ff"
+                                        font.pixelSize: 9
+                                        font.bold: true
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Text {
+                                        id: linkedSubtabAction
+                                        visible: itemRect.linkedSubtabActiveAction !== ""
+                                        text: "Active: " + itemRect.linkedSubtabActiveAction
+                                        color: "#b6f1c5"
+                                        font.pixelSize: 8
+                                        elide: Text.ElideRight
                                     }
                                 }
                             }
@@ -1342,7 +1556,7 @@ ApplicationWindow {
                                 width: 18
                                 height: 18
                                 radius: 4
-                                anchors.left: itemRect.isTask ? timerButton.right : parent.left
+                                anchors.left: itemRect.isTask ? reminderButton.right : parent.left
                                 anchors.leftMargin: itemRect.isTask ? 6 : 8
                                 anchors.top: parent.top
                                 anchors.topMargin: 8
@@ -1357,6 +1571,47 @@ ApplicationWindow {
                                     color: "#1b2028"
                                     font.pixelSize: 11
                                     font.bold: true
+                                }
+                            }
+
+                            // Reminder button - bell icon for date/time reminders
+                            Rectangle {
+                                id: reminderButton
+                                visible: itemRect.isTask
+                                width: 20
+                                height: 20
+                                radius: 10
+                                anchors.left: timerButton.right
+                                anchors.top: parent.top
+                                anchors.leftMargin: 4
+                                anchors.topMargin: 8
+                                color: itemRect.taskReminderActive ? "#e67e22" : "#1a2230"
+                                border.color: itemRect.taskReminderActive ? "#d35400" : "#4b5b72"
+                                border.width: 2
+                                z: 20
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "⏰"
+                                    color: itemRect.taskReminderActive ? "#ffffff" : "#8a93a5"
+                                    font.pixelSize: 10
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                    onClicked: function(mouse) {
+                                        dialogs.reminderContextMenu.taskIndex = itemRect.taskIndex
+                                        dialogs.reminderContextMenu.reminderAt = itemRect.taskReminderAt
+                                        if (mouse.button === Qt.RightButton || itemRect.taskReminderActive) {
+                                            dialogs.reminderContextMenu.popup()
+                                        } else {
+                                            dialogs.reminderDialog.taskIndex = itemRect.taskIndex
+                                            dialogs.reminderDialog.dateValue = ""
+                                            dialogs.reminderDialog.timeValue = ""
+                                            dialogs.reminderDialog.open()
+                                        }
+                                    }
                                 }
                             }
 
@@ -1859,6 +2114,7 @@ ApplicationWindow {
                                     property real resizeStartWidth: 0
                                     property real resizeStartHeight: 0
                                     property point resizeStartPos: Qt.point(0, 0)
+                                    property real resizeAspectRatio: 1.0
 
                                     DragHandler {
                                         id: imageResizeDrag
@@ -1870,6 +2126,7 @@ ApplicationWindow {
                                                 itemRect.resizing = true
                                                 imageResizeHandle.resizeStartWidth = model.width
                                                 imageResizeHandle.resizeStartHeight = model.height
+                                                imageResizeHandle.resizeAspectRatio = model.height > 0 ? model.width / model.height : 1.0
                                             } else {
                                                 itemRect.resizing = false
                                             }
@@ -1879,11 +2136,26 @@ ApplicationWindow {
                                                 return
                                             var deltaX = translation.x / root.zoomLevel
                                             var deltaY = translation.y / root.zoomLevel
-                                            var newWidth = Math.max(60, imageResizeHandle.resizeStartWidth + deltaX)
-                                            var newHeight = Math.max(40, imageResizeHandle.resizeStartHeight + deltaY)
+                                            var startWidth = Math.max(1, imageResizeHandle.resizeStartWidth)
+                                            var startHeight = Math.max(1, imageResizeHandle.resizeStartHeight)
+                                            var widthScale = (startWidth + deltaX) / startWidth
+                                            var heightScale = (startHeight + deltaY) / startHeight
+                                            var dominantByWidth = Math.abs(deltaX / startWidth) >= Math.abs(deltaY / startHeight)
+                                            var uniformScale = dominantByWidth ? widthScale : heightScale
+                                            var minScale = Math.max(60 / startWidth, 40 / startHeight)
+                                            uniformScale = Math.max(uniformScale, minScale)
+
+                                            var newWidth = Math.max(60, startWidth * uniformScale)
+                                            var newHeight = Math.max(40, startHeight * uniformScale)
                                             if (root.snapToGrid) {
-                                                newWidth = Math.max(root.gridSpacing, Math.round(newWidth / root.gridSpacing) * root.gridSpacing)
-                                                newHeight = Math.max(root.gridSpacing, Math.round(newHeight / root.gridSpacing) * root.gridSpacing)
+                                                var aspect = Math.max(0.01, imageResizeHandle.resizeAspectRatio)
+                                                if (aspect >= 1.0) {
+                                                    newWidth = Math.max(root.gridSpacing, Math.round(newWidth / root.gridSpacing) * root.gridSpacing)
+                                                    newHeight = Math.max(40, newWidth / aspect)
+                                                } else {
+                                                    newHeight = Math.max(root.gridSpacing, Math.round(newHeight / root.gridSpacing) * root.gridSpacing)
+                                                    newWidth = Math.max(60, newHeight * aspect)
+                                                }
                                             }
                                             diagramModel.resizeItem(itemRect.itemId, newWidth, newHeight)
                                             edgeCanvas.requestPaint()
@@ -2078,26 +2350,51 @@ ApplicationWindow {
                             Text {
                                 id: itemLabel
                                 visible: itemRect.itemType !== "freetext" && itemRect.itemType !== "obstacle" && itemRect.itemType !== "wish" && itemRect.itemType !== "image"
-                                anchors.centerIn: parent
-                                width: parent.width - 36
-                                height: parent.height - 24
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.bottom: parent.bottom
+                                anchors.leftMargin: itemRect.labelLeftInset
+                                anchors.rightMargin: itemRect.labelRightInset
+                                anchors.topMargin: itemRect.labelTopInset
+                                anchors.bottomMargin: itemRect.labelBottomInset
+                                readonly property bool useMarkdown: {
+                                    if (itemRect.itemType === "task")
+                                        return false
+                                    var editingThisItem = dialogs && dialogs.boxDialog
+                                        && dialogs.boxDialog.visible
+                                        && dialogs.boxDialog.editingItemId === itemRect.itemId
+                                    if (editingThisItem)
+                                        return true
+                                    if (!diagramModel)
+                                        return itemRect.selected || itemRect.hovered
+                                    return diagramModel.count <= 80 || itemRect.selected || itemRect.hovered
+                                }
                                 text: model.text
                                 color: itemRect.isTask && itemRect.taskCompleted ? "#c9d7ce" : model.textColor
                                 wrapMode: Text.WordWrap
                                 horizontalAlignment: Text.AlignHCenter
                                 verticalAlignment: Text.AlignVCenter
-                                textFormat: Text.PlainText
+                                textFormat: itemLabel.useMarkdown ? Text.MarkdownText : Text.PlainText
                                 font.pixelSize: 14
                                 font.bold: itemRect.itemType === "task"
                                 font.strikeout: itemRect.isTask && itemRect.taskCompleted
-                                maximumLineCount: Math.max(1, Math.floor(height / (font.pixelSize * 1.3)))
-                                elide: Text.ElideRight
+                                maximumLineCount: itemLabel.useMarkdown ? 1000 : Math.max(1, Math.floor(height / (font.pixelSize * 1.3)))
+                                elide: itemLabel.useMarkdown ? Text.ElideNone : Text.ElideRight
                                 clip: true
 
                                 ToolTip.visible: labelHover.containsMouse
                                 ToolTip.delay: 400
                                 ToolTip.timeout: 2000
-                                ToolTip.text: model.text + (model.noteMarkdown ? "\n\n" + model.noteMarkdown : "")
+                                ToolTip.text: {
+                                    var text = model.text + (model.noteMarkdown ? "\n\n" + model.noteMarkdown : "")
+                                    if (itemRect.hasLinkedSubtab) {
+                                        text += "\n\nSubtab: " + Math.round(itemRect.linkedSubtabCompletion) + "%"
+                                        if (itemRect.linkedSubtabActiveAction !== "")
+                                            text += "\nActive: " + itemRect.linkedSubtabActiveAction
+                                    }
+                                    return text
+                                }
 
                                 MouseArea {
                                     id: labelHover
@@ -2539,6 +2836,71 @@ ApplicationWindow {
         onTriggered: saveNotification.opacity = 0
     }
 
+    Popup {
+        id: reminderPopup
+        modal: false
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        x: (root.width - width) / 2
+        y: 70
+        width: Math.min(root.width - 40, 420)
+
+        background: Rectangle {
+            radius: 10
+            color: "#162536"
+            border.color: "#e67e22"
+            border.width: 2
+        }
+
+        contentItem: ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 12
+            spacing: 10
+
+            Text {
+                text: "Reminder Due"
+                color: "#ffd7b0"
+                font.pixelSize: 14
+                font.bold: true
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: root.pendingReminderTaskTitle && root.pendingReminderTaskTitle.length > 0 ? root.pendingReminderTaskTitle : "Task"
+                color: "#f5f6f8"
+                wrapMode: Text.WordWrap
+            }
+
+            RowLayout {
+                spacing: 8
+
+                Button {
+                    text: "Open Task"
+                    onClicked: {
+                        var tabIndex = root.pendingReminderTabIndex
+                        var taskIndex = root.pendingReminderTaskIndex
+                        reminderPopup.close()
+                        if (projectManager && projectManager.openReminderTask) {
+                            projectManager.openReminderTask(tabIndex, taskIndex)
+                        } else {
+                            root.drillToTask(taskIndex)
+                        }
+                    }
+                }
+
+                Button {
+                    text: "Dismiss"
+                    onClicked: reminderPopup.close()
+                }
+            }
+        }
+
+        onClosed: {
+            root.reminderPopupBusy = false
+            root.showNextReminderAlert()
+        }
+    }
+
     Connections {
         target: projectManager
         enabled: projectManager !== null
@@ -2547,13 +2909,58 @@ ApplicationWindow {
         }
         function onLoadCompleted(filePath) {
             root.updateBoardBounds()
+            root.refreshLinkingTabsPanel()
             Qt.callLater(root.scrollToContent)
         }
         function onTabSwitched() {
             root.updateBoardBounds()
+            root.refreshLinkingTabsPanel()
             Qt.callLater(root.scrollToContent)
+        }
+        function onTaskDrillRequested(taskIndex) {
+            root.showWindow()
+            root.drillToTask(taskIndex)
         }
     }
 
-    Component.onCompleted: { updateBoardBounds(); Qt.callLater(resetView) }
+    Connections {
+        target: projectManager
+        enabled: projectManager !== null
+        function onTaskReminderDue(tabIndex, taskIndex, taskTitle) {
+            root.showWindow()
+            root.showReminderAlert(tabIndex, taskIndex, taskTitle)
+        }
+    }
+
+    Connections {
+        target: tabModel
+        enabled: tabModel !== null
+        function onTabsChanged() {
+            root.refreshLinkingTabsPanel()
+        }
+        function onCurrentTabChanged() {
+            root.refreshLinkingTabsPanel()
+        }
+        function onCurrentTabIndexChanged() {
+            root.refreshLinkingTabsPanel()
+        }
+        function onDataChanged() {
+            root.refreshLinkingTabsPanel()
+        }
+        function onRowsInserted() {
+            root.refreshLinkingTabsPanel()
+        }
+        function onRowsRemoved() {
+            root.refreshLinkingTabsPanel()
+        }
+        function onModelReset() {
+            root.refreshLinkingTabsPanel()
+        }
+    }
+
+    Component.onCompleted: {
+        updateBoardBounds()
+        refreshLinkingTabsPanel()
+        Qt.callLater(resetView)
+    }
 }

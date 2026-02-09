@@ -12,7 +12,7 @@ import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import (
     QAbstractListModel,
@@ -40,6 +40,7 @@ class Task:
     custom_estimate: Optional[float] = None  # minutes, overrides avg estimate if set
     countdown_duration: Optional[float] = None  # countdown duration in seconds
     countdown_start: Optional[float] = None  # timestamp when countdown started
+    reminder_at: Optional[float] = None  # local timestamp when reminder should fire
 
 
 @dataclass
@@ -66,6 +67,8 @@ class TaskModel(QAbstractListModel):
     CountdownProgressRole = Qt.UserRole + 10
     CountdownExpiredRole = Qt.UserRole + 11
     CountdownActiveRole = Qt.UserRole + 12
+    ReminderActiveRole = Qt.UserRole + 13
+    ReminderAtRole = Qt.UserRole + 14
 
     avgTimeChanged = Signal()
     totalEstimateChanged = Signal()
@@ -73,6 +76,8 @@ class TaskModel(QAbstractListModel):
     taskRenamed = Signal(int, str, arguments=['taskIndex', 'newTitle'])
     taskCompletionChanged = Signal(int, bool, arguments=['taskIndex', 'completed'])
     taskCountdownChanged = Signal(int, arguments=['taskIndex'])
+    taskReminderChanged = Signal(int, arguments=['taskIndex'])
+    taskReminderDue = Signal(int, str, arguments=['taskIndex', 'taskTitle'])
 
     def __init__(self, tasks: Optional[List[Task]] = None):
         super().__init__()
@@ -125,6 +130,10 @@ class TaskModel(QAbstractListModel):
             return self._isCountdownExpired(task)
         elif role == self.CountdownActiveRole:
             return self._isCountdownActive(task)
+        elif role == self.ReminderActiveRole:
+            return self._isReminderActive(task)
+        elif role == self.ReminderAtRole:
+            return self._formatReminderAt(task)
         return None
 
     def roleNames(self):  # type: ignore[override]
@@ -141,6 +150,8 @@ class TaskModel(QAbstractListModel):
             self.CountdownProgressRole: b"countdownProgress",
             self.CountdownExpiredRole: b"countdownExpired",
             self.CountdownActiveRole: b"countdownActive",
+            self.ReminderActiveRole: b"reminderActive",
+            self.ReminderAtRole: b"reminderAt",
         }
 
     def _getAverageTaskTime(self) -> float:
@@ -295,6 +306,41 @@ class TaskModel(QAbstractListModel):
         """Return True if countdown timer is active."""
         return task.countdown_duration is not None and task.countdown_start is not None
 
+    def _isReminderActive(self, task: Task) -> bool:
+        """Return True when the task has an active reminder."""
+        return not task.completed and task.reminder_at is not None
+
+    def _formatReminderAt(self, task: Task) -> str:
+        """Return a human-readable local datetime for the reminder."""
+        if task.completed or task.reminder_at is None:
+            return ""
+        return datetime.fromtimestamp(task.reminder_at).strftime("%Y-%m-%d %H:%M")
+
+    def _parseReminderDateTime(self, reminder_str: str) -> Optional[float]:
+        """Parse reminder datetime string as local time and return timestamp."""
+        normalized = reminder_str.strip()
+        if not normalized:
+            return None
+
+        for fmt in (
+            "%Y-%m-%d %H:%M",
+            "%Y-%m-%d %H:%M:%S",
+            "%Y-%m-%dT%H:%M",
+            "%Y-%m-%dT%H:%M:%S",
+        ):
+            try:
+                parsed = datetime.strptime(normalized, fmt)
+                return parsed.timestamp()
+            except ValueError:
+                continue
+
+        try:
+            # Supports ISO inputs including timezone offsets.
+            parsed = datetime.fromisoformat(normalized)
+            return parsed.timestamp()
+        except ValueError:
+            return None
+
     @Slot(int, str)
     def setCountdownTimer(self, row: int, duration_str: str) -> None:
         """Set a countdown timer for a task.
@@ -343,6 +389,46 @@ class TaskModel(QAbstractListModel):
         except ValueError:
             # Invalid format, ignore
             return
+
+    @Slot(int, str, result=bool)
+    def setReminderAt(self, row: int, reminder_at_str: str) -> bool:
+        """Set a local date/time reminder for a task.
+
+        Accepted formats include:
+        - YYYY-MM-DD HH:MM
+        - YYYY-MM-DD HH:MM:SS
+        - YYYY-MM-DDTHH:MM
+        - YYYY-MM-DDTHH:MM:SS
+        """
+        if row < 0 or row >= len(self._tasks):
+            return False
+
+        reminder_at = self._parseReminderDateTime(reminder_at_str)
+        if reminder_at is None:
+            return False
+
+        task = self._tasks[row]
+        task.reminder_at = reminder_at
+
+        idx = self.index(row, 0)
+        self.dataChanged.emit(idx, idx, [self.ReminderActiveRole, self.ReminderAtRole])
+        self.taskReminderChanged.emit(row)
+        return True
+
+    @Slot(int)
+    def clearReminderAt(self, row: int) -> None:
+        """Clear a task reminder."""
+        if row < 0 or row >= len(self._tasks):
+            return
+
+        task = self._tasks[row]
+        if task.reminder_at is None:
+            return
+        task.reminder_at = None
+
+        idx = self.index(row, 0)
+        self.dataChanged.emit(idx, idx, [self.ReminderActiveRole, self.ReminderAtRole])
+        self.taskReminderChanged.emit(row)
 
     @Slot(int)
     def clearCountdownTimer(self, row: int) -> None:
@@ -397,6 +483,7 @@ class TaskModel(QAbstractListModel):
         current_time = time.time()
         changed = False
         countdown_task_indices = []
+        due_reminders: List[Tuple[int, str]] = []
 
         for i, task in enumerate(self._tasks):
             if not task.completed and task.start_time:
@@ -408,6 +495,9 @@ class TaskModel(QAbstractListModel):
             # Track tasks with active countdown timers
             if task.countdown_duration is not None and task.countdown_start is not None:
                 countdown_task_indices.append(i)
+
+            if task.reminder_at is not None and not task.completed and task.reminder_at <= current_time:
+                due_reminders.append((i, task.title))
 
         # Update all rows if any task changed, since completion times are interdependent
         if changed and len(self._tasks) > 0:
@@ -425,6 +515,14 @@ class TaskModel(QAbstractListModel):
             ])
             # Emit signal so DiagramModel can update its own dataChanged
             self.taskCountdownChanged.emit(i)
+
+        for i, task_title in due_reminders:
+            task = self._tasks[i]
+            task.reminder_at = None
+            idx = self.index(i, 0)
+            self.dataChanged.emit(idx, idx, [self.ReminderActiveRole, self.ReminderAtRole])
+            self.taskReminderChanged.emit(i)
+            self.taskReminderDue.emit(i, task_title)
 
     def addTask(self, title: str, parent_row: int = -1) -> None:
         """Add a new task to the model."""
@@ -492,6 +590,7 @@ class TaskModel(QAbstractListModel):
             return
 
         task = self._tasks[row]
+        had_active_reminder = task.reminder_at is not None
         task.completed = completed
 
         if completed:
@@ -503,6 +602,7 @@ class TaskModel(QAbstractListModel):
             # Clear countdown timer when task is completed
             task.countdown_duration = None
             task.countdown_start = None
+            task.reminder_at = None
         else:
             # Restart timing
             task.start_time = time.time()
@@ -510,6 +610,8 @@ class TaskModel(QAbstractListModel):
         idx = self.index(row, 0)
         self.dataChanged.emit(idx, idx)
         self.taskCompletionChanged.emit(row, completed)
+        if completed and had_active_reminder:
+            self.taskReminderChanged.emit(row)
         self.avgTimeChanged.emit()
         self.totalEstimateChanged.emit()
 
@@ -658,6 +760,8 @@ class TaskModel(QAbstractListModel):
             task_dict["countdown_duration"] = task.countdown_duration
         if task.countdown_start is not None:
             task_dict["countdown_start"] = task.countdown_start
+        if task.reminder_at is not None:
+            task_dict["reminder_at"] = task.reminder_at
         return task_dict
 
     def getSubtasksData(self, parent_row: int) -> Dict[str, Any]:
@@ -754,6 +858,7 @@ class TaskModel(QAbstractListModel):
                         custom_estimate=task_data.get("custom_estimate"),
                         countdown_duration=task_data.get("countdown_duration"),
                         countdown_start=task_data.get("countdown_start"),
+                        reminder_at=task_data.get("reminder_at"),
                     )
                     # Don't auto-start timing for loaded tasks
                     if not task.completed:
@@ -854,6 +959,43 @@ class TabModel(QAbstractListModel):
         if current_task_index < len(tasks):
             return tasks[current_task_index].get("title", "")
         return ""
+
+    def _tabLinksToName(self, tab: Tab, target_name: str) -> bool:
+        if not target_name:
+            return False
+        tasks = tab.tasks.get("tasks", []) if tab.tasks else []
+        for task in tasks:
+            if not isinstance(task, dict):
+                continue
+            if str(task.get("title", "")).strip() == target_name:
+                return True
+        return False
+
+    @Slot(result=list)
+    def getTabsLinkingToCurrentTab(self) -> List[Dict[str, Any]]:
+        """Return tabs that contain a task linking to the current tab."""
+        if not (0 <= self._current_tab_index < len(self._tabs)):
+            return []
+
+        current_tab_name = self._tabs[self._current_tab_index].name.strip()
+        if not current_tab_name:
+            return []
+
+        links: List[Dict[str, Any]] = []
+        for idx, tab in enumerate(self._tabs):
+            if idx == self._current_tab_index:
+                continue
+            if not self._tabLinksToName(tab, current_tab_name):
+                continue
+            links.append(
+                {
+                    "tabIndex": idx,
+                    "name": tab.name,
+                    "completionPercent": self._calculateTabCompletion(tab),
+                    "activeTaskTitle": self._getActiveTaskTitle(tab),
+                }
+            )
+        return links
 
     @Slot(str)
     def addTab(self, name: str = "") -> None:
@@ -1026,6 +1168,8 @@ class ProjectManager(QObject):
     recentProjectsChanged = Signal()  # Emitted when recent projects list changes
     currentFilePathChanged = Signal()  # Emitted when current file path changes
     tabSwitched = Signal()  # Emitted when switching to a different tab
+    taskDrillRequested = Signal(int, arguments=["taskIndex"])
+    taskReminderDue = Signal(int, int, str, arguments=["tabIndex", "taskIndex", "taskTitle"])
 
     def __init__(self, task_model: TaskModel, diagram_model_or_manager, tab_model: Optional["TabModel"] = None):
         """Initialize ProjectManager.
@@ -1044,16 +1188,77 @@ class ProjectManager(QObject):
         else:
             self._diagram_model = diagram_model_or_manager
         self._tab_model = tab_model
+        set_tab_model = getattr(self._diagram_model, "setTabModel", None)
+        if callable(set_tab_model):
+            set_tab_model(self._tab_model)
         self._current_file_path: str = ""
         self._settings = QSettings("ProgressTracker", "ProgressTracker")
         self._recent_projects: List[str] = self._load_recent_projects()
+        self._reminder_timer = QTimer(self)
+        self._reminder_timer.timeout.connect(self._checkBackgroundTabReminders)
+        self._reminder_timer.start(1000)
+        self._task_model.taskReminderDue.connect(self._onCurrentTabReminderDue)
         if self._tab_model is not None:
             self._task_model.taskCompletionChanged.connect(self._refreshCurrentTabTasks)
             self._task_model.taskCountChanged.connect(self._refreshCurrentTabTasks)
             self._task_model.taskRenamed.connect(self._refreshCurrentTabTasks)
+            self._task_model.taskReminderChanged.connect(self._refreshCurrentTabTasks)
             # Connect diagram model's currentTaskChanged to update tab sidebar
             if hasattr(self._diagram_model, 'currentTaskChanged'):
                 self._diagram_model.currentTaskChanged.connect(self._refreshCurrentTabDiagram)
+
+    def _onCurrentTabReminderDue(self, task_index: int, task_title: str) -> None:
+        tab_index = self._tab_model.currentTabIndex if self._tab_model is not None else 0
+        self.taskReminderDue.emit(tab_index, task_index, task_title)
+
+    def _checkBackgroundTabReminders(self) -> None:
+        """Emit due reminders from non-active tabs."""
+        if self._tab_model is None:
+            return
+
+        now = time.time()
+        active_tab = self._tab_model.currentTabIndex
+
+        for tab_index, tab in enumerate(self._tab_model.getAllTabs()):
+            if tab_index == active_tab:
+                continue
+            tasks_payload = tab.tasks if isinstance(tab.tasks, dict) else {}
+            tasks = tasks_payload.get("tasks", []) if isinstance(tasks_payload, dict) else []
+            if not isinstance(tasks, list):
+                continue
+
+            tab_changed = False
+            for task_index, task in enumerate(tasks):
+                if not isinstance(task, dict):
+                    continue
+                if task.get("completed", False):
+                    continue
+
+                reminder_at = task.get("reminder_at")
+                if reminder_at is None:
+                    continue
+
+                try:
+                    reminder_ts = float(reminder_at)
+                except (TypeError, ValueError):
+                    continue
+
+                if reminder_ts > now:
+                    continue
+
+                task.pop("reminder_at", None)
+                tab_changed = True
+
+                title = str(task.get("title", "")).strip() or "Task"
+                self.taskReminderDue.emit(tab_index, task_index, title)
+
+            if tab_changed:
+                model_index = self._tab_model.index(tab_index, 0)
+                self._tab_model.dataChanged.emit(
+                    model_index,
+                    model_index,
+                    [self._tab_model.CompletionRole, self._tab_model.ActiveTaskTitleRole],
+                )
 
     def _load_recent_projects(self) -> List[str]:
         """Load recent projects list from settings."""
@@ -1328,6 +1533,32 @@ class ProjectManager(QObject):
             error_msg = f"Corrupted project file: {e}"
             self.errorOccurred.emit(error_msg)
             print(error_msg)
+
+    @Slot(int)
+    def drillToTask(self, task_index: int) -> None:
+        """Focus a task in the current tab and notify UI to center on it."""
+        if task_index < 0 or task_index >= self._task_model.rowCount():
+            return
+
+        focus_task = getattr(self._diagram_model, "focusTask", None)
+        if callable(focus_task):
+            focus_task(task_index)
+        else:
+            set_current_task = getattr(self._diagram_model, "setCurrentTask", None)
+            if callable(set_current_task):
+                set_current_task(task_index)
+
+        self.taskDrillRequested.emit(task_index)
+
+    @Slot(int, int)
+    def openReminderTask(self, tab_index: int, task_index: int) -> None:
+        """Open the tab and task targeted by a due reminder."""
+        if self._tab_model is not None:
+            if tab_index < 0 or tab_index >= self._tab_model.tabCount:
+                return
+            if self._tab_model.currentTabIndex != tab_index:
+                self.switchTab(tab_index)
+        self.drillToTask(task_index)
 
     @Slot(int)
     def drillToTab(self, task_index: int) -> None:

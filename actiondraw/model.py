@@ -59,6 +59,11 @@ class DiagramModel(
     TaskCountdownExpiredRole = Qt.UserRole + 17
     TaskCountdownActiveRole = Qt.UserRole + 18
     FolderPathRole = Qt.UserRole + 19
+    LinkedSubtabCompletionRole = Qt.UserRole + 20
+    LinkedSubtabActiveActionRole = Qt.UserRole + 21
+    HasLinkedSubtabRole = Qt.UserRole + 22
+    TaskReminderActiveRole = Qt.UserRole + 23
+    TaskReminderAtRole = Qt.UserRole + 24
 
     itemsChanged = Signal()
     edgesChanged = Signal()
@@ -68,13 +73,14 @@ class DiagramModel(
     brushWidthChanged = Signal()
     currentTaskChanged = Signal()
 
-    def __init__(self, task_model=None):
+    def __init__(self, task_model=None, tab_model=None):
         super().__init__()
         self._items: List[DiagramItem] = []
         self._edges: List[DiagramEdge] = []
         self._current_task_index: int = -1
         self._edge_hover_target_id: str = ""
         self._task_model = task_model
+        self._tab_model = None
         self._id_source = count()
         self._edge_source_id: Optional[str] = None
         self._renaming_in_progress = False
@@ -87,10 +93,12 @@ class DiagramModel(
             self._task_model.taskRenamed.connect(self.onTaskRenamed)
             self._task_model.taskCompletionChanged.connect(self.onTaskCompletionChanged)
             self._task_model.taskCountdownChanged.connect(self.onTaskCountdownChanged)
+            self._task_model.taskReminderChanged.connect(self.onTaskReminderChanged)
 
         self._edge_drag_x: float = 0.0
         self._edge_drag_y: float = 0.0
         self._is_dragging_edge: bool = False
+        self.setTabModel(tab_model)
 
     def _next_id(self, prefix: str) -> str:
         return f"{prefix}_{next(self._id_source)}"
@@ -173,6 +181,16 @@ class DiagramModel(
             return self._isTaskCountdownActive(item.task_index)
         if role == self.FolderPathRole:
             return item.folder_path
+        if role == self.LinkedSubtabCompletionRole:
+            return self._getLinkedSubtabCompletion(item.task_index)
+        if role == self.LinkedSubtabActiveActionRole:
+            return self._getLinkedSubtabActiveAction(item.task_index)
+        if role == self.HasLinkedSubtabRole:
+            return self._hasLinkedSubtab(item.task_index)
+        if role == self.TaskReminderActiveRole:
+            return self._isTaskReminderActive(item.task_index)
+        if role == self.TaskReminderAtRole:
+            return self._getTaskReminderAt(item.task_index)
         return None
 
     def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
@@ -196,7 +214,67 @@ class DiagramModel(
             self.TaskCountdownExpiredRole: b"taskCountdownExpired",
             self.TaskCountdownActiveRole: b"taskCountdownActive",
             self.FolderPathRole: b"folderPath",
+            self.LinkedSubtabCompletionRole: b"linkedSubtabCompletion",
+            self.LinkedSubtabActiveActionRole: b"linkedSubtabActiveAction",
+            self.HasLinkedSubtabRole: b"hasLinkedSubtab",
+            self.TaskReminderActiveRole: b"taskReminderActive",
+            self.TaskReminderAtRole: b"taskReminderAt",
         }
+
+    def setTabModel(self, tab_model) -> None:
+        """Attach or replace the tab model used for linked-subtab metadata."""
+        if tab_model is self._tab_model:
+            return
+        self._disconnectTabModelSignals()
+        self._tab_model = tab_model
+        self._connectTabModelSignals()
+        self._emitLinkedSubtabDataChanged()
+
+    def _connectTabModelSignals(self) -> None:
+        if self._tab_model is None:
+            return
+        try:
+            self._tab_model.dataChanged.connect(self._onTabModelUpdated)
+            self._tab_model.rowsInserted.connect(self._onTabModelUpdated)
+            self._tab_model.rowsRemoved.connect(self._onTabModelUpdated)
+            self._tab_model.modelReset.connect(self._onTabModelUpdated)
+            self._tab_model.layoutChanged.connect(self._onTabModelUpdated)
+        except (AttributeError, RuntimeError):
+            pass
+
+    def _disconnectTabModelSignals(self) -> None:
+        if self._tab_model is None:
+            return
+        for signal in (
+            getattr(self._tab_model, "dataChanged", None),
+            getattr(self._tab_model, "rowsInserted", None),
+            getattr(self._tab_model, "rowsRemoved", None),
+            getattr(self._tab_model, "modelReset", None),
+            getattr(self._tab_model, "layoutChanged", None),
+        ):
+            if signal is None:
+                continue
+            try:
+                signal.disconnect(self._onTabModelUpdated)
+            except (TypeError, RuntimeError):
+                pass
+
+    def _onTabModelUpdated(self, *args) -> None:
+        self._emitLinkedSubtabDataChanged()
+
+    def _emitLinkedSubtabDataChanged(self) -> None:
+        if not self._items:
+            return
+        roles = [
+            self.LinkedSubtabCompletionRole,
+            self.LinkedSubtabActiveActionRole,
+            self.HasLinkedSubtabRole,
+        ]
+        for row, item in enumerate(self._items):
+            if item.task_index < 0:
+                continue
+            idx = self.index(row, 0)
+            self.dataChanged.emit(idx, idx, roles)
 
     # --- Properties exposed to QML -----------------------------------------
     @Property(list, notify=edgesChanged)
@@ -374,7 +452,16 @@ class DiagramModel(
                     return
                 item.text = text
                 index = self.index(row, 0)
-                self.dataChanged.emit(index, index, [self.TextRole])
+                self.dataChanged.emit(
+                    index,
+                    index,
+                    [
+                        self.TextRole,
+                        self.LinkedSubtabCompletionRole,
+                        self.LinkedSubtabActiveActionRole,
+                        self.HasLinkedSubtabRole,
+                    ],
+                )
                 self.itemsChanged.emit()
                 return
 
@@ -578,6 +665,35 @@ class DiagramModel(
                     self.TaskCountdownActiveRole
                 ])
 
+    @Slot(int)
+    def onTaskReminderChanged(self, task_index: int) -> None:
+        """Handle reminder updates from the task list."""
+        for row, item in enumerate(self._items):
+            if item.task_index == task_index:
+                index = self.index(row, 0)
+                self.dataChanged.emit(index, index, [
+                    self.TaskReminderActiveRole,
+                    self.TaskReminderAtRole,
+                ])
+
+    def _isTaskReminderActive(self, task_index: int) -> bool:
+        """Return True if task has an active reminder."""
+        if self._task_model is None:
+            return False
+        if task_index < 0 or task_index >= self._task_model.rowCount():
+            return False
+        idx = self._task_model.index(task_index, 0)
+        return bool(self._task_model.data(idx, self._task_model.ReminderActiveRole))
+
+    def _getTaskReminderAt(self, task_index: int) -> str:
+        """Get the reminder datetime string for a task."""
+        if self._task_model is None:
+            return ""
+        if task_index < 0 or task_index >= self._task_model.rowCount():
+            return ""
+        idx = self._task_model.index(task_index, 0)
+        return str(self._task_model.data(idx, self._task_model.ReminderAtRole) or "")
+
     def _getTaskCountdownRemaining(self, task_index: int) -> float:
         """Get seconds remaining on task countdown, or -1 if no timer."""
         if self._task_model is None:
@@ -631,6 +747,19 @@ class DiagramModel(
         """Restart the countdown timer for a task from QML."""
         if self._task_model is not None:
             self._task_model.restartCountdownTimer(task_index)
+
+    @Slot(int, str, result=bool)
+    def setTaskReminderAt(self, task_index: int, reminder_at_str: str) -> bool:
+        """Set a reminder datetime for a task from QML."""
+        if self._task_model is not None:
+            return bool(self._task_model.setReminderAt(task_index, reminder_at_str))
+        return False
+
+    @Slot(int)
+    def clearTaskReminderAt(self, task_index: int) -> None:
+        """Clear the reminder datetime for a task from QML."""
+        if self._task_model is not None:
+            self._task_model.clearReminderAt(task_index)
 
     @Slot(str, str)
     def convertItemType(self, item_id: str, preset_name: str) -> None:
@@ -1070,6 +1199,24 @@ class DiagramModel(
                 index = self.index(row, 0)
                 self.dataChanged.emit(index, index, [self.TaskCurrentRole])
 
+    @Slot(int)
+    def focusTask(self, task_index: int) -> None:
+        """Focus a task without toggle-off behavior."""
+        if self._task_model is not None:
+            if task_index < 0 or task_index >= self._task_model.rowCount():
+                return
+
+        old_index = self._current_task_index
+        if task_index == old_index:
+            return
+        self._current_task_index = task_index
+        self.currentTaskChanged.emit()
+
+        for row, item in enumerate(self._items):
+            if item.task_index >= 0 and (item.task_index == old_index or item.task_index == self._current_task_index):
+                index = self.index(row, 0)
+                self.dataChanged.emit(index, index, [self.TaskCurrentRole])
+
     @Property(int, notify=currentTaskChanged)
     def currentTaskIndex(self) -> int:
         """Return the currently focused task index, or -1 if none."""
@@ -1105,6 +1252,62 @@ class DiagramModel(
         idx = self._task_model.index(task_index, 0)
         return bool(self._task_model.data(idx, self._task_model.CompletedRole))
 
+    def _findLinkedSubtab(self, task_index: int):
+        if self._tab_model is None or self._task_model is None:
+            return None
+        if task_index < 0 or task_index >= self._task_model.rowCount():
+            return None
+        idx = self._task_model.index(task_index, 0)
+        title = str(self._task_model.data(idx, self._task_model.TitleRole) or "").strip()
+        if not title:
+            return None
+        get_all_tabs = getattr(self._tab_model, "getAllTabs", None)
+        if not callable(get_all_tabs):
+            return None
+        for tab in get_all_tabs():
+            if getattr(tab, "name", "") == title:
+                return tab
+        return None
+
+    def _calculateLinkedTabCompletion(self, tab) -> float:
+        tasks_payload = getattr(tab, "tasks", {})
+        tasks = tasks_payload.get("tasks", []) if isinstance(tasks_payload, dict) else []
+        if not tasks:
+            return 0.0
+        completed = 0
+        for task in tasks:
+            if isinstance(task, dict) and task.get("completed"):
+                completed += 1
+        return (completed / len(tasks)) * 100.0
+
+    def _getLinkedSubtabCompletion(self, task_index: int) -> float:
+        tab = self._findLinkedSubtab(task_index)
+        if tab is None:
+            return -1.0
+        return self._calculateLinkedTabCompletion(tab)
+
+    def _getLinkedSubtabActiveAction(self, task_index: int) -> str:
+        tab = self._findLinkedSubtab(task_index)
+        if tab is None:
+            return ""
+        diagram_payload = getattr(tab, "diagram", {})
+        if not isinstance(diagram_payload, dict):
+            return ""
+        current_task_index = int(diagram_payload.get("current_task_index", -1))
+        if current_task_index < 0:
+            return ""
+        tasks_payload = getattr(tab, "tasks", {})
+        tasks = tasks_payload.get("tasks", []) if isinstance(tasks_payload, dict) else []
+        if current_task_index >= len(tasks):
+            return ""
+        current_task = tasks[current_task_index]
+        if not isinstance(current_task, dict):
+            return ""
+        return str(current_task.get("title", ""))
+
+    def _hasLinkedSubtab(self, task_index: int) -> bool:
+        return self._findLinkedSubtab(task_index) is not None
+
     @Slot(str, result="QVariant")
     def getItemSnapshot(self, item_id: str) -> Dict[str, Any]:
         item = self.getItem(item_id)
@@ -1120,6 +1323,9 @@ class DiagramModel(
             "text": item.text,
             "taskIndex": item.task_index,
             "folderPath": item.folder_path,
+            "linkedSubtabCompletion": self._getLinkedSubtabCompletion(item.task_index),
+            "linkedSubtabActiveAction": self._getLinkedSubtabActiveAction(item.task_index),
+            "hasLinkedSubtab": self._hasLinkedSubtab(item.task_index),
         }
 
     def getItemAt(self, x: float, y: float) -> Optional[str]:

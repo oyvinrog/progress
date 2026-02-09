@@ -24,6 +24,8 @@ Item {
     property alias taskRenameDialog: taskRenameDialog
     property alias timerDialog: timerDialog
     property alias timerContextMenu: timerContextMenu
+    property alias reminderDialog: reminderDialog
+    property alias reminderContextMenu: reminderContextMenu
     property alias edgeDropMenu: edgeDropMenu
     property alias edgeDropTaskDialog: edgeDropTaskDialog
     property alias saveDialog: saveDialog
@@ -141,44 +143,133 @@ Item {
     Dialog {
         id: boxDialog
         modal: true
+        width: 620
         property real targetX: 0
         property real targetY: 0
         property string editingItemId: ""
         property string textValue: ""
         property string presetName: "box"
+        property real dialogHeight: 180
         title: boxDialog.editingItemId.length === 0 ? root.presetTitle(boxDialog.presetName) : "Edit Label"
 
+        Shortcut {
+            sequence: "Ctrl+Return"
+            enabled: boxDialog.visible
+            onActivated: boxDialog.accept()
+        }
+
+        Shortcut {
+            sequence: "Ctrl+Enter"
+            enabled: boxDialog.visible
+            onActivated: boxDialog.accept()
+        }
+
         onOpened: {
-            boxTextField.forceActiveFocus()
+            boxTextArea.forceActiveFocus()
             if (boxDialog.editingItemId.length > 0)
-                boxTextField.selectAll()
+                boxTextArea.selectAll()
         }
 
         contentItem: ColumnLayout {
-            width: 320
+            width: boxDialog.width - 32
+            Layout.fillWidth: true
             spacing: 12
 
-            TextField {
-                id: boxTextField
+            Label {
                 Layout.fillWidth: true
-                text: boxDialog.textValue
-                placeholderText: "Label"
-                selectByMouse: true
-                color: "#f5f6f8"
-                background: Rectangle {
-                    color: "#1b2028"
-                    radius: 4
-                    border.color: "#384458"
+                text: "Markdown supported. Example: ## Heading, **bold**, - list"
+                color: "#8fa2c5"
+                font.pixelSize: 12
+                wrapMode: Text.WordWrap
+            }
+
+            SplitView {
+                id: boxEditorSplit
+                Layout.fillWidth: true
+                Layout.preferredHeight: boxDialog.dialogHeight
+                orientation: Qt.Horizontal
+
+                ScrollView {
+                    id: boxEditorInputPane
+                    SplitView.fillWidth: true
+                    SplitView.fillHeight: true
+                    SplitView.minimumWidth: 220
+                    SplitView.preferredWidth: Math.max(260, (boxEditorSplit.width - 10) / 2)
+
+                    TextArea {
+                        id: boxTextArea
+                        text: boxDialog.textValue
+                        placeholderText: "Label"
+                        wrapMode: TextEdit.Wrap
+                        selectByMouse: true
+                        color: "#f5f6f8"
+                        font.pixelSize: 14
+                        background: Rectangle {
+                            color: "#1b2028"
+                            radius: 6
+                            border.color: "#384458"
+                        }
+                        onTextChanged: boxDialog.textValue = text
+                    }
                 }
-                onTextChanged: boxDialog.textValue = text
-                Keys.onReturnPressed: boxDialog.accept()
-                Keys.onEnterPressed: boxDialog.accept()
+
+                Rectangle {
+                    id: boxEditorPreviewPane
+                    SplitView.fillWidth: true
+                    SplitView.fillHeight: true
+                    SplitView.minimumWidth: 220
+                    SplitView.preferredWidth: Math.max(260, (boxEditorSplit.width - 10) / 2)
+                    color: "#0f1624"
+                    radius: 6
+                    border.color: "#384458"
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 8
+                        spacing: 6
+
+                        Label {
+                            text: "Preview"
+                            color: "#aab7cf"
+                            font.pixelSize: 12
+                            font.bold: true
+                        }
+
+                        ScrollView {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            background: Rectangle {
+                                color: "#0b1220"
+                                radius: 4
+                                border.color: "#2b3646"
+                            }
+
+                            Text {
+                                width: parent.width
+                                text: boxTextArea.text
+                                textFormat: Text.MarkdownText
+                                wrapMode: Text.WordWrap
+                                color: "#f5f6f8"
+                                leftPadding: 10
+                                rightPadding: 10
+                                topPadding: 8
+                                bottomPadding: 8
+                            }
+                        }
+                    }
+                }
             }
         }
 
         footer: DialogButtonBox {
             id: boxDialogButtonBox
             standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+
+            Component.onCompleted: {
+                var okButton = boxDialogButtonBox.standardButton(DialogButtonBox.Ok)
+                if (okButton)
+                    okButton.text = "Save (Ctrl+Enter)"
+            }
         }
 
         onAccepted: {
@@ -928,6 +1019,162 @@ Item {
             onTriggered: {
                 if (diagramModel && timerContextMenu.taskIndex >= 0) {
                     diagramModel.clearTaskCountdownTimer(timerContextMenu.taskIndex)
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: reminderDialog
+        modal: true
+        title: "Set Reminder"
+        property int taskIndex: -1
+        property string dateValue: ""
+        property string timeValue: ""
+
+        function parseReminderParts(value) {
+            var trimmed = value ? value.trim() : ""
+            if (!trimmed.length)
+                return { date: "", time: "" }
+            var parts = trimmed.split(" ")
+            if (parts.length < 2)
+                return { date: "", time: "" }
+            var datePart = parts[0]
+            var timePart = parts[1]
+            if (timePart.length >= 5)
+                timePart = timePart.slice(0, 5)
+            return { date: datePart, time: timePart }
+        }
+
+        function setToOffsetMinutes(minutesFromNow) {
+            var dt = new Date()
+            dt.setMinutes(dt.getMinutes() + minutesFromNow)
+            reminderDialog.dateValue = Qt.formatDateTime(dt, "yyyy-MM-dd")
+            reminderDialog.timeValue = Qt.formatDateTime(dt, "HH:mm")
+        }
+
+        onOpened: {
+            if (reminderDialog.dateValue.trim().length === 0 || reminderDialog.timeValue.trim().length === 0) {
+                setToOffsetMinutes(60)
+            }
+            reminderDateField.forceActiveFocus()
+        }
+
+        contentItem: ColumnLayout {
+            width: 300
+            spacing: 12
+
+            Label {
+                text: "Set a local date and time reminder."
+                color: "#8a93a5"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            TextField {
+                id: reminderDateField
+                Layout.fillWidth: true
+                text: reminderDialog.dateValue
+                placeholderText: "YYYY-MM-DD"
+                selectByMouse: true
+                color: "#f5f6f8"
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#384458"
+                }
+                onTextChanged: reminderDialog.dateValue = text
+            }
+
+            TextField {
+                id: reminderTimeField
+                Layout.fillWidth: true
+                text: reminderDialog.timeValue
+                placeholderText: "HH:MM"
+                selectByMouse: true
+                color: "#f5f6f8"
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#384458"
+                }
+                onTextChanged: reminderDialog.timeValue = text
+                Keys.onReturnPressed: reminderDialog.accept()
+                Keys.onEnterPressed: reminderDialog.accept()
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                Button {
+                    text: "+15m"
+                    onClicked: reminderDialog.setToOffsetMinutes(15)
+                }
+                Button {
+                    text: "+1h"
+                    onClicked: reminderDialog.setToOffsetMinutes(60)
+                }
+                Button {
+                    text: "+1d"
+                    onClicked: reminderDialog.setToOffsetMinutes(24 * 60)
+                }
+            }
+        }
+
+        footer: DialogButtonBox {
+            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+        }
+
+        onAccepted: {
+            if (diagramModel && reminderDialog.taskIndex >= 0) {
+                var reminderValue = reminderDialog.dateValue.trim() + " " + reminderDialog.timeValue.trim()
+                if (reminderDialog.dateValue.trim().length > 0 && reminderDialog.timeValue.trim().length > 0) {
+                    var saved = diagramModel.setTaskReminderAt(reminderDialog.taskIndex, reminderValue)
+                    if (!saved) {
+                        if (root && root.showSaveNotification)
+                            root.showSaveNotification("Invalid reminder. Use YYYY-MM-DD and HH:MM")
+                        return
+                    }
+                }
+            }
+            reminderDialog.close()
+        }
+        onRejected: reminderDialog.close()
+
+        onClosed: {
+            reminderDialog.taskIndex = -1
+            reminderDialog.dateValue = ""
+            reminderDialog.timeValue = ""
+        }
+    }
+
+    Menu {
+        id: reminderContextMenu
+        property int taskIndex: -1
+        property string reminderAt: ""
+
+        function openEditor() {
+            if (reminderContextMenu.taskIndex < 0)
+                return
+            reminderDialog.taskIndex = reminderContextMenu.taskIndex
+            var parts = reminderDialog.parseReminderParts(reminderContextMenu.reminderAt)
+            reminderDialog.dateValue = parts.date
+            reminderDialog.timeValue = parts.time
+            reminderDialog.open()
+        }
+
+        MenuItem {
+            text: reminderContextMenu.reminderAt && reminderContextMenu.reminderAt.length > 0 ? "Update Reminder" : "Set Reminder"
+            onTriggered: reminderContextMenu.openEditor()
+        }
+
+        MenuItem {
+            text: "Clear Reminder"
+            visible: reminderContextMenu.reminderAt && reminderContextMenu.reminderAt.length > 0
+            onTriggered: {
+                if (diagramModel && reminderContextMenu.taskIndex >= 0) {
+                    diagramModel.clearTaskReminderAt(reminderContextMenu.taskIndex)
                 }
             }
         }
