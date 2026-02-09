@@ -2157,6 +2157,61 @@ class TestTabModelCompletion:
         completion = model.data(index, model.CompletionRole)
         assert completion == 100.0
 
+    def test_get_tabs_linking_to_current_tab(self, app):
+        """Returns tabs that contain a task matching current tab name."""
+        from task_model import TabModel, Tab
+
+        model = TabModel()
+        model.setTabs(
+            [
+                Tab(
+                    name="Main",
+                    tasks={"tasks": [{"title": "API", "completed": False}]},
+                    diagram={"items": [], "edges": [], "strokes": [], "current_task_index": -1},
+                ),
+                Tab(
+                    name="API",
+                    tasks={"tasks": [{"title": "Do work", "completed": False}]},
+                    diagram={"items": [], "edges": [], "strokes": [], "current_task_index": 0},
+                ),
+                Tab(
+                    name="Other",
+                    tasks={"tasks": [{"title": "API", "completed": True}]},
+                    diagram={"items": [], "edges": [], "strokes": [], "current_task_index": -1},
+                ),
+            ],
+            active_tab=1,
+        )
+
+        links = model.getTabsLinkingToCurrentTab()
+        link_names = [link["name"] for link in links]
+        assert link_names == ["Main", "Other"]
+        assert links[0]["tabIndex"] == 0
+        assert links[1]["tabIndex"] == 2
+
+    def test_get_tabs_linking_to_current_tab_empty_when_no_matches(self, app):
+        """No linking tabs returns an empty list."""
+        from task_model import TabModel, Tab
+
+        model = TabModel()
+        model.setTabs(
+            [
+                Tab(
+                    name="Main",
+                    tasks={"tasks": [{"title": "Task A", "completed": False}]},
+                    diagram={"items": [], "edges": [], "strokes": [], "current_task_index": -1},
+                ),
+                Tab(
+                    name="Subtab",
+                    tasks={"tasks": [{"title": "Task B", "completed": False}]},
+                    diagram={"items": [], "edges": [], "strokes": [], "current_task_index": -1},
+                ),
+            ],
+            active_tab=1,
+        )
+
+        assert model.getTabsLinkingToCurrentTab() == []
+
 
 class TestTabModelMoveTab:
     """Tests for TabModel.moveTab method."""

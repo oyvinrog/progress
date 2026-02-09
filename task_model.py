@@ -855,6 +855,43 @@ class TabModel(QAbstractListModel):
             return tasks[current_task_index].get("title", "")
         return ""
 
+    def _tabLinksToName(self, tab: Tab, target_name: str) -> bool:
+        if not target_name:
+            return False
+        tasks = tab.tasks.get("tasks", []) if tab.tasks else []
+        for task in tasks:
+            if not isinstance(task, dict):
+                continue
+            if str(task.get("title", "")).strip() == target_name:
+                return True
+        return False
+
+    @Slot(result=list)
+    def getTabsLinkingToCurrentTab(self) -> List[Dict[str, Any]]:
+        """Return tabs that contain a task linking to the current tab."""
+        if not (0 <= self._current_tab_index < len(self._tabs)):
+            return []
+
+        current_tab_name = self._tabs[self._current_tab_index].name.strip()
+        if not current_tab_name:
+            return []
+
+        links: List[Dict[str, Any]] = []
+        for idx, tab in enumerate(self._tabs):
+            if idx == self._current_tab_index:
+                continue
+            if not self._tabLinksToName(tab, current_tab_name):
+                continue
+            links.append(
+                {
+                    "tabIndex": idx,
+                    "name": tab.name,
+                    "completionPercent": self._calculateTabCompletion(tab),
+                    "activeTaskTitle": self._getActiveTaskTitle(tab),
+                }
+            )
+        return links
+
     @Slot(str)
     def addTab(self, name: str = "") -> None:
         """Add a new empty tab."""

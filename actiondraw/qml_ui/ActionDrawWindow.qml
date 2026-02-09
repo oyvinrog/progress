@@ -103,6 +103,7 @@ ApplicationWindow {
     property real currentMinItemY: 0
     property real currentMaxItemX: 0
     property real currentMaxItemY: 0
+    property var linkingTabsToCurrent: []
     property real boundMinItemX: Math.min(currentMinItemX, 0)
     property real boundMinItemY: Math.min(currentMinItemY, 0)
     property real originOffsetX: boardMargin - boundMinItemX
@@ -122,6 +123,14 @@ ApplicationWindow {
             currentMaxItemX = 0
             currentMaxItemY = 0
         }
+    }
+
+    function refreshLinkingTabsPanel() {
+        if (!tabModel || !tabModel.getTabsLinkingToCurrentTab) {
+            linkingTabsToCurrent = []
+            return
+        }
+        linkingTabsToCurrent = tabModel.getTabsLinkingToCurrentTab()
     }
 
     function scrollToContent() {
@@ -473,6 +482,87 @@ ApplicationWindow {
             color: "#101a24"
             border.color: "#2f465b"
             border.width: 1
+
+            Rectangle {
+                id: linkingTabsPanel
+                visible: root.linkingTabsToCurrent && root.linkingTabsToCurrent.length > 0
+                anchors.top: parent.top
+                anchors.right: parent.right
+                anchors.topMargin: 10
+                anchors.rightMargin: 10
+                width: Math.min(parent.width * 0.34, 280)
+                height: linksColumn.implicitHeight + 18
+                radius: 10
+                color: "#13212d"
+                border.color: "#34536a"
+                border.width: 1
+                z: 30
+
+                Column {
+                    id: linksColumn
+                    anchors.fill: parent
+                    anchors.margins: 9
+                    spacing: 6
+
+                    Text {
+                        text: "Linked From Tabs"
+                        color: "#9ed1f2"
+                        font.pixelSize: 10
+                        font.bold: true
+                    }
+
+                    Repeater {
+                        model: root.linkingTabsToCurrent
+
+                        delegate: Rectangle {
+                            width: linksColumn.width
+                            height: linkActiveText.visible ? 40 : 24
+                            radius: 6
+                            color: linkMouse.containsMouse ? "#1f3547" : "#182b3a"
+                            border.color: "#33546a"
+                            border.width: 1
+
+                            Column {
+                                anchors.fill: parent
+                                anchors.leftMargin: 7
+                                anchors.rightMargin: 7
+                                anchors.topMargin: 4
+                                anchors.bottomMargin: 4
+                                spacing: 1
+
+                                Text {
+                                    id: linkTitleText
+                                    text: modelData.name + " (" + Math.round(modelData.completionPercent) + "%)"
+                                    color: "#d9ebf8"
+                                    font.pixelSize: 10
+                                    font.bold: true
+                                    elide: Text.ElideRight
+                                }
+
+                                Text {
+                                    id: linkActiveText
+                                    visible: modelData.activeTaskTitle && modelData.activeTaskTitle.length > 0
+                                    text: "Active: " + modelData.activeTaskTitle
+                                    color: "#8dc8a5"
+                                    font.pixelSize: 9
+                                    elide: Text.ElideRight
+                                }
+                            }
+
+                            MouseArea {
+                                id: linkMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (projectManager)
+                                        projectManager.switchTab(modelData.tabIndex)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             Rectangle {
                 anchors.fill: parent
@@ -2618,13 +2708,45 @@ ApplicationWindow {
         }
         function onLoadCompleted(filePath) {
             root.updateBoardBounds()
+            root.refreshLinkingTabsPanel()
             Qt.callLater(root.scrollToContent)
         }
         function onTabSwitched() {
             root.updateBoardBounds()
+            root.refreshLinkingTabsPanel()
             Qt.callLater(root.scrollToContent)
         }
     }
 
-    Component.onCompleted: { updateBoardBounds(); Qt.callLater(resetView) }
+    Connections {
+        target: tabModel
+        enabled: tabModel !== null
+        function onTabsChanged() {
+            root.refreshLinkingTabsPanel()
+        }
+        function onCurrentTabChanged() {
+            root.refreshLinkingTabsPanel()
+        }
+        function onCurrentTabIndexChanged() {
+            root.refreshLinkingTabsPanel()
+        }
+        function onDataChanged() {
+            root.refreshLinkingTabsPanel()
+        }
+        function onRowsInserted() {
+            root.refreshLinkingTabsPanel()
+        }
+        function onRowsRemoved() {
+            root.refreshLinkingTabsPanel()
+        }
+        function onModelReset() {
+            root.refreshLinkingTabsPanel()
+        }
+    }
+
+    Component.onCompleted: {
+        updateBoardBounds()
+        refreshLinkingTabsPanel()
+        Qt.callLater(resetView)
+    }
 }
