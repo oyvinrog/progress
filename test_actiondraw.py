@@ -444,6 +444,9 @@ class TestQueries:
         assert roles[empty_diagram_model.ColorRole] == b"color"
         assert roles[empty_diagram_model.TextColorRole] == b"textColor"
         assert roles[empty_diagram_model.TaskCompletedRole] == b"taskCompleted"
+        assert roles[empty_diagram_model.LinkedSubtabCompletionRole] == b"linkedSubtabCompletion"
+        assert roles[empty_diagram_model.LinkedSubtabActiveActionRole] == b"linkedSubtabActiveAction"
+        assert roles[empty_diagram_model.HasLinkedSubtabRole] == b"hasLinkedSubtab"
 
     def test_data_invalid_index(self, empty_diagram_model):
         assert empty_diagram_model.data(empty_diagram_model.index(10, 0), empty_diagram_model.IdRole) is None
@@ -1959,6 +1962,98 @@ class TestCountdownTimer:
 
         assert remaining == -1.0
         assert active == False
+
+
+class TestLinkedSubtabMetadata:
+    """Tests for task-level linked subtab metadata on diagram items."""
+
+    def test_linked_subtab_defaults_without_tab_model(self, app):
+        task_model = TaskModel()
+        task_model.addTask("Parent Task", -1)
+        diagram_model = DiagramModel(task_model=task_model)
+        diagram_model.addTask(0, 100.0, 100.0)
+
+        index = diagram_model.index(0, 0)
+        assert diagram_model.data(index, diagram_model.HasLinkedSubtabRole) is False
+        assert diagram_model.data(index, diagram_model.LinkedSubtabCompletionRole) == -1.0
+        assert diagram_model.data(index, diagram_model.LinkedSubtabActiveActionRole) == ""
+
+    def test_linked_subtab_completion_and_active_action(self, app):
+        from task_model import Tab, TabModel
+
+        task_model = TaskModel()
+        task_model.addTask("Build API", -1)
+        diagram_model = DiagramModel(task_model=task_model)
+
+        tab_model = TabModel()
+        tab_model.setTabs(
+            [
+                Tab(
+                    name="Main",
+                    tasks={"tasks": [{"title": "Build API", "completed": False}]},
+                    diagram={"items": [], "edges": [], "strokes": [], "current_task_index": -1},
+                ),
+                Tab(
+                    name="Build API",
+                    tasks={
+                        "tasks": [
+                            {"title": "Scope", "completed": True},
+                            {"title": "Implement", "completed": False},
+                        ]
+                    },
+                    diagram={"items": [], "edges": [], "strokes": [], "current_task_index": 1},
+                ),
+            ],
+            active_tab=0,
+        )
+        diagram_model.setTabModel(tab_model)
+        diagram_model.addTask(0, 120.0, 140.0)
+
+        index = diagram_model.index(0, 0)
+        assert diagram_model.data(index, diagram_model.HasLinkedSubtabRole) is True
+        assert diagram_model.data(index, diagram_model.LinkedSubtabCompletionRole) == 50.0
+        assert diagram_model.data(index, diagram_model.LinkedSubtabActiveActionRole) == "Implement"
+
+    def test_linked_subtab_updates_when_tab_data_changes(self, app):
+        from task_model import Tab, TabModel
+
+        task_model = TaskModel()
+        task_model.addTask("Launch", -1)
+        diagram_model = DiagramModel(task_model=task_model)
+
+        tab_model = TabModel()
+        tab_model.setTabs(
+            [
+                Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": [], "current_task_index": -1}),
+                Tab(
+                    name="Launch",
+                    tasks={"tasks": [{"title": "Prep", "completed": False}]},
+                    diagram={"items": [], "edges": [], "strokes": [], "current_task_index": -1},
+                ),
+            ],
+            active_tab=0,
+        )
+        diagram_model.setTabModel(tab_model)
+        diagram_model.addTask(0, 80.0, 90.0)
+
+        emitted_roles = []
+
+        def _capture_data_changed(_first, _last, roles):
+            emitted_roles.append(list(roles))
+
+        diagram_model.dataChanged.connect(_capture_data_changed)
+
+        tab_model.setTabData(
+            1,
+            {"tasks": [{"title": "Ship", "completed": True}]},
+            {"items": [], "edges": [], "strokes": [], "current_task_index": 0},
+        )
+
+        index = diagram_model.index(0, 0)
+        assert diagram_model.data(index, diagram_model.LinkedSubtabCompletionRole) == 100.0
+        assert diagram_model.data(index, diagram_model.LinkedSubtabActiveActionRole) == "Ship"
+        assert any(diagram_model.LinkedSubtabCompletionRole in roles for roles in emitted_roles)
+        assert any(diagram_model.LinkedSubtabActiveActionRole in roles for roles in emitted_roles)
 
 
 class TestAddTaskWithParent:

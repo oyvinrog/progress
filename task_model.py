@@ -1044,6 +1044,9 @@ class ProjectManager(QObject):
         else:
             self._diagram_model = diagram_model_or_manager
         self._tab_model = tab_model
+        set_tab_model = getattr(self._diagram_model, "setTabModel", None)
+        if callable(set_tab_model):
+            set_tab_model(self._tab_model)
         self._current_file_path: str = ""
         self._settings = QSettings("ProgressTracker", "ProgressTracker")
         self._recent_projects: List[str] = self._load_recent_projects()

@@ -1144,6 +1144,9 @@ ApplicationWindow {
                             property real taskCountdownProgress: model.taskCountdownProgress
                             property bool taskCountdownExpired: model.taskCountdownExpired
                             property bool taskCountdownActive: model.taskCountdownActive
+                            property real linkedSubtabCompletion: model.linkedSubtabCompletion
+                            property string linkedSubtabActiveAction: model.linkedSubtabActiveAction
+                            property bool hasLinkedSubtab: model.hasLinkedSubtab
                             x: model.x
                             y: model.y
                             width: model.width
@@ -1211,6 +1214,49 @@ ApplicationWindow {
                                     onClicked: {
                                         if (diagramModel)
                                             diagramModel.openFolder(itemRect.itemId)
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                id: linkedSubtabBadge
+                                visible: itemRect.isTask && itemRect.hasLinkedSubtab
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                anchors.rightMargin: 8
+                                anchors.topMargin: 8
+                                width: Math.min(parent.width * 0.55, 148)
+                                height: linkedSubtabAction.visible ? 34 : 20
+                                radius: 6
+                                color: "#12374d"
+                                border.color: "#2f6d8f"
+                                border.width: 1
+                                z: 24
+
+                                Column {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 6
+                                    anchors.rightMargin: 6
+                                    anchors.topMargin: 3
+                                    anchors.bottomMargin: 3
+                                    spacing: 1
+
+                                    Text {
+                                        id: linkedSubtabPercent
+                                        text: Math.round(itemRect.linkedSubtabCompletion) + "% subtab"
+                                        color: "#8fd9ff"
+                                        font.pixelSize: 9
+                                        font.bold: true
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Text {
+                                        id: linkedSubtabAction
+                                        visible: itemRect.linkedSubtabActiveAction !== ""
+                                        text: "Active: " + itemRect.linkedSubtabActiveAction
+                                        color: "#b6f1c5"
+                                        font.pixelSize: 8
+                                        elide: Text.ElideRight
                                     }
                                 }
                             }
@@ -2114,7 +2160,15 @@ ApplicationWindow {
                                 ToolTip.visible: labelHover.containsMouse
                                 ToolTip.delay: 400
                                 ToolTip.timeout: 2000
-                                ToolTip.text: model.text + (model.noteMarkdown ? "\n\n" + model.noteMarkdown : "")
+                                ToolTip.text: {
+                                    var text = model.text + (model.noteMarkdown ? "\n\n" + model.noteMarkdown : "")
+                                    if (itemRect.hasLinkedSubtab) {
+                                        text += "\n\nSubtab: " + Math.round(itemRect.linkedSubtabCompletion) + "%"
+                                        if (itemRect.linkedSubtabActiveAction !== "")
+                                            text += "\nActive: " + itemRect.linkedSubtabActiveAction
+                                    }
+                                    return text
+                                }
 
                                 MouseArea {
                                     id: labelHover
