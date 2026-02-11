@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtQml import QQmlApplicationEngine
 
+from .markdown_image_paster import MarkdownImagePaster
 from .markdown_note_qml import MARKDOWN_NOTE_QML
 
 
@@ -17,6 +18,8 @@ class MarkdownNoteEditor(QObject):
     def __init__(self) -> None:
         super().__init__()
         self._engine = QQmlApplicationEngine()
+        self._image_paster = MarkdownImagePaster()
+        self._engine.rootContext().setContextProperty("markdownImagePaster", self._image_paster)
         self._engine.loadData(MARKDOWN_NOTE_QML.encode("utf-8"))
         roots = self._engine.rootObjects()
         if not roots:

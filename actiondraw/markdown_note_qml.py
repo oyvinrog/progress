@@ -22,6 +22,33 @@ ApplicationWindow {
     signal saveRequested(string noteId, string text)
     signal cancelRequested()
 
+    function insertTextAtCursor(text) {
+        if (!text || text.length === 0)
+            return
+        var start = editor.selectionStart
+        var end = editor.selectionEnd
+        if (start !== end) {
+            var left = Math.min(start, end)
+            var right = Math.max(start, end)
+            editor.remove(left, right)
+            editor.cursorPosition = left
+        }
+        editor.insert(editor.cursorPosition, text)
+    }
+
+    function handlePasteFromClipboard() {
+        if (!markdownImagePaster) {
+            editor.paste()
+            return
+        }
+        var imageMarkdown = markdownImagePaster.clipboardImageMarkdown()
+        if (imageMarkdown.length > 0) {
+            insertTextAtCursor(imageMarkdown)
+            return
+        }
+        editor.paste()
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 12
@@ -54,6 +81,14 @@ ApplicationWindow {
                     color: "#0b1220"
                     radius: 8
                     border.color: "#2b3646"
+                }
+                Keys.onShortcutOverride: function(event) {
+                    var isPaste = event.matches(StandardKey.Paste)
+                    var isShiftInsert = ((event.modifiers & Qt.ShiftModifier) && event.key === Qt.Key_Insert)
+                    if (isPaste || isShiftInsert) {
+                        editorRoot.handlePasteFromClipboard()
+                        event.accepted = true
+                    }
                 }
             }
 

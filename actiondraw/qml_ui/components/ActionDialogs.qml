@@ -35,6 +35,35 @@ Item {
 
     anchors.fill: parent
 
+    function insertTextAtCursor(editor, value) {
+        if (!editor || !value || value.length === 0)
+            return
+        var start = editor.selectionStart
+        var end = editor.selectionEnd
+        if (start !== end) {
+            var left = Math.min(start, end)
+            var right = Math.max(start, end)
+            editor.remove(left, right)
+            editor.cursorPosition = left
+        }
+        editor.insert(editor.cursorPosition, value)
+    }
+
+    function handleMarkdownPaste(editor) {
+        if (!editor)
+            return
+        if (!markdownImagePaster) {
+            editor.paste()
+            return
+        }
+        var imageMarkdown = markdownImagePaster.clipboardImageMarkdown()
+        if (imageMarkdown.length > 0) {
+            insertTextAtCursor(editor, imageMarkdown)
+            return
+        }
+        editor.paste()
+    }
+
     Dialog {
         id: addDialog
         modal: true
@@ -209,6 +238,14 @@ Item {
                             radius: 6
                             border.color: "#384458"
                         }
+                        Keys.onShortcutOverride: function(event) {
+                            var isPaste = event.matches(StandardKey.Paste)
+                            var isShiftInsert = ((event.modifiers & Qt.ShiftModifier) && event.key === Qt.Key_Insert)
+                            if (isPaste || isShiftInsert) {
+                                dialogHost.handleMarkdownPaste(boxTextArea)
+                                event.accepted = true
+                            }
+                        }
                         onTextChanged: boxDialog.textValue = text
                     }
                 }
@@ -359,6 +396,14 @@ Item {
                             color: "#1b2028"
                             radius: 6
                             border.color: "#384458"
+                        }
+                        Keys.onShortcutOverride: function(event) {
+                            var isPaste = event.matches(StandardKey.Paste)
+                            var isShiftInsert = ((event.modifiers & Qt.ShiftModifier) && event.key === Qt.Key_Insert)
+                            if (isPaste || isShiftInsert) {
+                                dialogHost.handleMarkdownPaste(freeTextArea)
+                                event.accepted = true
+                            }
                         }
                         onTextChanged: freeTextDialog.textValue = text
                     }
