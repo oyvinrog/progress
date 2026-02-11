@@ -20,7 +20,7 @@ def create_actiondraw_window(
     tab_model=None,
 ) -> QQmlApplicationEngine:
     """Create and return a QQmlApplicationEngine hosting the ActionDraw UI."""
-    from markdown_note_editor import MarkdownNoteManager
+    from .markdown_note_manager import MarkdownNoteManager
 
     engine = QQmlApplicationEngine()
     if markdown_note_manager is None:
