@@ -405,6 +405,63 @@ class DiagramModel(
             self.addEdge(source_id, new_id)
         return new_id
 
+    def _find_task_chain_tail(self, source_id: str) -> str:
+        """Find the last task in a task chain starting from source_id."""
+        if not source_id:
+            return ""
+        source_item = self.getItem(source_id)
+        if source_item is None:
+            return ""
+
+        current_id = source_id
+        visited: set[str] = {source_id}
+        while True:
+            next_task_id = ""
+            for edge in self._edges:
+                if edge.from_id != current_id:
+                    continue
+                candidate = self.getItem(edge.to_id)
+                if candidate is None:
+                    continue
+                if candidate.item_type != DiagramItemType.TASK:
+                    continue
+                if edge.to_id in visited:
+                    continue
+                next_task_id = edge.to_id
+                break
+            if not next_task_id:
+                return current_id
+            visited.add(next_task_id)
+            current_id = next_task_id
+
+    @Slot(str, str, result=str)
+    def createTaskFromMarkdownSelection(self, source_id: str, selected_text: str) -> str:
+        """Create a task from selected markdown text and append it to the source task chain."""
+        if not self._task_model:
+            return ""
+        source_item = self.getItem(source_id)
+        if source_item is None:
+            return ""
+
+        text = selected_text.strip()
+        if not text:
+            return ""
+
+        attach_from_id = self._find_task_chain_tail(source_id)
+        if not attach_from_id:
+            return ""
+        attach_item = self.getItem(attach_from_id)
+        if attach_item is None:
+            return ""
+
+        x = attach_item.x + attach_item.width + 100.0
+        y = attach_item.y
+        new_id = self.addTaskFromText(text, x, y)
+        if not new_id:
+            return ""
+        self.addEdge(attach_from_id, new_id)
+        return new_id
+
     @Slot(int, float, float, result=str)
     def addTask(self, task_index: int, x: float, y: float) -> str:
         if self._task_model is None:

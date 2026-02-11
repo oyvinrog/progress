@@ -804,6 +804,30 @@ class TestDiagramModelSerialization:
         new_model.from_dict(data)
         assert new_model.getItemMarkdown(item_id) == "# Title\nBody"
 
+    def test_create_task_from_markdown_selection_chains_tasks(self, diagram_model_with_task_model):
+        source_id = diagram_model_with_task_model.addPresetItemWithText("box", 50, 60, "Source")
+
+        first_task_id = diagram_model_with_task_model.createTaskFromMarkdownSelection(source_id, "First task")
+        assert first_task_id.startswith("task_")
+        first_task = diagram_model_with_task_model.getItem(first_task_id)
+        assert first_task is not None
+        assert first_task.text == "First task"
+        assert any(
+            edge["fromId"] == source_id and edge["toId"] == first_task_id
+            for edge in diagram_model_with_task_model.edges
+        )
+
+        second_task_id = diagram_model_with_task_model.createTaskFromMarkdownSelection(source_id, "Second task")
+        assert second_task_id.startswith("task_")
+        assert any(
+            edge["fromId"] == first_task_id and edge["toId"] == second_task_id
+            for edge in diagram_model_with_task_model.edges
+        )
+
+    def test_create_task_from_markdown_selection_requires_task_model(self, empty_diagram_model):
+        source_id = empty_diagram_model.addPresetItemWithText("box", 10, 20, "Source")
+        assert empty_diagram_model.createTaskFromMarkdownSelection(source_id, "Task text") == ""
+
     def test_from_dict_empty(self, empty_diagram_model):
         """Test loading empty data."""
         empty_diagram_model.addBox(10.0, 20.0, "Existing")
@@ -1694,6 +1718,24 @@ class TestMultiTabSupport:
 
         project_manager.drillToTask(0)
         assert diagram_model.currentTaskIndex == 0
+
+    def test_project_manager_add_tab_as_drill_task(self, app):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        tab_model.addTab("Backend API")
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        created_item_id = project_manager.addTabAsDrillTask(1, 120.0, 240.0)
+        assert created_item_id.startswith("task_")
+        assert task_model.rowCount() == 1
+        assert task_model.getTaskTitle(0) == "Backend API"
+        assert diagram_model.count == 1
+        item = diagram_model.getItemSnapshot(created_item_id)
+        assert item["taskIndex"] == 0
+        assert item["text"] == "Backend API"
 
 
 class TestCountdownTimer:

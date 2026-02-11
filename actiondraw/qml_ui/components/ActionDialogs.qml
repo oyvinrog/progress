@@ -165,9 +165,9 @@ Item {
         }
 
         onOpened: {
-            boxTextArea.forceActiveFocus()
+            boxMarkdownEditor.focusEditor()
             if (boxDialog.editingItemId.length > 0)
-                boxTextArea.selectAll()
+                boxMarkdownEditor.selectAll()
         }
 
         contentItem: ColumnLayout {
@@ -183,80 +183,34 @@ Item {
                 wrapMode: Text.WordWrap
             }
 
-            SplitView {
-                id: boxEditorSplit
+            MarkdownEditorPane {
+                id: boxMarkdownEditor
                 Layout.fillWidth: true
                 Layout.preferredHeight: boxDialog.dialogHeight
-                orientation: Qt.Horizontal
-
-                ScrollView {
-                    id: boxEditorInputPane
-                    SplitView.fillWidth: true
-                    SplitView.fillHeight: true
-                    SplitView.minimumWidth: 220
-                    SplitView.preferredWidth: Math.max(260, (boxEditorSplit.width - 10) / 2)
-
-                    TextArea {
-                        id: boxTextArea
-                        text: boxDialog.textValue
-                        placeholderText: "Label"
-                        wrapMode: TextEdit.Wrap
-                        selectByMouse: true
-                        color: "#f5f6f8"
-                        font.pixelSize: 14
-                        background: Rectangle {
-                            color: "#1b2028"
-                            radius: 6
-                            border.color: "#384458"
-                        }
-                        onTextChanged: boxDialog.textValue = text
+                textValue: boxDialog.textValue
+                placeholderText: "Label"
+                allowCreateTask: true
+                sourceItemId: boxDialog.editingItemId
+                onTextValueChanged: boxDialog.textValue = textValue
+                onCreateTaskRequested: function(selectedText) {
+                    if (!diagramModel)
+                        return
+                    var sourceId = boxDialog.editingItemId
+                    if (sourceId.length === 0) {
+                        sourceId = diagramModel.addPresetItemWithText(
+                            boxDialog.presetName,
+                            root.snapValue(boxDialog.targetX),
+                            root.snapValue(boxDialog.targetY),
+                            boxDialog.textValue
+                        )
+                        if (sourceId.length === 0)
+                            return
+                        boxDialog.editingItemId = sourceId
+                        boxMarkdownEditor.sourceItemId = sourceId
                     }
-                }
-
-                Rectangle {
-                    id: boxEditorPreviewPane
-                    SplitView.fillWidth: true
-                    SplitView.fillHeight: true
-                    SplitView.minimumWidth: 220
-                    SplitView.preferredWidth: Math.max(260, (boxEditorSplit.width - 10) / 2)
-                    color: "#0f1624"
-                    radius: 6
-                    border.color: "#384458"
-
-                    ColumnLayout {
-                        anchors.fill: parent
-                        anchors.margins: 8
-                        spacing: 6
-
-                        Label {
-                            text: "Preview"
-                            color: "#aab7cf"
-                            font.pixelSize: 12
-                            font.bold: true
-                        }
-
-                        ScrollView {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            background: Rectangle {
-                                color: "#0b1220"
-                                radius: 4
-                                border.color: "#2b3646"
-                            }
-
-                            Text {
-                                width: parent.width
-                                text: boxTextArea.text
-                                textFormat: Text.MarkdownText
-                                wrapMode: Text.WordWrap
-                                color: "#f5f6f8"
-                                leftPadding: 10
-                                rightPadding: 10
-                                topPadding: 8
-                                bottomPadding: 8
-                            }
-                        }
-                    }
+                    var newTaskId = diagramModel.createTaskFromMarkdownSelection(sourceId, selectedText)
+                    if (newTaskId.length > 0 && root)
+                        root.selectedItemId = newTaskId
                 }
             }
         }
@@ -321,9 +275,9 @@ Item {
         }
 
         onOpened: {
-            freeTextArea.forceActiveFocus()
+            freeTextMarkdownEditor.focusEditor()
             if (freeTextDialog.editingItemId.length > 0)
-                freeTextArea.selectAll()
+                freeTextMarkdownEditor.selectAll()
         }
 
         contentItem: ColumnLayout {
@@ -338,73 +292,34 @@ Item {
                 wrapMode: Text.WordWrap
             }
 
-            SplitView {
+            MarkdownEditorPane {
+                id: freeTextMarkdownEditor
                 Layout.fillWidth: true
                 Layout.preferredHeight: freeTextDialog.dialogHeight
-                orientation: Qt.Horizontal
-
-                ScrollView {
-                    SplitView.fillWidth: true
-                    SplitView.fillHeight: true
-
-                    TextArea {
-                        id: freeTextArea
-                        text: freeTextDialog.textValue
-                        placeholderText: "Write your text here..."
-                        wrapMode: TextEdit.Wrap
-                        selectByMouse: true
-                        color: "#f5f6f8"
-                        font.pixelSize: 14
-                        background: Rectangle {
-                            color: "#1b2028"
-                            radius: 6
-                            border.color: "#384458"
-                        }
-                        onTextChanged: freeTextDialog.textValue = text
+                textValue: freeTextDialog.textValue
+                placeholderText: "Write your text here..."
+                allowCreateTask: true
+                sourceItemId: freeTextDialog.editingItemId
+                onTextValueChanged: freeTextDialog.textValue = textValue
+                onCreateTaskRequested: function(selectedText) {
+                    if (!diagramModel)
+                        return
+                    var sourceId = freeTextDialog.editingItemId
+                    if (sourceId.length === 0) {
+                        sourceId = diagramModel.addPresetItemWithText(
+                            "freetext",
+                            root.snapValue(freeTextDialog.targetX),
+                            root.snapValue(freeTextDialog.targetY),
+                            freeTextDialog.textValue
+                        )
+                        if (sourceId.length === 0)
+                            return
+                        freeTextDialog.editingItemId = sourceId
+                        freeTextMarkdownEditor.sourceItemId = sourceId
                     }
-                }
-
-                Rectangle {
-                    SplitView.fillWidth: true
-                    SplitView.fillHeight: true
-                    color: "#0f1624"
-                    radius: 6
-                    border.color: "#384458"
-
-                    ColumnLayout {
-                        anchors.fill: parent
-                        anchors.margins: 8
-                        spacing: 6
-
-                        Label {
-                            text: "Preview"
-                            color: "#aab7cf"
-                            font.pixelSize: 12
-                            font.bold: true
-                        }
-
-                        ScrollView {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            background: Rectangle {
-                                color: "#0b1220"
-                                radius: 4
-                                border.color: "#2b3646"
-                            }
-
-                            Text {
-                                width: parent.width
-                                text: freeTextArea.text
-                                textFormat: Text.MarkdownText
-                                wrapMode: Text.WordWrap
-                                color: "#f5f6f8"
-                                leftPadding: 10
-                                rightPadding: 10
-                                topPadding: 8
-                                bottomPadding: 8
-                            }
-                        }
-                    }
+                    var newTaskId = diagramModel.createTaskFromMarkdownSelection(sourceId, selectedText)
+                    if (newTaskId.length > 0 && root)
+                        root.selectedItemId = newTaskId
                 }
             }
 

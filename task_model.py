@@ -1592,6 +1592,27 @@ class ProjectManager(QObject):
 
         self.switchTab(target_index)
 
+    @Slot(int, float, float, result=str)
+    def addTabAsDrillTask(self, tab_index: int, x: float, y: float) -> str:
+        """Create a task node titled after a tab so it can drill to that tab."""
+        if self._tab_model is None:
+            return ""
+        if tab_index < 0 or tab_index >= self._tab_model.tabCount:
+            return ""
+
+        tabs = self._tab_model.getAllTabs()
+        if tab_index >= len(tabs):
+            return ""
+        tab_name = str(tabs[tab_index].name or "").strip()
+        if not tab_name:
+            return ""
+
+        add_task_from_text = getattr(self._diagram_model, "addTaskFromText", None)
+        if not callable(add_task_from_text):
+            return ""
+        created_item_id = add_task_from_text(tab_name, x, y)
+        return str(created_item_id or "")
+
     @Slot(int)
     def switchTab(self, index: int) -> None:
         """Switch to a different tab, saving current state first.

@@ -6,6 +6,7 @@ Rectangle {
     id: sidebar
     property var tabModel
     property var projectManager
+    property var onTabDragReleased
     property int expandedWidth: 252
     property int collapsedWidth: 48
     readonly property bool keepExpanded: tabContextMenu.visible || renameTabDialog.visible
@@ -110,6 +111,9 @@ Rectangle {
                         property bool isActive: tabModel ? index === tabModel.currentTabIndex : false
                         property string activeTaskTitle: model.activeTaskTitle || ""
                         property int tabPriority: model.priority || 0
+                        property int dragTabIndex: index
+                        property string dragTabName: model.name || ""
+                        property bool suppressClick: false
                         width: tabColumnContent.width
                         height: tabButton.activeTaskTitle !== "" && sidebar.isExpanded ? 54 : 40
                         radius: 9
@@ -119,6 +123,31 @@ Rectangle {
 
                         Behavior on color {
                             ColorAnimation { duration: 110 }
+                        }
+
+                        Drag.active: tabDragHandler.active
+                        Drag.keys: ["progress-tab"]
+                        Drag.supportedActions: Qt.CopyAction
+                        Drag.mimeData: ({ "text/plain": tabButton.dragTabName })
+                        Drag.hotSpot.x: width / 2
+                        Drag.hotSpot.y: height / 2
+
+                        DragHandler {
+                            id: tabDragHandler
+                            target: null
+                            acceptedButtons: Qt.LeftButton
+                            onActiveChanged: {
+                                if (active)
+                                    tabButton.suppressClick = true
+                                else if (tabButton.suppressClick && typeof sidebar.onTabDragReleased === "function") {
+                                    var scenePos = tabButton.mapToItem(
+                                        null,
+                                        tabDragHandler.centroid.position.x,
+                                        tabDragHandler.centroid.position.y
+                                    )
+                                    sidebar.onTabDragReleased(tabButton.dragTabIndex, scenePos.x, scenePos.y)
+                                }
+                            }
                         }
 
                         ColumnLayout {
@@ -194,12 +223,15 @@ Rectangle {
                         }
 
                         ToolTip {
-                            visible: tabMouseArea.containsMouse && (!sidebar.isExpanded || tabName.truncated || tabActiveTask.truncated || tabButton.tabPriority > 0)
+                            visible: tabMouseArea.containsMouse
                             text: {
                                 var priorityText = tabButton.tabPriority === 1 ? "[Priority 1 - High] " :
                                                    tabButton.tabPriority === 2 ? "[Priority 2 - Medium] " :
                                                    tabButton.tabPriority === 3 ? "[Priority 3 - Low] " : ""
-                                return priorityText + model.name + " (" + Math.round(model.completionPercent) + "%)" + (tabButton.activeTaskTitle ? "\n" + tabButton.activeTaskTitle : "")
+                                var baseText = priorityText + model.name + " (" + Math.round(model.completionPercent) + "%)"
+                                if (tabButton.activeTaskTitle)
+                                    baseText += "\n" + tabButton.activeTaskTitle
+                                return baseText + "\nDrag to drawing to create a drill task"
                             }
                             delay: 500
                         }
@@ -210,6 +242,10 @@ Rectangle {
                             hoverEnabled: true
                             acceptedButtons: Qt.LeftButton | Qt.RightButton
                             onClicked: function(mouse) {
+                                if (tabButton.suppressClick && mouse.button === Qt.LeftButton) {
+                                    tabButton.suppressClick = false
+                                    return
+                                }
                                 if (mouse.button === Qt.RightButton) {
                                     tabContextMenu.tabIndex = index
                                     tabContextMenu.tabName = model.name
