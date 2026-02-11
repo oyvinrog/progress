@@ -35,35 +35,6 @@ Item {
 
     anchors.fill: parent
 
-    function insertTextAtCursor(editor, value) {
-        if (!editor || !value || value.length === 0)
-            return
-        var start = editor.selectionStart
-        var end = editor.selectionEnd
-        if (start !== end) {
-            var left = Math.min(start, end)
-            var right = Math.max(start, end)
-            editor.remove(left, right)
-            editor.cursorPosition = left
-        }
-        editor.insert(editor.cursorPosition, value)
-    }
-
-    function handleMarkdownPaste(editor) {
-        if (!editor)
-            return
-        if (!markdownImagePaster) {
-            editor.paste()
-            return
-        }
-        var imageMarkdown = markdownImagePaster.clipboardImageMarkdown()
-        if (imageMarkdown.length > 0) {
-            insertTextAtCursor(editor, imageMarkdown)
-            return
-        }
-        editor.paste()
-    }
-
     Dialog {
         id: addDialog
         modal: true
@@ -194,9 +165,9 @@ Item {
         }
 
         onOpened: {
-            boxTextArea.forceActiveFocus()
+            boxMarkdownEditor.focusEditor()
             if (boxDialog.editingItemId.length > 0)
-                boxTextArea.selectAll()
+                boxMarkdownEditor.selectAll()
         }
 
         contentItem: ColumnLayout {
@@ -212,89 +183,13 @@ Item {
                 wrapMode: Text.WordWrap
             }
 
-            SplitView {
-                id: boxEditorSplit
+            MarkdownEditorPane {
+                id: boxMarkdownEditor
                 Layout.fillWidth: true
                 Layout.preferredHeight: boxDialog.dialogHeight
-                orientation: Qt.Horizontal
-
-                ScrollView {
-                    id: boxEditorInputPane
-                    SplitView.fillWidth: true
-                    SplitView.fillHeight: true
-                    SplitView.minimumWidth: 220
-                    SplitView.preferredWidth: Math.max(260, (boxEditorSplit.width - 10) / 2)
-
-                    TextArea {
-                        id: boxTextArea
-                        text: boxDialog.textValue
-                        placeholderText: "Label"
-                        wrapMode: TextEdit.Wrap
-                        selectByMouse: true
-                        color: "#f5f6f8"
-                        font.pixelSize: 14
-                        background: Rectangle {
-                            color: "#1b2028"
-                            radius: 6
-                            border.color: "#384458"
-                        }
-                        Keys.onShortcutOverride: function(event) {
-                            var isPaste = event.matches(StandardKey.Paste)
-                            var isShiftInsert = ((event.modifiers & Qt.ShiftModifier) && event.key === Qt.Key_Insert)
-                            if (isPaste || isShiftInsert) {
-                                dialogHost.handleMarkdownPaste(boxTextArea)
-                                event.accepted = true
-                            }
-                        }
-                        onTextChanged: boxDialog.textValue = text
-                    }
-                }
-
-                Rectangle {
-                    id: boxEditorPreviewPane
-                    SplitView.fillWidth: true
-                    SplitView.fillHeight: true
-                    SplitView.minimumWidth: 220
-                    SplitView.preferredWidth: Math.max(260, (boxEditorSplit.width - 10) / 2)
-                    color: "#0f1624"
-                    radius: 6
-                    border.color: "#384458"
-
-                    ColumnLayout {
-                        anchors.fill: parent
-                        anchors.margins: 8
-                        spacing: 6
-
-                        Label {
-                            text: "Preview"
-                            color: "#aab7cf"
-                            font.pixelSize: 12
-                            font.bold: true
-                        }
-
-                        ScrollView {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            background: Rectangle {
-                                color: "#0b1220"
-                                radius: 4
-                                border.color: "#2b3646"
-                            }
-
-                            Text {
-                                width: parent.width
-                                text: boxTextArea.text
-                                textFormat: Text.MarkdownText
-                                wrapMode: Text.WordWrap
-                                color: "#f5f6f8"
-                                leftPadding: 10
-                                rightPadding: 10
-                                topPadding: 8
-                                bottomPadding: 8
-                            }
-                        }
-                    }
-                }
+                textValue: boxDialog.textValue
+                placeholderText: "Label"
+                onTextValueChanged: boxDialog.textValue = textValue
             }
         }
 
@@ -358,9 +253,9 @@ Item {
         }
 
         onOpened: {
-            freeTextArea.forceActiveFocus()
+            freeTextMarkdownEditor.focusEditor()
             if (freeTextDialog.editingItemId.length > 0)
-                freeTextArea.selectAll()
+                freeTextMarkdownEditor.selectAll()
         }
 
         contentItem: ColumnLayout {
@@ -375,82 +270,13 @@ Item {
                 wrapMode: Text.WordWrap
             }
 
-            SplitView {
+            MarkdownEditorPane {
+                id: freeTextMarkdownEditor
                 Layout.fillWidth: true
                 Layout.preferredHeight: freeTextDialog.dialogHeight
-                orientation: Qt.Horizontal
-
-                ScrollView {
-                    SplitView.fillWidth: true
-                    SplitView.fillHeight: true
-
-                    TextArea {
-                        id: freeTextArea
-                        text: freeTextDialog.textValue
-                        placeholderText: "Write your text here..."
-                        wrapMode: TextEdit.Wrap
-                        selectByMouse: true
-                        color: "#f5f6f8"
-                        font.pixelSize: 14
-                        background: Rectangle {
-                            color: "#1b2028"
-                            radius: 6
-                            border.color: "#384458"
-                        }
-                        Keys.onShortcutOverride: function(event) {
-                            var isPaste = event.matches(StandardKey.Paste)
-                            var isShiftInsert = ((event.modifiers & Qt.ShiftModifier) && event.key === Qt.Key_Insert)
-                            if (isPaste || isShiftInsert) {
-                                dialogHost.handleMarkdownPaste(freeTextArea)
-                                event.accepted = true
-                            }
-                        }
-                        onTextChanged: freeTextDialog.textValue = text
-                    }
-                }
-
-                Rectangle {
-                    SplitView.fillWidth: true
-                    SplitView.fillHeight: true
-                    color: "#0f1624"
-                    radius: 6
-                    border.color: "#384458"
-
-                    ColumnLayout {
-                        anchors.fill: parent
-                        anchors.margins: 8
-                        spacing: 6
-
-                        Label {
-                            text: "Preview"
-                            color: "#aab7cf"
-                            font.pixelSize: 12
-                            font.bold: true
-                        }
-
-                        ScrollView {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            background: Rectangle {
-                                color: "#0b1220"
-                                radius: 4
-                                border.color: "#2b3646"
-                            }
-
-                            Text {
-                                width: parent.width
-                                text: freeTextArea.text
-                                textFormat: Text.MarkdownText
-                                wrapMode: Text.WordWrap
-                                color: "#f5f6f8"
-                                leftPadding: 10
-                                rightPadding: 10
-                                topPadding: 8
-                                bottomPadding: 8
-                            }
-                        }
-                    }
-                }
+                textValue: freeTextDialog.textValue
+                placeholderText: "Write your text here..."
+                onTextValueChanged: freeTextDialog.textValue = textValue
             }
 
             Rectangle {

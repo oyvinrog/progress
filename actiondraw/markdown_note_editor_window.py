@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal, QUrl
 from PySide6.QtQml import QQmlApplicationEngine
 
 from .markdown_image_paster import MarkdownImagePaster
-from .markdown_note_qml import MARKDOWN_NOTE_QML
+from .qml import MARKDOWN_NOTE_EDITOR_QML_PATH, QML_DIR
 
 
 class MarkdownNoteEditor(QObject):
@@ -18,9 +18,10 @@ class MarkdownNoteEditor(QObject):
     def __init__(self) -> None:
         super().__init__()
         self._engine = QQmlApplicationEngine()
+        self._engine.addImportPath(str(QML_DIR))
         self._image_paster = MarkdownImagePaster()
         self._engine.rootContext().setContextProperty("markdownImagePaster", self._image_paster)
-        self._engine.loadData(MARKDOWN_NOTE_QML.encode("utf-8"))
+        self._engine.load(QUrl.fromLocalFile(str(MARKDOWN_NOTE_EDITOR_QML_PATH)))
         roots = self._engine.rootObjects()
         if not roots:
             raise RuntimeError("Failed to load markdown note editor QML.")
