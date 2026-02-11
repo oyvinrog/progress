@@ -2988,6 +2988,20 @@ ApplicationWindow {
         }
     }
 
+    Connections {
+        target: markdownNoteManager
+        enabled: markdownNoteManager !== null
+        function onTaskCreated(taskId) {
+            if (!taskId || !diagramModel)
+                return
+            root.selectedItemId = taskId
+            var snapshot = diagramModel.getItemSnapshot(taskId)
+            if (snapshot && snapshot.taskIndex !== undefined && snapshot.taskIndex >= 0) {
+                root.drillToTask(snapshot.taskIndex)
+            }
+        }
+    }
+
     Component.onCompleted: {
         updateBoardBounds()
         refreshLinkingTabsPanel()

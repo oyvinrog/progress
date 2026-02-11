@@ -37,8 +37,20 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.fillHeight: true
             placeholderText: "Write your note here..."
+            allowCreateTask: true
+            sourceItemId: editorRoot.noteId
             textValue: editorRoot.noteText
             onTextValueChanged: editorRoot.noteText = textValue
+            onCreateTaskRequested: function(selectedText) {
+                if (editorRoot.noteId.length === 0)
+                    return
+                if (markdownNoteManager && markdownNoteManager.createTaskFromNoteSelection) {
+                    markdownNoteManager.createTaskFromNoteSelection(editorRoot.noteId, selectedText)
+                    return
+                }
+                if (diagramModel && diagramModel.createTaskFromMarkdownSelection)
+                    diagramModel.createTaskFromMarkdownSelection(editorRoot.noteId, selectedText)
+            }
         }
 
         RowLayout {

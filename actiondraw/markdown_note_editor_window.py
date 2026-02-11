@@ -15,12 +15,16 @@ class MarkdownNoteEditor(QObject):
     noteSaved = Signal(str, str)
     noteCanceled = Signal(str)
 
-    def __init__(self) -> None:
+    def __init__(self, diagram_model=None, markdown_note_manager=None) -> None:
         super().__init__()
         self._engine = QQmlApplicationEngine()
         self._engine.addImportPath(str(QML_DIR))
+        self._diagram_model = diagram_model
+        self._markdown_note_manager = markdown_note_manager
         self._image_paster = MarkdownImagePaster()
         self._engine.rootContext().setContextProperty("markdownImagePaster", self._image_paster)
+        self._engine.rootContext().setContextProperty("diagramModel", self._diagram_model)
+        self._engine.rootContext().setContextProperty("markdownNoteManager", self._markdown_note_manager)
         self._engine.load(QUrl.fromLocalFile(str(MARKDOWN_NOTE_EDITOR_QML_PATH)))
         roots = self._engine.rootObjects()
         if not roots:

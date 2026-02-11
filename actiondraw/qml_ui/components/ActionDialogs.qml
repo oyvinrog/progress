@@ -189,7 +189,29 @@ Item {
                 Layout.preferredHeight: boxDialog.dialogHeight
                 textValue: boxDialog.textValue
                 placeholderText: "Label"
+                allowCreateTask: true
+                sourceItemId: boxDialog.editingItemId
                 onTextValueChanged: boxDialog.textValue = textValue
+                onCreateTaskRequested: function(selectedText) {
+                    if (!diagramModel)
+                        return
+                    var sourceId = boxDialog.editingItemId
+                    if (sourceId.length === 0) {
+                        sourceId = diagramModel.addPresetItemWithText(
+                            boxDialog.presetName,
+                            root.snapValue(boxDialog.targetX),
+                            root.snapValue(boxDialog.targetY),
+                            boxDialog.textValue
+                        )
+                        if (sourceId.length === 0)
+                            return
+                        boxDialog.editingItemId = sourceId
+                        boxMarkdownEditor.sourceItemId = sourceId
+                    }
+                    var newTaskId = diagramModel.createTaskFromMarkdownSelection(sourceId, selectedText)
+                    if (newTaskId.length > 0 && root)
+                        root.selectedItemId = newTaskId
+                }
             }
         }
 
@@ -276,7 +298,29 @@ Item {
                 Layout.preferredHeight: freeTextDialog.dialogHeight
                 textValue: freeTextDialog.textValue
                 placeholderText: "Write your text here..."
+                allowCreateTask: true
+                sourceItemId: freeTextDialog.editingItemId
                 onTextValueChanged: freeTextDialog.textValue = textValue
+                onCreateTaskRequested: function(selectedText) {
+                    if (!diagramModel)
+                        return
+                    var sourceId = freeTextDialog.editingItemId
+                    if (sourceId.length === 0) {
+                        sourceId = diagramModel.addPresetItemWithText(
+                            "freetext",
+                            root.snapValue(freeTextDialog.targetX),
+                            root.snapValue(freeTextDialog.targetY),
+                            freeTextDialog.textValue
+                        )
+                        if (sourceId.length === 0)
+                            return
+                        freeTextDialog.editingItemId = sourceId
+                        freeTextMarkdownEditor.sourceItemId = sourceId
+                    }
+                    var newTaskId = diagramModel.createTaskFromMarkdownSelection(sourceId, selectedText)
+                    if (newTaskId.length > 0 && root)
+                        root.selectedItemId = newTaskId
+                }
             }
 
             Rectangle {

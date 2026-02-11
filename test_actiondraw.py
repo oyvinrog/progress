@@ -804,6 +804,30 @@ class TestDiagramModelSerialization:
         new_model.from_dict(data)
         assert new_model.getItemMarkdown(item_id) == "# Title\nBody"
 
+    def test_create_task_from_markdown_selection_chains_tasks(self, diagram_model_with_task_model):
+        source_id = diagram_model_with_task_model.addPresetItemWithText("box", 50, 60, "Source")
+
+        first_task_id = diagram_model_with_task_model.createTaskFromMarkdownSelection(source_id, "First task")
+        assert first_task_id.startswith("task_")
+        first_task = diagram_model_with_task_model.getItem(first_task_id)
+        assert first_task is not None
+        assert first_task.text == "First task"
+        assert any(
+            edge["fromId"] == source_id and edge["toId"] == first_task_id
+            for edge in diagram_model_with_task_model.edges
+        )
+
+        second_task_id = diagram_model_with_task_model.createTaskFromMarkdownSelection(source_id, "Second task")
+        assert second_task_id.startswith("task_")
+        assert any(
+            edge["fromId"] == first_task_id and edge["toId"] == second_task_id
+            for edge in diagram_model_with_task_model.edges
+        )
+
+    def test_create_task_from_markdown_selection_requires_task_model(self, empty_diagram_model):
+        source_id = empty_diagram_model.addPresetItemWithText("box", 10, 20, "Source")
+        assert empty_diagram_model.createTaskFromMarkdownSelection(source_id, "Task text") == ""
+
     def test_from_dict_empty(self, empty_diagram_model):
         """Test loading empty data."""
         empty_diagram_model.addBox(10.0, 20.0, "Existing")
