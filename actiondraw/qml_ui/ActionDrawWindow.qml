@@ -344,6 +344,35 @@ ApplicationWindow {
         return snapPoint(Qt.point(cx, cy))
     }
 
+    function viewportPointToDiagram(vx, vy) {
+        var dx = (viewport.contentX + vx) / root.zoomLevel - root.originOffsetX
+        var dy = (viewport.contentY + vy) / root.zoomLevel - root.originOffsetY
+        return Qt.point(dx, dy)
+    }
+
+    function handleTabDragRelease(tabIndex, sceneX, sceneY) {
+        if (!projectManager || !diagramModel)
+            return
+        if (tabIndex === undefined || tabIndex < 0)
+            return
+
+        var viewportPos = viewport.mapFromItem(null, sceneX, sceneY)
+        var insideViewport = (
+            viewportPos.x >= 0 && viewportPos.x <= viewport.width &&
+            viewportPos.y >= 0 && viewportPos.y <= viewport.height
+        )
+        if (!insideViewport)
+            return
+
+        var diagramPoint = root.viewportPointToDiagram(viewportPos.x, viewportPos.y)
+        var snapped = root.snapPoint(diagramPoint)
+        var newId = projectManager.addTabAsDrillTask(tabIndex, snapped.x, snapped.y)
+        if (newId && newId.length > 0) {
+            root.selectedItemId = newId
+            root.lastCreatedTaskId = newId
+        }
+    }
+
     function copySelectionToClipboard() {
         if (!diagramModel)
             return
@@ -495,6 +524,7 @@ ApplicationWindow {
         SidebarTabs {
             tabModel: tabModelRef
             projectManager: projectManagerRef
+            onTabDragReleased: root.handleTabDragRelease
         }
 
         // Main content area (right side)

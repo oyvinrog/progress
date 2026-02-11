@@ -1695,6 +1695,24 @@ class TestMultiTabSupport:
         project_manager.drillToTask(0)
         assert diagram_model.currentTaskIndex == 0
 
+    def test_project_manager_add_tab_as_drill_task(self, app):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        tab_model.addTab("Backend API")
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        created_item_id = project_manager.addTabAsDrillTask(1, 120.0, 240.0)
+        assert created_item_id.startswith("task_")
+        assert task_model.rowCount() == 1
+        assert task_model.getTaskTitle(0) == "Backend API"
+        assert diagram_model.count == 1
+        item = diagram_model.getItemSnapshot(created_item_id)
+        assert item["taskIndex"] == 0
+        assert item["text"] == "Backend API"
+
 
 class TestCountdownTimer:
     """Tests for the countdown timer feature."""
