@@ -32,6 +32,23 @@ Item {
     property alias loadDialog: loadDialog
     property alias folderDialog: folderDialog
     property alias clipboardPasteDialog: clipboardPasteDialog
+    property bool anyDialogVisible: (
+        addDialog.visible
+        || boxDialog.visible
+        || freeTextDialog.visible
+        || edgeDescriptionDialog.visible
+        || taskDialog.visible
+        || newTaskDialog.visible
+        || quickTaskDialog.visible
+        || breakdownDialog.visible
+        || taskRenameDialog.visible
+        || timerDialog.visible
+        || reminderDialog.visible
+        || edgeDropTaskDialog.visible
+        || clipboardPasteDialog.visible
+        || saveDialog.visible
+        || loadDialog.visible
+    )
 
     anchors.fill: parent
 

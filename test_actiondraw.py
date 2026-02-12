@@ -452,6 +452,53 @@ class TestQueries:
         assert empty_diagram_model.data(empty_diagram_model.index(10, 0), empty_diagram_model.IdRole) is None
         assert empty_diagram_model.data(QModelIndex(), empty_diagram_model.IdRole) is None
 
+    def test_find_nearest_connected_task_in_direction_right(self, diagram_model_with_task_model):
+        source = diagram_model_with_task_model.addTask(0, 100.0, 100.0)
+        right_near = diagram_model_with_task_model.addTask(1, 260.0, 100.0)
+        right_far = diagram_model_with_task_model.addTask(2, 500.0, 100.0)
+        diagram_model_with_task_model.addEdge(source, right_near)
+        diagram_model_with_task_model.addEdge(source, right_far)
+
+        picked = diagram_model_with_task_model.findNearestConnectedTaskInDirection(source, "right")
+        assert picked == right_near
+
+    def test_find_nearest_connected_task_in_direction_uses_steering(self, diagram_model_with_task_model):
+        source = diagram_model_with_task_model.addTask(0, 200.0, 200.0)
+        straight_right = diagram_model_with_task_model.addTask(1, 380.0, 200.0)
+        down_right = diagram_model_with_task_model.addTask(2, 300.0, 360.0)
+        diagram_model_with_task_model.addEdge(source, straight_right)
+        diagram_model_with_task_model.addEdge(source, down_right)
+
+        picked = diagram_model_with_task_model.findNearestConnectedTaskInDirection(source, "right")
+        assert picked == straight_right
+
+    def test_find_nearest_connected_task_in_direction_up_and_down(self, diagram_model_with_task_model):
+        source = diagram_model_with_task_model.addTask(0, 300.0, 300.0)
+        up_task = diagram_model_with_task_model.addTask(1, 300.0, 120.0)
+        down_task = diagram_model_with_task_model.addTask(2, 300.0, 520.0)
+        diagram_model_with_task_model.addEdge(source, up_task)
+        diagram_model_with_task_model.addEdge(source, down_task)
+
+        assert diagram_model_with_task_model.findNearestConnectedTaskInDirection(source, "up") == up_task
+        assert diagram_model_with_task_model.findNearestConnectedTaskInDirection(source, "down") == down_task
+
+    def test_find_nearest_connected_task_in_direction_ignores_non_task_items(self, diagram_model_with_task_model):
+        source = diagram_model_with_task_model.addTask(0, 100.0, 100.0)
+        right_box = diagram_model_with_task_model.addBox(260.0, 100.0, "Box")
+        right_task = diagram_model_with_task_model.addTask(1, 420.0, 100.0)
+        diagram_model_with_task_model.addEdge(source, right_box)
+        diagram_model_with_task_model.addEdge(source, right_task)
+
+        picked = diagram_model_with_task_model.findNearestConnectedTaskInDirection(source, "right")
+        assert picked == right_task
+
+    def test_find_nearest_connected_task_in_direction_returns_empty_for_no_match(self, diagram_model_with_task_model):
+        source = diagram_model_with_task_model.addTask(0, 100.0, 100.0)
+        left_task = diagram_model_with_task_model.addTask(1, 0.0, 100.0)
+        diagram_model_with_task_model.addEdge(source, left_task)
+
+        assert diagram_model_with_task_model.findNearestConnectedTaskInDirection(source, "right") == ""
+
 
 class TestUnlimitedBoardSize:
     """Tests for unlimited board size (maxItemX, maxItemY properties)."""

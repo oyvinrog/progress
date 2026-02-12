@@ -278,6 +278,42 @@ ApplicationWindow {
         onActivated: root.openMarkdownNoteForSelection()
     }
 
+    Shortcut {
+        sequence: "Left"
+        enabled: diagramModel !== null
+            && root.selectedItemId.length > 0
+            && (!dialogs || !dialogs.anyDialogVisible)
+            && !reminderPopup.visible
+        onActivated: root.navigateConnectedTask("left")
+    }
+
+    Shortcut {
+        sequence: "Right"
+        enabled: diagramModel !== null
+            && root.selectedItemId.length > 0
+            && (!dialogs || !dialogs.anyDialogVisible)
+            && !reminderPopup.visible
+        onActivated: root.navigateConnectedTask("right")
+    }
+
+    Shortcut {
+        sequence: "Up"
+        enabled: diagramModel !== null
+            && root.selectedItemId.length > 0
+            && (!dialogs || !dialogs.anyDialogVisible)
+            && !reminderPopup.visible
+        onActivated: root.navigateConnectedTask("up")
+    }
+
+    Shortcut {
+        sequence: "Down"
+        enabled: diagramModel !== null
+            && root.selectedItemId.length > 0
+            && (!dialogs || !dialogs.anyDialogVisible)
+            && !reminderPopup.visible
+        onActivated: root.navigateConnectedTask("down")
+    }
+
     function addTaskOrConnectedTask() {
         if (!diagramModel)
             return
@@ -357,6 +393,24 @@ ApplicationWindow {
         if (!root.selectedItemId || root.selectedItemId.length === 0)
             return
         markdownNoteManager.openNote(root.selectedItemId)
+    }
+
+    function navigateConnectedTask(direction) {
+        if (!diagramModel || !root.selectedItemId || root.selectedItemId.length === 0)
+            return
+        var nextId = diagramModel.findNearestConnectedTaskInDirection(root.selectedItemId, direction)
+        if (!nextId || nextId.length === 0)
+            return
+        root.selectedItemId = nextId
+        if (edgeCanvas)
+            edgeCanvas.selectedEdgeId = ""
+
+        var item = diagramModel.getItemSnapshot(nextId)
+        if (!item || !(item.x || item.x === 0))
+            return
+        var centerX = item.x + (item.width || 120) / 2
+        var centerY = item.y + (item.height || 60) / 2
+        centerOnPoint(centerX, centerY)
     }
 
     function showEdgeDropSuggestions(sourceId, dropX, dropY) {
@@ -2910,6 +2964,7 @@ ApplicationWindow {
                     model: [
                         "Ctrl+Enter  New Task",
                         "Ctrl+-  Backward Chain",
+                        "Arrows  Connected Task",
                         "Ctrl+V  Paste",
                         "Ctrl+S  Save",
                         "F2  Rename",

@@ -1408,6 +1408,76 @@ class DiagramModel(
                 return item.id
         return None
 
+    def _item_center(self, item: DiagramItem) -> tuple[float, float]:
+        return (item.x + (item.width / 2.0), item.y + (item.height / 2.0))
+
+    @Slot(str, str, result=str)
+    def findNearestConnectedTaskInDirection(self, item_id: str, direction: str) -> str:
+        """Find the nearest directly-connected task in the requested direction.
+
+        Direction can be: "left", "right", "up", or "down".
+        Edges are treated as undirected for keyboard navigation.
+        """
+        source = self.getItem(item_id)
+        if source is None:
+            return ""
+
+        direction_key = (direction or "").strip().lower()
+        if direction_key not in {"left", "right", "up", "down"}:
+            return ""
+
+        connected_ids: set[str] = set()
+        for edge in self._edges:
+            if edge.from_id == item_id:
+                connected_ids.add(edge.to_id)
+            elif edge.to_id == item_id:
+                connected_ids.add(edge.from_id)
+
+        if not connected_ids:
+            return ""
+
+        source_x, source_y = self._item_center(source)
+        best_item_id = ""
+        best_score: Optional[tuple[float, float, float]] = None
+
+        for candidate in self._items:
+            if candidate.id not in connected_ids:
+                continue
+            if candidate.item_type != DiagramItemType.TASK:
+                continue
+
+            cand_x, cand_y = self._item_center(candidate)
+            dx = cand_x - source_x
+            dy = cand_y - source_y
+            euclidean = math.hypot(dx, dy)
+            if euclidean <= 0.0:
+                continue
+
+            if direction_key == "left":
+                primary = -dx
+                lateral = abs(dy)
+            elif direction_key == "right":
+                primary = dx
+                lateral = abs(dy)
+            elif direction_key == "up":
+                primary = -dy
+                lateral = abs(dx)
+            else:  # down
+                primary = dy
+                lateral = abs(dx)
+
+            if primary <= 0.0:
+                continue
+
+            # Steer primarily by direction alignment, then by distance.
+            alignment_penalty = lateral / primary
+            score = (alignment_penalty, euclidean, primary)
+            if best_score is None or score < best_score:
+                best_score = score
+                best_item_id = candidate.id
+
+        return best_item_id
+
     @Slot(float, float, result=str)
     def itemIdAt(self, x: float, y: float) -> str:
         return self.getItemAt(x, y) or ""
