@@ -261,6 +261,18 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Ctrl+-"
+        enabled: diagramModel !== null && !dialogs.freeTextDialog.visible
+        onActivated: root.addTaskOrConnectedTaskBackward()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Minus"
+        enabled: diagramModel !== null && !dialogs.freeTextDialog.visible
+        onActivated: root.addTaskOrConnectedTaskBackward()
+    }
+
+    Shortcut {
         sequence: "Ctrl+M"
         enabled: diagramModel !== null
         onActivated: root.openMarkdownNoteForSelection()
@@ -296,6 +308,45 @@ ApplicationWindow {
             dialogs.edgeDropTaskDialog.open()
         } else {
             // No selection - add new task at center.
+            addQuickTaskAtCenter()
+        }
+    }
+
+    function addTaskOrConnectedTaskBackward(sourceIdOverride) {
+        if (!diagramModel)
+            return
+        var sourceId = sourceIdOverride || ""
+        var item = null
+        if (sourceId.length > 0) {
+            item = diagramModel.getItemSnapshot(sourceId)
+            if (!item || !(item.x || item.x === 0))
+                sourceId = ""
+        }
+        if (!sourceId && root.selectedItemId && root.selectedItemId.length > 0) {
+            item = diagramModel.getItemSnapshot(root.selectedItemId)
+            if (item && (item.x || item.x === 0)) {
+                sourceId = root.selectedItemId
+            }
+        }
+        if (!sourceId && root.lastCreatedTaskId && root.lastCreatedTaskId.length > 0) {
+            item = diagramModel.getItemSnapshot(root.lastCreatedTaskId)
+            if (item && (item.x || item.x === 0)) {
+                sourceId = root.lastCreatedTaskId
+            } else {
+                root.lastCreatedTaskId = ""
+            }
+        }
+        if (sourceId) {
+            // Backward chain: create predecessor task and connect new -> source.
+            var dropX = item.x - ((item.width || 100) + 50)
+            var dropY = item.y
+            dialogs.edgeDropTaskDialog.sourceId = sourceId
+            dialogs.edgeDropTaskDialog.sourceType = "task"
+            dialogs.edgeDropTaskDialog.dropX = dropX
+            dialogs.edgeDropTaskDialog.dropY = dropY
+            dialogs.edgeDropTaskDialog.reverseDirection = true
+            dialogs.edgeDropTaskDialog.open()
+        } else {
             addQuickTaskAtCenter()
         }
     }
@@ -2816,8 +2867,12 @@ ApplicationWindow {
 
                                 TapHandler {
                                     acceptedButtons: Qt.LeftButton
-                                    onTapped: {
+                                    onTapped: function(eventPoint) {
                                         if (diagramModel) {
+                                            if (eventPoint.modifiers & Qt.ControlModifier) {
+                                                root.addTaskOrConnectedTaskBackward(itemRect.itemId)
+                                                return
+                                            }
                                             diagramModel.removeItem(itemRect.itemId)
                                         }
                                     }
@@ -2854,6 +2909,7 @@ ApplicationWindow {
                 Repeater {
                     model: [
                         "Ctrl+Enter  New Task",
+                        "Ctrl+-  Backward Chain",
                         "Ctrl+V  Paste",
                         "Ctrl+S  Save",
                         "F2  Rename",

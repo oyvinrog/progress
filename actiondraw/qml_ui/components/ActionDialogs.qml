@@ -1264,6 +1264,7 @@ Item {
         property string sourceType: "task"
         property real dropX: 0
         property real dropY: 0
+        property bool reverseDirection: false
 
         onOpened: edgeDropTaskField.forceActiveFocus()
 
@@ -1273,8 +1274,11 @@ Item {
 
             Label {
                 text: {
-                    if (edgeDropTaskDialog.sourceType === "task" && taskModel)
+                    if (edgeDropTaskDialog.sourceType === "task" && taskModel) {
+                        if (edgeDropTaskDialog.reverseDirection)
+                            return "Create a predecessor task connected into the source item."
                         return "Create a new task connected from the source item."
+                    }
                     else
                         return "Create a new " + edgeDropTaskDialog.sourceType + " connected from the source item."
                 }
@@ -1306,12 +1310,24 @@ Item {
         onAccepted: {
             if (diagramModel && edgeDropTaskDialog.sourceId && edgeDropTaskField.text.trim().length > 0) {
                 if (edgeDropTaskDialog.sourceType === "task" && taskModel) {
-                    var newId = diagramModel.addTaskFromTextAndConnect(
-                        edgeDropTaskDialog.sourceId,
-                        root.snapValue(edgeDropTaskDialog.dropX),
-                        root.snapValue(edgeDropTaskDialog.dropY),
-                        edgeDropTaskField.text
-                    )
+                    var newId = ""
+                    if (edgeDropTaskDialog.reverseDirection) {
+                        newId = diagramModel.addTaskFromText(
+                            edgeDropTaskField.text,
+                            root.snapValue(edgeDropTaskDialog.dropX),
+                            root.snapValue(edgeDropTaskDialog.dropY)
+                        )
+                        if (newId && newId.length > 0) {
+                            diagramModel.addEdge(newId, edgeDropTaskDialog.sourceId)
+                        }
+                    } else {
+                        newId = diagramModel.addTaskFromTextAndConnect(
+                            edgeDropTaskDialog.sourceId,
+                            root.snapValue(edgeDropTaskDialog.dropX),
+                            root.snapValue(edgeDropTaskDialog.dropY),
+                            edgeDropTaskField.text
+                        )
+                    }
                     if (newId && newId.length > 0) {
                         root.lastCreatedTaskId = newId
                         root.selectedItemId = newId
@@ -1334,6 +1350,7 @@ Item {
             edgeDropTaskField.text = ""
             edgeDropTaskDialog.sourceId = ""
             edgeDropTaskDialog.sourceType = "task"
+            edgeDropTaskDialog.reverseDirection = false
         }
     }
 
