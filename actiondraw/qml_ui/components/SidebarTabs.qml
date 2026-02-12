@@ -6,6 +6,7 @@ Rectangle {
     id: sidebar
     property var tabModel
     property var projectManager
+    property var onTabDragMoved
     property var onTabDragReleased
     property int expandedWidth: 252
     property int collapsedWidth: 48
@@ -114,15 +115,24 @@ Rectangle {
                         property int dragTabIndex: index
                         property string dragTabName: model.name || ""
                         property bool suppressClick: false
+                        property bool dragging: tabDragHandler.active
                         width: tabColumnContent.width
                         height: tabButton.activeTaskTitle !== "" && sidebar.isExpanded ? 54 : 40
                         radius: 9
+                        scale: dragging ? 1.03 : 1.0
+                        opacity: dragging ? 0.9 : 1.0
                         color: isActive ? "#1f3b54" : (tabMouseArea.containsMouse ? "#1a2f42" : "#132535")
-                        border.color: isActive ? "#64c1ff" : "#2a4358"
-                        border.width: 1
+                        border.color: dragging ? "#8fe2ff" : (isActive ? "#64c1ff" : "#2a4358")
+                        border.width: dragging ? 2 : 1
 
                         Behavior on color {
                             ColorAnimation { duration: 110 }
+                        }
+                        Behavior on scale {
+                            NumberAnimation { duration: 90; easing.type: Easing.OutCubic }
+                        }
+                        Behavior on opacity {
+                            NumberAnimation { duration: 90; easing.type: Easing.OutCubic }
                         }
 
                         Drag.active: tabDragHandler.active
@@ -136,17 +146,34 @@ Rectangle {
                             id: tabDragHandler
                             target: null
                             acceptedButtons: Qt.LeftButton
+                            dragThreshold: 4
                             onActiveChanged: {
-                                if (active)
+                                var scenePos = tabButton.mapToItem(
+                                    null,
+                                    tabDragHandler.centroid.position.x,
+                                    tabDragHandler.centroid.position.y
+                                )
+                                if (active) {
                                     tabButton.suppressClick = true
-                                else if (tabButton.suppressClick && typeof sidebar.onTabDragReleased === "function") {
-                                    var scenePos = tabButton.mapToItem(
-                                        null,
-                                        tabDragHandler.centroid.position.x,
-                                        tabDragHandler.centroid.position.y
-                                    )
-                                    sidebar.onTabDragReleased(tabButton.dragTabIndex, scenePos.x, scenePos.y)
+                                    if (typeof sidebar.onTabDragMoved === "function")
+                                        sidebar.onTabDragMoved(tabButton.dragTabIndex, tabButton.dragTabName, scenePos.x, scenePos.y, true)
+                                } else {
+                                    if (typeof sidebar.onTabDragMoved === "function")
+                                        sidebar.onTabDragMoved(tabButton.dragTabIndex, tabButton.dragTabName, scenePos.x, scenePos.y, false)
+                                    if (tabButton.suppressClick && typeof sidebar.onTabDragReleased === "function") {
+                                        sidebar.onTabDragReleased(tabButton.dragTabIndex, scenePos.x, scenePos.y)
+                                    }
                                 }
+                            }
+                            onTranslationChanged: {
+                                if (!tabDragHandler.active || typeof sidebar.onTabDragMoved !== "function")
+                                    return
+                                var scenePos = tabButton.mapToItem(
+                                    null,
+                                    tabDragHandler.centroid.position.x,
+                                    tabDragHandler.centroid.position.y
+                                )
+                                sidebar.onTabDragMoved(tabButton.dragTabIndex, tabButton.dragTabName, scenePos.x, scenePos.y, true)
                             }
                         }
 
@@ -241,6 +268,7 @@ Rectangle {
                             anchors.fill: parent
                             hoverEnabled: true
                             acceptedButtons: Qt.LeftButton | Qt.RightButton
+                            cursorShape: tabDragHandler.active ? Qt.ClosedHandCursor : Qt.PointingHandCursor
                             onClicked: function(mouse) {
                                 if (tabButton.suppressClick && mouse.button === Qt.LeftButton) {
                                     tabButton.suppressClick = false

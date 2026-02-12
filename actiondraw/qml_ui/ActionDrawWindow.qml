@@ -222,6 +222,11 @@ ApplicationWindow {
     property string pendingReminderTaskTitle: ""
     property var reminderQueue: []
     property bool reminderPopupBusy: false
+    property bool tabDragActive: false
+    property bool tabDragInsideViewport: false
+    property string tabDragPreviewName: ""
+    property real tabDragPreviewX: 0
+    property real tabDragPreviewY: 0
 
     Shortcut {
         sequence: "Ctrl+S"
@@ -350,19 +355,67 @@ ApplicationWindow {
         return Qt.point(dx, dy)
     }
 
-    function handleTabDragRelease(tabIndex, sceneX, sceneY) {
-        if (!projectManager || !diagramModel)
+    function diagramPointToViewport(dx, dy) {
+        var vx = (dx + root.originOffsetX) * root.zoomLevel - viewport.contentX
+        var vy = (dy + root.originOffsetY) * root.zoomLevel - viewport.contentY
+        return Qt.point(vx, vy)
+    }
+
+    function clearTabDragPreview() {
+        root.tabDragActive = false
+        root.tabDragInsideViewport = false
+        root.tabDragPreviewName = ""
+        root.tabDragPreviewX = 0
+        root.tabDragPreviewY = 0
+    }
+
+    function updateTabDragHover(tabIndex, tabName, sceneX, sceneY, active) {
+        if (!active) {
+            root.clearTabDragPreview()
             return
-        if (tabIndex === undefined || tabIndex < 0)
+        }
+        root.tabDragActive = true
+        root.tabDragPreviewName = tabName || ""
+
+        if (!diagramModel || tabIndex === undefined || tabIndex < 0) {
+            root.tabDragInsideViewport = false
             return
+        }
 
         var viewportPos = viewport.mapFromItem(null, sceneX, sceneY)
         var insideViewport = (
             viewportPos.x >= 0 && viewportPos.x <= viewport.width &&
             viewportPos.y >= 0 && viewportPos.y <= viewport.height
         )
+        root.tabDragInsideViewport = insideViewport
         if (!insideViewport)
             return
+
+        var diagramPoint = root.viewportPointToDiagram(viewportPos.x, viewportPos.y)
+        var snapped = root.snapPoint(diagramPoint)
+        root.tabDragPreviewX = snapped.x
+        root.tabDragPreviewY = snapped.y
+    }
+
+    function handleTabDragRelease(tabIndex, sceneX, sceneY) {
+        if (!projectManager || !diagramModel) {
+            root.clearTabDragPreview()
+            return
+        }
+        if (tabIndex === undefined || tabIndex < 0) {
+            root.clearTabDragPreview()
+            return
+        }
+
+        var viewportPos = viewport.mapFromItem(null, sceneX, sceneY)
+        var insideViewport = (
+            viewportPos.x >= 0 && viewportPos.x <= viewport.width &&
+            viewportPos.y >= 0 && viewportPos.y <= viewport.height
+        )
+        if (!insideViewport) {
+            root.clearTabDragPreview()
+            return
+        }
 
         var diagramPoint = root.viewportPointToDiagram(viewportPos.x, viewportPos.y)
         var snapped = root.snapPoint(diagramPoint)
@@ -371,6 +424,7 @@ ApplicationWindow {
             root.selectedItemId = newId
             root.lastCreatedTaskId = newId
         }
+        root.clearTabDragPreview()
     }
 
     function copySelectionToClipboard() {
@@ -524,6 +578,7 @@ ApplicationWindow {
         SidebarTabs {
             tabModel: tabModelRef
             projectManager: projectManagerRef
+            onTabDragMoved: root.updateTabDragHover
             onTabDragReleased: root.handleTabDragRelease
         }
 
@@ -2829,6 +2884,47 @@ ApplicationWindow {
         }
         }  // Close main content ColumnLayout
     }  // Close outer RowLayout
+
+    Rectangle {
+        visible: root.tabDragActive
+        property point viewportTop: viewport.mapToItem(root.contentItem, viewport.width / 2, 0)
+        x: viewportTop.x - width / 2
+        y: viewportTop.y + 10
+        radius: 9
+        height: 30
+        width: dropHintText.implicitWidth + 18
+        color: root.tabDragInsideViewport ? "#1c4e64" : "#3e2d2d"
+        border.color: root.tabDragInsideViewport ? "#76d7ff" : "#d28f8f"
+        border.width: 1
+        z: 980
+
+        Text {
+            id: dropHintText
+            anchors.centerIn: parent
+            color: "#eaf7ff"
+            font.pixelSize: 12
+            font.bold: true
+            text: root.tabDragInsideViewport
+                ? "Drop to create drill task"
+                : "Drag into drawing area"
+        }
+    }
+
+    Rectangle {
+        visible: root.tabDragActive && root.tabDragInsideViewport
+        width: 18
+        height: 18
+        radius: 9
+        color: "#3ad39f"
+        border.color: "#dff8ef"
+        border.width: 2
+        opacity: 0.9
+        z: 980
+        property point viewportPos: root.diagramPointToViewport(root.tabDragPreviewX, root.tabDragPreviewY)
+        property point scenePos: viewport.mapToItem(root.contentItem, viewportPos.x, viewportPos.y)
+        x: scenePos.x - width / 2
+        y: scenePos.y - height / 2
+    }
 
     // Save notification toast
     Rectangle {
