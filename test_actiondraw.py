@@ -1,9 +1,7 @@
 """Tests for the rewritten actiondraw module."""
 
-import sys
 import pytest
 from PySide6.QtCore import QModelIndex
-from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine
 
 from actiondraw import (
@@ -16,14 +14,6 @@ from actiondraw import (
     create_actiondraw_window,
 )
 from task_model import TaskModel
-
-
-@pytest.fixture(scope="session")
-def app():
-    instance = QGuiApplication.instance()
-    if instance is None:
-        instance = QGuiApplication(sys.argv)
-    return instance
 
 
 @pytest.fixture

@@ -1,7 +1,5 @@
 """Tests for markdown clipboard image pasting helpers."""
 
-import sys
-
 import pytest
 from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QMimeData
 from PySide6.QtGui import QColor, QGuiApplication, QImage
@@ -11,14 +9,6 @@ from actiondraw.markdown_image_paster import (
     image_to_png_base64,
     markdown_image_from_qimage,
 )
-
-
-@pytest.fixture(scope="session")
-def app():
-    instance = QGuiApplication.instance()
-    if instance is None:
-        instance = QGuiApplication(sys.argv)
-    return instance
 
 
 def test_image_to_png_base64_null_image_returns_empty():
