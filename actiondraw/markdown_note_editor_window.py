@@ -35,8 +35,10 @@ class MarkdownNoteEditor(QObject):
 
     def open(self, note_id: str, note_text: str, note_title: str) -> None:
         self._root.setProperty("noteId", note_id)
-        self._root.setProperty("noteText", note_text)
         self._root.setProperty("noteTitle", note_title)
+        # Clear first to avoid stale editor state when reusing the same window instance.
+        self._root.setProperty("noteText", "")
+        self._root.setProperty("noteText", note_text or "")
         self._root.show()
         self._root.raise_()
         self._root.requestActivate()

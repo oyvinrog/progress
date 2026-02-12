@@ -164,6 +164,11 @@ Item {
             onActivated: boxDialog.accept()
         }
 
+        onTextValueChanged: {
+            if (boxMarkdownEditor.textValue !== boxDialog.textValue)
+                boxMarkdownEditor.textValue = boxDialog.textValue
+        }
+
         onOpened: {
             boxMarkdownEditor.focusEditor()
             if (boxDialog.editingItemId.length > 0)
@@ -272,6 +277,11 @@ Item {
             sequence: "Ctrl+Enter"
             enabled: freeTextDialog.visible
             onActivated: freeTextDialog.accept()
+        }
+
+        onTextValueChanged: {
+            if (freeTextMarkdownEditor.textValue !== freeTextDialog.textValue)
+                freeTextMarkdownEditor.textValue = freeTextDialog.textValue
         }
 
         onOpened: {
