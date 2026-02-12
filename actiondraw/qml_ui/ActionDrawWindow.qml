@@ -222,6 +222,11 @@ ApplicationWindow {
     property string pendingReminderTaskTitle: ""
     property var reminderQueue: []
     property bool reminderPopupBusy: false
+    property bool tabDragActive: false
+    property bool tabDragInsideViewport: false
+    property string tabDragPreviewName: ""
+    property real tabDragPreviewX: 0
+    property real tabDragPreviewY: 0
 
     Shortcut {
         sequence: "Ctrl+S"
@@ -256,9 +261,57 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Ctrl+-"
+        enabled: diagramModel !== null && !dialogs.freeTextDialog.visible
+        onActivated: root.addTaskOrConnectedTaskBackward()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Minus"
+        enabled: diagramModel !== null && !dialogs.freeTextDialog.visible
+        onActivated: root.addTaskOrConnectedTaskBackward()
+    }
+
+    Shortcut {
         sequence: "Ctrl+M"
         enabled: diagramModel !== null
         onActivated: root.openMarkdownNoteForSelection()
+    }
+
+    Shortcut {
+        sequence: "Left"
+        enabled: diagramModel !== null
+            && root.selectedItemId.length > 0
+            && (!dialogs || !dialogs.anyDialogVisible)
+            && !reminderPopup.visible
+        onActivated: root.navigateConnectedTask("left")
+    }
+
+    Shortcut {
+        sequence: "Right"
+        enabled: diagramModel !== null
+            && root.selectedItemId.length > 0
+            && (!dialogs || !dialogs.anyDialogVisible)
+            && !reminderPopup.visible
+        onActivated: root.navigateConnectedTask("right")
+    }
+
+    Shortcut {
+        sequence: "Up"
+        enabled: diagramModel !== null
+            && root.selectedItemId.length > 0
+            && (!dialogs || !dialogs.anyDialogVisible)
+            && !reminderPopup.visible
+        onActivated: root.navigateConnectedTask("up")
+    }
+
+    Shortcut {
+        sequence: "Down"
+        enabled: diagramModel !== null
+            && root.selectedItemId.length > 0
+            && (!dialogs || !dialogs.anyDialogVisible)
+            && !reminderPopup.visible
+        onActivated: root.navigateConnectedTask("down")
     }
 
     function addTaskOrConnectedTask() {
@@ -295,12 +348,69 @@ ApplicationWindow {
         }
     }
 
+    function addTaskOrConnectedTaskBackward(sourceIdOverride) {
+        if (!diagramModel)
+            return
+        var sourceId = sourceIdOverride || ""
+        var item = null
+        if (sourceId.length > 0) {
+            item = diagramModel.getItemSnapshot(sourceId)
+            if (!item || !(item.x || item.x === 0))
+                sourceId = ""
+        }
+        if (!sourceId && root.selectedItemId && root.selectedItemId.length > 0) {
+            item = diagramModel.getItemSnapshot(root.selectedItemId)
+            if (item && (item.x || item.x === 0)) {
+                sourceId = root.selectedItemId
+            }
+        }
+        if (!sourceId && root.lastCreatedTaskId && root.lastCreatedTaskId.length > 0) {
+            item = diagramModel.getItemSnapshot(root.lastCreatedTaskId)
+            if (item && (item.x || item.x === 0)) {
+                sourceId = root.lastCreatedTaskId
+            } else {
+                root.lastCreatedTaskId = ""
+            }
+        }
+        if (sourceId) {
+            // Backward chain: create predecessor task and connect new -> source.
+            var dropX = item.x - ((item.width || 100) + 50)
+            var dropY = item.y
+            dialogs.edgeDropTaskDialog.sourceId = sourceId
+            dialogs.edgeDropTaskDialog.sourceType = "task"
+            dialogs.edgeDropTaskDialog.dropX = dropX
+            dialogs.edgeDropTaskDialog.dropY = dropY
+            dialogs.edgeDropTaskDialog.reverseDirection = true
+            dialogs.edgeDropTaskDialog.open()
+        } else {
+            addQuickTaskAtCenter()
+        }
+    }
+
     function openMarkdownNoteForSelection() {
         if (!diagramModel || !markdownNoteManager)
             return
         if (!root.selectedItemId || root.selectedItemId.length === 0)
             return
         markdownNoteManager.openNote(root.selectedItemId)
+    }
+
+    function navigateConnectedTask(direction) {
+        if (!diagramModel || !root.selectedItemId || root.selectedItemId.length === 0)
+            return
+        var nextId = diagramModel.findNearestConnectedTaskInDirection(root.selectedItemId, direction)
+        if (!nextId || nextId.length === 0)
+            return
+        root.selectedItemId = nextId
+        if (edgeCanvas)
+            edgeCanvas.selectedEdgeId = ""
+
+        var item = diagramModel.getItemSnapshot(nextId)
+        if (!item || !(item.x || item.x === 0))
+            return
+        var centerX = item.x + (item.width || 120) / 2
+        var centerY = item.y + (item.height || 60) / 2
+        centerOnPoint(centerX, centerY)
     }
 
     function showEdgeDropSuggestions(sourceId, dropX, dropY) {
@@ -350,19 +460,67 @@ ApplicationWindow {
         return Qt.point(dx, dy)
     }
 
-    function handleTabDragRelease(tabIndex, sceneX, sceneY) {
-        if (!projectManager || !diagramModel)
+    function diagramPointToViewport(dx, dy) {
+        var vx = (dx + root.originOffsetX) * root.zoomLevel - viewport.contentX
+        var vy = (dy + root.originOffsetY) * root.zoomLevel - viewport.contentY
+        return Qt.point(vx, vy)
+    }
+
+    function clearTabDragPreview() {
+        root.tabDragActive = false
+        root.tabDragInsideViewport = false
+        root.tabDragPreviewName = ""
+        root.tabDragPreviewX = 0
+        root.tabDragPreviewY = 0
+    }
+
+    function updateTabDragHover(tabIndex, tabName, sceneX, sceneY, active) {
+        if (!active) {
+            root.clearTabDragPreview()
             return
-        if (tabIndex === undefined || tabIndex < 0)
+        }
+        root.tabDragActive = true
+        root.tabDragPreviewName = tabName || ""
+
+        if (!diagramModel || tabIndex === undefined || tabIndex < 0) {
+            root.tabDragInsideViewport = false
             return
+        }
 
         var viewportPos = viewport.mapFromItem(null, sceneX, sceneY)
         var insideViewport = (
             viewportPos.x >= 0 && viewportPos.x <= viewport.width &&
             viewportPos.y >= 0 && viewportPos.y <= viewport.height
         )
+        root.tabDragInsideViewport = insideViewport
         if (!insideViewport)
             return
+
+        var diagramPoint = root.viewportPointToDiagram(viewportPos.x, viewportPos.y)
+        var snapped = root.snapPoint(diagramPoint)
+        root.tabDragPreviewX = snapped.x
+        root.tabDragPreviewY = snapped.y
+    }
+
+    function handleTabDragRelease(tabIndex, sceneX, sceneY) {
+        if (!projectManager || !diagramModel) {
+            root.clearTabDragPreview()
+            return
+        }
+        if (tabIndex === undefined || tabIndex < 0) {
+            root.clearTabDragPreview()
+            return
+        }
+
+        var viewportPos = viewport.mapFromItem(null, sceneX, sceneY)
+        var insideViewport = (
+            viewportPos.x >= 0 && viewportPos.x <= viewport.width &&
+            viewportPos.y >= 0 && viewportPos.y <= viewport.height
+        )
+        if (!insideViewport) {
+            root.clearTabDragPreview()
+            return
+        }
 
         var diagramPoint = root.viewportPointToDiagram(viewportPos.x, viewportPos.y)
         var snapped = root.snapPoint(diagramPoint)
@@ -371,6 +529,7 @@ ApplicationWindow {
             root.selectedItemId = newId
             root.lastCreatedTaskId = newId
         }
+        root.clearTabDragPreview()
     }
 
     function copySelectionToClipboard() {
@@ -524,6 +683,7 @@ ApplicationWindow {
         SidebarTabs {
             tabModel: tabModelRef
             projectManager: projectManagerRef
+            onTabDragMoved: root.updateTabDragHover
             onTabDragReleased: root.handleTabDragRelease
         }
 
@@ -2761,8 +2921,12 @@ ApplicationWindow {
 
                                 TapHandler {
                                     acceptedButtons: Qt.LeftButton
-                                    onTapped: {
+                                    onTapped: function(eventPoint) {
                                         if (diagramModel) {
+                                            if (eventPoint.modifiers & Qt.ControlModifier) {
+                                                root.addTaskOrConnectedTaskBackward(itemRect.itemId)
+                                                return
+                                            }
                                             diagramModel.removeItem(itemRect.itemId)
                                         }
                                     }
@@ -2799,6 +2963,8 @@ ApplicationWindow {
                 Repeater {
                     model: [
                         "Ctrl+Enter  New Task",
+                        "Ctrl+-  Backward Chain",
+                        "Arrows  Connected Task",
                         "Ctrl+V  Paste",
                         "Ctrl+S  Save",
                         "F2  Rename",
@@ -2829,6 +2995,47 @@ ApplicationWindow {
         }
         }  // Close main content ColumnLayout
     }  // Close outer RowLayout
+
+    Rectangle {
+        visible: root.tabDragActive
+        property point viewportTop: viewport.mapToItem(root.contentItem, viewport.width / 2, 0)
+        x: viewportTop.x - width / 2
+        y: viewportTop.y + 10
+        radius: 9
+        height: 30
+        width: dropHintText.implicitWidth + 18
+        color: root.tabDragInsideViewport ? "#1c4e64" : "#3e2d2d"
+        border.color: root.tabDragInsideViewport ? "#76d7ff" : "#d28f8f"
+        border.width: 1
+        z: 980
+
+        Text {
+            id: dropHintText
+            anchors.centerIn: parent
+            color: "#eaf7ff"
+            font.pixelSize: 12
+            font.bold: true
+            text: root.tabDragInsideViewport
+                ? "Drop to create drill task"
+                : "Drag into drawing area"
+        }
+    }
+
+    Rectangle {
+        visible: root.tabDragActive && root.tabDragInsideViewport
+        width: 18
+        height: 18
+        radius: 9
+        color: "#3ad39f"
+        border.color: "#dff8ef"
+        border.width: 2
+        opacity: 0.9
+        z: 980
+        property point viewportPos: root.diagramPointToViewport(root.tabDragPreviewX, root.tabDragPreviewY)
+        property point scenePos: viewport.mapToItem(root.contentItem, viewportPos.x, viewportPos.y)
+        x: scenePos.x - width / 2
+        y: scenePos.y - height / 2
+    }
 
     // Save notification toast
     Rectangle {

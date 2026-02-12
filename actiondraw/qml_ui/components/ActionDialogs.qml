@@ -32,6 +32,23 @@ Item {
     property alias loadDialog: loadDialog
     property alias folderDialog: folderDialog
     property alias clipboardPasteDialog: clipboardPasteDialog
+    property bool anyDialogVisible: (
+        addDialog.visible
+        || boxDialog.visible
+        || freeTextDialog.visible
+        || edgeDescriptionDialog.visible
+        || taskDialog.visible
+        || newTaskDialog.visible
+        || quickTaskDialog.visible
+        || breakdownDialog.visible
+        || taskRenameDialog.visible
+        || timerDialog.visible
+        || reminderDialog.visible
+        || edgeDropTaskDialog.visible
+        || clipboardPasteDialog.visible
+        || saveDialog.visible
+        || loadDialog.visible
+    )
 
     anchors.fill: parent
 
@@ -164,6 +181,11 @@ Item {
             onActivated: boxDialog.accept()
         }
 
+        onTextValueChanged: {
+            if (boxMarkdownEditor.textValue !== boxDialog.textValue)
+                boxMarkdownEditor.textValue = boxDialog.textValue
+        }
+
         onOpened: {
             boxMarkdownEditor.focusEditor()
             if (boxDialog.editingItemId.length > 0)
@@ -272,6 +294,11 @@ Item {
             sequence: "Ctrl+Enter"
             enabled: freeTextDialog.visible
             onActivated: freeTextDialog.accept()
+        }
+
+        onTextValueChanged: {
+            if (freeTextMarkdownEditor.textValue !== freeTextDialog.textValue)
+                freeTextMarkdownEditor.textValue = freeTextDialog.textValue
         }
 
         onOpened: {
@@ -1254,6 +1281,7 @@ Item {
         property string sourceType: "task"
         property real dropX: 0
         property real dropY: 0
+        property bool reverseDirection: false
 
         onOpened: edgeDropTaskField.forceActiveFocus()
 
@@ -1263,8 +1291,11 @@ Item {
 
             Label {
                 text: {
-                    if (edgeDropTaskDialog.sourceType === "task" && taskModel)
+                    if (edgeDropTaskDialog.sourceType === "task" && taskModel) {
+                        if (edgeDropTaskDialog.reverseDirection)
+                            return "Create a predecessor task connected into the source item."
                         return "Create a new task connected from the source item."
+                    }
                     else
                         return "Create a new " + edgeDropTaskDialog.sourceType + " connected from the source item."
                 }
@@ -1296,12 +1327,24 @@ Item {
         onAccepted: {
             if (diagramModel && edgeDropTaskDialog.sourceId && edgeDropTaskField.text.trim().length > 0) {
                 if (edgeDropTaskDialog.sourceType === "task" && taskModel) {
-                    var newId = diagramModel.addTaskFromTextAndConnect(
-                        edgeDropTaskDialog.sourceId,
-                        root.snapValue(edgeDropTaskDialog.dropX),
-                        root.snapValue(edgeDropTaskDialog.dropY),
-                        edgeDropTaskField.text
-                    )
+                    var newId = ""
+                    if (edgeDropTaskDialog.reverseDirection) {
+                        newId = diagramModel.addTaskFromText(
+                            edgeDropTaskField.text,
+                            root.snapValue(edgeDropTaskDialog.dropX),
+                            root.snapValue(edgeDropTaskDialog.dropY)
+                        )
+                        if (newId && newId.length > 0) {
+                            diagramModel.addEdge(newId, edgeDropTaskDialog.sourceId)
+                        }
+                    } else {
+                        newId = diagramModel.addTaskFromTextAndConnect(
+                            edgeDropTaskDialog.sourceId,
+                            root.snapValue(edgeDropTaskDialog.dropX),
+                            root.snapValue(edgeDropTaskDialog.dropY),
+                            edgeDropTaskField.text
+                        )
+                    }
                     if (newId && newId.length > 0) {
                         root.lastCreatedTaskId = newId
                         root.selectedItemId = newId
@@ -1324,6 +1367,7 @@ Item {
             edgeDropTaskField.text = ""
             edgeDropTaskDialog.sourceId = ""
             edgeDropTaskDialog.sourceType = "task"
+            edgeDropTaskDialog.reverseDirection = false
         }
     }
 
