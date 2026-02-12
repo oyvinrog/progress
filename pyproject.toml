@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "actiondraw"
-version = "0.1.7"
+version = "0.1.8"
 description = "A diagramming module built with PySide6 and QML"
 readme = "README.md"
 authors = [
