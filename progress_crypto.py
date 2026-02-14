@@ -26,6 +26,16 @@ except Exception:  # pragma: no cover - import availability depends on environme
     Type = None  # type: ignore[assignment]
     hash_secret_raw = None  # type: ignore[assignment]
 
+try:  # pragma: no cover - import availability depends on environment
+    from ykman.device import list_all_devices
+    from yubikit.core.otp import OtpConnection
+    from yubikit.yubiotp import SLOT, YubiOtpSession
+except Exception:  # pragma: no cover - import availability depends on environment
+    list_all_devices = None  # type: ignore[assignment]
+    OtpConnection = None  # type: ignore[assignment]
+    SLOT = None  # type: ignore[assignment]
+    YubiOtpSession = None  # type: ignore[assignment]
+
 
 class CryptoError(Exception):
     """Raised when encryption/decryption or credential steps fail."""
@@ -77,14 +87,48 @@ class YkmanCliYubiKeyProvider:
         return _parse_hmac_response(completed.stdout)
 
 
-def has_yubikey_cli() -> bool:
-    """Return True when the ykman CLI is available."""
+class YubikitYubiKeyProvider:
+    """YubiKey challenge-response provider backed by Yubico Python APIs."""
 
-    return _resolve_ykman_binary(raise_on_missing=False) is not None
+    def hmac_challenge_response(self, slot: str, challenge: bytes) -> bytes:
+        if not _has_native_yubikey_api():
+            raise CryptoError(
+                "Missing YubiKey Python API support. Install `yubikey-manager` "
+                "or configure ykman CLI support."
+            )
+
+        slot_number = _slot_to_int(slot)
+        if slot_number not in (1, 2):
+            raise CryptoError("YubiKey slot must be 1 or 2")
+
+        devices = list_all_devices([OtpConnection])  # type: ignore[misc]
+        if not devices:
+            raise CryptoError("No YubiKey detected over OTP interface")
+
+        device, _info = devices[0]
+        try:
+            with device.open_connection(OtpConnection) as connection:  # type: ignore[misc]
+                session = YubiOtpSession(connection)  # type: ignore[misc]
+                response = session.calculate_hmac_sha1(SLOT(slot_number), challenge)  # type: ignore[misc]
+        except Exception as exc:
+            raise CryptoError(f"YubiKey challenge-response failed via yubikit API: {exc}") from exc
+
+        if len(response) != 20:
+            raise CryptoError(f"Unexpected YubiKey response length: {len(response)}")
+        return response
+
+
+def has_yubikey_cli() -> bool:
+    """Return True when YubiKey support is available via native API or ykman CLI."""
+
+    return _has_native_yubikey_api() or _resolve_ykman_binary(raise_on_missing=False) is not None
 
 
 def yubikey_support_guidance() -> str:
     """Return OS-specific setup guidance for enabling YubiKey mode."""
+
+    if _has_native_yubikey_api():
+        return "YubiKey support detected via Yubico Python APIs (`yubikit`)."
 
     detected = _resolve_ykman_binary(raise_on_missing=False)
     if detected:
@@ -93,28 +137,34 @@ def yubikey_support_guidance() -> str:
     system = platform.system().lower()
     if system == "windows":
         return (
-            "YubiKey mode is unavailable: ykman CLI not found.\n\n"
-            "Windows (no-admin option):\n"
+            "YubiKey mode is unavailable: no YubiKey API/CLI support found.\n\n"
+            "Windows setup (preferred, no-admin option):\n"
+            "1. Install Python support: py -m pip install --user yubikey-manager\n"
+            "2. Reopen the app and choose YubiKey mode again.\n\n"
+            "Windows CLI fallback (no-admin option):\n"
             "1. Download a portable ykman.exe build.\n"
             "2. Set YKMAN_PATH to that executable before launching the app.\n"
             "   Example (cmd): set YKMAN_PATH=C:\\tools\\ykman\\ykman.exe\n"
             "3. Reopen the app and choose YubiKey mode again.\n\n"
-            "Without ykman, use passphrase-only encryption."
+            "Without YubiKey support, use passphrase-only encryption."
         )
     if system == "linux":
         return (
-            "YubiKey mode is unavailable: ykman CLI not found.\n\n"
-            "Linux setup:\n"
+            "YubiKey mode is unavailable: no YubiKey API/CLI support found.\n\n"
+            "Linux setup (preferred):\n"
+            "1. Install Python support: pip install --user yubikey-manager\n"
+            "2. Reopen the app and choose YubiKey mode again.\n\n"
+            "Linux CLI fallback:\n"
             "1. Install tools: sudo apt update && sudo apt install -y yubikey-manager pcscd\n"
             "2. Ensure service is running: systemctl --user start pcscd (or system service)\n"
             "3. Reopen the app and choose YubiKey mode again.\n\n"
-            "Without ykman, use passphrase-only encryption."
+            "Without YubiKey support, use passphrase-only encryption."
         )
     return (
-        "YubiKey mode is unavailable: ykman CLI not found.\n\n"
-        "Install Yubico ykman CLI or set YKMAN_PATH to the ykman executable,\n"
+        "YubiKey mode is unavailable: no YubiKey API/CLI support found.\n\n"
+        "Install Yubico Python support (`yubikey-manager`) or ykman CLI,\n"
         "then reopen the app and try YubiKey mode again.\n\n"
-        "Without ykman, use passphrase-only encryption."
+        "Without YubiKey support, use passphrase-only encryption."
     )
 
 
@@ -312,7 +362,7 @@ def _build_secret_material(
     if credentials.use_yubikey:
         if challenge is None:
             raise CryptoError("YubiKey challenge is required")
-        provider = yubikey_provider or YkmanCliYubiKeyProvider()
+        provider = yubikey_provider or _default_yubikey_provider()
         yubikey_bytes = provider.hmac_challenge_response(credentials.yubikey_slot, challenge)
 
     if passphrase_bytes and yubikey_bytes:
@@ -379,6 +429,19 @@ def _slot_to_int(slot: str) -> int:
         return int(slot)
     except (TypeError, ValueError) as exc:
         raise CryptoError(f"Invalid YubiKey slot: {slot}") from exc
+
+
+def _default_yubikey_provider() -> YubiKeyProvider:
+    if _has_native_yubikey_api():
+        return YubikitYubiKeyProvider()
+    return YkmanCliYubiKeyProvider()
+
+
+def _has_native_yubikey_api() -> bool:
+    return all(
+        value is not None
+        for value in (list_all_devices, OtpConnection, YubiOtpSession, SLOT)
+    )
 
 
 def _resolve_ykman_binary(*, raise_on_missing: bool = True) -> Optional[str]:
