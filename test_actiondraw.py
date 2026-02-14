@@ -3332,6 +3332,7 @@ class TestConvertItemType:
 
 class TestYubiKeyGuidance:
     def test_guidance_windows_no_admin_instructions(self, monkeypatch):
+        monkeypatch.setattr("progress_crypto._has_native_yubikey_api", lambda: False)
         monkeypatch.setattr("progress_crypto._resolve_ykman_binary", lambda raise_on_missing=False: None)
         monkeypatch.setattr("progress_crypto.platform.system", lambda: "Windows")
         message = yubikey_support_guidance()
@@ -3339,6 +3340,7 @@ class TestYubiKeyGuidance:
         assert "YKMAN_PATH" in message
 
     def test_guidance_reports_detected_ykman_path(self, monkeypatch):
+        monkeypatch.setattr("progress_crypto._has_native_yubikey_api", lambda: False)
         monkeypatch.setattr("progress_crypto._resolve_ykman_binary", lambda raise_on_missing=False: "/tmp/ykman")
         message = yubikey_support_guidance()
         assert "YubiKey support detected" in message
