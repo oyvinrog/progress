@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "actiondraw"
-version = "0.1.8"
+version = "0.1.9"
 description = "A diagramming module built with PySide6 and QML"
 readme = "README.md"
 authors = [
@@ -28,6 +28,9 @@ requires-python = ">=3.8"
 dependencies = [
     "PySide6>=6.6,<7",
     "matplotlib>=3.7.0",
+    "cryptography>=42.0.0",
+    "argon2-cffi>=23.1.0",
+    "yubikey-manager; python_version >= '3.9'",
 ]
 
 [project.optional-dependencies]
@@ -46,7 +49,7 @@ actiondraw = "actiondraw:main"
 
 [tool.setuptools]
 packages = ["actiondraw"]
-py-modules = ["task_model", "markdown_note_editor"]
+py-modules = ["task_model", "markdown_note_editor", "progress_crypto"]
 
 [tool.setuptools.package-data]
 actiondraw = ["qml_ui/**/*.qml"]

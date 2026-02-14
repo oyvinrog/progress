@@ -25,6 +25,8 @@ ApplicationWindow {
     property var projectManagerRef: projectManager
     property var markdownNoteManagerRef: markdownNoteManager
     property var tabModelRef: tabModel
+    property bool yubiKeyPromptVisible: false
+    property string yubiKeyPromptText: "Touch your YubiKey to continue."
 
     menuBar: ActionMenuBar {
         root: root
@@ -106,6 +108,22 @@ ApplicationWindow {
         saveNotification.text = message
         saveNotification.opacity = 1
         saveNotificationTimer.restart()
+    }
+
+    function showErrorDialog(message) {
+        errorDialog.messageText = message
+        errorDialog.open()
+    }
+
+    function showYubiKeyPrompt(message) {
+        yubiKeyPromptText = (message && message.length > 0) ? message : "Touch your YubiKey to continue."
+        yubiKeyPromptVisible = true
+        yubiKeyTouchDialog.open()
+    }
+
+    function hideYubiKeyPrompt() {
+        yubiKeyPromptVisible = false
+        yubiKeyTouchDialog.close()
     }
 
     function showNextReminderAlert() {
@@ -3073,6 +3091,42 @@ ApplicationWindow {
         onTriggered: saveNotification.opacity = 0
     }
 
+    Dialog {
+        id: errorDialog
+        modal: true
+        title: "ActionDraw"
+        anchors.centerIn: parent
+        width: Math.min(root.width - 60, 700)
+        standardButtons: Dialog.Ok
+        property string messageText: ""
+
+        background: Rectangle {
+            radius: 10
+            color: "#0f1b27"
+            border.color: "#4f6780"
+            border.width: 1
+        }
+
+        contentItem: Rectangle {
+            implicitWidth: errorDialog.width - 32
+            implicitHeight: 240
+            color: "transparent"
+
+            ScrollView {
+                anchors.fill: parent
+                clip: true
+
+                Text {
+                    width: Math.max(200, parent.width - 16)
+                    text: errorDialog.messageText
+                    wrapMode: Text.Wrap
+                    color: "#f5f8fc"
+                    font.pixelSize: 13
+                }
+            }
+        }
+    }
+
     Popup {
         id: reminderPopup
         modal: false
@@ -3158,6 +3212,18 @@ ApplicationWindow {
             root.showWindow()
             root.drillToTask(taskIndex)
         }
+        function onErrorOccurred(message) {
+            root.showWindow()
+            root.hideYubiKeyPrompt()
+            root.showErrorDialog(message)
+        }
+        function onYubiKeyInteractionStarted(message) {
+            root.showWindow()
+            root.showYubiKeyPrompt(message)
+        }
+        function onYubiKeyInteractionFinished() {
+            root.hideYubiKeyPrompt()
+        }
     }
 
     Connections {
@@ -3213,5 +3279,60 @@ ApplicationWindow {
         updateBoardBounds()
         refreshLinkingTabsPanel()
         Qt.callLater(resetView)
+    }
+
+    Dialog {
+        id: yubiKeyTouchDialog
+        modal: true
+        focus: true
+        closePolicy: Popup.NoAutoClose
+        x: Math.round((root.width - width) / 2)
+        y: Math.round((root.height - height) / 2)
+        width: Math.min(root.width * 0.52, 520)
+        visible: root.yubiKeyPromptVisible
+
+        contentItem: ColumnLayout {
+            spacing: 14
+
+            Label {
+                text: "YubiKey Verification Required"
+                font.pixelSize: 17
+                font.bold: true
+                color: "#e8eef8"
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+            }
+
+            Label {
+                text: root.yubiKeyPromptText
+                color: "#c7d6e8"
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+            }
+
+            RowLayout {
+                spacing: 10
+                Layout.fillWidth: true
+
+                BusyIndicator {
+                    running: root.yubiKeyPromptVisible
+                    Layout.preferredWidth: 28
+                    Layout.preferredHeight: 28
+                }
+
+                Label {
+                    text: "Waiting for touch..."
+                    color: "#9bb0c8"
+                    Layout.fillWidth: true
+                }
+            }
+        }
+
+        background: Rectangle {
+            radius: 14
+            color: "#132031"
+            border.color: "#2a4462"
+            border.width: 1
+        }
     }
 }

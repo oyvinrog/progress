@@ -1379,7 +1379,7 @@ Item {
         defaultSuffix: "progress"
         onAccepted: {
             if (projectManager) {
-                projectManager.saveProject(selectedFile)
+                projectManager.saveProjectAs(selectedFile)
             }
         }
     }

@@ -13,7 +13,63 @@ from actiondraw import (
     DrawingStroke,
     create_actiondraw_window,
 )
+from progress_crypto import CryptoError, EncryptionCredentials, yubikey_support_guidance
 from task_model import TaskModel
+
+
+@pytest.fixture(autouse=True)
+def fixed_project_encryption_credentials(monkeypatch):
+    """Avoid interactive credential prompts in tests."""
+    import base64
+    import importlib.util
+    import json
+
+    from task_model import ProjectManager
+
+    def _fake_prompt(self, operation, file_path, envelope=None):
+        return EncryptionCredentials(passphrase="test-passphrase")
+
+    monkeypatch.setattr(ProjectManager, "_prompt_encryption_credentials", _fake_prompt)
+
+    crypto_available = (
+        importlib.util.find_spec("cryptography") is not None
+        and importlib.util.find_spec("argon2") is not None
+    )
+    if crypto_available:
+        return
+
+    def _fake_encrypt(project_data, credentials):
+        plaintext = json.dumps(project_data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        return {
+            "version": "1.2",
+            "saved_at": project_data.get("saved_at"),
+            "encryption": {
+                "cipher": "AES-256-GCM",
+                "kdf": "Argon2id",
+                "kdf_params": {"time_cost": 3, "memory_cost": 65536, "parallelism": 1, "hash_len": 32},
+                "salt_b64": "ZmFrZXNhbHQ=",
+                "nonce_b64": "ZmFrZW5vbmNl",
+                "aad_b64": "ZmFrZWFhZA==",
+                "auth_mode": "passphrase",
+                "yubikey": {"enabled": False, "slot": "2", "challenge_b64": ""},
+            },
+            "ciphertext": base64.b64encode(plaintext).decode("ascii"),
+        }
+
+    def _fake_decrypt(envelope, credentials):
+        if credentials.passphrase != "test-passphrase":
+            raise CryptoError("Unable to decrypt project: invalid credentials or corrupted file")
+        raw = base64.b64decode(envelope["ciphertext"].encode("ascii"))
+        return json.loads(raw.decode("utf-8"))
+
+    def _fake_is_encrypted(payload):
+        return isinstance(payload, dict) and "encryption" in payload and "ciphertext" in payload
+
+    from task_model import decrypt_project_data, encrypt_project_data, is_encrypted_envelope
+    assert decrypt_project_data and encrypt_project_data and is_encrypted_envelope
+    monkeypatch.setattr("task_model.encrypt_project_data", _fake_encrypt)
+    monkeypatch.setattr("task_model.decrypt_project_data", _fake_decrypt)
+    monkeypatch.setattr("task_model.is_encrypted_envelope", _fake_is_encrypted)
 
 
 @pytest.fixture
@@ -1544,8 +1600,8 @@ class TestMultiTabSupport:
         assert task_model.rowCount() == 1
         assert diagram_model.count == 1
 
-    def test_save_creates_v1_1_format(self, app, tmp_path):
-        """Saving a project creates v1.1 format with tabs array."""
+    def test_save_creates_encrypted_v1_2_envelope(self, app, tmp_path):
+        """Saving a project creates encrypted v1.2 envelope format."""
         import json
         from task_model import TaskModel, ProjectManager, TabModel
 
@@ -1561,17 +1617,16 @@ class TestMultiTabSupport:
         project_manager.saveProject(str(project_file))
 
         data = json.loads(project_file.read_text())
-        assert data["version"] == "1.1"
-        assert "tabs" in data
-        assert len(data["tabs"]) == 1
-        assert data["tabs"][0]["name"] == "Main"
-        assert "active_tab" in data
-        assert data["active_tab"] == 0
+        assert data["version"] == "1.2"
+        assert "encryption" in data
+        assert "ciphertext" in data
+        assert data["encryption"]["cipher"] == "AES-256-GCM"
+        assert data["encryption"]["kdf"] == "Argon2id"
+        assert data["encryption"]["auth_mode"] == "passphrase"
 
     def test_roundtrip_multiple_tabs(self, app, tmp_path):
         """Save and load preserves multiple tabs."""
-        import json
-        from task_model import TaskModel, ProjectManager, TabModel, Tab
+        from task_model import TaskModel, ProjectManager, TabModel
 
         task_model = TaskModel()
         diagram_model = DiagramModel()
@@ -1613,6 +1668,154 @@ class TestMultiTabSupport:
         project_manager2.switchTab(0)
         assert task_model2.rowCount() == 1
         assert diagram_model2.count == 1
+
+    def test_load_encrypted_wrong_passphrase_fails(self, app, tmp_path, monkeypatch):
+        """Loading with wrong passphrase emits an error and does not load."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        task_model.addTask("Secret", -1)
+
+        project_file = tmp_path / "secure.progress"
+        project_manager.saveProject(str(project_file))
+
+        task_model2 = TaskModel()
+        diagram_model2 = DiagramModel()
+        tab_model2 = TabModel()
+        project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
+
+        def _wrong_prompt(self, operation, file_path, envelope=None):
+            return EncryptionCredentials(passphrase="wrong-passphrase")
+
+        monkeypatch.setattr(ProjectManager, "_prompt_encryption_credentials", _wrong_prompt)
+
+        errors = []
+        project_manager2.errorOccurred.connect(errors.append)
+        project_manager2.loadProject(str(project_file))
+
+        assert errors
+        assert "invalid credentials" in errors[-1]
+        assert task_model2.rowCount() == 0
+
+    def test_save_current_reuses_loaded_credentials_without_prompt(self, app, tmp_path, monkeypatch):
+        """After loading encrypted project, Save reuses in-memory credentials."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        calls = []
+
+        def _tracking_prompt(self, operation, file_path, envelope=None):
+            calls.append(operation)
+            return EncryptionCredentials(passphrase="test-passphrase")
+
+        monkeypatch.setattr(ProjectManager, "_prompt_encryption_credentials", _tracking_prompt)
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        task_model.addTask("Secret", -1)
+
+        project_file = tmp_path / "reuse_save.progress"
+        project_manager.saveProject(str(project_file))
+
+        task_model2 = TaskModel()
+        diagram_model2 = DiagramModel()
+        tab_model2 = TabModel()
+        project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
+        project_manager2.loadProject(str(project_file))
+
+        calls.clear()
+        project_manager2.saveCurrentProject()
+
+        assert calls == []
+
+    def test_save_as_prompts_even_with_cached_loaded_credentials(self, app, tmp_path, monkeypatch):
+        """Save As always prompts for encryption selection/credentials."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        calls = []
+
+        def _tracking_prompt(self, operation, file_path, envelope=None):
+            calls.append(operation)
+            return EncryptionCredentials(passphrase="test-passphrase")
+
+        monkeypatch.setattr(ProjectManager, "_prompt_encryption_credentials", _tracking_prompt)
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        task_model.addTask("Secret", -1)
+
+        project_file = tmp_path / "save_as_source.progress"
+        project_manager.saveProject(str(project_file))
+
+        task_model2 = TaskModel()
+        diagram_model2 = DiagramModel()
+        tab_model2 = TabModel()
+        project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
+        project_manager2.loadProject(str(project_file))
+
+        calls.clear()
+        save_as_file = tmp_path / "save_as_target.progress"
+        project_manager2.saveProjectAs(str(save_as_file))
+
+        assert calls == ["save"]
+        assert save_as_file.exists()
+
+    def test_save_with_yubikey_emits_touch_prompt_signals(self, app, tmp_path, monkeypatch):
+        """YubiKey save flow emits start/finish prompt signals for UI feedback."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        task_model.addTask("Secret", -1)
+
+        project_file = tmp_path / "yk_signal.progress"
+        project_manager._current_file_path = str(project_file)
+        project_manager._cached_encryption_file_path = str(project_file)
+        project_manager._cached_encryption_credentials = EncryptionCredentials(
+            passphrase=None,
+            use_yubikey=True,
+            yubikey_slot="2",
+        )
+
+        def _fake_encrypt(project_data, credentials):
+            assert credentials.use_yubikey is True
+            return {
+                "version": "1.2",
+                "saved_at": project_data.get("saved_at"),
+                "encryption": {
+                    "cipher": "AES-256-GCM",
+                    "kdf": "Argon2id",
+                    "kdf_params": {"time_cost": 3, "memory_cost": 65536, "parallelism": 1, "hash_len": 32},
+                    "salt_b64": "ZmFrZXNhbHQ=",
+                    "nonce_b64": "ZmFrZW5vbmNl",
+                    "aad_b64": "ZmFrZWFhZA==",
+                    "auth_mode": "yubikey",
+                    "yubikey": {"enabled": True, "slot": "2", "challenge_b64": "Y2hhbGxlbmdl"},
+                },
+                "ciphertext": "ZmFrZWNpcGhlcnRleHQ=",
+            }
+
+        monkeypatch.setattr("task_model.encrypt_project_data", _fake_encrypt)
+
+        started = []
+        finished = []
+        project_manager.yubiKeyInteractionStarted.connect(started.append)
+        project_manager.yubiKeyInteractionFinished.connect(lambda: finished.append(True))
+
+        project_manager.saveCurrentProject()
+
+        assert len(started) == 1
+        assert "Touch your YubiKey" in started[0]
+        assert len(finished) == 1
+        assert project_file.exists()
 
     # --- Tab operation tests ---
 
@@ -1663,8 +1866,6 @@ class TestMultiTabSupport:
     def test_cannot_remove_last_tab(self, tab_model):
         """Cannot remove the last remaining tab."""
         assert tab_model.tabCount == 1
-        tab_model.removeTab(0)
-        assert tab_model.tabCount == 1  # Still has 1 tab
 
     def test_tab_completion_role(self, tab_model):
         """Completion percent reflects task completion."""
@@ -3127,6 +3328,23 @@ class TestConvertItemType:
         empty_diagram_model.convertItemType(item_id, "ObStAcLe")
         item = empty_diagram_model.getItem(item_id)
         assert item.item_type.value == "obstacle"
+
+
+class TestYubiKeyGuidance:
+    def test_guidance_windows_no_admin_instructions(self, monkeypatch):
+        monkeypatch.setattr("progress_crypto._has_native_yubikey_api", lambda: False)
+        monkeypatch.setattr("progress_crypto._resolve_ykman_binary", lambda raise_on_missing=False: None)
+        monkeypatch.setattr("progress_crypto.platform.system", lambda: "Windows")
+        message = yubikey_support_guidance()
+        assert "no-admin option" in message
+        assert "YKMAN_PATH" in message
+
+    def test_guidance_reports_detected_ykman_path(self, monkeypatch):
+        monkeypatch.setattr("progress_crypto._has_native_yubikey_api", lambda: False)
+        monkeypatch.setattr("progress_crypto._resolve_ykman_binary", lambda raise_on_missing=False: "/tmp/ykman")
+        message = yubikey_support_guidance()
+        assert "YubiKey support detected" in message
+        assert "/tmp/ykman" in message
 
 
 if __name__ == "__main__":

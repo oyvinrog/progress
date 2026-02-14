@@ -94,6 +94,41 @@ python -m actiondraw
 - Python 3.8+
 - PySide6 >= 6.6
 - matplotlib >= 3.7.0
+- cryptography >= 42.0.0
+- argon2-cffi >= 23.1.0
+
+### Optional: YubiKey Support
+
+YubiKey-based encryption mode is optional and not required for normal save/load.
+The app prefers Yubico Python APIs (`yubikit`, from `yubikey-manager`) for
+challenge-response, and falls back to the `ykman` CLI when available.
+
+The app detects YubiKey capability at runtime and shows in-app setup guidance
+if YubiKey mode is selected while support is unavailable.
+If no YubiKey API/CLI support is available, you can still use passphrase-only mode.
+
+Install Python API support (works well for local user installs):
+
+```bash
+pip install --user yubikey-manager
+```
+
+Linux setup:
+
+```bash
+sudo apt update
+sudo apt install -y yubikey-manager pcscd
+```
+
+Windows CLI fallback (no admin-friendly option):
+- Use a portable `ykman.exe` and set `YKMAN_PATH` to that file path before starting the app.
+- If `ykman` is on PATH already, no extra env var is required.
+
+Example:
+
+```bash
+set YKMAN_PATH=C:\tools\ykman\ykman.exe
+```
 
 ## Development
 
