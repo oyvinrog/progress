@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import (
     QAbstractListModel,
+    QCoreApplication,
     QModelIndex,
     QObject,
     Qt,
@@ -1180,6 +1181,8 @@ class ProjectManager(QObject):
     tabSwitched = Signal()  # Emitted when switching to a different tab
     taskDrillRequested = Signal(int, arguments=["taskIndex"])
     taskReminderDue = Signal(int, int, str, arguments=["tabIndex", "taskIndex", "taskTitle"])
+    yubiKeyInteractionStarted = Signal(str, arguments=["message"])
+    yubiKeyInteractionFinished = Signal()
 
     def __init__(self, task_model: TaskModel, diagram_model_or_manager, tab_model: Optional["TabModel"] = None):
         """Initialize ProjectManager.
@@ -1393,6 +1396,18 @@ class ProjectManager(QObject):
                 self._diagram_model.to_dict()
             )
 
+    def _begin_yubikey_interaction(self, operation: str) -> None:
+        if operation == "load":
+            message = "Touch your YubiKey to decrypt this project."
+        else:
+            message = "Touch your YubiKey to encrypt and save this project."
+        self.yubiKeyInteractionStarted.emit(message)
+        QCoreApplication.processEvents()
+
+    def _end_yubikey_interaction(self) -> None:
+        self.yubiKeyInteractionFinished.emit()
+        QCoreApplication.processEvents()
+
     def _prompt_encryption_credentials(
         self,
         operation: str,
@@ -1551,8 +1566,14 @@ class ProjectManager(QObject):
             if credentials is None:
                 return
 
-            encrypted_payload = encrypt_project_data(project_data, credentials)
-            encrypted_payload["version"] = self.ENCRYPTED_PROJECT_VERSION
+            if credentials.use_yubikey:
+                self._begin_yubikey_interaction("save")
+            try:
+                encrypted_payload = encrypt_project_data(project_data, credentials)
+                encrypted_payload["version"] = self.ENCRYPTED_PROJECT_VERSION
+            finally:
+                if credentials.use_yubikey:
+                    self._end_yubikey_interaction()
 
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(encrypted_payload, f, ensure_ascii=False, separators=(",", ":"))
@@ -1618,7 +1639,13 @@ class ProjectManager(QObject):
                 credentials = self._prompt_encryption_credentials("load", file_path, project_data)
                 if credentials is None:
                     return
-                project_data = decrypt_project_data(project_data, credentials)
+                if credentials.use_yubikey:
+                    self._begin_yubikey_interaction("load")
+                try:
+                    project_data = decrypt_project_data(project_data, credentials)
+                finally:
+                    if credentials.use_yubikey:
+                        self._end_yubikey_interaction()
                 self._cached_encryption_file_path = file_path
                 self._cached_encryption_credentials = EncryptionCredentials(
                     passphrase=credentials.passphrase,

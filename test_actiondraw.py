@@ -1766,6 +1766,57 @@ class TestMultiTabSupport:
         assert calls == ["save"]
         assert save_as_file.exists()
 
+    def test_save_with_yubikey_emits_touch_prompt_signals(self, app, tmp_path, monkeypatch):
+        """YubiKey save flow emits start/finish prompt signals for UI feedback."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        task_model.addTask("Secret", -1)
+
+        project_file = tmp_path / "yk_signal.progress"
+        project_manager._current_file_path = str(project_file)
+        project_manager._cached_encryption_file_path = str(project_file)
+        project_manager._cached_encryption_credentials = EncryptionCredentials(
+            passphrase=None,
+            use_yubikey=True,
+            yubikey_slot="2",
+        )
+
+        def _fake_encrypt(project_data, credentials):
+            assert credentials.use_yubikey is True
+            return {
+                "version": "1.2",
+                "saved_at": project_data.get("saved_at"),
+                "encryption": {
+                    "cipher": "AES-256-GCM",
+                    "kdf": "Argon2id",
+                    "kdf_params": {"time_cost": 3, "memory_cost": 65536, "parallelism": 1, "hash_len": 32},
+                    "salt_b64": "ZmFrZXNhbHQ=",
+                    "nonce_b64": "ZmFrZW5vbmNl",
+                    "aad_b64": "ZmFrZWFhZA==",
+                    "auth_mode": "yubikey",
+                    "yubikey": {"enabled": True, "slot": "2", "challenge_b64": "Y2hhbGxlbmdl"},
+                },
+                "ciphertext": "ZmFrZWNpcGhlcnRleHQ=",
+            }
+
+        monkeypatch.setattr("task_model.encrypt_project_data", _fake_encrypt)
+
+        started = []
+        finished = []
+        project_manager.yubiKeyInteractionStarted.connect(started.append)
+        project_manager.yubiKeyInteractionFinished.connect(lambda: finished.append(True))
+
+        project_manager.saveCurrentProject()
+
+        assert len(started) == 1
+        assert "Touch your YubiKey" in started[0]
+        assert len(finished) == 1
+        assert project_file.exists()
+
     # --- Tab operation tests ---
 
     def test_add_tab(self, tab_model):
