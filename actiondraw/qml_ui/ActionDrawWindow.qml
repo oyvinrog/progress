@@ -108,6 +108,11 @@ ApplicationWindow {
         saveNotificationTimer.restart()
     }
 
+    function showErrorDialog(message) {
+        errorDialog.messageText = message
+        errorDialog.open()
+    }
+
     function showNextReminderAlert() {
         if (root.reminderPopupBusy)
             return
@@ -3073,6 +3078,42 @@ ApplicationWindow {
         onTriggered: saveNotification.opacity = 0
     }
 
+    Dialog {
+        id: errorDialog
+        modal: true
+        title: "ActionDraw"
+        anchors.centerIn: parent
+        width: Math.min(root.width - 60, 700)
+        standardButtons: Dialog.Ok
+        property string messageText: ""
+
+        background: Rectangle {
+            radius: 10
+            color: "#0f1b27"
+            border.color: "#4f6780"
+            border.width: 1
+        }
+
+        contentItem: Rectangle {
+            implicitWidth: errorDialog.width - 32
+            implicitHeight: 240
+            color: "transparent"
+
+            ScrollView {
+                anchors.fill: parent
+                clip: true
+
+                Text {
+                    width: Math.max(200, parent.width - 16)
+                    text: errorDialog.messageText
+                    wrapMode: Text.Wrap
+                    color: "#f5f8fc"
+                    font.pixelSize: 13
+                }
+            }
+        }
+    }
+
     Popup {
         id: reminderPopup
         modal: false
@@ -3157,6 +3198,10 @@ ApplicationWindow {
         function onTaskDrillRequested(taskIndex) {
             root.showWindow()
             root.drillToTask(taskIndex)
+        }
+        function onErrorOccurred(message) {
+            root.showWindow()
+            root.showErrorDialog(message)
         }
     }
 

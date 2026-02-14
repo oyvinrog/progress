@@ -26,6 +26,15 @@ from PySide6.QtCore import (
     Slot,
     Property,
 )
+from progress_crypto import (
+    CryptoError,
+    EncryptionCredentials,
+    decrypt_project_data,
+    encrypt_project_data,
+    has_yubikey_cli,
+    is_encrypted_envelope,
+    yubikey_support_guidance,
+)
 
 
 @dataclass
@@ -1160,6 +1169,7 @@ class ProjectManager(QObject):
     """
 
     PROJECT_VERSION = "1.1"
+    ENCRYPTED_PROJECT_VERSION = "1.2"
     MAX_RECENT_PROJECTS = 8
 
     saveCompleted = Signal(str)  # Emitted with file path after successful save
@@ -1376,6 +1386,96 @@ class ProjectManager(QObject):
                 self._diagram_model.to_dict()
             )
 
+    def _prompt_encryption_credentials(
+        self,
+        operation: str,
+        file_path: str,
+        envelope: Optional[Dict[str, Any]] = None,
+    ) -> Optional[EncryptionCredentials]:
+        """Prompt the user for credentials on each encrypted save/load operation."""
+        from PySide6.QtWidgets import QInputDialog, QLineEdit
+
+        save_mode = operation == "save"
+        title = "Save Encrypted Project" if save_mode else "Load Encrypted Project"
+
+        if save_mode:
+            modes = ["Passphrase only", "YubiKey only", "Passphrase + YubiKey"]
+            mode, ok = QInputDialog.getItem(
+                None,
+                title,
+                "Select encryption mode:",
+                modes,
+                0,
+                False,
+            )
+            if not ok:
+                return None
+            require_passphrase = mode in ("Passphrase only", "Passphrase + YubiKey")
+            require_yubikey = mode in ("YubiKey only", "Passphrase + YubiKey")
+            slot_default = "2"
+        else:
+            if not isinstance(envelope, dict):
+                self.errorOccurred.emit("Encrypted project metadata is missing")
+                return None
+            encryption = envelope.get("encryption")
+            if not isinstance(encryption, dict):
+                self.errorOccurred.emit("Encrypted project metadata is invalid")
+                return None
+            auth_mode = str(encryption.get("auth_mode", "")).strip()
+            require_passphrase = auth_mode in ("passphrase", "passphrase+yubikey")
+            require_yubikey = auth_mode in ("yubikey", "passphrase+yubikey")
+            yk_meta = encryption.get("yubikey")
+            slot_default = "2"
+            if isinstance(yk_meta, dict):
+                slot_default = str(yk_meta.get("slot", "2"))
+
+        if require_yubikey and not has_yubikey_cli():
+            self.errorOccurred.emit(yubikey_support_guidance())
+            return None
+
+        passphrase: Optional[str] = None
+        if require_passphrase:
+            prompt = "Enter passphrase:"
+            entered, ok = QInputDialog.getText(None, title, prompt, QLineEdit.Password)
+            if not ok:
+                return None
+            if not entered:
+                self.errorOccurred.emit("Passphrase cannot be empty")
+                return None
+            passphrase = entered
+
+        slot = "2"
+        if require_yubikey:
+            choices = ["1", "2"]
+            index = 1 if slot_default not in choices else choices.index(slot_default)
+            selected_slot, ok = QInputDialog.getItem(
+                None,
+                title,
+                "Select YubiKey slot:",
+                choices,
+                index,
+                False,
+            )
+            if not ok:
+                return None
+            slot = selected_slot
+
+        return EncryptionCredentials(
+            passphrase=passphrase,
+            use_yubikey=require_yubikey,
+            yubikey_slot=slot,
+        )
+
+    @Slot(result=bool)
+    def hasYubiKeySupport(self) -> bool:
+        """Return True when YubiKey CLI support is currently available."""
+        return has_yubikey_cli()
+
+    @Slot(result=str)
+    def getYubiKeySupportGuidance(self) -> str:
+        """Return setup guidance for enabling YubiKey support on this OS."""
+        return yubikey_support_guidance()
+
     @Slot(str)
     def saveProject(self, file_path: str) -> None:
         """Save the current project to a JSON file in v1.1 format.
@@ -1427,8 +1527,15 @@ class ProjectManager(QObject):
                     "active_tab": 0,
                 }
 
+            credentials = self._prompt_encryption_credentials("save", file_path)
+            if credentials is None:
+                return
+
+            encrypted_payload = encrypt_project_data(project_data, credentials)
+            encrypted_payload["version"] = self.ENCRYPTED_PROJECT_VERSION
+
             with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(project_data, f, ensure_ascii=False, separators=(",", ":"))
+                json.dump(encrypted_payload, f, ensure_ascii=False, separators=(",", ":"))
 
             self._current_file_path = file_path
             self.currentFilePathChanged.emit()
@@ -1437,6 +1544,10 @@ class ProjectManager(QObject):
             print(f"Project saved to: {file_path}")
 
         except (OSError, IOError) as e:
+            error_msg = f"Failed to save project: {e}"
+            self.errorOccurred.emit(error_msg)
+            print(error_msg)
+        except CryptoError as e:
             error_msg = f"Failed to save project: {e}"
             self.errorOccurred.emit(error_msg)
             print(error_msg)
@@ -1476,6 +1587,12 @@ class ProjectManager(QObject):
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 project_data = json.load(f)
+
+            if is_encrypted_envelope(project_data):
+                credentials = self._prompt_encryption_credentials("load", file_path, project_data)
+                if credentials is None:
+                    return
+                project_data = decrypt_project_data(project_data, credentials)
 
             version = project_data.get("version", "1.0")
             active_tab = 0
@@ -1531,6 +1648,10 @@ class ProjectManager(QObject):
             print(error_msg)
         except (KeyError, TypeError) as e:
             error_msg = f"Corrupted project file: {e}"
+            self.errorOccurred.emit(error_msg)
+            print(error_msg)
+        except CryptoError as e:
+            error_msg = f"Failed to load project: {e}"
             self.errorOccurred.emit(error_msg)
             print(error_msg)
 
