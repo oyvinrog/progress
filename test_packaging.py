@@ -2,9 +2,10 @@
 
 import re
 from pathlib import Path
+from typing import Set
 
 
-def _read_setuptools_py_modules() -> set[str]:
+def _read_setuptools_py_modules() -> Set[str]:
     pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
     match = re.search(r"py-modules\s*=\s*\[(.*?)\]", pyproject, flags=re.DOTALL)
     assert match is not None, "py-modules is missing from pyproject.toml"
