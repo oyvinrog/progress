@@ -1700,6 +1700,72 @@ class TestMultiTabSupport:
         assert "invalid credentials" in errors[-1]
         assert task_model2.rowCount() == 0
 
+    def test_save_current_reuses_loaded_credentials_without_prompt(self, app, tmp_path, monkeypatch):
+        """After loading encrypted project, Save reuses in-memory credentials."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        calls = []
+
+        def _tracking_prompt(self, operation, file_path, envelope=None):
+            calls.append(operation)
+            return EncryptionCredentials(passphrase="test-passphrase")
+
+        monkeypatch.setattr(ProjectManager, "_prompt_encryption_credentials", _tracking_prompt)
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        task_model.addTask("Secret", -1)
+
+        project_file = tmp_path / "reuse_save.progress"
+        project_manager.saveProject(str(project_file))
+
+        task_model2 = TaskModel()
+        diagram_model2 = DiagramModel()
+        tab_model2 = TabModel()
+        project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
+        project_manager2.loadProject(str(project_file))
+
+        calls.clear()
+        project_manager2.saveCurrentProject()
+
+        assert calls == []
+
+    def test_save_as_prompts_even_with_cached_loaded_credentials(self, app, tmp_path, monkeypatch):
+        """Save As always prompts for encryption selection/credentials."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        calls = []
+
+        def _tracking_prompt(self, operation, file_path, envelope=None):
+            calls.append(operation)
+            return EncryptionCredentials(passphrase="test-passphrase")
+
+        monkeypatch.setattr(ProjectManager, "_prompt_encryption_credentials", _tracking_prompt)
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        task_model.addTask("Secret", -1)
+
+        project_file = tmp_path / "save_as_source.progress"
+        project_manager.saveProject(str(project_file))
+
+        task_model2 = TaskModel()
+        diagram_model2 = DiagramModel()
+        tab_model2 = TabModel()
+        project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
+        project_manager2.loadProject(str(project_file))
+
+        calls.clear()
+        save_as_file = tmp_path / "save_as_target.progress"
+        project_manager2.saveProjectAs(str(save_as_file))
+
+        assert calls == ["save"]
+        assert save_as_file.exists()
+
     # --- Tab operation tests ---
 
     def test_add_tab(self, tab_model):

@@ -1216,6 +1216,8 @@ class ProjectManager(QObject):
             # Connect diagram model's currentTaskChanged to update tab sidebar
             if hasattr(self._diagram_model, 'currentTaskChanged'):
                 self._diagram_model.currentTaskChanged.connect(self._refreshCurrentTabDiagram)
+        self._cached_encryption_credentials: Optional[EncryptionCredentials] = None
+        self._cached_encryption_file_path: str = ""
 
     def _onCurrentTabReminderDue(self, task_index: int, task_title: str) -> None:
         tab_index = self._tab_model.currentTabIndex if self._tab_model is not None else 0
@@ -1364,7 +1366,12 @@ class ProjectManager(QObject):
         if not self._current_file_path:
             self.errorOccurred.emit("No current project file selected")
             return
-        self.saveProject(self._current_file_path)
+        self.saveProject(self._current_file_path, force_prompt=False)
+
+    @Slot(str)
+    def saveProjectAs(self, file_path: str) -> None:
+        """Save project under a new path and always prompt for encryption choice."""
+        self.saveProject(file_path, force_prompt=True)
 
     def _saveCurrentTabState(self) -> None:
         """Save the current task/diagram state to the tab model."""
@@ -1477,11 +1484,12 @@ class ProjectManager(QObject):
         return yubikey_support_guidance()
 
     @Slot(str)
-    def saveProject(self, file_path: str) -> None:
+    def saveProject(self, file_path: str, force_prompt: bool = True) -> None:
         """Save the current project to a JSON file in v1.1 format.
 
         Args:
             file_path: Path to save the project file (should end in .progress)
+            force_prompt: True to force prompting for encryption choice/credentials.
         """
         file_path = self._normalize_file_path(file_path)
 
@@ -1527,7 +1535,19 @@ class ProjectManager(QObject):
                     "active_tab": 0,
                 }
 
-            credentials = self._prompt_encryption_credentials("save", file_path)
+            credentials = None
+            if (
+                not force_prompt
+                and self._cached_encryption_credentials is not None
+                and self._cached_encryption_file_path == file_path
+            ):
+                credentials = EncryptionCredentials(
+                    passphrase=self._cached_encryption_credentials.passphrase,
+                    use_yubikey=self._cached_encryption_credentials.use_yubikey,
+                    yubikey_slot=self._cached_encryption_credentials.yubikey_slot,
+                )
+            else:
+                credentials = self._prompt_encryption_credentials("save", file_path)
             if credentials is None:
                 return
 
@@ -1538,6 +1558,12 @@ class ProjectManager(QObject):
                 json.dump(encrypted_payload, f, ensure_ascii=False, separators=(",", ":"))
 
             self._current_file_path = file_path
+            self._cached_encryption_file_path = file_path
+            self._cached_encryption_credentials = EncryptionCredentials(
+                passphrase=credentials.passphrase,
+                use_yubikey=credentials.use_yubikey,
+                yubikey_slot=credentials.yubikey_slot,
+            )
             self.currentFilePathChanged.emit()
             self._add_to_recent(file_path)
             self.saveCompleted.emit(file_path)
@@ -1593,6 +1619,12 @@ class ProjectManager(QObject):
                 if credentials is None:
                     return
                 project_data = decrypt_project_data(project_data, credentials)
+                self._cached_encryption_file_path = file_path
+                self._cached_encryption_credentials = EncryptionCredentials(
+                    passphrase=credentials.passphrase,
+                    use_yubikey=credentials.use_yubikey,
+                    yubikey_slot=credentials.yubikey_slot,
+                )
 
             version = project_data.get("version", "1.0")
             active_tab = 0
