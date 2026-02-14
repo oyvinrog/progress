@@ -30,7 +30,7 @@ dependencies = [
     "matplotlib>=3.7.0",
     "cryptography>=42.0.0",
     "argon2-cffi>=23.1.0",
-    "yubikey-manager",
+    "yubikey-manager; python_version >= '3.9'",
 ]
 
 [project.optional-dependencies]
