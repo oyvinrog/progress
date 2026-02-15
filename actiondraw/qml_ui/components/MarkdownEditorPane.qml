@@ -13,6 +13,12 @@ Item {
 
     signal createTaskRequested(string selectedText)
 
+    function normalizeLineBreaks(value) {
+        if (!value)
+            return ""
+        return value.replace(/\u2029/g, "\n")
+    }
+
     function focusEditor() {
         editor.forceActiveFocus()
     }
@@ -101,7 +107,7 @@ Item {
                             event.accepted = true
                         }
                     }
-                    onTextChanged: root.textValue = text
+                    onTextChanged: root.textValue = root.normalizeLineBreaks(text)
                     onSelectionStartChanged: root.refreshSelectionCache()
                     onSelectionEndChanged: root.refreshSelectionCache()
                 }
@@ -139,7 +145,7 @@ Item {
 
                         Text {
                             width: parent.width
-                            text: root.textValue
+                            text: root.normalizeLineBreaks(root.textValue)
                             textFormat: Text.MarkdownText
                             wrapMode: Text.WordWrap
                             color: "#f5f6f8"
@@ -176,7 +182,7 @@ Item {
     }
 
     onTextValueChanged: {
-        if (editor.text !== textValue)
-            editor.text = textValue
+        if (root.normalizeLineBreaks(editor.text) !== root.normalizeLineBreaks(textValue))
+            editor.text = root.normalizeLineBreaks(textValue)
     }
 }
