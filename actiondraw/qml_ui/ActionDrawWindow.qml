@@ -297,6 +297,15 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Delete"
+        enabled: diagramModel !== null
+            && root.selectedItemId.length > 0
+            && (!dialogs || !dialogs.anyDialogVisible)
+            && !reminderPopup.visible
+        onActivated: root.deleteSelectedItem()
+    }
+
+    Shortcut {
         sequence: "Left"
         enabled: diagramModel !== null
             && root.selectedItemId.length > 0
@@ -411,6 +420,17 @@ ApplicationWindow {
         if (!root.selectedItemId || root.selectedItemId.length === 0)
             return
         markdownNoteManager.openNote(root.selectedItemId)
+    }
+
+    function deleteSelectedItem() {
+        if (!diagramModel || !root.selectedItemId || root.selectedItemId.length === 0)
+            return
+        var itemId = root.selectedItemId
+        diagramModel.removeItem(itemId)
+        if (root.selectedItemId === itemId)
+            root.selectedItemId = ""
+        if (edgeCanvas && edgeCanvas.selectedEdgeId && edgeCanvas.selectedEdgeId.length > 0)
+            edgeCanvas.selectedEdgeId = ""
     }
 
     function navigateConnectedTask(direction) {
@@ -2982,6 +3002,7 @@ ApplicationWindow {
                     model: [
                         "Ctrl+Enter  New Task",
                         "Ctrl+-  Backward Chain",
+                        "Delete  Remove Node",
                         "Arrows  Connected Task",
                         "Ctrl+V  Paste",
                         "Ctrl+S  Save",

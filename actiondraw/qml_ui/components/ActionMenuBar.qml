@@ -131,6 +131,12 @@ MenuBar {
             onTriggered: root.openMarkdownNoteForSelection()
         }
 
+        MenuItem {
+            text: "Delete\t\t\tDel"
+            enabled: hasDiagramModel() && root.selectedItemId.length > 0
+            onTriggered: root.deleteSelectedItem()
+        }
+
         MenuSeparator {}
 
         MenuItem {
