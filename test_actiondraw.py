@@ -1753,6 +1753,27 @@ class TestMultiTabSupport:
         project_manager.saveProject(str(project_file))
         assert project_manager.hasUnsavedChanges() is False
 
+    def test_has_unsaved_changes_ignores_active_task_time_drift(self, app, tmp_path):
+        """Auto-updating active task timers should not immediately re-mark project as unsaved."""
+        import time
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        task_model.addTask("Running task", -1)
+
+        project_file = tmp_path / "unsaved_time_drift.progress"
+        project_manager.saveProject(str(project_file))
+        assert project_manager.hasUnsavedChanges() is False
+
+        for _ in range(5):
+            time.sleep(0.25)
+            app.processEvents()
+
+        assert project_manager.hasUnsavedChanges() is False
+
     def test_has_unsaved_changes_false_after_load(self, app, tmp_path):
         """Loading an existing project resets unsaved state baseline."""
         from task_model import TaskModel, ProjectManager, TabModel

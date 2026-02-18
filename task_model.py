@@ -5,6 +5,7 @@ previously embedded in progress_list.py, making them available for
 independent use by actiondraw.
 """
 
+import copy
 import json
 import os
 import subprocess
@@ -1543,7 +1544,32 @@ class ProjectManager(QObject):
 
     def _serialize_project_payload(self, project_data: Dict[str, Any]) -> str:
         """Return deterministic JSON text for change detection."""
-        return json.dumps(project_data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+        normalized = self._normalize_project_payload_for_change_detection(project_data)
+        return json.dumps(normalized, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+    def _normalize_project_payload_for_change_detection(self, project_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize runtime-only fields so background timers do not mark projects as dirty."""
+        normalized = copy.deepcopy(project_data)
+        tabs = normalized.get("tabs")
+        if not isinstance(tabs, list):
+            return normalized
+
+        for tab in tabs:
+            if not isinstance(tab, dict):
+                continue
+            tasks_payload = tab.get("tasks")
+            if not isinstance(tasks_payload, dict):
+                continue
+            tasks = tasks_payload.get("tasks")
+            if not isinstance(tasks, list):
+                continue
+            for task in tasks:
+                if not isinstance(task, dict):
+                    continue
+                if not bool(task.get("completed", False)):
+                    task.pop("time_spent", None)
+
+        return normalized
 
     @Slot(result=bool)
     def hasUnsavedChanges(self) -> bool:
