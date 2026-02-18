@@ -1479,8 +1479,8 @@ class DiagramModel(
         return (item.x + (item.width / 2.0), item.y + (item.height / 2.0))
 
     @Slot(str, str, result=str)
-    def findNearestConnectedTaskInDirection(self, item_id: str, direction: str) -> str:
-        """Find the nearest directly-connected task in the requested direction.
+    def findNearestConnectedItemInDirection(self, item_id: str, direction: str) -> str:
+        """Find the nearest directly-connected item in the requested direction.
 
         Direction can be: "left", "right", "up", or "down".
         Edges are treated as undirected for keyboard navigation.
@@ -1509,8 +1509,6 @@ class DiagramModel(
 
         for candidate in self._items:
             if candidate.id not in connected_ids:
-                continue
-            if candidate.item_type != DiagramItemType.TASK:
                 continue
 
             cand_x, cand_y = self._item_center(candidate)
@@ -1544,6 +1542,11 @@ class DiagramModel(
                 best_item_id = candidate.id
 
         return best_item_id
+
+    @Slot(str, str, result=str)
+    def findNearestConnectedTaskInDirection(self, item_id: str, direction: str) -> str:
+        """Backward-compatible alias for item navigation."""
+        return self.findNearestConnectedItemInDirection(item_id, direction)
 
     @Slot(float, float, result=str)
     def itemIdAt(self, x: float, y: float) -> str:

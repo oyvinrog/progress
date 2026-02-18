@@ -569,7 +569,15 @@ class TestQueries:
         assert diagram_model_with_task_model.findNearestConnectedTaskInDirection(source, "up") == up_task
         assert diagram_model_with_task_model.findNearestConnectedTaskInDirection(source, "down") == down_task
 
-    def test_find_nearest_connected_task_in_direction_ignores_non_task_items(self, diagram_model_with_task_model):
+    def test_find_nearest_connected_item_in_direction_from_non_task_source(self, diagram_model_with_task_model):
+        source_box = diagram_model_with_task_model.addBox(100.0, 100.0, "Source")
+        right_note = diagram_model_with_task_model.addPresetItem("note", 260.0, 100.0)
+        diagram_model_with_task_model.addEdge(source_box, right_note)
+
+        picked = diagram_model_with_task_model.findNearestConnectedItemInDirection(source_box, "right")
+        assert picked == right_note
+
+    def test_find_nearest_connected_task_in_direction_includes_non_task_items(self, diagram_model_with_task_model):
         source = diagram_model_with_task_model.addTask(0, 100.0, 100.0)
         right_box = diagram_model_with_task_model.addBox(260.0, 100.0, "Box")
         right_task = diagram_model_with_task_model.addTask(1, 420.0, 100.0)
@@ -577,7 +585,7 @@ class TestQueries:
         diagram_model_with_task_model.addEdge(source, right_task)
 
         picked = diagram_model_with_task_model.findNearestConnectedTaskInDirection(source, "right")
-        assert picked == right_task
+        assert picked == right_box
 
     def test_find_nearest_connected_task_in_direction_returns_empty_for_no_match(self, diagram_model_with_task_model):
         source = diagram_model_with_task_model.addTask(0, 100.0, 100.0)

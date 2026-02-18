@@ -366,7 +366,7 @@ ApplicationWindow {
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
-        onActivated: root.navigateConnectedTask("left")
+        onActivated: root.navigateConnectedItem("left")
     }
 
     Shortcut {
@@ -375,7 +375,7 @@ ApplicationWindow {
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
-        onActivated: root.navigateConnectedTask("right")
+        onActivated: root.navigateConnectedItem("right")
     }
 
     Shortcut {
@@ -384,7 +384,7 @@ ApplicationWindow {
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
-        onActivated: root.navigateConnectedTask("up")
+        onActivated: root.navigateConnectedItem("up")
     }
 
     Shortcut {
@@ -393,7 +393,7 @@ ApplicationWindow {
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
-        onActivated: root.navigateConnectedTask("down")
+        onActivated: root.navigateConnectedItem("down")
     }
 
     function addTaskOrConnectedTask() {
@@ -530,10 +530,10 @@ ApplicationWindow {
             edgeCanvas.selectedEdgeId = ""
     }
 
-    function navigateConnectedTask(direction) {
+    function navigateConnectedItem(direction) {
         if (!diagramModel || !root.selectedItemId || root.selectedItemId.length === 0)
             return
-        var nextId = diagramModel.findNearestConnectedTaskInDirection(root.selectedItemId, direction)
+        var nextId = diagramModel.findNearestConnectedItemInDirection(root.selectedItemId, direction)
         if (!nextId || nextId.length === 0)
             return
         root.selectedItemId = nextId
