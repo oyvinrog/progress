@@ -11,7 +11,14 @@ Rectangle {
     property int expandedWidth: 252
     property int collapsedWidth: 48
     readonly property bool keepExpanded: tabContextMenu.visible || renameTabDialog.visible
-    readonly property bool isExpanded: sidebarHoverHandler.hovered || keepExpanded
+    readonly property bool persistedExpanded: projectManager ? projectManager.sidebarExpanded : true
+    readonly property bool isExpanded: persistedExpanded || keepExpanded
+
+    function toggleSidebarExpanded() {
+        if (!projectManager || !projectManager.setSidebarExpanded)
+            return
+        projectManager.setSidebarExpanded(!persistedExpanded)
+    }
 
     Layout.fillHeight: true
     Layout.preferredWidth: isExpanded ? expandedWidth : collapsedWidth
@@ -39,35 +46,38 @@ Rectangle {
         opacity: 0.32
     }
 
-    HoverHandler {
-        id: sidebarHoverHandler
-    }
-
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: sidebar.isExpanded ? 10 : 6
         spacing: 8
 
         Rectangle {
+            id: headerBox
             Layout.fillWidth: true
             height: 34
             radius: 8
-            color: "#192736"
+            color: {
+                if (headerMouseArea.pressed)
+                    return "#24425a"
+                if (headerMouseArea.containsMouse)
+                    return "#22384c"
+                return "#192736"
+            }
             border.color: "#31485e"
             border.width: 1
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 10
-                anchors.rightMargin: 10
+                anchors.leftMargin: sidebar.isExpanded ? 10 : 6
+                anchors.rightMargin: sidebar.isExpanded ? 10 : 6
                 spacing: 8
 
                 Text {
-                    text: sidebar.isExpanded ? "Project Tabs" : ">"
+                    text: sidebar.isExpanded ? "Project Tabs" : "Tabs"
                     color: "#dbe7f3"
-                    font.pixelSize: sidebar.isExpanded ? 12 : 14
+                    font.pixelSize: sidebar.isExpanded ? 12 : 10
                     font.bold: true
-                    Layout.alignment: Qt.AlignVCenter
+                    Layout.alignment: sidebar.isExpanded ? Qt.AlignVCenter : (Qt.AlignVCenter | Qt.AlignHCenter)
                 }
 
                 Item { Layout.fillWidth: true }
@@ -87,6 +97,26 @@ Rectangle {
                         font.pixelSize: 11
                         font.bold: true
                     }
+                }
+
+                Text {
+                    text: sidebar.isExpanded ? "<" : ">"
+                    color: "#9fc6e0"
+                    font.pixelSize: 14
+                    font.bold: true
+                    Layout.alignment: Qt.AlignVCenter
+                }
+            }
+
+            MouseArea {
+                id: headerMouseArea
+                anchors.fill: parent
+                hoverEnabled: true
+                acceptedButtons: Qt.LeftButton
+                cursorShape: Qt.PointingHandCursor
+                onClicked: function(mouse) {
+                    if (mouse.button === Qt.LeftButton && !sidebar.keepExpanded)
+                        sidebar.toggleSidebarExpanded()
                 }
             }
         }

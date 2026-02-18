@@ -1291,6 +1291,7 @@ class ProjectManager(QObject):
     errorOccurred = Signal(str)  # Emitted with error message on failure
     recentProjectsChanged = Signal()  # Emitted when recent projects list changes
     currentFilePathChanged = Signal()  # Emitted when current file path changes
+    sidebarExpandedChanged = Signal()
     tabSwitched = Signal()  # Emitted when switching to a different tab
     taskDrillRequested = Signal(int, arguments=["taskIndex"])
     taskReminderDue = Signal(int, int, str, arguments=["tabIndex", "taskIndex", "taskTitle"])
@@ -1319,6 +1320,7 @@ class ProjectManager(QObject):
             set_tab_model(self._tab_model)
         self._current_file_path: str = ""
         self._settings = QSettings("ProgressTracker", "ProgressTracker")
+        self._sidebar_expanded = self._load_sidebar_expanded_setting()
         self._recent_projects: List[str] = self._load_recent_projects()
         self._reminder_timer = QTimer(self)
         self._reminder_timer.timeout.connect(self._checkBackgroundTabReminders)
@@ -1402,6 +1404,17 @@ class ProjectManager(QObject):
             return [p for p in stored if p and os.path.exists(p)][:self.MAX_RECENT_PROJECTS]
         return []
 
+    def _load_sidebar_expanded_setting(self) -> bool:
+        """Load persisted sidebar expansion preference."""
+        stored = self._settings.value("ui/sidebar_expanded", True)
+        if isinstance(stored, bool):
+            return stored
+        if isinstance(stored, (int, float)):
+            return bool(stored)
+        if isinstance(stored, str):
+            return stored.strip().lower() in {"1", "true", "yes", "on"}
+        return True
+
     def _save_recent_projects(self) -> None:
         """Save recent projects list to settings."""
         self._settings.setValue("recentProjects", self._recent_projects)
@@ -1425,6 +1438,22 @@ class ProjectManager(QObject):
     def recentProjects(self) -> List[str]:
         """Return the list of recent project file paths."""
         return self._recent_projects
+
+    @Property(bool, notify=sidebarExpandedChanged)
+    def sidebarExpanded(self) -> bool:
+        """Return whether the tab sidebar should be expanded."""
+        return self._sidebar_expanded
+
+    @Slot(bool)
+    def setSidebarExpanded(self, expanded: bool) -> None:
+        """Persist and broadcast tab sidebar expansion state."""
+        expanded_flag = bool(expanded)
+        if self._sidebar_expanded == expanded_flag:
+            return
+        self._sidebar_expanded = expanded_flag
+        self._settings.setValue("ui/sidebar_expanded", self._sidebar_expanded)
+        self._settings.sync()
+        self.sidebarExpandedChanged.emit()
 
     @Slot()
     def newInstanceActionDraw(self) -> None:
