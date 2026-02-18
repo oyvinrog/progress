@@ -2709,6 +2709,44 @@ class TestTabModelCompletion:
 
         assert model.getTabsLinkingToCurrentTab() == []
 
+    def test_priority_plot_roles_exist(self, app):
+        """Priority plot roles are exposed to QML."""
+        from task_model import TabModel
+
+        model = TabModel()
+        role_names = model.roleNames()
+        assert b"priorityTimeHours" in role_names.values()
+        assert b"prioritySubjectiveValue" in role_names.values()
+        assert b"priorityScore" in role_names.values()
+
+    def test_priority_plot_score_and_sort(self, app):
+        """Setting plot coordinates recomputes score and reorders tabs."""
+        from task_model import TabModel
+
+        model = TabModel()
+        model.addTab("Second")
+        model.setPriorityPoint(0, 4.0, 4.0)
+        model.setPriorityPoint(1, 2.0, 6.0)
+
+        assert model.data(model.index(0, 0), model.NameRole) == "Second"
+        top_score = model.data(model.index(0, 0), model.PriorityScoreRole)
+        low_score = model.data(model.index(1, 0), model.PriorityScoreRole)
+        assert top_score > low_score
+
+    def test_priority_plot_sort_preserves_current_tab(self, app):
+        """Current tab remains the same logical tab after priority sorting."""
+        from task_model import TabModel
+
+        model = TabModel()
+        model.addTab("Second")
+        model.setCurrentTab(1)
+        assert model.currentTabName == "Second"
+
+        model.setPriorityPoint(1, 2.0, 8.0)
+        model.setPriorityPoint(0, 8.0, 1.0)
+
+        assert model.currentTabName == "Second"
+
 
 class TestTabModelMoveTab:
     """Tests for TabModel.moveTab method."""
@@ -2796,6 +2834,70 @@ class TestTabModelUpdateCurrentTabTasks:
 
         assert len(signal_received) == 1
         assert model.CompletionRole in signal_received[0][1]
+
+
+class TestPriorityPlotPersistence:
+    def test_priority_plot_fields_roundtrip(self, app, tmp_path):
+        """Priority plot fields are saved and loaded in project files."""
+        from task_model import ProjectManager, Tab, TabModel, TaskModel
+
+        project_file = tmp_path / "priority_fields.progress"
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        tab_model.setTabs(
+            [
+                Tab(
+                    name="Alpha",
+                    tasks={"tasks": []},
+                    diagram={"items": [], "edges": [], "strokes": []},
+                    priority_time_hours=3.0,
+                    priority_subjective_value=5.0,
+                    priority_score=0.0,
+                ),
+                Tab(
+                    name="Beta",
+                    tasks={"tasks": []},
+                    diagram={"items": [], "edges": [], "strokes": []},
+                    priority_time_hours=2.0,
+                    priority_subjective_value=7.0,
+                    priority_score=0.0,
+                ),
+            ],
+            active_tab=0,
+        )
+        tab_model.recomputeAndSortPriorities()
+
+        manager = ProjectManager(task_model, diagram_model, tab_model)
+        manager.saveProject(str(project_file))
+
+        task_model2 = TaskModel()
+        diagram_model2 = DiagramModel(task_model=task_model2)
+        tab_model2 = TabModel()
+        manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
+        manager2.loadProject(str(project_file))
+
+        tabs = tab_model2.getAllTabs()
+        assert len(tabs) == 2
+        loaded_names = {tab.name for tab in tabs}
+        assert loaded_names == {"Alpha", "Beta"}
+        loaded_by_name = {tab.name: tab for tab in tabs}
+        assert loaded_by_name["Alpha"].priority_time_hours == pytest.approx(3.0)
+        assert loaded_by_name["Alpha"].priority_subjective_value == pytest.approx(5.0)
+        assert loaded_by_name["Alpha"].priority_score > 0
+        assert loaded_by_name["Beta"].priority_time_hours == pytest.approx(2.0)
+        assert loaded_by_name["Beta"].priority_subjective_value == pytest.approx(7.0)
+        assert loaded_by_name["Beta"].priority_score > 0
+
+
+class TestPriorityPlotStandalone:
+    def test_priority_plot_smoke(self, app, monkeypatch):
+        """Standalone priority plot launcher supports smoke mode."""
+        from actiondraw.priorityplot.app import main
+
+        monkeypatch.setenv("PRIORITYPLOT_SMOKE", "1")
+        assert main() == 0
 
 
 class TestClipboardFunctionality:

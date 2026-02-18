@@ -46,9 +46,10 @@ Issues = "https://github.com/oyvinrog/progress/issues"
 
 [project.scripts]
 actiondraw = "actiondraw:main"
+priorityplot = "actiondraw.priorityplot.app:main"
 
 [tool.setuptools]
-packages = ["actiondraw"]
+packages = ["actiondraw", "actiondraw.priorityplot"]
 py-modules = ["task_model", "markdown_note_editor", "progress_crypto"]
 
 [tool.setuptools.package-data]

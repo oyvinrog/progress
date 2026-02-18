@@ -25,6 +25,7 @@ ApplicationWindow {
     property var projectManagerRef: projectManager
     property var markdownNoteManagerRef: markdownNoteManager
     property var tabModelRef: tabModel
+    property var priorityPlotWindowRef: null
     property bool yubiKeyPromptVisible: false
     property string yubiKeyPromptText: "Touch your YubiKey to continue."
 
@@ -74,6 +75,34 @@ ApplicationWindow {
     function showWindow() {
         root.visible = true
         root.requestActivate()
+    }
+
+    function openPriorityPlotWindow() {
+        if (!tabModelRef)
+            return
+        if (priorityPlotWindowRef) {
+            priorityPlotWindowRef.show()
+            priorityPlotWindowRef.raise()
+            priorityPlotWindowRef.requestActivate()
+            return
+        }
+        var component = Qt.createComponent(Qt.resolvedUrl("PriorityPlotWindow.qml"))
+        if (component.status === Component.Error) {
+            console.log("Failed to load PriorityPlotWindow:", component.errorString())
+            return
+        }
+        var win = component.createObject(root, { "tabModel": tabModelRef })
+        if (!win) {
+            console.log("Failed to instantiate PriorityPlotWindow")
+            return
+        }
+        priorityPlotWindowRef = win
+        win.closing.connect(function() {
+            priorityPlotWindowRef = null
+        })
+        win.show()
+        win.raise()
+        win.requestActivate()
     }
 
     function drillToTask(taskIndex) {

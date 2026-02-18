@@ -276,6 +276,14 @@ MenuBar {
         title: "Tools"
 
         MenuItem {
+            text: "Priority Plot..."
+            enabled: root && root.openPriorityPlotWindow
+            onTriggered: root.openPriorityPlotWindow()
+        }
+
+        MenuSeparator {}
+
+        MenuItem {
             text: "Connect All Items"
             onTriggered: diagramModel && diagramModel.connectAllItems()
         }

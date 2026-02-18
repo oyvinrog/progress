@@ -17,3 +17,8 @@ def test_runtime_top_level_modules_are_packaged():
     required = {"task_model", "markdown_note_editor", "progress_crypto"}
     missing = required - modules
     assert not missing, f"Missing py-modules in pyproject.toml: {sorted(missing)}"
+
+
+def test_priorityplot_script_is_declared():
+    pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
+    assert 'priorityplot = "actiondraw.priorityplot.app:main"' in pyproject

@@ -36,6 +36,11 @@ from progress_crypto import (
     is_encrypted_envelope,
     yubikey_support_guidance,
 )
+from actiondraw.priorityplot.model import (
+    clamp_subjective_value,
+    clamp_time_hours,
+    compute_priority_score,
+)
 
 
 @dataclass
@@ -60,6 +65,9 @@ class Tab:
     tasks: Dict[str, Any]  # TaskModel.to_dict() data
     diagram: Dict[str, Any]  # DiagramModel.to_dict() data
     priority: int = 0  # 0 = no priority, 1-3 = priority levels
+    priority_time_hours: float = 1.01
+    priority_subjective_value: float = 1.0
+    priority_score: float = 0.0
 
 
 class TaskModel(QAbstractListModel):
@@ -898,6 +906,9 @@ class TabModel(QAbstractListModel):
     CompletionRole = Qt.UserRole + 3
     ActiveTaskTitleRole = Qt.UserRole + 4
     PriorityRole = Qt.UserRole + 5
+    PriorityTimeHoursRole = Qt.UserRole + 6
+    PrioritySubjectiveValueRole = Qt.UserRole + 7
+    PriorityScoreRole = Qt.UserRole + 8
 
     tabsChanged = Signal()
     currentTabChanged = Signal()
@@ -926,6 +937,12 @@ class TabModel(QAbstractListModel):
             return self._getActiveTaskTitle(tab)
         if role == self.PriorityRole:
             return tab.priority
+        if role == self.PriorityTimeHoursRole:
+            return tab.priority_time_hours
+        if role == self.PrioritySubjectiveValueRole:
+            return tab.priority_subjective_value
+        if role == self.PriorityScoreRole:
+            return tab.priority_score
         return None
 
     def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
@@ -935,6 +952,9 @@ class TabModel(QAbstractListModel):
             self.CompletionRole: b"completionPercent",
             self.ActiveTaskTitleRole: b"activeTaskTitle",
             self.PriorityRole: b"priority",
+            self.PriorityTimeHoursRole: b"priorityTimeHours",
+            self.PrioritySubjectiveValueRole: b"prioritySubjectiveValue",
+            self.PriorityScoreRole: b"priorityScore",
         }
 
     @Property(int, notify=currentTabIndexChanged)
@@ -1073,6 +1093,59 @@ class TabModel(QAbstractListModel):
         model_index = self.index(index, 0)
         self.dataChanged.emit(model_index, model_index, [self.PriorityRole])
 
+    def _computePriorityScore(self, value: float, time_hours: float) -> float:
+        return compute_priority_score(value, time_hours)
+
+    @Slot(int, float, float)
+    def setPriorityPoint(self, index: int, time_hours: float, subjective_value: float) -> None:
+        """Set tab priority plot coordinates, recompute scores, and auto-sort tabs."""
+        if index < 0 or index >= len(self._tabs):
+            return
+
+        tab = self._tabs[index]
+        tab.priority_time_hours = clamp_time_hours(time_hours)
+        tab.priority_subjective_value = clamp_subjective_value(subjective_value)
+        self.recomputeAndSortPriorities()
+
+    @Slot()
+    def recomputeAndSortPriorities(self) -> None:
+        """Recompute all priority scores and keep tabs sorted by score descending."""
+        if not self._tabs:
+            return
+
+        current_tab = self._tabs[self._current_tab_index]
+        for tab in self._tabs:
+            tab.priority_score = self._computePriorityScore(
+                tab.priority_subjective_value,
+                tab.priority_time_hours,
+            )
+
+        indexed_tabs = list(enumerate(self._tabs))
+        indexed_tabs.sort(key=lambda item: (-item[1].priority_score, item[0]))
+        sorted_tabs = [item[1] for item in indexed_tabs]
+        if sorted_tabs == self._tabs:
+            model_index = self.index(0, 0)
+            end_index = self.index(len(self._tabs) - 1, 0)
+            self.dataChanged.emit(
+                model_index,
+                end_index,
+                [
+                    self.PriorityTimeHoursRole,
+                    self.PrioritySubjectiveValueRole,
+                    self.PriorityScoreRole,
+                ],
+            )
+            return
+
+        self.beginResetModel()
+        self._tabs = sorted_tabs
+        self.endResetModel()
+
+        self._current_tab_index = self._tabs.index(current_tab)
+        self.tabsChanged.emit()
+        self.currentTabIndexChanged.emit()
+        self.currentTabChanged.emit()
+
     @Slot(int)
     def setCurrentTab(self, index: int) -> None:
         """Switch to a different tab."""
@@ -1120,6 +1193,13 @@ class TabModel(QAbstractListModel):
         """Replace all tabs with new data."""
         self.beginResetModel()
         self._tabs = tabs if tabs else [Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})]
+        for tab in self._tabs:
+            tab.priority_time_hours = clamp_time_hours(getattr(tab, "priority_time_hours", 1.01))
+            tab.priority_subjective_value = clamp_subjective_value(getattr(tab, "priority_subjective_value", 1.0))
+            tab.priority_score = self._computePriorityScore(
+                tab.priority_subjective_value,
+                tab.priority_time_hours,
+            )
         self.endResetModel()
 
         # Validate and set active tab index
@@ -1529,6 +1609,9 @@ class ProjectManager(QObject):
                         "tasks": tab.tasks,
                         "diagram": tab.diagram,
                         "priority": tab.priority,
+                        "priority_time_hours": tab.priority_time_hours,
+                        "priority_subjective_value": tab.priority_subjective_value,
+                        "priority_score": tab.priority_score,
                     })
 
                 project_data = {
@@ -1670,7 +1753,10 @@ class ProjectManager(QObject):
                         name=tab_data.get("name", "Tab"),
                         tasks=tab_data.get("tasks", {"tasks": []}),
                         diagram=tab_data.get("diagram", {"items": [], "edges": [], "strokes": []}),
-                        priority=tab_data.get("priority", 0)
+                        priority=tab_data.get("priority", 0),
+                        priority_time_hours=tab_data.get("priority_time_hours", 1.01),
+                        priority_subjective_value=tab_data.get("priority_subjective_value", 1.0),
+                        priority_score=tab_data.get("priority_score", 0.0),
                     ))
                 active_tab = project_data.get("active_tab", 0)
 

@@ -36,6 +36,7 @@ After installation, run from anywhere:
 
 ```bash
 actiondraw       # Diagramming canvas
+priorityplot     # Standalone priority plot
 ```
 
 For local development (from the repo directory):
@@ -81,6 +82,7 @@ After installation, run from anywhere:
 ```bash
 progress-list    # Main progress tracking app
 actiondraw       # Standalone diagramming canvas
+priorityplot     # Standalone priority plot
 ```
 
 For local development (from the repo directory):

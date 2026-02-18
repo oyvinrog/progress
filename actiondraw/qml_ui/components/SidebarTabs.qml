@@ -111,7 +111,7 @@ Rectangle {
                         id: tabButton
                         property bool isActive: tabModel ? index === tabModel.currentTabIndex : false
                         property string activeTaskTitle: model.activeTaskTitle || ""
-                        property int tabPriority: model.priority || 0
+                        property real tabPriorityScore: model.priorityScore || 0
                         property int dragTabIndex: index
                         property string dragTabName: model.name || ""
                         property bool suppressClick: false
@@ -190,19 +190,19 @@ Rectangle {
 
                                 Rectangle {
                                     id: priorityBadge
-                                    visible: tabButton.tabPriority > 0
-                                    width: 16
+                                    visible: tabButton.tabPriorityScore > 0
+                                    width: 36
                                     height: 16
                                     radius: 4
-                                    color: tabButton.tabPriority === 1 ? "#d84f4f" :
-                                           tabButton.tabPriority === 2 ? "#e1943c" :
-                                           tabButton.tabPriority === 3 ? "#4da268" : "transparent"
+                                    color: "#1b4d67"
+                                    border.color: "#68c8f2"
+                                    border.width: 1
 
                                     Text {
                                         anchors.centerIn: parent
-                                        text: tabButton.tabPriority
+                                        text: tabButton.tabPriorityScore.toFixed(2)
                                         color: "#ffffff"
-                                        font.pixelSize: 10
+                                        font.pixelSize: 9
                                         font.bold: true
                                     }
                                 }
@@ -252,9 +252,9 @@ Rectangle {
                         ToolTip {
                             visible: tabMouseArea.containsMouse
                             text: {
-                                var priorityText = tabButton.tabPriority === 1 ? "[Priority 1 - High] " :
-                                                   tabButton.tabPriority === 2 ? "[Priority 2 - Medium] " :
-                                                   tabButton.tabPriority === 3 ? "[Priority 3 - Low] " : ""
+                                var priorityText = tabButton.tabPriorityScore > 0
+                                    ? "[Score " + tabButton.tabPriorityScore.toFixed(2) + "] "
+                                    : ""
                                 var baseText = priorityText + model.name + " (" + Math.round(model.completionPercent) + "%)"
                                 if (tabButton.activeTaskTitle)
                                     baseText += "\n" + tabButton.activeTaskTitle
