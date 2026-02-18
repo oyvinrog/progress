@@ -891,11 +891,36 @@ class TestDiagramModelSerialization:
         empty_diagram_model.setItemMarkdown(item_id, "# Title\nBody")
 
         data = empty_diagram_model.to_dict()
-        assert data["items"][0]["note_markdown"] == "# Title\nBody"
+        assert data["items"][0]["text"] == "# Title\nBody"
+        assert "note_markdown" not in data["items"][0]
 
         new_model = DiagramModel()
         new_model.from_dict(data)
         assert new_model.getItemMarkdown(item_id) == "# Title\nBody"
+
+    def test_from_dict_migrates_legacy_note_markdown_to_text(self, empty_diagram_model):
+        empty_diagram_model.from_dict({
+            "items": [
+                {
+                    "id": "note_0",
+                    "item_type": "note",
+                    "x": 10.0,
+                    "y": 20.0,
+                    "width": 160.0,
+                    "height": 110.0,
+                    "text": "Old Title",
+                    "task_index": -1,
+                    "color": "#f7e07b",
+                    "text_color": "#1b2028",
+                    "note_markdown": "# Migrated\nBody",
+                }
+            ],
+            "edges": [],
+        })
+        item = empty_diagram_model.getItem("note_0")
+        assert item is not None
+        assert item.text == "# Migrated\nBody"
+        assert item.note_markdown == ""
 
     def test_create_task_from_markdown_selection_chains_tasks(self, diagram_model_with_task_model):
         source_id = diagram_model_with_task_model.addPresetItemWithText("box", 50, 60, "Source")
@@ -3349,14 +3374,15 @@ class TestSerializeItemForClipboard:
         assert result["text"] == "Test Box"
 
     def test_serialize_item_with_note(self, empty_diagram_model):
-        """Serializing item with note preserves markdown."""
+        """Serializing note item uses note text as canonical markdown payload."""
         from actiondraw import DiagramItem, DiagramItemType
         item = DiagramItem(
             id="note_1",
             item_type=DiagramItemType.NOTE,
             x=0.0,
             y=0.0,
-            note_markdown="# Heading\n\nContent",
+            text="# Heading\n\nContent",
+            note_markdown="legacy value should be ignored for notes",
         )
 
         result = empty_diagram_model._serialize_item_for_clipboard(item)

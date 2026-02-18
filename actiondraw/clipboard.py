@@ -38,6 +38,10 @@ class ClipboardMixin:
     getItem: Callable[[str], Optional[DiagramItem]]
 
     def _serialize_item_for_clipboard(self, item: DiagramItem) -> Dict[str, Any]:
+        note_markdown = item.note_markdown
+        if item.item_type == DiagramItemType.NOTE:
+            # Notes now keep their canonical content directly in text.
+            note_markdown = item.text
         return {
             "id": item.id,
             "type": item.item_type.value,
@@ -50,7 +54,7 @@ class ClipboardMixin:
             "color": item.color,
             "textColor": item.text_color,
             "imageData": item.image_data,
-            "noteMarkdown": item.note_markdown,
+            "noteMarkdown": note_markdown,
             "folderPath": item.folder_path,
         }
 
@@ -347,6 +351,12 @@ class ClipboardMixin:
                 item_h = float(item_data.get("height", 60.0))
             except (TypeError, ValueError):
                 continue
+            text_value = str(item_data.get("text", ""))
+            note_markdown_value = str(item_data.get("noteMarkdown", ""))
+            if item_type == DiagramItemType.NOTE and note_markdown_value:
+                text_value = note_markdown_value
+                note_markdown_value = ""
+
             item = DiagramItem(
                 id=item_id,
                 item_type=item_type,
@@ -354,12 +364,12 @@ class ClipboardMixin:
                 y=item_y,
                 width=item_w,
                 height=item_h,
-                text=str(item_data.get("text", "")),
+                text=text_value,
                 task_index=task_index,
                 color=str(item_data.get("color", "#4a9eff")),
                 text_color=str(item_data.get("textColor", "#f5f6f8")),
                 image_data=str(item_data.get("imageData", "")),
-                note_markdown=str(item_data.get("noteMarkdown", "")),
+                note_markdown=note_markdown_value,
                 folder_path=str(item_data.get("folderPath", "")),
             )
             self._append_item(item)

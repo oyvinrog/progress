@@ -526,6 +526,16 @@ class DiagramModel(
     def setItemMarkdown(self, item_id: str, markdown: str) -> None:
         for row, item in enumerate(self._items):
             if item.id == item_id:
+                if item.item_type == DiagramItemType.NOTE:
+                    if item.text == markdown and item.note_markdown == "":
+                        return
+                    # Notes now store canonical content directly in text.
+                    item.text = markdown
+                    item.note_markdown = ""
+                    index = self.index(row, 0)
+                    self.dataChanged.emit(index, index, [self.TextRole, self.NoteMarkdownRole])
+                    self.itemsChanged.emit()
+                    return
                 if item.note_markdown == markdown:
                     return
                 item.note_markdown = markdown
@@ -538,6 +548,8 @@ class DiagramModel(
     def getItemMarkdown(self, item_id: str) -> str:
         for item in self._items:
             if item.id == item_id:
+                if item.item_type == DiagramItemType.NOTE:
+                    return item.text
                 return item.note_markdown
         return ""
 
@@ -1524,7 +1536,7 @@ class DiagramModel(
             # Only store image_data if it's an image item (to avoid bloating files)
             if item.item_type == DiagramItemType.IMAGE and item.image_data:
                 item_dict["image_data"] = item.image_data
-            if item.note_markdown:
+            if item.note_markdown and item.item_type != DiagramItemType.NOTE:
                 item_dict["note_markdown"] = item.note_markdown
             if item.folder_path:
                 item_dict["folder_path"] = item.folder_path
@@ -1596,6 +1608,13 @@ class DiagramModel(
                 except ValueError:
                     item_type = DiagramItemType.BOX
 
+                text_value = str(item_data.get("text", ""))
+                note_markdown_value = str(item_data.get("note_markdown", ""))
+                if item_type == DiagramItemType.NOTE and note_markdown_value:
+                    # Legacy compatibility: old notes stored main content in note_markdown.
+                    text_value = note_markdown_value
+                    note_markdown_value = ""
+
                 item = DiagramItem(
                     id=item_id,
                     item_type=item_type,
@@ -1603,12 +1622,12 @@ class DiagramModel(
                     y=float(item_data.get("y", 0.0)),
                     width=float(item_data.get("width", 120.0)),
                     height=float(item_data.get("height", 60.0)),
-                    text=item_data.get("text", ""),
+                    text=text_value,
                     task_index=int(item_data.get("task_index", -1)),
                     color=item_data.get("color", "#4a9eff"),
                     text_color=item_data.get("text_color", "#f5f6f8"),
                     image_data=item_data.get("image_data", ""),
-                    note_markdown=item_data.get("note_markdown", ""),
+                    note_markdown=note_markdown_value,
                     folder_path=item_data.get("folder_path", ""),
                 )
                 new_items.append(item)

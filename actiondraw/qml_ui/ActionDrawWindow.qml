@@ -346,6 +346,12 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Ctrl+N"
+        enabled: diagramModel !== null && !dialogs.freeTextDialog.visible
+        onActivated: root.addConnectedNote()
+    }
+
+    Shortcut {
         sequence: "Delete"
         enabled: diagramModel !== null
             && root.selectedItemId.length > 0
@@ -464,11 +470,54 @@ ApplicationWindow {
     }
 
     function openMarkdownNoteForSelection() {
-        if (!diagramModel || !markdownNoteManager)
+        if (!diagramModel)
             return
         if (!root.selectedItemId || root.selectedItemId.length === 0)
             return
-        markdownNoteManager.openNote(root.selectedItemId)
+        var item = diagramModel.getItemSnapshot(root.selectedItemId)
+        if (!item || !item.type)
+            return
+        if (item.type === "note") {
+            root.openPresetDialog("note", Qt.point(item.x, item.y), item.id, item.text)
+            return
+        }
+        if (markdownNoteManager)
+            markdownNoteManager.openNote(root.selectedItemId)
+    }
+
+    function addConnectedNote() {
+        if (!diagramModel)
+            return
+        var sourceId = ""
+        var sourceItem = null
+        if (root.selectedItemId && root.selectedItemId.length > 0) {
+            sourceItem = diagramModel.getItemSnapshot(root.selectedItemId)
+            if (sourceItem && (sourceItem.x || sourceItem.x === 0))
+                sourceId = root.selectedItemId
+        }
+        if (!sourceId && root.lastCreatedTaskId && root.lastCreatedTaskId.length > 0) {
+            sourceItem = diagramModel.getItemSnapshot(root.lastCreatedTaskId)
+            if (sourceItem && (sourceItem.x || sourceItem.x === 0))
+                sourceId = root.lastCreatedTaskId
+            else
+                root.lastCreatedTaskId = ""
+        }
+        if (!sourceId) {
+            var center = root.diagramCenterPoint()
+            var centerSnapped = root.snapPoint(center)
+            var centerNoteId = diagramModel.addPresetItem("note", centerSnapped.x, centerSnapped.y)
+            if (centerNoteId && centerNoteId.length > 0)
+                root.selectedItemId = centerNoteId
+            return
+        }
+
+        var dropX = sourceItem.x + (sourceItem.width || 100) + 50
+        var dropY = sourceItem.y
+        dropX = root.snapValue(dropX)
+        dropY = root.snapValue(dropY)
+        var noteId = diagramModel.addPresetItemAndConnect(sourceId, "note", dropX, dropY, "Note")
+        if (noteId && noteId.length > 0)
+            root.selectedItemId = noteId
     }
 
     function deleteSelectedItem() {
@@ -966,17 +1015,11 @@ ApplicationWindow {
                             }
                         }
                         MenuItem {
-                            text: "Note (Markdown)"
+                            text: "Note"
                             icon.name: "document-edit"
                             onTriggered: {
-                                if (!diagramModel) return
                                 var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
-                                var newId = diagramModel.addPresetItem("note", snapped.x, snapped.y)
-                                if (newId) {
-                                    root.selectedItemId = newId
-                                    if (markdownNoteManager)
-                                        markdownNoteManager.openNote(newId)
-                                }
+                                root.openPresetDialog("note", snapped, "", undefined)
                             }
                         }
                         MenuItem {
@@ -1113,7 +1156,7 @@ ApplicationWindow {
                             }
                         }
                         MenuItem {
-                            text: "Edit Note...\t\tCtrl+M"
+                            text: "Edit Note/Details...\t\tCtrl+M"
                             icon.name: "document-edit"
                             enabled: diagramModel !== null && diagramLayer.contextMenuItemId.length > 0
                             onTriggered: {
@@ -1829,7 +1872,7 @@ ApplicationWindow {
 
                             Rectangle {
                                 id: noteBadge
-                                visible: model.noteMarkdown && model.noteMarkdown.trim().length > 0
+                                visible: itemRect.itemType !== "note" && model.noteMarkdown && model.noteMarkdown.trim().length > 0
                                 width: 18
                                 height: 18
                                 radius: 4
@@ -2664,7 +2707,9 @@ ApplicationWindow {
                                 ToolTip.delay: 400
                                 ToolTip.timeout: 2000
                                 ToolTip.text: {
-                                    var text = model.text + (model.noteMarkdown ? "\n\n" + model.noteMarkdown : "")
+                                    var text = model.text
+                                    if (itemRect.itemType !== "note" && model.noteMarkdown && model.noteMarkdown !== model.text)
+                                        text += (text.length > 0 ? "\n\n" : "") + model.noteMarkdown
                                     if (itemRect.hasLinkedSubtab) {
                                         text += "\n\nSubtab: " + Math.round(itemRect.linkedSubtabCompletion) + "%"
                                         if (itemRect.linkedSubtabActiveAction !== "")
@@ -2705,7 +2750,7 @@ ApplicationWindow {
                                 ToolTip.visible: obstacleHover.containsMouse
                                 ToolTip.delay: 400
                                 ToolTip.timeout: 2000
-                                ToolTip.text: model.text + (model.noteMarkdown ? "\n\n" + model.noteMarkdown : "")
+                                ToolTip.text: model.text + (model.noteMarkdown && model.noteMarkdown !== model.text ? "\n\n" + model.noteMarkdown : "")
 
                                 MouseArea {
                                     id: obstacleHover
@@ -2739,7 +2784,7 @@ ApplicationWindow {
                                 ToolTip.visible: wishHover.containsMouse
                                 ToolTip.delay: 400
                                 ToolTip.timeout: 2000
-                                ToolTip.text: model.text + (model.noteMarkdown ? "\n\n" + model.noteMarkdown : "")
+                                ToolTip.text: model.text + (model.noteMarkdown && model.noteMarkdown !== model.text ? "\n\n" + model.noteMarkdown : "")
 
                                 MouseArea {
                                     id: wishHover
@@ -2781,7 +2826,7 @@ ApplicationWindow {
                                 ToolTip.visible: freeTextHover.containsMouse
                                 ToolTip.delay: 400
                                 ToolTip.timeout: 2000
-                                ToolTip.text: model.text + (model.noteMarkdown ? "\n\n" + model.noteMarkdown : "")
+                                ToolTip.text: model.text + (model.noteMarkdown && model.noteMarkdown !== model.text ? "\n\n" + model.noteMarkdown : "")
 
                                 MouseArea {
                                     id: freeTextHover
@@ -2869,10 +2914,12 @@ ApplicationWindow {
                                         dialogs.edgeDropTaskDialog.open()
                                     } else if (itemRect.itemType === "chatgpt") {
                                         diagramModel.openChatGpt(itemRect.itemId)
-                                    } else if (itemRect.itemType === "note" || itemRect.itemType === "wish" || itemRect.itemType === "obstacle") {
+                                    } else if (itemRect.itemType === "wish" || itemRect.itemType === "obstacle") {
                                         if (markdownNoteManager) {
                                             markdownNoteManager.openNote(itemRect.itemId)
                                         }
+                                    } else if (itemRect.itemType === "note") {
+                                        root.openPresetDialog("note", Qt.point(model.x, model.y), itemRect.itemId, model.text)
                                     } else if (itemRect.itemType === "task" && itemRect.taskIndex < 0) {
                                         // Task not yet linked to task list - create new task
                                         dialogs.newTaskDialog.openWithItem(itemRect.itemId, model.text)
@@ -3050,6 +3097,7 @@ ApplicationWindow {
                 Repeater {
                     model: [
                         "Ctrl+Enter  New Task",
+                        "Ctrl+N  Connected Note",
                         "Ctrl+-  Backward Chain",
                         "Delete  Remove Node",
                         "Arrows  Connected Task",
