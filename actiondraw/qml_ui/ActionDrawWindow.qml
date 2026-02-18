@@ -28,6 +28,8 @@ ApplicationWindow {
     property var priorityPlotWindowRef: null
     property bool yubiKeyPromptVisible: false
     property string yubiKeyPromptText: "Touch your YubiKey to continue."
+    property bool suppressClosePrompt: false
+    property bool closeAfterSaveAsRequested: false
 
     menuBar: ActionMenuBar {
         root: root
@@ -124,13 +126,31 @@ ApplicationWindow {
 
     function performSave() {
         if (!projectManager) {
-            return
+            return false
         }
         if (projectManager.hasCurrentFile()) {
-            projectManager.saveCurrentProject()
+            return projectManager.saveCurrentProject()
         } else {
             dialogs.saveDialog.open()
+            return false
         }
+    }
+
+    function forceCloseWithoutPrompt() {
+        suppressClosePrompt = true
+        root.close()
+    }
+
+    function handleSaveDialogAccepted(saved) {
+        if (!closeAfterSaveAsRequested)
+            return
+        closeAfterSaveAsRequested = false
+        if (saved)
+            forceCloseWithoutPrompt()
+    }
+
+    function handleSaveDialogRejected() {
+        closeAfterSaveAsRequested = false
     }
 
     function showSaveNotification(message) {
@@ -3331,6 +3351,21 @@ ApplicationWindow {
         Qt.callLater(resetView)
     }
 
+    onClosing: function(close) {
+        if (suppressClosePrompt) {
+            suppressClosePrompt = false
+            close.accepted = true
+            return
+        }
+        if (!projectManager || !projectManager.hasUnsavedChanges()) {
+            close.accepted = true
+            return
+        }
+        close.accepted = false
+        closeAfterSaveAsRequested = false
+        unsavedChangesDialog.open()
+    }
+
     Dialog {
         id: yubiKeyTouchDialog
         modal: true
@@ -3380,6 +3415,73 @@ ApplicationWindow {
 
         background: Rectangle {
             radius: 14
+            color: "#132031"
+            border.color: "#2a4462"
+            border.width: 1
+        }
+    }
+
+    Dialog {
+        id: unsavedChangesDialog
+        modal: true
+        focus: true
+        x: Math.round((root.width - width) / 2)
+        y: Math.round((root.height - height) / 2)
+        width: Math.min(root.width * 0.5, 520)
+        title: "Unsaved Changes"
+
+        contentItem: ColumnLayout {
+            spacing: 12
+
+            Label {
+                text: "The diagram has unsaved changes. Save before closing?"
+                color: "#d6e2f0"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+        }
+
+        footer: RowLayout {
+            spacing: 8
+
+            Item {
+                Layout.fillWidth: true
+            }
+
+            Button {
+                text: "Save"
+                onClicked: {
+                    unsavedChangesDialog.close()
+                    if (projectManager && projectManager.hasCurrentFile()) {
+                        var saved = root.performSave()
+                        if (saved)
+                            root.forceCloseWithoutPrompt()
+                    } else {
+                        closeAfterSaveAsRequested = true
+                        dialogs.saveDialog.open()
+                    }
+                }
+            }
+
+            Button {
+                text: "Discard"
+                onClicked: {
+                    unsavedChangesDialog.close()
+                    root.forceCloseWithoutPrompt()
+                }
+            }
+
+            Button {
+                text: "Cancel"
+                onClicked: {
+                    closeAfterSaveAsRequested = false
+                    unsavedChangesDialog.close()
+                }
+            }
+        }
+
+        background: Rectangle {
+            radius: 12
             color: "#132031"
             border.color: "#2a4462"
             border.width: 1

@@ -1378,9 +1378,16 @@ Item {
         nameFilters: ["Progress files (*.progress)", "All files (*)"]
         defaultSuffix: "progress"
         onAccepted: {
+            var saved = false
             if (projectManager) {
-                projectManager.saveProjectAs(selectedFile)
+                saved = projectManager.saveProjectAs(selectedFile)
             }
+            if (root && root.handleSaveDialogAccepted)
+                root.handleSaveDialogAccepted(saved)
+        }
+        onRejected: {
+            if (root && root.handleSaveDialogRejected)
+                root.handleSaveDialogRejected()
         }
     }
 

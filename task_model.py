@@ -1334,6 +1334,7 @@ class ProjectManager(QObject):
                 self._diagram_model.currentTaskChanged.connect(self._refreshCurrentTabDiagram)
         self._cached_encryption_credentials: Optional[EncryptionCredentials] = None
         self._cached_encryption_file_path: str = ""
+        self._last_saved_snapshot = self._serialize_project_payload(self._build_project_data())
 
     def _onCurrentTabReminderDue(self, task_index: int, task_title: str) -> None:
         tab_index = self._tab_model.currentTabIndex if self._tab_model is not None else 0
@@ -1476,18 +1477,63 @@ class ProjectManager(QObject):
         """Return True if a current project file is set."""
         return bool(self._current_file_path)
 
-    @Slot()
-    def saveCurrentProject(self) -> None:
+    def _build_project_data(self) -> Dict[str, Any]:
+        """Build a normalized project payload from live in-memory state."""
+        if self._tab_model is not None:
+            tabs_data = []
+            current_tab_index = self._tab_model.currentTabIndex
+            current_tasks = self._task_model.to_dict()
+            current_diagram = self._diagram_model.to_dict()
+            for index, tab in enumerate(self._tab_model.getAllTabs()):
+                tabs_data.append({
+                    "name": tab.name,
+                    "tasks": current_tasks if index == current_tab_index else tab.tasks,
+                    "diagram": current_diagram if index == current_tab_index else tab.diagram,
+                    "priority": tab.priority,
+                    "priority_time_hours": tab.priority_time_hours,
+                    "priority_subjective_value": tab.priority_subjective_value,
+                    "priority_score": tab.priority_score,
+                    "include_in_priority_plot": tab.include_in_priority_plot,
+                })
+
+            return {
+                "version": self.PROJECT_VERSION,
+                "tabs": tabs_data,
+                "active_tab": current_tab_index,
+            }
+
+        return {
+            "version": self.PROJECT_VERSION,
+            "tabs": [{
+                "name": "Main",
+                "tasks": self._task_model.to_dict(),
+                "diagram": self._diagram_model.to_dict(),
+            }],
+            "active_tab": 0,
+        }
+
+    def _serialize_project_payload(self, project_data: Dict[str, Any]) -> str:
+        """Return deterministic JSON text for change detection."""
+        return json.dumps(project_data, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+    @Slot(result=bool)
+    def hasUnsavedChanges(self) -> bool:
+        """Return True when current in-memory state differs from last save/load snapshot."""
+        current_snapshot = self._serialize_project_payload(self._build_project_data())
+        return current_snapshot != self._last_saved_snapshot
+
+    @Slot(result=bool)
+    def saveCurrentProject(self) -> bool:
         """Save the current project to the existing file path."""
         if not self._current_file_path:
             self.errorOccurred.emit("No current project file selected")
-            return
-        self.saveProject(self._current_file_path, force_prompt=False)
+            return False
+        return self.saveProject(self._current_file_path, force_prompt=False)
 
-    @Slot(str)
-    def saveProjectAs(self, file_path: str) -> None:
+    @Slot(str, result=bool)
+    def saveProjectAs(self, file_path: str) -> bool:
         """Save project under a new path and always prompt for encryption choice."""
-        self.saveProject(file_path, force_prompt=True)
+        return self.saveProject(file_path, force_prompt=True)
 
     def _saveCurrentTabState(self) -> None:
         """Save the current task/diagram state to the tab model."""
@@ -1611,8 +1657,8 @@ class ProjectManager(QObject):
         """Return setup guidance for enabling YubiKey support on this OS."""
         return yubikey_support_guidance()
 
-    @Slot(str)
-    def saveProject(self, file_path: str, force_prompt: bool = True) -> None:
+    @Slot(str, result=bool)
+    def saveProject(self, file_path: str, force_prompt: bool = True) -> bool:
         """Save the current project to a JSON file in v1.1 format.
 
         Args:
@@ -1623,7 +1669,7 @@ class ProjectManager(QObject):
 
         if not file_path:
             self.errorOccurred.emit("No file path specified")
-            return
+            return False
 
         # Ensure .progress extension
         if not file_path.endswith(".progress"):
@@ -1632,40 +1678,9 @@ class ProjectManager(QObject):
         try:
             # Save current tab state first
             self._saveCurrentTabState()
-
-            if self._tab_model is not None:
-                # v1.1 format with tabs
-                tabs_data = []
-                for tab in self._tab_model.getAllTabs():
-                    tabs_data.append({
-                        "name": tab.name,
-                        "tasks": tab.tasks,
-                        "diagram": tab.diagram,
-                        "priority": tab.priority,
-                        "priority_time_hours": tab.priority_time_hours,
-                        "priority_subjective_value": tab.priority_subjective_value,
-                        "priority_score": tab.priority_score,
-                        "include_in_priority_plot": tab.include_in_priority_plot,
-                    })
-
-                project_data = {
-                    "version": self.PROJECT_VERSION,
-                    "saved_at": datetime.now().isoformat(),
-                    "tabs": tabs_data,
-                    "active_tab": self._tab_model.currentTabIndex,
-                }
-            else:
-                # Fallback: save as single tab in v1.1 format
-                project_data = {
-                    "version": self.PROJECT_VERSION,
-                    "saved_at": datetime.now().isoformat(),
-                    "tabs": [{
-                        "name": "Main",
-                        "tasks": self._task_model.to_dict(),
-                        "diagram": self._diagram_model.to_dict(),
-                    }],
-                    "active_tab": 0,
-                }
+            payload_data = self._build_project_data()
+            project_data = dict(payload_data)
+            project_data["saved_at"] = datetime.now().isoformat()
 
             credentials = None
             if (
@@ -1681,7 +1696,7 @@ class ProjectManager(QObject):
             else:
                 credentials = self._prompt_encryption_credentials("save", file_path)
             if credentials is None:
-                return
+                return False
 
             if credentials.use_yubikey:
                 self._begin_yubikey_interaction("save")
@@ -1704,17 +1719,21 @@ class ProjectManager(QObject):
             )
             self.currentFilePathChanged.emit()
             self._add_to_recent(file_path)
+            self._last_saved_snapshot = self._serialize_project_payload(payload_data)
             self.saveCompleted.emit(file_path)
             print(f"Project saved to: {file_path}")
+            return True
 
         except (OSError, IOError) as e:
             error_msg = f"Failed to save project: {e}"
             self.errorOccurred.emit(error_msg)
             print(error_msg)
+            return False
         except CryptoError as e:
             error_msg = f"Failed to save project: {e}"
             self.errorOccurred.emit(error_msg)
             print(error_msg)
+            return False
 
     def _loadFromV1(self, project_data: Dict[str, Any]) -> List[Tab]:
         """Convert v1.0 format data to tabs structure.
@@ -1815,6 +1834,7 @@ class ProjectManager(QObject):
             self._current_file_path = file_path
             self.currentFilePathChanged.emit()
             self._add_to_recent(file_path)
+            self._last_saved_snapshot = self._serialize_project_payload(self._build_project_data())
             self.loadCompleted.emit(file_path)
             print(f"Project loaded from: {file_path}")
 

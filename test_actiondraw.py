@@ -1669,6 +1669,45 @@ class TestMultiTabSupport:
         assert task_model2.rowCount() == 1
         assert diagram_model2.count == 1
 
+    def test_has_unsaved_changes_tracks_diagram_edits(self, app, tmp_path):
+        """Unsaved state flips true after diagram changes and false after save."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        assert project_manager.hasUnsavedChanges() is False
+
+        diagram_model.addBox(20.0, 30.0, "Unsaved Box")
+        assert project_manager.hasUnsavedChanges() is True
+
+        project_file = tmp_path / "unsaved_state.progress"
+        project_manager.saveProject(str(project_file))
+        assert project_manager.hasUnsavedChanges() is False
+
+    def test_has_unsaved_changes_false_after_load(self, app, tmp_path):
+        """Loading an existing project resets unsaved state baseline."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        diagram_model.addBox(50.0, 60.0, "Saved Box")
+
+        project_file = tmp_path / "load_baseline.progress"
+        project_manager.saveProject(str(project_file))
+
+        task_model2 = TaskModel()
+        diagram_model2 = DiagramModel()
+        tab_model2 = TabModel()
+        project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
+        project_manager2.loadProject(str(project_file))
+
+        assert project_manager2.hasUnsavedChanges() is False
+
     def test_load_encrypted_wrong_passphrase_fails(self, app, tmp_path, monkeypatch):
         """Loading with wrong passphrase emits an error and does not load."""
         from task_model import TaskModel, ProjectManager, TabModel
