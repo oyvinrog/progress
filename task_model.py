@@ -68,6 +68,7 @@ class Tab:
     priority_time_hours: float = 1.01
     priority_subjective_value: float = 1.0
     priority_score: float = 0.0
+    include_in_priority_plot: bool = True
 
 
 class TaskModel(QAbstractListModel):
@@ -909,6 +910,7 @@ class TabModel(QAbstractListModel):
     PriorityTimeHoursRole = Qt.UserRole + 6
     PrioritySubjectiveValueRole = Qt.UserRole + 7
     PriorityScoreRole = Qt.UserRole + 8
+    IncludeInPriorityPlotRole = Qt.UserRole + 9
 
     tabsChanged = Signal()
     currentTabChanged = Signal()
@@ -943,6 +945,8 @@ class TabModel(QAbstractListModel):
             return tab.priority_subjective_value
         if role == self.PriorityScoreRole:
             return tab.priority_score
+        if role == self.IncludeInPriorityPlotRole:
+            return tab.include_in_priority_plot
         return None
 
     def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
@@ -955,6 +959,7 @@ class TabModel(QAbstractListModel):
             self.PriorityTimeHoursRole: b"priorityTimeHours",
             self.PrioritySubjectiveValueRole: b"prioritySubjectiveValue",
             self.PriorityScoreRole: b"priorityScore",
+            self.IncludeInPriorityPlotRole: b"includeInPriorityPlot",
         }
 
     @Property(int, notify=currentTabIndexChanged)
@@ -1103,8 +1108,22 @@ class TabModel(QAbstractListModel):
             return
 
         tab = self._tabs[index]
+        if not tab.include_in_priority_plot:
+            return
         tab.priority_time_hours = clamp_time_hours(time_hours)
         tab.priority_subjective_value = clamp_subjective_value(subjective_value)
+        self.recomputeAndSortPriorities()
+
+    @Slot(int, bool)
+    def setIncludeInPriorityPlot(self, index: int, include: bool) -> None:
+        """Include or exclude a tab from priority-plot scoring and plotting."""
+        if index < 0 or index >= len(self._tabs):
+            return
+        tab = self._tabs[index]
+        include_flag = bool(include)
+        if tab.include_in_priority_plot == include_flag:
+            return
+        tab.include_in_priority_plot = include_flag
         self.recomputeAndSortPriorities()
 
     @Slot()
@@ -1115,13 +1134,22 @@ class TabModel(QAbstractListModel):
 
         current_tab = self._tabs[self._current_tab_index]
         for tab in self._tabs:
-            tab.priority_score = self._computePriorityScore(
-                tab.priority_subjective_value,
-                tab.priority_time_hours,
-            )
+            if tab.include_in_priority_plot:
+                tab.priority_score = self._computePriorityScore(
+                    tab.priority_subjective_value,
+                    tab.priority_time_hours,
+                )
+            else:
+                tab.priority_score = 0.0
 
         indexed_tabs = list(enumerate(self._tabs))
-        indexed_tabs.sort(key=lambda item: (-item[1].priority_score, item[0]))
+        indexed_tabs.sort(
+            key=lambda item: (
+                0 if item[1].include_in_priority_plot else 1,
+                -item[1].priority_score,
+                item[0],
+            )
+        )
         sorted_tabs = [item[1] for item in indexed_tabs]
         if sorted_tabs == self._tabs:
             model_index = self.index(0, 0)
@@ -1133,6 +1161,7 @@ class TabModel(QAbstractListModel):
                     self.PriorityTimeHoursRole,
                     self.PrioritySubjectiveValueRole,
                     self.PriorityScoreRole,
+                    self.IncludeInPriorityPlotRole,
                 ],
             )
             return
@@ -1196,10 +1225,14 @@ class TabModel(QAbstractListModel):
         for tab in self._tabs:
             tab.priority_time_hours = clamp_time_hours(getattr(tab, "priority_time_hours", 1.01))
             tab.priority_subjective_value = clamp_subjective_value(getattr(tab, "priority_subjective_value", 1.0))
-            tab.priority_score = self._computePriorityScore(
-                tab.priority_subjective_value,
-                tab.priority_time_hours,
-            )
+            tab.include_in_priority_plot = bool(getattr(tab, "include_in_priority_plot", True))
+            if tab.include_in_priority_plot:
+                tab.priority_score = self._computePriorityScore(
+                    tab.priority_subjective_value,
+                    tab.priority_time_hours,
+                )
+            else:
+                tab.priority_score = 0.0
         self.endResetModel()
 
         # Validate and set active tab index
@@ -1612,6 +1645,7 @@ class ProjectManager(QObject):
                         "priority_time_hours": tab.priority_time_hours,
                         "priority_subjective_value": tab.priority_subjective_value,
                         "priority_score": tab.priority_score,
+                        "include_in_priority_plot": tab.include_in_priority_plot,
                     })
 
                 project_data = {
@@ -1757,6 +1791,7 @@ class ProjectManager(QObject):
                         priority_time_hours=tab_data.get("priority_time_hours", 1.01),
                         priority_subjective_value=tab_data.get("priority_subjective_value", 1.0),
                         priority_score=tab_data.get("priority_score", 0.0),
+                        include_in_priority_plot=tab_data.get("include_in_priority_plot", True),
                     ))
                 active_tab = project_data.get("active_tab", 0)
 

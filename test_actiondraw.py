@@ -2718,6 +2718,7 @@ class TestTabModelCompletion:
         assert b"priorityTimeHours" in role_names.values()
         assert b"prioritySubjectiveValue" in role_names.values()
         assert b"priorityScore" in role_names.values()
+        assert b"includeInPriorityPlot" in role_names.values()
 
     def test_priority_plot_score_and_sort(self, app):
         """Setting plot coordinates recomputes score and reorders tabs."""
@@ -2746,6 +2747,29 @@ class TestTabModelCompletion:
         model.setPriorityPoint(0, 8.0, 1.0)
 
         assert model.currentTabName == "Second"
+
+    def test_priority_plot_exclusion_removes_from_scoring_order(self, app):
+        """Excluded tabs are not scored and are sorted after included tabs."""
+        from task_model import TabModel
+
+        model = TabModel()
+        model.addTab("Second")
+        model.setPriorityPoint(0, 2.0, 9.0)  # High score
+        model.setPriorityPoint(1, 2.0, 3.0)  # Lower score
+        names_before = [
+            model.data(model.index(i, 0), model.NameRole)
+            for i in range(model.tabCount)
+        ]
+        main_index = names_before.index("Main")
+
+        model.setIncludeInPriorityPlot(main_index, False)
+
+        names_after = [
+            model.data(model.index(i, 0), model.NameRole)
+            for i in range(model.tabCount)
+        ]
+        assert names_after[-1] == "Main"
+        assert model.data(model.index(model.tabCount - 1, 0), model.PriorityScoreRole) == pytest.approx(0.0)
 
 
 class TestTabModelMoveTab:
@@ -2886,9 +2910,50 @@ class TestPriorityPlotPersistence:
         assert loaded_by_name["Alpha"].priority_time_hours == pytest.approx(3.0)
         assert loaded_by_name["Alpha"].priority_subjective_value == pytest.approx(5.0)
         assert loaded_by_name["Alpha"].priority_score > 0
+        assert loaded_by_name["Alpha"].include_in_priority_plot is True
         assert loaded_by_name["Beta"].priority_time_hours == pytest.approx(2.0)
         assert loaded_by_name["Beta"].priority_subjective_value == pytest.approx(7.0)
         assert loaded_by_name["Beta"].priority_score > 0
+        assert loaded_by_name["Beta"].include_in_priority_plot is True
+
+    def test_priority_plot_exclusion_field_roundtrip(self, app, tmp_path):
+        """Priority plot exclusion flag is persisted."""
+        from task_model import ProjectManager, Tab, TabModel, TaskModel
+
+        project_file = tmp_path / "priority_exclusion.progress"
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        tab_model.setTabs(
+            [
+                Tab(
+                    name="Included",
+                    tasks={"tasks": []},
+                    diagram={"items": [], "edges": [], "strokes": []},
+                    include_in_priority_plot=True,
+                ),
+                Tab(
+                    name="Excluded",
+                    tasks={"tasks": []},
+                    diagram={"items": [], "edges": [], "strokes": []},
+                    include_in_priority_plot=False,
+                ),
+            ],
+            active_tab=0,
+        )
+
+        manager = ProjectManager(task_model, diagram_model, tab_model)
+        manager.saveProject(str(project_file))
+
+        task_model2 = TaskModel()
+        diagram_model2 = DiagramModel(task_model=task_model2)
+        tab_model2 = TabModel()
+        manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
+        manager2.loadProject(str(project_file))
+
+        loaded = {tab.name: tab for tab in tab_model2.getAllTabs()}
+        assert loaded["Included"].include_in_priority_plot is True
+        assert loaded["Excluded"].include_in_priority_plot is False
 
 
 class TestPriorityPlotStandalone:

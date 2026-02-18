@@ -95,7 +95,7 @@ Window {
 
                         delegate: Rectangle {
                             width: parent.width
-                            height: 52
+                            height: 66
                             radius: 8
                             color: index === 0 ? "#244e67" : "#173245"
                             border.color: "#3b6682"
@@ -106,7 +106,7 @@ Window {
                                 anchors.leftMargin: 8
                                 anchors.rightMargin: 8
                                 anchors.verticalCenter: parent.verticalCenter
-                                spacing: 1
+                                spacing: 2
 
                                 Text {
                                     text: (index + 1) + ". " + model.name
@@ -124,6 +124,30 @@ Window {
                                     font.pixelSize: 10
                                     elide: Text.ElideRight
                                     width: parent.width
+                                }
+
+                                Button {
+                                    width: 118
+                                    height: 22
+                                    text: (model.includeInPriorityPlot !== false) ? "Included in Plot" : "Excluded from Plot"
+                                    onClicked: {
+                                        if (root.tabModelRef && root.tabModelRef.setIncludeInPriorityPlot)
+                                            root.tabModelRef.setIncludeInPriorityPlot(index, !(model.includeInPriorityPlot !== false))
+                                    }
+                                    background: Rectangle {
+                                        radius: 6
+                                        color: (model.includeInPriorityPlot !== false) ? "#1d5f6d" : "#4a2f40"
+                                        border.color: (model.includeInPriorityPlot !== false) ? "#7fe0ef" : "#d9a3bf"
+                                        border.width: 1
+                                    }
+                                    contentItem: Text {
+                                        text: parent.text
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                        color: "#eff9ff"
+                                        font.pixelSize: 10
+                                        font.bold: true
+                                    }
                                 }
                             }
                         }

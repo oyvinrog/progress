@@ -277,6 +277,7 @@ Rectangle {
                                 if (mouse.button === Qt.RightButton) {
                                     tabContextMenu.tabIndex = index
                                     tabContextMenu.tabName = model.name
+                                    tabContextMenu.includeInPlot = model.includeInPriorityPlot !== false
                                     tabContextMenu.popup()
                                 } else {
                                     if (projectManager)
@@ -336,6 +337,7 @@ Rectangle {
         id: tabContextMenu
         property int tabIndex: -1
         property string tabName: ""
+        property bool includeInPlot: true
 
         Menu {
             title: "Set Priority"
@@ -367,6 +369,20 @@ Rectangle {
                 onTriggered: {
                     if (tabModel)
                         tabModel.setPriority(tabContextMenu.tabIndex, 0)
+                }
+            }
+        }
+
+        MenuSeparator {}
+
+        MenuItem {
+            text: (tabContextMenu.includeInPlot === true)
+                ? "Exclude from Priority Plot"
+                : "Include in Priority Plot"
+            onTriggered: {
+                if (tabModel && tabModel.setIncludeInPriorityPlot) {
+                    tabModel.setIncludeInPriorityPlot(tabContextMenu.tabIndex, !tabContextMenu.includeInPlot)
+                    tabContextMenu.includeInPlot = !tabContextMenu.includeInPlot
                 }
             }
         }

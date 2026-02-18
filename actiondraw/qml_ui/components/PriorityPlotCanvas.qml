@@ -109,6 +109,7 @@ Rectangle {
             id: pointItem
             width: 14
             height: 14
+            visible: model.includeInPriorityPlot !== false
             property real pointTime: model.priorityTimeHours || 1.01
             property real pointValue: model.prioritySubjectiveValue || 0.0
             x: root.toX(pointTime) - width / 2
