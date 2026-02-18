@@ -134,6 +134,61 @@ class DiagramModel(
         self.endInsertRows()
         self.itemsChanged.emit()
 
+    def _dimensions_for_connected_kind(self, item_kind: str) -> tuple[float, float]:
+        kind = (item_kind or "").strip().lower()
+        if kind == "task":
+            return (140.0, 70.0)
+        preset = ITEM_PRESETS.get(kind)
+        if preset:
+            return (float(preset.get("width", 120.0)), float(preset.get("height", 60.0)))
+        return (120.0, 60.0)
+
+    @staticmethod
+    def _rectangles_overlap(
+        ax: float,
+        ay: float,
+        aw: float,
+        ah: float,
+        bx: float,
+        by: float,
+        bw: float,
+        bh: float,
+    ) -> bool:
+        return ax < bx + bw and ax + aw > bx and ay < by + bh and ay + ah > by
+
+    def _position_overlaps_existing(self, x: float, y: float, width: float, height: float) -> bool:
+        for item in self._items:
+            if self._rectangles_overlap(x, y, width, height, item.x, item.y, item.width, item.height):
+                return True
+        return False
+
+    @Slot(str, str, float, float, float, result="QVariantMap")
+    def resolveConnectedPlacement(
+        self, source_id: str, item_kind: str, base_x: float, base_y: float, step_y: float
+    ) -> Dict[str, float]:
+        # source_id is included for future route-specific strategies and QML call-site symmetry.
+        _ = source_id
+        width, height = self._dimensions_for_connected_kind(item_kind)
+        step = abs(float(step_y))
+        if step <= 0.0:
+            step = 60.0
+
+        if not self._position_overlaps_existing(base_x, base_y, width, height):
+            return {"x": float(base_x), "y": float(base_y)}
+
+        max_vertical_offsets = 50
+        for offset in range(1, max_vertical_offsets + 1):
+            candidate_y = base_y + (step * offset)
+            if not self._position_overlaps_existing(base_x, candidate_y, width, height):
+                return {"x": float(base_x), "y": float(candidate_y)}
+
+        for offset in range(1, max_vertical_offsets + 1):
+            candidate_y = base_y - (step * offset)
+            if not self._position_overlaps_existing(base_x, candidate_y, width, height):
+                return {"x": float(base_x), "y": float(candidate_y)}
+
+        return {"x": float(base_x), "y": float(base_y)}
+
     # --- Qt model overrides -------------------------------------------------
     def rowCount(self, parent: QModelIndex | None = QModelIndex()) -> int:  # type: ignore[override]
         return len(self._items)

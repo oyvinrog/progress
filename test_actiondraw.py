@@ -483,6 +483,47 @@ class TestQueries:
         # Outside even with margin
         assert empty_diagram_model.getItemAtWithMargin(80.0, 130.0, 10.0) is None
 
+    def test_resolve_connected_placement_uses_base_when_free(self, empty_diagram_model):
+        source_id = empty_diagram_model.addBox(0.0, 0.0, "Source")
+        placement = empty_diagram_model.resolveConnectedPlacement(source_id, "task", 300.0, 120.0, 60.0)
+        assert placement["x"] == 300.0
+        assert placement["y"] == 120.0
+
+    def test_resolve_connected_placement_stacks_down_when_base_occupied(self, empty_diagram_model):
+        source_id = empty_diagram_model.addBox(0.0, 0.0, "Source")
+        empty_diagram_model.addBox(300.0, 120.0, "Blocker")
+        placement = empty_diagram_model.resolveConnectedPlacement(source_id, "task", 300.0, 120.0, 60.0)
+        assert placement["x"] == 300.0
+        assert placement["y"] == 180.0
+
+    def test_resolve_connected_placement_skips_multiple_occupied_rows(self, empty_diagram_model):
+        source_id = empty_diagram_model.addBox(0.0, 0.0, "Source")
+        empty_diagram_model.addBox(300.0, 120.0, "Blocker 0")
+        empty_diagram_model.addBox(300.0, 180.0, "Blocker 1")
+        empty_diagram_model.addBox(300.0, 240.0, "Blocker 2")
+        placement = empty_diagram_model.resolveConnectedPlacement(source_id, "task", 300.0, 120.0, 60.0)
+        assert placement["x"] == 300.0
+        assert placement["y"] == 300.0
+
+    def test_resolve_connected_placement_uses_upward_fallback(self, empty_diagram_model):
+        source_id = empty_diagram_model.addBox(0.0, 0.0, "Source")
+        for offset in range(0, 51):
+            empty_diagram_model.addBox(300.0, 120.0 + (offset * 60.0), f"Blocker {offset}")
+        placement = empty_diagram_model.resolveConnectedPlacement(source_id, "task", 300.0, 120.0, 60.0)
+        assert placement["x"] == 300.0
+        assert placement["y"] == 0.0
+
+    def test_resolve_connected_placement_respects_item_dimensions(self, empty_diagram_model):
+        source_id = empty_diagram_model.addBox(0.0, 0.0, "Source")
+        empty_diagram_model.addBox(300.0, 120.0, "Base Blocker")
+        empty_diagram_model.addBox(450.0, 180.0, "Right-side Blocker")
+
+        task_placement = empty_diagram_model.resolveConnectedPlacement(source_id, "task", 300.0, 120.0, 60.0)
+        note_placement = empty_diagram_model.resolveConnectedPlacement(source_id, "note", 300.0, 120.0, 60.0)
+
+        assert task_placement["y"] == 180.0
+        assert note_placement["y"] == 240.0
+
     def test_role_names(self, empty_diagram_model):
         roles = empty_diagram_model.roleNames()
         assert roles[empty_diagram_model.IdRole] == b"itemId"

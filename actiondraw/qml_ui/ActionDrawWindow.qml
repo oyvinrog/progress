@@ -513,9 +513,8 @@ ApplicationWindow {
 
         var dropX = sourceItem.x + (sourceItem.width || 100) + 50
         var dropY = sourceItem.y
-        dropX = root.snapValue(dropX)
-        dropY = root.snapValue(dropY)
-        var noteId = diagramModel.addPresetItemAndConnect(sourceId, "note", dropX, dropY, "Note")
+        var drop = root.resolveConnectedDrop(sourceId, "note", dropX, dropY)
+        var noteId = diagramModel.addPresetItemAndConnect(sourceId, "note", drop.x, drop.y, "Note")
         if (noteId && noteId.length > 0)
             root.selectedItemId = noteId
     }
@@ -582,6 +581,23 @@ ApplicationWindow {
 
     function snapPoint(point) {
         return Qt.point(snapValue(point.x), snapValue(point.y))
+    }
+
+    function resolveConnectedDrop(sourceId, itemKind, dropX, dropY) {
+        var snappedX = root.snapValue(dropX)
+        var snappedY = root.snapValue(dropY)
+        if (!diagramModel || !diagramModel.resolveConnectedPlacement)
+            return Qt.point(snappedX, snappedY)
+        var placement = diagramModel.resolveConnectedPlacement(
+            sourceId,
+            itemKind,
+            snappedX,
+            snappedY,
+            root.gridSpacing
+        )
+        if (!placement || !(placement.x || placement.x === 0) || !(placement.y || placement.y === 0))
+            return Qt.point(snappedX, snappedY)
+        return Qt.point(root.snapValue(placement.x), root.snapValue(placement.y))
     }
 
     function diagramCenterPoint() {
