@@ -11,7 +11,14 @@ Rectangle {
     property int expandedWidth: 252
     property int collapsedWidth: 48
     readonly property bool keepExpanded: tabContextMenu.visible || renameTabDialog.visible
-    readonly property bool isExpanded: sidebarHoverHandler.hovered || keepExpanded
+    readonly property bool persistedExpanded: projectManager ? projectManager.sidebarExpanded : true
+    readonly property bool isExpanded: persistedExpanded || keepExpanded
+
+    function toggleSidebarExpanded() {
+        if (!projectManager || !projectManager.setSidebarExpanded)
+            return
+        projectManager.setSidebarExpanded(!persistedExpanded)
+    }
 
     Layout.fillHeight: true
     Layout.preferredWidth: isExpanded ? expandedWidth : collapsedWidth
@@ -39,35 +46,38 @@ Rectangle {
         opacity: 0.32
     }
 
-    HoverHandler {
-        id: sidebarHoverHandler
-    }
-
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: sidebar.isExpanded ? 10 : 6
         spacing: 8
 
         Rectangle {
+            id: headerBox
             Layout.fillWidth: true
             height: 34
             radius: 8
-            color: "#192736"
+            color: {
+                if (headerMouseArea.pressed)
+                    return "#24425a"
+                if (headerMouseArea.containsMouse)
+                    return "#22384c"
+                return "#192736"
+            }
             border.color: "#31485e"
             border.width: 1
 
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 10
-                anchors.rightMargin: 10
+                anchors.leftMargin: sidebar.isExpanded ? 10 : 6
+                anchors.rightMargin: sidebar.isExpanded ? 10 : 6
                 spacing: 8
 
                 Text {
-                    text: sidebar.isExpanded ? "Project Tabs" : ">"
+                    text: sidebar.isExpanded ? "Project Tabs" : "Tabs"
                     color: "#dbe7f3"
-                    font.pixelSize: sidebar.isExpanded ? 12 : 14
+                    font.pixelSize: sidebar.isExpanded ? 12 : 10
                     font.bold: true
-                    Layout.alignment: Qt.AlignVCenter
+                    Layout.alignment: sidebar.isExpanded ? Qt.AlignVCenter : (Qt.AlignVCenter | Qt.AlignHCenter)
                 }
 
                 Item { Layout.fillWidth: true }
@@ -87,6 +97,26 @@ Rectangle {
                         font.pixelSize: 11
                         font.bold: true
                     }
+                }
+
+                Text {
+                    text: sidebar.isExpanded ? "<" : ">"
+                    color: "#9fc6e0"
+                    font.pixelSize: 14
+                    font.bold: true
+                    Layout.alignment: Qt.AlignVCenter
+                }
+            }
+
+            MouseArea {
+                id: headerMouseArea
+                anchors.fill: parent
+                hoverEnabled: true
+                acceptedButtons: Qt.LeftButton
+                cursorShape: Qt.PointingHandCursor
+                onClicked: function(mouse) {
+                    if (mouse.button === Qt.LeftButton && !sidebar.keepExpanded)
+                        sidebar.toggleSidebarExpanded()
                 }
             }
         }
@@ -111,7 +141,7 @@ Rectangle {
                         id: tabButton
                         property bool isActive: tabModel ? index === tabModel.currentTabIndex : false
                         property string activeTaskTitle: model.activeTaskTitle || ""
-                        property int tabPriority: model.priority || 0
+                        property real tabPriorityScore: model.priorityScore || 0
                         property int dragTabIndex: index
                         property string dragTabName: model.name || ""
                         property bool suppressClick: false
@@ -190,19 +220,19 @@ Rectangle {
 
                                 Rectangle {
                                     id: priorityBadge
-                                    visible: tabButton.tabPriority > 0
-                                    width: 16
+                                    visible: tabButton.tabPriorityScore > 0
+                                    width: 36
                                     height: 16
                                     radius: 4
-                                    color: tabButton.tabPriority === 1 ? "#d84f4f" :
-                                           tabButton.tabPriority === 2 ? "#e1943c" :
-                                           tabButton.tabPriority === 3 ? "#4da268" : "transparent"
+                                    color: "#1b4d67"
+                                    border.color: "#68c8f2"
+                                    border.width: 1
 
                                     Text {
                                         anchors.centerIn: parent
-                                        text: tabButton.tabPriority
+                                        text: tabButton.tabPriorityScore.toFixed(2)
                                         color: "#ffffff"
-                                        font.pixelSize: 10
+                                        font.pixelSize: 9
                                         font.bold: true
                                     }
                                 }
@@ -252,9 +282,9 @@ Rectangle {
                         ToolTip {
                             visible: tabMouseArea.containsMouse
                             text: {
-                                var priorityText = tabButton.tabPriority === 1 ? "[Priority 1 - High] " :
-                                                   tabButton.tabPriority === 2 ? "[Priority 2 - Medium] " :
-                                                   tabButton.tabPriority === 3 ? "[Priority 3 - Low] " : ""
+                                var priorityText = tabButton.tabPriorityScore > 0
+                                    ? "[Score " + tabButton.tabPriorityScore.toFixed(2) + "] "
+                                    : ""
                                 var baseText = priorityText + model.name + " (" + Math.round(model.completionPercent) + "%)"
                                 if (tabButton.activeTaskTitle)
                                     baseText += "\n" + tabButton.activeTaskTitle
@@ -277,6 +307,7 @@ Rectangle {
                                 if (mouse.button === Qt.RightButton) {
                                     tabContextMenu.tabIndex = index
                                     tabContextMenu.tabName = model.name
+                                    tabContextMenu.includeInPlot = model.includeInPriorityPlot !== false
                                     tabContextMenu.popup()
                                 } else {
                                     if (projectManager)
@@ -336,6 +367,7 @@ Rectangle {
         id: tabContextMenu
         property int tabIndex: -1
         property string tabName: ""
+        property bool includeInPlot: true
 
         Menu {
             title: "Set Priority"
@@ -367,6 +399,20 @@ Rectangle {
                 onTriggered: {
                     if (tabModel)
                         tabModel.setPriority(tabContextMenu.tabIndex, 0)
+                }
+            }
+        }
+
+        MenuSeparator {}
+
+        MenuItem {
+            text: (tabContextMenu.includeInPlot === true)
+                ? "Exclude from Priority Plot"
+                : "Include in Priority Plot"
+            onTriggered: {
+                if (tabModel && tabModel.setIncludeInPriorityPlot) {
+                    tabModel.setIncludeInPriorityPlot(tabContextMenu.tabIndex, !tabContextMenu.includeInPlot)
+                    tabContextMenu.includeInPlot = !tabContextMenu.includeInPlot
                 }
             }
         }

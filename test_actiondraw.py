@@ -483,6 +483,47 @@ class TestQueries:
         # Outside even with margin
         assert empty_diagram_model.getItemAtWithMargin(80.0, 130.0, 10.0) is None
 
+    def test_resolve_connected_placement_uses_base_when_free(self, empty_diagram_model):
+        source_id = empty_diagram_model.addBox(0.0, 0.0, "Source")
+        placement = empty_diagram_model.resolveConnectedPlacement(source_id, "task", 300.0, 120.0, 60.0)
+        assert placement["x"] == 300.0
+        assert placement["y"] == 120.0
+
+    def test_resolve_connected_placement_stacks_down_when_base_occupied(self, empty_diagram_model):
+        source_id = empty_diagram_model.addBox(0.0, 0.0, "Source")
+        empty_diagram_model.addBox(300.0, 120.0, "Blocker")
+        placement = empty_diagram_model.resolveConnectedPlacement(source_id, "task", 300.0, 120.0, 60.0)
+        assert placement["x"] == 300.0
+        assert placement["y"] == 180.0
+
+    def test_resolve_connected_placement_skips_multiple_occupied_rows(self, empty_diagram_model):
+        source_id = empty_diagram_model.addBox(0.0, 0.0, "Source")
+        empty_diagram_model.addBox(300.0, 120.0, "Blocker 0")
+        empty_diagram_model.addBox(300.0, 180.0, "Blocker 1")
+        empty_diagram_model.addBox(300.0, 240.0, "Blocker 2")
+        placement = empty_diagram_model.resolveConnectedPlacement(source_id, "task", 300.0, 120.0, 60.0)
+        assert placement["x"] == 300.0
+        assert placement["y"] == 300.0
+
+    def test_resolve_connected_placement_uses_upward_fallback(self, empty_diagram_model):
+        source_id = empty_diagram_model.addBox(0.0, 0.0, "Source")
+        for offset in range(0, 51):
+            empty_diagram_model.addBox(300.0, 120.0 + (offset * 60.0), f"Blocker {offset}")
+        placement = empty_diagram_model.resolveConnectedPlacement(source_id, "task", 300.0, 120.0, 60.0)
+        assert placement["x"] == 300.0
+        assert placement["y"] == 0.0
+
+    def test_resolve_connected_placement_respects_item_dimensions(self, empty_diagram_model):
+        source_id = empty_diagram_model.addBox(0.0, 0.0, "Source")
+        empty_diagram_model.addBox(300.0, 120.0, "Base Blocker")
+        empty_diagram_model.addBox(450.0, 180.0, "Right-side Blocker")
+
+        task_placement = empty_diagram_model.resolveConnectedPlacement(source_id, "task", 300.0, 120.0, 60.0)
+        note_placement = empty_diagram_model.resolveConnectedPlacement(source_id, "note", 300.0, 120.0, 60.0)
+
+        assert task_placement["y"] == 180.0
+        assert note_placement["y"] == 240.0
+
     def test_role_names(self, empty_diagram_model):
         roles = empty_diagram_model.roleNames()
         assert roles[empty_diagram_model.IdRole] == b"itemId"
@@ -528,7 +569,15 @@ class TestQueries:
         assert diagram_model_with_task_model.findNearestConnectedTaskInDirection(source, "up") == up_task
         assert diagram_model_with_task_model.findNearestConnectedTaskInDirection(source, "down") == down_task
 
-    def test_find_nearest_connected_task_in_direction_ignores_non_task_items(self, diagram_model_with_task_model):
+    def test_find_nearest_connected_item_in_direction_from_non_task_source(self, diagram_model_with_task_model):
+        source_box = diagram_model_with_task_model.addBox(100.0, 100.0, "Source")
+        right_note = diagram_model_with_task_model.addPresetItem("note", 260.0, 100.0)
+        diagram_model_with_task_model.addEdge(source_box, right_note)
+
+        picked = diagram_model_with_task_model.findNearestConnectedItemInDirection(source_box, "right")
+        assert picked == right_note
+
+    def test_find_nearest_connected_task_in_direction_includes_non_task_items(self, diagram_model_with_task_model):
         source = diagram_model_with_task_model.addTask(0, 100.0, 100.0)
         right_box = diagram_model_with_task_model.addBox(260.0, 100.0, "Box")
         right_task = diagram_model_with_task_model.addTask(1, 420.0, 100.0)
@@ -536,7 +585,7 @@ class TestQueries:
         diagram_model_with_task_model.addEdge(source, right_task)
 
         picked = diagram_model_with_task_model.findNearestConnectedTaskInDirection(source, "right")
-        assert picked == right_task
+        assert picked == right_box
 
     def test_find_nearest_connected_task_in_direction_returns_empty_for_no_match(self, diagram_model_with_task_model):
         source = diagram_model_with_task_model.addTask(0, 100.0, 100.0)
@@ -891,11 +940,36 @@ class TestDiagramModelSerialization:
         empty_diagram_model.setItemMarkdown(item_id, "# Title\nBody")
 
         data = empty_diagram_model.to_dict()
-        assert data["items"][0]["note_markdown"] == "# Title\nBody"
+        assert data["items"][0]["text"] == "# Title\nBody"
+        assert "note_markdown" not in data["items"][0]
 
         new_model = DiagramModel()
         new_model.from_dict(data)
         assert new_model.getItemMarkdown(item_id) == "# Title\nBody"
+
+    def test_from_dict_migrates_legacy_note_markdown_to_text(self, empty_diagram_model):
+        empty_diagram_model.from_dict({
+            "items": [
+                {
+                    "id": "note_0",
+                    "item_type": "note",
+                    "x": 10.0,
+                    "y": 20.0,
+                    "width": 160.0,
+                    "height": 110.0,
+                    "text": "Old Title",
+                    "task_index": -1,
+                    "color": "#f7e07b",
+                    "text_color": "#1b2028",
+                    "note_markdown": "# Migrated\nBody",
+                }
+            ],
+            "edges": [],
+        })
+        item = empty_diagram_model.getItem("note_0")
+        assert item is not None
+        assert item.text == "# Migrated\nBody"
+        assert item.note_markdown == ""
 
     def test_create_task_from_markdown_selection_chains_tasks(self, diagram_model_with_task_model):
         source_id = diagram_model_with_task_model.addPresetItemWithText("box", 50, 60, "Source")
@@ -1668,6 +1742,66 @@ class TestMultiTabSupport:
         project_manager2.switchTab(0)
         assert task_model2.rowCount() == 1
         assert diagram_model2.count == 1
+
+    def test_has_unsaved_changes_tracks_diagram_edits(self, app, tmp_path):
+        """Unsaved state flips true after diagram changes and false after save."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        assert project_manager.hasUnsavedChanges() is False
+
+        diagram_model.addBox(20.0, 30.0, "Unsaved Box")
+        assert project_manager.hasUnsavedChanges() is True
+
+        project_file = tmp_path / "unsaved_state.progress"
+        project_manager.saveProject(str(project_file))
+        assert project_manager.hasUnsavedChanges() is False
+
+    def test_has_unsaved_changes_ignores_active_task_time_drift(self, app, tmp_path):
+        """Auto-updating active task timers should not immediately re-mark project as unsaved."""
+        import time
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        task_model.addTask("Running task", -1)
+
+        project_file = tmp_path / "unsaved_time_drift.progress"
+        project_manager.saveProject(str(project_file))
+        assert project_manager.hasUnsavedChanges() is False
+
+        for _ in range(5):
+            time.sleep(0.25)
+            app.processEvents()
+
+        assert project_manager.hasUnsavedChanges() is False
+
+    def test_has_unsaved_changes_false_after_load(self, app, tmp_path):
+        """Loading an existing project resets unsaved state baseline."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        diagram_model.addBox(50.0, 60.0, "Saved Box")
+
+        project_file = tmp_path / "load_baseline.progress"
+        project_manager.saveProject(str(project_file))
+
+        task_model2 = TaskModel()
+        diagram_model2 = DiagramModel()
+        tab_model2 = TabModel()
+        project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
+        project_manager2.loadProject(str(project_file))
+
+        assert project_manager2.hasUnsavedChanges() is False
 
     def test_load_encrypted_wrong_passphrase_fails(self, app, tmp_path, monkeypatch):
         """Loading with wrong passphrase emits an error and does not load."""
@@ -2709,6 +2843,68 @@ class TestTabModelCompletion:
 
         assert model.getTabsLinkingToCurrentTab() == []
 
+    def test_priority_plot_roles_exist(self, app):
+        """Priority plot roles are exposed to QML."""
+        from task_model import TabModel
+
+        model = TabModel()
+        role_names = model.roleNames()
+        assert b"priorityTimeHours" in role_names.values()
+        assert b"prioritySubjectiveValue" in role_names.values()
+        assert b"priorityScore" in role_names.values()
+        assert b"includeInPriorityPlot" in role_names.values()
+
+    def test_priority_plot_score_and_sort(self, app):
+        """Setting plot coordinates recomputes score and reorders tabs."""
+        from task_model import TabModel
+
+        model = TabModel()
+        model.addTab("Second")
+        model.setPriorityPoint(0, 4.0, 4.0)
+        model.setPriorityPoint(1, 2.0, 6.0)
+
+        assert model.data(model.index(0, 0), model.NameRole) == "Second"
+        top_score = model.data(model.index(0, 0), model.PriorityScoreRole)
+        low_score = model.data(model.index(1, 0), model.PriorityScoreRole)
+        assert top_score > low_score
+
+    def test_priority_plot_sort_preserves_current_tab(self, app):
+        """Current tab remains the same logical tab after priority sorting."""
+        from task_model import TabModel
+
+        model = TabModel()
+        model.addTab("Second")
+        model.setCurrentTab(1)
+        assert model.currentTabName == "Second"
+
+        model.setPriorityPoint(1, 2.0, 8.0)
+        model.setPriorityPoint(0, 8.0, 1.0)
+
+        assert model.currentTabName == "Second"
+
+    def test_priority_plot_exclusion_removes_from_scoring_order(self, app):
+        """Excluded tabs are not scored and are sorted after included tabs."""
+        from task_model import TabModel
+
+        model = TabModel()
+        model.addTab("Second")
+        model.setPriorityPoint(0, 2.0, 9.0)  # High score
+        model.setPriorityPoint(1, 2.0, 3.0)  # Lower score
+        names_before = [
+            model.data(model.index(i, 0), model.NameRole)
+            for i in range(model.tabCount)
+        ]
+        main_index = names_before.index("Main")
+
+        model.setIncludeInPriorityPlot(main_index, False)
+
+        names_after = [
+            model.data(model.index(i, 0), model.NameRole)
+            for i in range(model.tabCount)
+        ]
+        assert names_after[-1] == "Main"
+        assert model.data(model.index(model.tabCount - 1, 0), model.PriorityScoreRole) == pytest.approx(0.0)
+
 
 class TestTabModelMoveTab:
     """Tests for TabModel.moveTab method."""
@@ -2796,6 +2992,111 @@ class TestTabModelUpdateCurrentTabTasks:
 
         assert len(signal_received) == 1
         assert model.CompletionRole in signal_received[0][1]
+
+
+class TestPriorityPlotPersistence:
+    def test_priority_plot_fields_roundtrip(self, app, tmp_path):
+        """Priority plot fields are saved and loaded in project files."""
+        from task_model import ProjectManager, Tab, TabModel, TaskModel
+
+        project_file = tmp_path / "priority_fields.progress"
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        tab_model.setTabs(
+            [
+                Tab(
+                    name="Alpha",
+                    tasks={"tasks": []},
+                    diagram={"items": [], "edges": [], "strokes": []},
+                    priority_time_hours=3.0,
+                    priority_subjective_value=5.0,
+                    priority_score=0.0,
+                ),
+                Tab(
+                    name="Beta",
+                    tasks={"tasks": []},
+                    diagram={"items": [], "edges": [], "strokes": []},
+                    priority_time_hours=2.0,
+                    priority_subjective_value=7.0,
+                    priority_score=0.0,
+                ),
+            ],
+            active_tab=0,
+        )
+        tab_model.recomputeAndSortPriorities()
+
+        manager = ProjectManager(task_model, diagram_model, tab_model)
+        manager.saveProject(str(project_file))
+
+        task_model2 = TaskModel()
+        diagram_model2 = DiagramModel(task_model=task_model2)
+        tab_model2 = TabModel()
+        manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
+        manager2.loadProject(str(project_file))
+
+        tabs = tab_model2.getAllTabs()
+        assert len(tabs) == 2
+        loaded_names = {tab.name for tab in tabs}
+        assert loaded_names == {"Alpha", "Beta"}
+        loaded_by_name = {tab.name: tab for tab in tabs}
+        assert loaded_by_name["Alpha"].priority_time_hours == pytest.approx(3.0)
+        assert loaded_by_name["Alpha"].priority_subjective_value == pytest.approx(5.0)
+        assert loaded_by_name["Alpha"].priority_score > 0
+        assert loaded_by_name["Alpha"].include_in_priority_plot is True
+        assert loaded_by_name["Beta"].priority_time_hours == pytest.approx(2.0)
+        assert loaded_by_name["Beta"].priority_subjective_value == pytest.approx(7.0)
+        assert loaded_by_name["Beta"].priority_score > 0
+        assert loaded_by_name["Beta"].include_in_priority_plot is True
+
+    def test_priority_plot_exclusion_field_roundtrip(self, app, tmp_path):
+        """Priority plot exclusion flag is persisted."""
+        from task_model import ProjectManager, Tab, TabModel, TaskModel
+
+        project_file = tmp_path / "priority_exclusion.progress"
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        tab_model.setTabs(
+            [
+                Tab(
+                    name="Included",
+                    tasks={"tasks": []},
+                    diagram={"items": [], "edges": [], "strokes": []},
+                    include_in_priority_plot=True,
+                ),
+                Tab(
+                    name="Excluded",
+                    tasks={"tasks": []},
+                    diagram={"items": [], "edges": [], "strokes": []},
+                    include_in_priority_plot=False,
+                ),
+            ],
+            active_tab=0,
+        )
+
+        manager = ProjectManager(task_model, diagram_model, tab_model)
+        manager.saveProject(str(project_file))
+
+        task_model2 = TaskModel()
+        diagram_model2 = DiagramModel(task_model=task_model2)
+        tab_model2 = TabModel()
+        manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
+        manager2.loadProject(str(project_file))
+
+        loaded = {tab.name: tab for tab in tab_model2.getAllTabs()}
+        assert loaded["Included"].include_in_priority_plot is True
+        assert loaded["Excluded"].include_in_priority_plot is False
+
+
+class TestPriorityPlotStandalone:
+    def test_priority_plot_smoke(self, app, monkeypatch):
+        """Standalone priority plot launcher supports smoke mode."""
+        from actiondraw.priorityplot.app import main
+
+        monkeypatch.setenv("PRIORITYPLOT_SMOKE", "1")
+        assert main() == 0
 
 
 class TestClipboardFunctionality:
@@ -3143,14 +3444,15 @@ class TestSerializeItemForClipboard:
         assert result["text"] == "Test Box"
 
     def test_serialize_item_with_note(self, empty_diagram_model):
-        """Serializing item with note preserves markdown."""
+        """Serializing note item uses note text as canonical markdown payload."""
         from actiondraw import DiagramItem, DiagramItemType
         item = DiagramItem(
             id="note_1",
             item_type=DiagramItemType.NOTE,
             x=0.0,
             y=0.0,
-            note_markdown="# Heading\n\nContent",
+            text="# Heading\n\nContent",
+            note_markdown="legacy value should be ignored for notes",
         )
 
         result = empty_diagram_model._serialize_item_for_clipboard(item)

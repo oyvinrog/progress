@@ -24,7 +24,7 @@ class MarkdownNoteManager(QObject):
             return
         title_text = item.text.strip()
         title = f"{title_text} Note" if title_text else f"{item.item_type.value.title()} Note"
-        self._editor.open(item_id, item.note_markdown, title)
+        self._editor.open(item_id, self._diagram_model.getItemMarkdown(item_id), title)
 
     def _save_note(self, item_id: str, note_text: str) -> None:
         self._diagram_model.setItemMarkdown(item_id, note_text)

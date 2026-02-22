@@ -5,6 +5,7 @@ previously embedded in progress_list.py, making them available for
 independent use by actiondraw.
 """
 
+import copy
 import json
 import os
 import subprocess
@@ -36,6 +37,11 @@ from progress_crypto import (
     is_encrypted_envelope,
     yubikey_support_guidance,
 )
+from actiondraw.priorityplot.model import (
+    clamp_subjective_value,
+    clamp_time_hours,
+    compute_priority_score,
+)
 
 
 @dataclass
@@ -60,6 +66,10 @@ class Tab:
     tasks: Dict[str, Any]  # TaskModel.to_dict() data
     diagram: Dict[str, Any]  # DiagramModel.to_dict() data
     priority: int = 0  # 0 = no priority, 1-3 = priority levels
+    priority_time_hours: float = 1.01
+    priority_subjective_value: float = 1.0
+    priority_score: float = 0.0
+    include_in_priority_plot: bool = True
 
 
 class TaskModel(QAbstractListModel):
@@ -898,6 +908,10 @@ class TabModel(QAbstractListModel):
     CompletionRole = Qt.UserRole + 3
     ActiveTaskTitleRole = Qt.UserRole + 4
     PriorityRole = Qt.UserRole + 5
+    PriorityTimeHoursRole = Qt.UserRole + 6
+    PrioritySubjectiveValueRole = Qt.UserRole + 7
+    PriorityScoreRole = Qt.UserRole + 8
+    IncludeInPriorityPlotRole = Qt.UserRole + 9
 
     tabsChanged = Signal()
     currentTabChanged = Signal()
@@ -926,6 +940,14 @@ class TabModel(QAbstractListModel):
             return self._getActiveTaskTitle(tab)
         if role == self.PriorityRole:
             return tab.priority
+        if role == self.PriorityTimeHoursRole:
+            return tab.priority_time_hours
+        if role == self.PrioritySubjectiveValueRole:
+            return tab.priority_subjective_value
+        if role == self.PriorityScoreRole:
+            return tab.priority_score
+        if role == self.IncludeInPriorityPlotRole:
+            return tab.include_in_priority_plot
         return None
 
     def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
@@ -935,6 +957,10 @@ class TabModel(QAbstractListModel):
             self.CompletionRole: b"completionPercent",
             self.ActiveTaskTitleRole: b"activeTaskTitle",
             self.PriorityRole: b"priority",
+            self.PriorityTimeHoursRole: b"priorityTimeHours",
+            self.PrioritySubjectiveValueRole: b"prioritySubjectiveValue",
+            self.PriorityScoreRole: b"priorityScore",
+            self.IncludeInPriorityPlotRole: b"includeInPriorityPlot",
         }
 
     @Property(int, notify=currentTabIndexChanged)
@@ -1073,6 +1099,83 @@ class TabModel(QAbstractListModel):
         model_index = self.index(index, 0)
         self.dataChanged.emit(model_index, model_index, [self.PriorityRole])
 
+    def _computePriorityScore(self, value: float, time_hours: float) -> float:
+        return compute_priority_score(value, time_hours)
+
+    @Slot(int, float, float)
+    def setPriorityPoint(self, index: int, time_hours: float, subjective_value: float) -> None:
+        """Set tab priority plot coordinates, recompute scores, and auto-sort tabs."""
+        if index < 0 or index >= len(self._tabs):
+            return
+
+        tab = self._tabs[index]
+        if not tab.include_in_priority_plot:
+            return
+        tab.priority_time_hours = clamp_time_hours(time_hours)
+        tab.priority_subjective_value = clamp_subjective_value(subjective_value)
+        self.recomputeAndSortPriorities()
+
+    @Slot(int, bool)
+    def setIncludeInPriorityPlot(self, index: int, include: bool) -> None:
+        """Include or exclude a tab from priority-plot scoring and plotting."""
+        if index < 0 or index >= len(self._tabs):
+            return
+        tab = self._tabs[index]
+        include_flag = bool(include)
+        if tab.include_in_priority_plot == include_flag:
+            return
+        tab.include_in_priority_plot = include_flag
+        self.recomputeAndSortPriorities()
+
+    @Slot()
+    def recomputeAndSortPriorities(self) -> None:
+        """Recompute all priority scores and keep tabs sorted by score descending."""
+        if not self._tabs:
+            return
+
+        current_tab = self._tabs[self._current_tab_index]
+        for tab in self._tabs:
+            if tab.include_in_priority_plot:
+                tab.priority_score = self._computePriorityScore(
+                    tab.priority_subjective_value,
+                    tab.priority_time_hours,
+                )
+            else:
+                tab.priority_score = 0.0
+
+        indexed_tabs = list(enumerate(self._tabs))
+        indexed_tabs.sort(
+            key=lambda item: (
+                0 if item[1].include_in_priority_plot else 1,
+                -item[1].priority_score,
+                item[0],
+            )
+        )
+        sorted_tabs = [item[1] for item in indexed_tabs]
+        if sorted_tabs == self._tabs:
+            model_index = self.index(0, 0)
+            end_index = self.index(len(self._tabs) - 1, 0)
+            self.dataChanged.emit(
+                model_index,
+                end_index,
+                [
+                    self.PriorityTimeHoursRole,
+                    self.PrioritySubjectiveValueRole,
+                    self.PriorityScoreRole,
+                    self.IncludeInPriorityPlotRole,
+                ],
+            )
+            return
+
+        self.beginResetModel()
+        self._tabs = sorted_tabs
+        self.endResetModel()
+
+        self._current_tab_index = self._tabs.index(current_tab)
+        self.tabsChanged.emit()
+        self.currentTabIndexChanged.emit()
+        self.currentTabChanged.emit()
+
     @Slot(int)
     def setCurrentTab(self, index: int) -> None:
         """Switch to a different tab."""
@@ -1120,6 +1223,17 @@ class TabModel(QAbstractListModel):
         """Replace all tabs with new data."""
         self.beginResetModel()
         self._tabs = tabs if tabs else [Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})]
+        for tab in self._tabs:
+            tab.priority_time_hours = clamp_time_hours(getattr(tab, "priority_time_hours", 1.01))
+            tab.priority_subjective_value = clamp_subjective_value(getattr(tab, "priority_subjective_value", 1.0))
+            tab.include_in_priority_plot = bool(getattr(tab, "include_in_priority_plot", True))
+            if tab.include_in_priority_plot:
+                tab.priority_score = self._computePriorityScore(
+                    tab.priority_subjective_value,
+                    tab.priority_time_hours,
+                )
+            else:
+                tab.priority_score = 0.0
         self.endResetModel()
 
         # Validate and set active tab index
@@ -1178,6 +1292,7 @@ class ProjectManager(QObject):
     errorOccurred = Signal(str)  # Emitted with error message on failure
     recentProjectsChanged = Signal()  # Emitted when recent projects list changes
     currentFilePathChanged = Signal()  # Emitted when current file path changes
+    sidebarExpandedChanged = Signal()
     tabSwitched = Signal()  # Emitted when switching to a different tab
     taskDrillRequested = Signal(int, arguments=["taskIndex"])
     taskReminderDue = Signal(int, int, str, arguments=["tabIndex", "taskIndex", "taskTitle"])
@@ -1206,6 +1321,7 @@ class ProjectManager(QObject):
             set_tab_model(self._tab_model)
         self._current_file_path: str = ""
         self._settings = QSettings("ProgressTracker", "ProgressTracker")
+        self._sidebar_expanded = self._load_sidebar_expanded_setting()
         self._recent_projects: List[str] = self._load_recent_projects()
         self._reminder_timer = QTimer(self)
         self._reminder_timer.timeout.connect(self._checkBackgroundTabReminders)
@@ -1221,6 +1337,7 @@ class ProjectManager(QObject):
                 self._diagram_model.currentTaskChanged.connect(self._refreshCurrentTabDiagram)
         self._cached_encryption_credentials: Optional[EncryptionCredentials] = None
         self._cached_encryption_file_path: str = ""
+        self._last_saved_snapshot = self._serialize_project_payload(self._build_project_data())
 
     def _onCurrentTabReminderDue(self, task_index: int, task_title: str) -> None:
         tab_index = self._tab_model.currentTabIndex if self._tab_model is not None else 0
@@ -1288,6 +1405,17 @@ class ProjectManager(QObject):
             return [p for p in stored if p and os.path.exists(p)][:self.MAX_RECENT_PROJECTS]
         return []
 
+    def _load_sidebar_expanded_setting(self) -> bool:
+        """Load persisted sidebar expansion preference."""
+        stored = self._settings.value("ui/sidebar_expanded", True)
+        if isinstance(stored, bool):
+            return stored
+        if isinstance(stored, (int, float)):
+            return bool(stored)
+        if isinstance(stored, str):
+            return stored.strip().lower() in {"1", "true", "yes", "on"}
+        return True
+
     def _save_recent_projects(self) -> None:
         """Save recent projects list to settings."""
         self._settings.setValue("recentProjects", self._recent_projects)
@@ -1311,6 +1439,22 @@ class ProjectManager(QObject):
     def recentProjects(self) -> List[str]:
         """Return the list of recent project file paths."""
         return self._recent_projects
+
+    @Property(bool, notify=sidebarExpandedChanged)
+    def sidebarExpanded(self) -> bool:
+        """Return whether the tab sidebar should be expanded."""
+        return self._sidebar_expanded
+
+    @Slot(bool)
+    def setSidebarExpanded(self, expanded: bool) -> None:
+        """Persist and broadcast tab sidebar expansion state."""
+        expanded_flag = bool(expanded)
+        if self._sidebar_expanded == expanded_flag:
+            return
+        self._sidebar_expanded = expanded_flag
+        self._settings.setValue("ui/sidebar_expanded", self._sidebar_expanded)
+        self._settings.sync()
+        self.sidebarExpandedChanged.emit()
 
     @Slot()
     def newInstanceActionDraw(self) -> None:
@@ -1363,18 +1507,88 @@ class ProjectManager(QObject):
         """Return True if a current project file is set."""
         return bool(self._current_file_path)
 
-    @Slot()
-    def saveCurrentProject(self) -> None:
+    def _build_project_data(self) -> Dict[str, Any]:
+        """Build a normalized project payload from live in-memory state."""
+        if self._tab_model is not None:
+            tabs_data = []
+            current_tab_index = self._tab_model.currentTabIndex
+            current_tasks = self._task_model.to_dict()
+            current_diagram = self._diagram_model.to_dict()
+            for index, tab in enumerate(self._tab_model.getAllTabs()):
+                tabs_data.append({
+                    "name": tab.name,
+                    "tasks": current_tasks if index == current_tab_index else tab.tasks,
+                    "diagram": current_diagram if index == current_tab_index else tab.diagram,
+                    "priority": tab.priority,
+                    "priority_time_hours": tab.priority_time_hours,
+                    "priority_subjective_value": tab.priority_subjective_value,
+                    "priority_score": tab.priority_score,
+                    "include_in_priority_plot": tab.include_in_priority_plot,
+                })
+
+            return {
+                "version": self.PROJECT_VERSION,
+                "tabs": tabs_data,
+                "active_tab": current_tab_index,
+            }
+
+        return {
+            "version": self.PROJECT_VERSION,
+            "tabs": [{
+                "name": "Main",
+                "tasks": self._task_model.to_dict(),
+                "diagram": self._diagram_model.to_dict(),
+            }],
+            "active_tab": 0,
+        }
+
+    def _serialize_project_payload(self, project_data: Dict[str, Any]) -> str:
+        """Return deterministic JSON text for change detection."""
+        normalized = self._normalize_project_payload_for_change_detection(project_data)
+        return json.dumps(normalized, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+    def _normalize_project_payload_for_change_detection(self, project_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize runtime-only fields so background timers do not mark projects as dirty."""
+        normalized = copy.deepcopy(project_data)
+        tabs = normalized.get("tabs")
+        if not isinstance(tabs, list):
+            return normalized
+
+        for tab in tabs:
+            if not isinstance(tab, dict):
+                continue
+            tasks_payload = tab.get("tasks")
+            if not isinstance(tasks_payload, dict):
+                continue
+            tasks = tasks_payload.get("tasks")
+            if not isinstance(tasks, list):
+                continue
+            for task in tasks:
+                if not isinstance(task, dict):
+                    continue
+                if not bool(task.get("completed", False)):
+                    task.pop("time_spent", None)
+
+        return normalized
+
+    @Slot(result=bool)
+    def hasUnsavedChanges(self) -> bool:
+        """Return True when current in-memory state differs from last save/load snapshot."""
+        current_snapshot = self._serialize_project_payload(self._build_project_data())
+        return current_snapshot != self._last_saved_snapshot
+
+    @Slot(result=bool)
+    def saveCurrentProject(self) -> bool:
         """Save the current project to the existing file path."""
         if not self._current_file_path:
             self.errorOccurred.emit("No current project file selected")
-            return
-        self.saveProject(self._current_file_path, force_prompt=False)
+            return False
+        return self.saveProject(self._current_file_path, force_prompt=False)
 
-    @Slot(str)
-    def saveProjectAs(self, file_path: str) -> None:
+    @Slot(str, result=bool)
+    def saveProjectAs(self, file_path: str) -> bool:
         """Save project under a new path and always prompt for encryption choice."""
-        self.saveProject(file_path, force_prompt=True)
+        return self.saveProject(file_path, force_prompt=True)
 
     def _saveCurrentTabState(self) -> None:
         """Save the current task/diagram state to the tab model."""
@@ -1498,8 +1712,8 @@ class ProjectManager(QObject):
         """Return setup guidance for enabling YubiKey support on this OS."""
         return yubikey_support_guidance()
 
-    @Slot(str)
-    def saveProject(self, file_path: str, force_prompt: bool = True) -> None:
+    @Slot(str, result=bool)
+    def saveProject(self, file_path: str, force_prompt: bool = True) -> bool:
         """Save the current project to a JSON file in v1.1 format.
 
         Args:
@@ -1510,7 +1724,7 @@ class ProjectManager(QObject):
 
         if not file_path:
             self.errorOccurred.emit("No file path specified")
-            return
+            return False
 
         # Ensure .progress extension
         if not file_path.endswith(".progress"):
@@ -1519,36 +1733,9 @@ class ProjectManager(QObject):
         try:
             # Save current tab state first
             self._saveCurrentTabState()
-
-            if self._tab_model is not None:
-                # v1.1 format with tabs
-                tabs_data = []
-                for tab in self._tab_model.getAllTabs():
-                    tabs_data.append({
-                        "name": tab.name,
-                        "tasks": tab.tasks,
-                        "diagram": tab.diagram,
-                        "priority": tab.priority,
-                    })
-
-                project_data = {
-                    "version": self.PROJECT_VERSION,
-                    "saved_at": datetime.now().isoformat(),
-                    "tabs": tabs_data,
-                    "active_tab": self._tab_model.currentTabIndex,
-                }
-            else:
-                # Fallback: save as single tab in v1.1 format
-                project_data = {
-                    "version": self.PROJECT_VERSION,
-                    "saved_at": datetime.now().isoformat(),
-                    "tabs": [{
-                        "name": "Main",
-                        "tasks": self._task_model.to_dict(),
-                        "diagram": self._diagram_model.to_dict(),
-                    }],
-                    "active_tab": 0,
-                }
+            payload_data = self._build_project_data()
+            project_data = dict(payload_data)
+            project_data["saved_at"] = datetime.now().isoformat()
 
             credentials = None
             if (
@@ -1564,7 +1751,7 @@ class ProjectManager(QObject):
             else:
                 credentials = self._prompt_encryption_credentials("save", file_path)
             if credentials is None:
-                return
+                return False
 
             if credentials.use_yubikey:
                 self._begin_yubikey_interaction("save")
@@ -1587,17 +1774,21 @@ class ProjectManager(QObject):
             )
             self.currentFilePathChanged.emit()
             self._add_to_recent(file_path)
+            self._last_saved_snapshot = self._serialize_project_payload(payload_data)
             self.saveCompleted.emit(file_path)
             print(f"Project saved to: {file_path}")
+            return True
 
         except (OSError, IOError) as e:
             error_msg = f"Failed to save project: {e}"
             self.errorOccurred.emit(error_msg)
             print(error_msg)
+            return False
         except CryptoError as e:
             error_msg = f"Failed to save project: {e}"
             self.errorOccurred.emit(error_msg)
             print(error_msg)
+            return False
 
     def _loadFromV1(self, project_data: Dict[str, Any]) -> List[Tab]:
         """Convert v1.0 format data to tabs structure.
@@ -1670,7 +1861,11 @@ class ProjectManager(QObject):
                         name=tab_data.get("name", "Tab"),
                         tasks=tab_data.get("tasks", {"tasks": []}),
                         diagram=tab_data.get("diagram", {"items": [], "edges": [], "strokes": []}),
-                        priority=tab_data.get("priority", 0)
+                        priority=tab_data.get("priority", 0),
+                        priority_time_hours=tab_data.get("priority_time_hours", 1.01),
+                        priority_subjective_value=tab_data.get("priority_subjective_value", 1.0),
+                        priority_score=tab_data.get("priority_score", 0.0),
+                        include_in_priority_plot=tab_data.get("include_in_priority_plot", True),
                     ))
                 active_tab = project_data.get("active_tab", 0)
 
@@ -1694,6 +1889,7 @@ class ProjectManager(QObject):
             self._current_file_path = file_path
             self.currentFilePathChanged.emit()
             self._add_to_recent(file_path)
+            self._last_saved_snapshot = self._serialize_project_payload(self._build_project_data())
             self.loadCompleted.emit(file_path)
             print(f"Project loaded from: {file_path}")
 

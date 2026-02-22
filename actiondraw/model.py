@@ -134,6 +134,61 @@ class DiagramModel(
         self.endInsertRows()
         self.itemsChanged.emit()
 
+    def _dimensions_for_connected_kind(self, item_kind: str) -> tuple[float, float]:
+        kind = (item_kind or "").strip().lower()
+        if kind == "task":
+            return (140.0, 70.0)
+        preset = ITEM_PRESETS.get(kind)
+        if preset:
+            return (float(preset.get("width", 120.0)), float(preset.get("height", 60.0)))
+        return (120.0, 60.0)
+
+    @staticmethod
+    def _rectangles_overlap(
+        ax: float,
+        ay: float,
+        aw: float,
+        ah: float,
+        bx: float,
+        by: float,
+        bw: float,
+        bh: float,
+    ) -> bool:
+        return ax < bx + bw and ax + aw > bx and ay < by + bh and ay + ah > by
+
+    def _position_overlaps_existing(self, x: float, y: float, width: float, height: float) -> bool:
+        for item in self._items:
+            if self._rectangles_overlap(x, y, width, height, item.x, item.y, item.width, item.height):
+                return True
+        return False
+
+    @Slot(str, str, float, float, float, result="QVariantMap")
+    def resolveConnectedPlacement(
+        self, source_id: str, item_kind: str, base_x: float, base_y: float, step_y: float
+    ) -> Dict[str, float]:
+        # source_id is included for future route-specific strategies and QML call-site symmetry.
+        _ = source_id
+        width, height = self._dimensions_for_connected_kind(item_kind)
+        step = abs(float(step_y))
+        if step <= 0.0:
+            step = 60.0
+
+        if not self._position_overlaps_existing(base_x, base_y, width, height):
+            return {"x": float(base_x), "y": float(base_y)}
+
+        max_vertical_offsets = 50
+        for offset in range(1, max_vertical_offsets + 1):
+            candidate_y = base_y + (step * offset)
+            if not self._position_overlaps_existing(base_x, candidate_y, width, height):
+                return {"x": float(base_x), "y": float(candidate_y)}
+
+        for offset in range(1, max_vertical_offsets + 1):
+            candidate_y = base_y - (step * offset)
+            if not self._position_overlaps_existing(base_x, candidate_y, width, height):
+                return {"x": float(base_x), "y": float(candidate_y)}
+
+        return {"x": float(base_x), "y": float(base_y)}
+
     # --- Qt model overrides -------------------------------------------------
     def rowCount(self, parent: QModelIndex | None = QModelIndex()) -> int:  # type: ignore[override]
         return len(self._items)
@@ -526,6 +581,16 @@ class DiagramModel(
     def setItemMarkdown(self, item_id: str, markdown: str) -> None:
         for row, item in enumerate(self._items):
             if item.id == item_id:
+                if item.item_type == DiagramItemType.NOTE:
+                    if item.text == markdown and item.note_markdown == "":
+                        return
+                    # Notes now store canonical content directly in text.
+                    item.text = markdown
+                    item.note_markdown = ""
+                    index = self.index(row, 0)
+                    self.dataChanged.emit(index, index, [self.TextRole, self.NoteMarkdownRole])
+                    self.itemsChanged.emit()
+                    return
                 if item.note_markdown == markdown:
                     return
                 item.note_markdown = markdown
@@ -538,6 +603,8 @@ class DiagramModel(
     def getItemMarkdown(self, item_id: str) -> str:
         for item in self._items:
             if item.id == item_id:
+                if item.item_type == DiagramItemType.NOTE:
+                    return item.text
                 return item.note_markdown
         return ""
 
@@ -1412,8 +1479,8 @@ class DiagramModel(
         return (item.x + (item.width / 2.0), item.y + (item.height / 2.0))
 
     @Slot(str, str, result=str)
-    def findNearestConnectedTaskInDirection(self, item_id: str, direction: str) -> str:
-        """Find the nearest directly-connected task in the requested direction.
+    def findNearestConnectedItemInDirection(self, item_id: str, direction: str) -> str:
+        """Find the nearest directly-connected item in the requested direction.
 
         Direction can be: "left", "right", "up", or "down".
         Edges are treated as undirected for keyboard navigation.
@@ -1442,8 +1509,6 @@ class DiagramModel(
 
         for candidate in self._items:
             if candidate.id not in connected_ids:
-                continue
-            if candidate.item_type != DiagramItemType.TASK:
                 continue
 
             cand_x, cand_y = self._item_center(candidate)
@@ -1477,6 +1542,11 @@ class DiagramModel(
                 best_item_id = candidate.id
 
         return best_item_id
+
+    @Slot(str, str, result=str)
+    def findNearestConnectedTaskInDirection(self, item_id: str, direction: str) -> str:
+        """Backward-compatible alias for item navigation."""
+        return self.findNearestConnectedItemInDirection(item_id, direction)
 
     @Slot(float, float, result=str)
     def itemIdAt(self, x: float, y: float) -> str:
@@ -1524,7 +1594,7 @@ class DiagramModel(
             # Only store image_data if it's an image item (to avoid bloating files)
             if item.item_type == DiagramItemType.IMAGE and item.image_data:
                 item_dict["image_data"] = item.image_data
-            if item.note_markdown:
+            if item.note_markdown and item.item_type != DiagramItemType.NOTE:
                 item_dict["note_markdown"] = item.note_markdown
             if item.folder_path:
                 item_dict["folder_path"] = item.folder_path
@@ -1596,6 +1666,13 @@ class DiagramModel(
                 except ValueError:
                     item_type = DiagramItemType.BOX
 
+                text_value = str(item_data.get("text", ""))
+                note_markdown_value = str(item_data.get("note_markdown", ""))
+                if item_type == DiagramItemType.NOTE and note_markdown_value:
+                    # Legacy compatibility: old notes stored main content in note_markdown.
+                    text_value = note_markdown_value
+                    note_markdown_value = ""
+
                 item = DiagramItem(
                     id=item_id,
                     item_type=item_type,
@@ -1603,12 +1680,12 @@ class DiagramModel(
                     y=float(item_data.get("y", 0.0)),
                     width=float(item_data.get("width", 120.0)),
                     height=float(item_data.get("height", 60.0)),
-                    text=item_data.get("text", ""),
+                    text=text_value,
                     task_index=int(item_data.get("task_index", -1)),
                     color=item_data.get("color", "#4a9eff"),
                     text_color=item_data.get("text_color", "#f5f6f8"),
                     image_data=item_data.get("image_data", ""),
-                    note_markdown=item_data.get("note_markdown", ""),
+                    note_markdown=note_markdown_value,
                     folder_path=item_data.get("folder_path", ""),
                 )
                 new_items.append(item)

@@ -1126,6 +1126,14 @@ Item {
         id: edgeDropMenu
         title: "Create & Connect"
 
+        function connectedDrop(itemKind) {
+            var baseX = root.snapValue(root.pendingEdgeDropX)
+            var baseY = root.snapValue(root.pendingEdgeDropY)
+            if (root && root.resolveConnectedDrop)
+                return root.resolveConnectedDrop(root.pendingEdgeSourceId, itemKind, baseX, baseY)
+            return Qt.point(baseX, baseY)
+        }
+
         MenuItem {
             text: "\u2192 Task"
             onTriggered: {
@@ -1141,11 +1149,12 @@ Item {
             text: "\u2192 Obstacle"
             onTriggered: {
                 if (diagramModel && root.pendingEdgeSourceId) {
+                    var drop = edgeDropMenu.connectedDrop("obstacle")
                     diagramModel.addPresetItemAndConnect(
                         root.pendingEdgeSourceId,
                         "obstacle",
-                        root.snapValue(root.pendingEdgeDropX),
-                        root.snapValue(root.pendingEdgeDropY),
+                        drop.x,
+                        drop.y,
                         "Obstacle"
                     )
                 }
@@ -1157,11 +1166,12 @@ Item {
             text: "\u2192 Wish"
             onTriggered: {
                 if (diagramModel && root.pendingEdgeSourceId) {
+                    var drop = edgeDropMenu.connectedDrop("wish")
                     diagramModel.addPresetItemAndConnect(
                         root.pendingEdgeSourceId,
                         "wish",
-                        root.snapValue(root.pendingEdgeDropX),
-                        root.snapValue(root.pendingEdgeDropY),
+                        drop.x,
+                        drop.y,
                         "Wish"
                     )
                 }
@@ -1173,11 +1183,12 @@ Item {
             text: "\u2192 ChatGPT"
             onTriggered: {
                 if (diagramModel && root.pendingEdgeSourceId) {
+                    var drop = edgeDropMenu.connectedDrop("chatgpt")
                     diagramModel.addPresetItemAndConnect(
                         root.pendingEdgeSourceId,
                         "chatgpt",
-                        root.snapValue(root.pendingEdgeDropX),
-                        root.snapValue(root.pendingEdgeDropY),
+                        drop.x,
+                        drop.y,
                         "Ask ChatGPT"
                     )
                 }
@@ -1191,11 +1202,12 @@ Item {
             text: "\u2192 Box"
             onTriggered: {
                 if (diagramModel && root.pendingEdgeSourceId) {
+                    var drop = edgeDropMenu.connectedDrop("box")
                     diagramModel.addPresetItemAndConnect(
                         root.pendingEdgeSourceId,
                         "box",
-                        root.snapValue(root.pendingEdgeDropX),
-                        root.snapValue(root.pendingEdgeDropY),
+                        drop.x,
+                        drop.y,
                         "Box"
                     )
                 }
@@ -1207,11 +1219,12 @@ Item {
             text: "\u2192 Note"
             onTriggered: {
                 if (diagramModel && root.pendingEdgeSourceId) {
+                    var drop = edgeDropMenu.connectedDrop("note")
                     diagramModel.addPresetItemAndConnect(
                         root.pendingEdgeSourceId,
                         "note",
-                        root.snapValue(root.pendingEdgeDropX),
-                        root.snapValue(root.pendingEdgeDropY),
+                        drop.x,
+                        drop.y,
                         "Note"
                     )
                 }
@@ -1223,11 +1236,12 @@ Item {
             text: "\u2192 Database"
             onTriggered: {
                 if (diagramModel && root.pendingEdgeSourceId) {
+                    var drop = edgeDropMenu.connectedDrop("database")
                     diagramModel.addPresetItemAndConnect(
                         root.pendingEdgeSourceId,
                         "database",
-                        root.snapValue(root.pendingEdgeDropX),
-                        root.snapValue(root.pendingEdgeDropY),
+                        drop.x,
+                        drop.y,
                         "Database"
                     )
                 }
@@ -1239,11 +1253,12 @@ Item {
             text: "\u2192 Server"
             onTriggered: {
                 if (diagramModel && root.pendingEdgeSourceId) {
+                    var drop = edgeDropMenu.connectedDrop("server")
                     diagramModel.addPresetItemAndConnect(
                         root.pendingEdgeSourceId,
                         "server",
-                        root.snapValue(root.pendingEdgeDropX),
-                        root.snapValue(root.pendingEdgeDropY),
+                        drop.x,
+                        drop.y,
                         "Server"
                     )
                 }
@@ -1255,11 +1270,12 @@ Item {
             text: "\u2192 Cloud"
             onTriggered: {
                 if (diagramModel && root.pendingEdgeSourceId) {
+                    var drop = edgeDropMenu.connectedDrop("cloud")
                     diagramModel.addPresetItemAndConnect(
                         root.pendingEdgeSourceId,
                         "cloud",
-                        root.snapValue(root.pendingEdgeDropX),
-                        root.snapValue(root.pendingEdgeDropY),
+                        drop.x,
+                        drop.y,
                         "Cloud"
                     )
                 }
@@ -1282,6 +1298,14 @@ Item {
         property real dropX: 0
         property real dropY: 0
         property bool reverseDirection: false
+
+        function connectedDrop(itemKind) {
+            var baseX = root.snapValue(edgeDropTaskDialog.dropX)
+            var baseY = root.snapValue(edgeDropTaskDialog.dropY)
+            if (root && root.resolveConnectedDrop)
+                return root.resolveConnectedDrop(edgeDropTaskDialog.sourceId, itemKind, baseX, baseY)
+            return Qt.point(baseX, baseY)
+        }
 
         onOpened: edgeDropTaskField.forceActiveFocus()
 
@@ -1328,11 +1352,12 @@ Item {
             if (diagramModel && edgeDropTaskDialog.sourceId && edgeDropTaskField.text.trim().length > 0) {
                 if (edgeDropTaskDialog.sourceType === "task" && taskModel) {
                     var newId = ""
+                    var taskDrop = edgeDropTaskDialog.connectedDrop("task")
                     if (edgeDropTaskDialog.reverseDirection) {
                         newId = diagramModel.addTaskFromText(
                             edgeDropTaskField.text,
-                            root.snapValue(edgeDropTaskDialog.dropX),
-                            root.snapValue(edgeDropTaskDialog.dropY)
+                            taskDrop.x,
+                            taskDrop.y
                         )
                         if (newId && newId.length > 0) {
                             diagramModel.addEdge(newId, edgeDropTaskDialog.sourceId)
@@ -1340,8 +1365,8 @@ Item {
                     } else {
                         newId = diagramModel.addTaskFromTextAndConnect(
                             edgeDropTaskDialog.sourceId,
-                            root.snapValue(edgeDropTaskDialog.dropX),
-                            root.snapValue(edgeDropTaskDialog.dropY),
+                            taskDrop.x,
+                            taskDrop.y,
                             edgeDropTaskField.text
                         )
                     }
@@ -1350,11 +1375,13 @@ Item {
                         root.selectedItemId = newId
                     }
                 } else {
+                    var presetName = edgeDropTaskDialog.sourceType === "task" ? "box" : edgeDropTaskDialog.sourceType
+                    var presetDrop = edgeDropTaskDialog.connectedDrop(presetName)
                     diagramModel.addPresetItemAndConnect(
                         edgeDropTaskDialog.sourceId,
-                        edgeDropTaskDialog.sourceType === "task" ? "box" : edgeDropTaskDialog.sourceType,
-                        root.snapValue(edgeDropTaskDialog.dropX),
-                        root.snapValue(edgeDropTaskDialog.dropY),
+                        presetName,
+                        presetDrop.x,
+                        presetDrop.y,
                         edgeDropTaskField.text
                     )
                 }
@@ -1378,9 +1405,16 @@ Item {
         nameFilters: ["Progress files (*.progress)", "All files (*)"]
         defaultSuffix: "progress"
         onAccepted: {
+            var saved = false
             if (projectManager) {
-                projectManager.saveProjectAs(selectedFile)
+                saved = projectManager.saveProjectAs(selectedFile)
             }
+            if (root && root.handleSaveDialogAccepted)
+                root.handleSaveDialogAccepted(saved)
+        }
+        onRejected: {
+            if (root && root.handleSaveDialogRejected)
+                root.handleSaveDialogRejected()
         }
     }
 

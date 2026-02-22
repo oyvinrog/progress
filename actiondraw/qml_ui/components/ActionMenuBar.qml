@@ -131,6 +131,12 @@ MenuBar {
             onTriggered: root.openMarkdownNoteForSelection()
         }
 
+        MenuItem {
+            text: "Delete\t\t\tDel"
+            enabled: hasDiagramModel() && root.selectedItemId.length > 0
+            onTriggered: root.deleteSelectedItem()
+        }
+
         MenuSeparator {}
 
         MenuItem {
@@ -268,6 +274,14 @@ MenuBar {
 
     Menu {
         title: "Tools"
+
+        MenuItem {
+            text: "Priority Plot..."
+            enabled: root && root.openPriorityPlotWindow
+            onTriggered: root.openPriorityPlotWindow()
+        }
+
+        MenuSeparator {}
 
         MenuItem {
             text: "Connect All Items"

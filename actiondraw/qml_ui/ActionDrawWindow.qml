@@ -25,8 +25,11 @@ ApplicationWindow {
     property var projectManagerRef: projectManager
     property var markdownNoteManagerRef: markdownNoteManager
     property var tabModelRef: tabModel
+    property var priorityPlotWindowRef: null
     property bool yubiKeyPromptVisible: false
     property string yubiKeyPromptText: "Touch your YubiKey to continue."
+    property bool suppressClosePrompt: false
+    property bool closeAfterSaveAsRequested: false
 
     menuBar: ActionMenuBar {
         root: root
@@ -76,6 +79,34 @@ ApplicationWindow {
         root.requestActivate()
     }
 
+    function openPriorityPlotWindow() {
+        if (!tabModelRef)
+            return
+        if (priorityPlotWindowRef) {
+            priorityPlotWindowRef.show()
+            priorityPlotWindowRef.raise()
+            priorityPlotWindowRef.requestActivate()
+            return
+        }
+        var component = Qt.createComponent(Qt.resolvedUrl("PriorityPlotWindow.qml"))
+        if (component.status === Component.Error) {
+            console.log("Failed to load PriorityPlotWindow:", component.errorString())
+            return
+        }
+        var win = component.createObject(root, { "tabModel": tabModelRef })
+        if (!win) {
+            console.log("Failed to instantiate PriorityPlotWindow")
+            return
+        }
+        priorityPlotWindowRef = win
+        win.closing.connect(function() {
+            priorityPlotWindowRef = null
+        })
+        win.show()
+        win.raise()
+        win.requestActivate()
+    }
+
     function drillToTask(taskIndex) {
         if (!diagramModel || taskIndex < 0)
             return
@@ -95,13 +126,31 @@ ApplicationWindow {
 
     function performSave() {
         if (!projectManager) {
-            return
+            return false
         }
         if (projectManager.hasCurrentFile()) {
-            projectManager.saveCurrentProject()
+            return projectManager.saveCurrentProject()
         } else {
             dialogs.saveDialog.open()
+            return false
         }
+    }
+
+    function forceCloseWithoutPrompt() {
+        suppressClosePrompt = true
+        root.close()
+    }
+
+    function handleSaveDialogAccepted(saved) {
+        if (!closeAfterSaveAsRequested)
+            return
+        closeAfterSaveAsRequested = false
+        if (saved)
+            forceCloseWithoutPrompt()
+    }
+
+    function handleSaveDialogRejected() {
+        closeAfterSaveAsRequested = false
     }
 
     function showSaveNotification(message) {
@@ -297,12 +346,27 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Ctrl+N"
+        enabled: diagramModel !== null && !dialogs.freeTextDialog.visible
+        onActivated: root.addConnectedNote()
+    }
+
+    Shortcut {
+        sequence: "Delete"
+        enabled: diagramModel !== null
+            && root.selectedItemId.length > 0
+            && (!dialogs || !dialogs.anyDialogVisible)
+            && !reminderPopup.visible
+        onActivated: root.deleteSelectedItem()
+    }
+
+    Shortcut {
         sequence: "Left"
         enabled: diagramModel !== null
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
-        onActivated: root.navigateConnectedTask("left")
+        onActivated: root.navigateConnectedItem("left")
     }
 
     Shortcut {
@@ -311,7 +375,7 @@ ApplicationWindow {
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
-        onActivated: root.navigateConnectedTask("right")
+        onActivated: root.navigateConnectedItem("right")
     }
 
     Shortcut {
@@ -320,7 +384,7 @@ ApplicationWindow {
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
-        onActivated: root.navigateConnectedTask("up")
+        onActivated: root.navigateConnectedItem("up")
     }
 
     Shortcut {
@@ -329,7 +393,7 @@ ApplicationWindow {
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
-        onActivated: root.navigateConnectedTask("down")
+        onActivated: root.navigateConnectedItem("down")
     }
 
     function addTaskOrConnectedTask() {
@@ -406,17 +470,70 @@ ApplicationWindow {
     }
 
     function openMarkdownNoteForSelection() {
-        if (!diagramModel || !markdownNoteManager)
+        if (!diagramModel)
             return
         if (!root.selectedItemId || root.selectedItemId.length === 0)
             return
-        markdownNoteManager.openNote(root.selectedItemId)
+        var item = diagramModel.getItemSnapshot(root.selectedItemId)
+        if (!item || !item.type)
+            return
+        if (item.type === "note") {
+            root.openPresetDialog("note", Qt.point(item.x, item.y), item.id, item.text)
+            return
+        }
+        if (markdownNoteManager)
+            markdownNoteManager.openNote(root.selectedItemId)
     }
 
-    function navigateConnectedTask(direction) {
+    function addConnectedNote() {
+        if (!diagramModel)
+            return
+        var sourceId = ""
+        var sourceItem = null
+        if (root.selectedItemId && root.selectedItemId.length > 0) {
+            sourceItem = diagramModel.getItemSnapshot(root.selectedItemId)
+            if (sourceItem && (sourceItem.x || sourceItem.x === 0))
+                sourceId = root.selectedItemId
+        }
+        if (!sourceId && root.lastCreatedTaskId && root.lastCreatedTaskId.length > 0) {
+            sourceItem = diagramModel.getItemSnapshot(root.lastCreatedTaskId)
+            if (sourceItem && (sourceItem.x || sourceItem.x === 0))
+                sourceId = root.lastCreatedTaskId
+            else
+                root.lastCreatedTaskId = ""
+        }
+        if (!sourceId) {
+            var center = root.diagramCenterPoint()
+            var centerSnapped = root.snapPoint(center)
+            var centerNoteId = diagramModel.addPresetItem("note", centerSnapped.x, centerSnapped.y)
+            if (centerNoteId && centerNoteId.length > 0)
+                root.selectedItemId = centerNoteId
+            return
+        }
+
+        var dropX = sourceItem.x + (sourceItem.width || 100) + 50
+        var dropY = sourceItem.y
+        var drop = root.resolveConnectedDrop(sourceId, "note", dropX, dropY)
+        var noteId = diagramModel.addPresetItemAndConnect(sourceId, "note", drop.x, drop.y, "Note")
+        if (noteId && noteId.length > 0)
+            root.selectedItemId = noteId
+    }
+
+    function deleteSelectedItem() {
         if (!diagramModel || !root.selectedItemId || root.selectedItemId.length === 0)
             return
-        var nextId = diagramModel.findNearestConnectedTaskInDirection(root.selectedItemId, direction)
+        var itemId = root.selectedItemId
+        diagramModel.removeItem(itemId)
+        if (root.selectedItemId === itemId)
+            root.selectedItemId = ""
+        if (edgeCanvas && edgeCanvas.selectedEdgeId && edgeCanvas.selectedEdgeId.length > 0)
+            edgeCanvas.selectedEdgeId = ""
+    }
+
+    function navigateConnectedItem(direction) {
+        if (!diagramModel || !root.selectedItemId || root.selectedItemId.length === 0)
+            return
+        var nextId = diagramModel.findNearestConnectedItemInDirection(root.selectedItemId, direction)
         if (!nextId || nextId.length === 0)
             return
         root.selectedItemId = nextId
@@ -464,6 +581,23 @@ ApplicationWindow {
 
     function snapPoint(point) {
         return Qt.point(snapValue(point.x), snapValue(point.y))
+    }
+
+    function resolveConnectedDrop(sourceId, itemKind, dropX, dropY) {
+        var snappedX = root.snapValue(dropX)
+        var snappedY = root.snapValue(dropY)
+        if (!diagramModel || !diagramModel.resolveConnectedPlacement)
+            return Qt.point(snappedX, snappedY)
+        var placement = diagramModel.resolveConnectedPlacement(
+            sourceId,
+            itemKind,
+            snappedX,
+            snappedY,
+            root.gridSpacing
+        )
+        if (!placement || !(placement.x || placement.x === 0) || !(placement.y || placement.y === 0))
+            return Qt.point(snappedX, snappedY)
+        return Qt.point(root.snapValue(placement.x), root.snapValue(placement.y))
     }
 
     function diagramCenterPoint() {
@@ -897,17 +1031,11 @@ ApplicationWindow {
                             }
                         }
                         MenuItem {
-                            text: "Note (Markdown)"
+                            text: "Note"
                             icon.name: "document-edit"
                             onTriggered: {
-                                if (!diagramModel) return
                                 var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
-                                var newId = diagramModel.addPresetItem("note", snapped.x, snapped.y)
-                                if (newId) {
-                                    root.selectedItemId = newId
-                                    if (markdownNoteManager)
-                                        markdownNoteManager.openNote(newId)
-                                }
+                                root.openPresetDialog("note", snapped, "", undefined)
                             }
                         }
                         MenuItem {
@@ -1044,7 +1172,7 @@ ApplicationWindow {
                             }
                         }
                         MenuItem {
-                            text: "Edit Note...\t\tCtrl+M"
+                            text: "Edit Note/Details...\t\tCtrl+M"
                             icon.name: "document-edit"
                             enabled: diagramModel !== null && diagramLayer.contextMenuItemId.length > 0
                             onTriggered: {
@@ -1760,7 +1888,7 @@ ApplicationWindow {
 
                             Rectangle {
                                 id: noteBadge
-                                visible: model.noteMarkdown && model.noteMarkdown.trim().length > 0
+                                visible: itemRect.itemType !== "note" && model.noteMarkdown && model.noteMarkdown.trim().length > 0
                                 width: 18
                                 height: 18
                                 radius: 4
@@ -2595,7 +2723,9 @@ ApplicationWindow {
                                 ToolTip.delay: 400
                                 ToolTip.timeout: 2000
                                 ToolTip.text: {
-                                    var text = model.text + (model.noteMarkdown ? "\n\n" + model.noteMarkdown : "")
+                                    var text = model.text
+                                    if (itemRect.itemType !== "note" && model.noteMarkdown && model.noteMarkdown !== model.text)
+                                        text += (text.length > 0 ? "\n\n" : "") + model.noteMarkdown
                                     if (itemRect.hasLinkedSubtab) {
                                         text += "\n\nSubtab: " + Math.round(itemRect.linkedSubtabCompletion) + "%"
                                         if (itemRect.linkedSubtabActiveAction !== "")
@@ -2636,7 +2766,7 @@ ApplicationWindow {
                                 ToolTip.visible: obstacleHover.containsMouse
                                 ToolTip.delay: 400
                                 ToolTip.timeout: 2000
-                                ToolTip.text: model.text + (model.noteMarkdown ? "\n\n" + model.noteMarkdown : "")
+                                ToolTip.text: model.text + (model.noteMarkdown && model.noteMarkdown !== model.text ? "\n\n" + model.noteMarkdown : "")
 
                                 MouseArea {
                                     id: obstacleHover
@@ -2670,7 +2800,7 @@ ApplicationWindow {
                                 ToolTip.visible: wishHover.containsMouse
                                 ToolTip.delay: 400
                                 ToolTip.timeout: 2000
-                                ToolTip.text: model.text + (model.noteMarkdown ? "\n\n" + model.noteMarkdown : "")
+                                ToolTip.text: model.text + (model.noteMarkdown && model.noteMarkdown !== model.text ? "\n\n" + model.noteMarkdown : "")
 
                                 MouseArea {
                                     id: wishHover
@@ -2712,7 +2842,7 @@ ApplicationWindow {
                                 ToolTip.visible: freeTextHover.containsMouse
                                 ToolTip.delay: 400
                                 ToolTip.timeout: 2000
-                                ToolTip.text: model.text + (model.noteMarkdown ? "\n\n" + model.noteMarkdown : "")
+                                ToolTip.text: model.text + (model.noteMarkdown && model.noteMarkdown !== model.text ? "\n\n" + model.noteMarkdown : "")
 
                                 MouseArea {
                                     id: freeTextHover
@@ -2800,10 +2930,12 @@ ApplicationWindow {
                                         dialogs.edgeDropTaskDialog.open()
                                     } else if (itemRect.itemType === "chatgpt") {
                                         diagramModel.openChatGpt(itemRect.itemId)
-                                    } else if (itemRect.itemType === "note" || itemRect.itemType === "wish" || itemRect.itemType === "obstacle") {
+                                    } else if (itemRect.itemType === "wish" || itemRect.itemType === "obstacle") {
                                         if (markdownNoteManager) {
                                             markdownNoteManager.openNote(itemRect.itemId)
                                         }
+                                    } else if (itemRect.itemType === "note") {
+                                        root.openPresetDialog("note", Qt.point(model.x, model.y), itemRect.itemId, model.text)
                                     } else if (itemRect.itemType === "task" && itemRect.taskIndex < 0) {
                                         // Task not yet linked to task list - create new task
                                         dialogs.newTaskDialog.openWithItem(itemRect.itemId, model.text)
@@ -2981,7 +3113,9 @@ ApplicationWindow {
                 Repeater {
                     model: [
                         "Ctrl+Enter  New Task",
+                        "Ctrl+N  Connected Note",
                         "Ctrl+-  Backward Chain",
+                        "Delete  Remove Node",
                         "Arrows  Connected Task",
                         "Ctrl+V  Paste",
                         "Ctrl+S  Save",
@@ -3281,6 +3415,21 @@ ApplicationWindow {
         Qt.callLater(resetView)
     }
 
+    onClosing: function(close) {
+        if (suppressClosePrompt) {
+            suppressClosePrompt = false
+            close.accepted = true
+            return
+        }
+        if (!projectManager || !projectManager.hasUnsavedChanges()) {
+            close.accepted = true
+            return
+        }
+        close.accepted = false
+        closeAfterSaveAsRequested = false
+        unsavedChangesDialog.open()
+    }
+
     Dialog {
         id: yubiKeyTouchDialog
         modal: true
@@ -3330,6 +3479,73 @@ ApplicationWindow {
 
         background: Rectangle {
             radius: 14
+            color: "#132031"
+            border.color: "#2a4462"
+            border.width: 1
+        }
+    }
+
+    Dialog {
+        id: unsavedChangesDialog
+        modal: true
+        focus: true
+        x: Math.round((root.width - width) / 2)
+        y: Math.round((root.height - height) / 2)
+        width: Math.min(root.width * 0.5, 520)
+        title: "Unsaved Changes"
+
+        contentItem: ColumnLayout {
+            spacing: 12
+
+            Label {
+                text: "The diagram has unsaved changes. Save before closing?"
+                color: "#d6e2f0"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+        }
+
+        footer: RowLayout {
+            spacing: 8
+
+            Item {
+                Layout.fillWidth: true
+            }
+
+            Button {
+                text: "Save"
+                onClicked: {
+                    unsavedChangesDialog.close()
+                    if (projectManager && projectManager.hasCurrentFile()) {
+                        var saved = root.performSave()
+                        if (saved)
+                            root.forceCloseWithoutPrompt()
+                    } else {
+                        closeAfterSaveAsRequested = true
+                        dialogs.saveDialog.open()
+                    }
+                }
+            }
+
+            Button {
+                text: "Discard"
+                onClicked: {
+                    unsavedChangesDialog.close()
+                    root.forceCloseWithoutPrompt()
+                }
+            }
+
+            Button {
+                text: "Cancel"
+                onClicked: {
+                    closeAfterSaveAsRequested = false
+                    unsavedChangesDialog.close()
+                }
+            }
+        }
+
+        background: Rectangle {
+            radius: 12
             color: "#132031"
             border.color: "#2a4462"
             border.width: 1
