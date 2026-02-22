@@ -80,7 +80,6 @@ pip install .
 After installation, run from anywhere:
 
 ```bash
-progress-list    # Main progress tracking app
 actiondraw       # Standalone diagramming canvas
 priorityplot     # Standalone priority plot
 ```
@@ -95,7 +94,6 @@ python -m actiondraw
 
 - Python 3.8+
 - PySide6 >= 6.6
-- matplotlib >= 3.7.0
 - cryptography >= 42.0.0
 - argon2-cffi >= 23.1.0
 
