@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import hashlib
+import re
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QObject, QUrl, Slot
@@ -15,6 +17,13 @@ SUPPORTED_IMAGE_MIME_TYPES = (
     "image/webp",
     "image/bmp",
     "image/gif",
+)
+
+_DATA_IMAGE_MARKDOWN_RE = re.compile(
+    r"!\[(?P<alt>[^\]]*)\]\((?P<url>data:image/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+)\)"
+)
+_TOKEN_IMAGE_MARKDOWN_RE = re.compile(
+    r"!\[(?P<alt>[^\]]*)\]\((?P<url>adimg://(?P<token>[a-f0-9]{8}(?:-\d+)?))\)"
 )
 
 
@@ -72,6 +81,65 @@ def _markdown_image_from_url(url: QUrl, alt_text: str = "pasted image") -> str:
 
 class MarkdownImagePaster(QObject):
     """Expose clipboard image-to-markdown conversion to QML."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._token_to_markdown: dict[str, str] = {}
+        self._markdown_to_token: dict[str, str] = {}
+
+    def _register_markdown_image(self, markdown: str) -> str:
+        if not markdown:
+            return ""
+        existing = self._markdown_to_token.get(markdown)
+        if existing:
+            return existing
+
+        digest = hashlib.sha256(markdown.encode("utf-8")).hexdigest()[:8]
+        token = digest
+        suffix = 1
+        while token in self._token_to_markdown and self._token_to_markdown[token] != markdown:
+            token = f"{digest}-{suffix}"
+            suffix += 1
+
+        self._token_to_markdown[token] = markdown
+        self._markdown_to_token[markdown] = token
+        return token
+
+    @Slot(str, result=str)
+    def compactMarkdownImages(self, markdown: str) -> str:
+        if not markdown:
+            return ""
+
+        def _replace(match: re.Match[str]) -> str:
+            alt = match.group("alt")
+            full_markdown = match.group(0)
+            token = self._register_markdown_image(full_markdown)
+            if not token:
+                return full_markdown
+            return f"![{alt}](adimg://{token})"
+
+        return _DATA_IMAGE_MARKDOWN_RE.sub(_replace, markdown)
+
+    @Slot(str, result=str)
+    def expandMarkdownImages(self, markdown: str) -> str:
+        if not markdown:
+            return ""
+
+        def _replace(match: re.Match[str]) -> str:
+            token = match.group("token")
+            expanded = self._token_to_markdown.get(token)
+            if expanded:
+                return expanded
+            return match.group(0)
+
+        return _TOKEN_IMAGE_MARKDOWN_RE.sub(_replace, markdown)
+
+    @Slot(result=str)
+    def clipboardImageMarkdownToken(self) -> str:
+        markdown = self.clipboardImageMarkdown()
+        if not markdown:
+            return ""
+        return self.compactMarkdownImages(markdown)
 
     @Slot(result=str)
     def clipboardImageMarkdown(self) -> str:

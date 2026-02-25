@@ -323,19 +323,19 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Ctrl+Return"
-        enabled: diagramModel !== null && !dialogs.freeTextDialog.visible
+        enabled: diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen)
         onActivated: root.addTaskOrConnectedTask()
     }
 
     Shortcut {
         sequence: "Ctrl+-"
-        enabled: diagramModel !== null && !dialogs.freeTextDialog.visible
+        enabled: diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen)
         onActivated: root.addTaskOrConnectedTaskBackward()
     }
 
     Shortcut {
         sequence: "Ctrl+Minus"
-        enabled: diagramModel !== null && !dialogs.freeTextDialog.visible
+        enabled: diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen)
         onActivated: root.addTaskOrConnectedTaskBackward()
     }
 
@@ -347,7 +347,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Ctrl+N"
-        enabled: diagramModel !== null && !dialogs.freeTextDialog.visible
+        enabled: diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen)
         onActivated: root.addConnectedNote()
     }
 
@@ -764,11 +764,14 @@ ApplicationWindow {
     }
 
     function openFreeTextDialog(point, itemId, initialText) {
-        dialogs.freeTextDialog.editingItemId = itemId || ""
-        dialogs.freeTextDialog.targetX = snapValue(point.x)
-        dialogs.freeTextDialog.targetY = snapValue(point.y)
-        dialogs.freeTextDialog.textValue = initialText !== undefined ? initialText : ""
-        dialogs.freeTextDialog.open()
+        if (!markdownNoteManager || !markdownNoteManager.openFreeText)
+            return
+        markdownNoteManager.openFreeText(
+            itemId || "",
+            snapValue(point.x),
+            snapValue(point.y),
+            initialText !== undefined ? initialText : ""
+        )
     }
 
     function setZoomInternal(newZoom, focusX, focusY) {
@@ -2819,9 +2822,10 @@ ApplicationWindow {
                                 anchors.rightMargin: 12
                                 anchors.bottomMargin: 8
                                 readonly property bool useMarkdown: {
-                                    var editingThisItem = dialogs && dialogs.freeTextDialog
-                                        && dialogs.freeTextDialog.visible
-                                        && dialogs.freeTextDialog.editingItemId === itemRect.itemId
+                                    var editingThisItem = markdownNoteManager
+                                        && markdownNoteManager.editorOpen
+                                        && markdownNoteManager.activeEditorType === "freetext"
+                                        && markdownNoteManager.activeItemId === itemRect.itemId
                                     if (editingThisItem)
                                         return true
                                     if (!diagramModel)
@@ -3406,6 +3410,12 @@ ApplicationWindow {
             if (snapshot && snapshot.taskIndex !== undefined && snapshot.taskIndex >= 0) {
                 root.drillToTask(snapshot.taskIndex)
             }
+        }
+
+        function onItemSaved(itemId) {
+            if (!itemId)
+                return
+            root.selectedItemId = itemId
         }
     }
 
