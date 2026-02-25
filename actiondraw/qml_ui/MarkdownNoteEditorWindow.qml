@@ -61,7 +61,7 @@ ApplicationWindow {
             Layout.fillHeight: true
             placeholderText: editorRoot.editorType === "freetext" ? "Write your text here..." : "Write your note here..."
             allowCreateTask: true
-            previewVisible: !editorRoot.fullWindowMode
+            previewVisible: true
             sourceItemId: editorRoot.noteId
             textValue: editorRoot.noteText
             onTextValueChanged: editorRoot.noteText = textValue
