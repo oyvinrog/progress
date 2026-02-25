@@ -15,7 +15,6 @@ Item {
 
     property alias addDialog: addDialog
     property alias boxDialog: boxDialog
-    property alias freeTextDialog: freeTextDialog
     property alias edgeDescriptionDialog: edgeDescriptionDialog
     property alias taskDialog: taskDialog
     property alias newTaskDialog: newTaskDialog
@@ -35,7 +34,6 @@ Item {
     property bool anyDialogVisible: (
         addDialog.visible
         || boxDialog.visible
-        || freeTextDialog.visible
         || edgeDescriptionDialog.visible
         || taskDialog.visible
         || newTaskDialog.visible
@@ -269,171 +267,6 @@ Item {
             boxDialog.textValue = ""
             boxDialog.editingItemId = ""
             boxDialog.presetName = "box"
-        }
-    }
-
-    Dialog {
-        id: freeTextDialog
-        modal: true
-        width: dialogWidth + 40
-        property real targetX: 0
-        property real targetY: 0
-        property string editingItemId: ""
-        property string textValue: ""
-        property real dialogWidth: 400
-        property real dialogHeight: 220
-        title: freeTextDialog.editingItemId.length === 0 ? "Free Text" : "Edit Free Text"
-
-        Shortcut {
-            sequence: "Ctrl+Return"
-            enabled: freeTextDialog.visible
-            onActivated: freeTextDialog.accept()
-        }
-
-        Shortcut {
-            sequence: "Ctrl+Enter"
-            enabled: freeTextDialog.visible
-            onActivated: freeTextDialog.accept()
-        }
-
-        onTextValueChanged: {
-            if (freeTextMarkdownEditor.textValue !== freeTextDialog.textValue)
-                freeTextMarkdownEditor.textValue = freeTextDialog.textValue
-        }
-
-        onOpened: {
-            freeTextMarkdownEditor.focusEditor()
-            if (freeTextDialog.editingItemId.length > 0)
-                freeTextMarkdownEditor.selectAll()
-        }
-
-        contentItem: ColumnLayout {
-            Layout.fillWidth: true
-            spacing: 12
-
-            Label {
-                Layout.fillWidth: true
-                text: "Markdown supported. Example: ## Heading, **bold**, - list"
-                color: "#8fa2c5"
-                font.pixelSize: 12
-                wrapMode: Text.WordWrap
-            }
-
-            MarkdownEditorPane {
-                id: freeTextMarkdownEditor
-                Layout.fillWidth: true
-                Layout.preferredHeight: freeTextDialog.dialogHeight
-                textValue: freeTextDialog.textValue
-                placeholderText: "Write your text here..."
-                allowCreateTask: true
-                sourceItemId: freeTextDialog.editingItemId
-                onTextValueChanged: freeTextDialog.textValue = textValue
-                onCreateTaskRequested: function(selectedText) {
-                    if (!diagramModel)
-                        return
-                    var sourceId = freeTextDialog.editingItemId
-                    if (sourceId.length === 0) {
-                        sourceId = diagramModel.addPresetItemWithText(
-                            "freetext",
-                            root.snapValue(freeTextDialog.targetX),
-                            root.snapValue(freeTextDialog.targetY),
-                            freeTextDialog.textValue
-                        )
-                        if (sourceId.length === 0)
-                            return
-                        freeTextDialog.editingItemId = sourceId
-                        freeTextMarkdownEditor.sourceItemId = sourceId
-                    }
-                    var newTaskId = diagramModel.createTaskFromMarkdownSelection(sourceId, selectedText)
-                    if (newTaskId.length > 0 && root)
-                        root.selectedItemId = newTaskId
-                }
-            }
-
-            Rectangle {
-                id: freeTextResizeHandle
-                Layout.alignment: Qt.AlignRight
-                width: 20
-                height: 20
-                color: freeTextResizeHover.hovered ? "#3a4555" : "transparent"
-                radius: 3
-
-                property real startWidth: 0
-                property real startHeight: 0
-
-                Canvas {
-                    anchors.fill: parent
-                    anchors.margins: 4
-                    onPaint: {
-                        var ctx = getContext("2d")
-                        ctx.clearRect(0, 0, width, height)
-                        ctx.strokeStyle = "#6a7a8a"
-                        ctx.lineWidth = 1.5
-                        ctx.beginPath()
-                        ctx.moveTo(0, height)
-                        ctx.lineTo(width, 0)
-                        ctx.moveTo(width * 0.5, height)
-                        ctx.lineTo(width, height * 0.5)
-                        ctx.stroke()
-                    }
-                }
-
-                HoverHandler {
-                    id: freeTextResizeHover
-                    cursorShape: Qt.SizeFDiagCursor
-                }
-
-                DragHandler {
-                    id: freeTextResizeDrag
-                    target: null
-                    cursorShape: Qt.SizeFDiagCursor
-                    onActiveChanged: {
-                        if (active) {
-                            freeTextResizeHandle.startWidth = freeTextDialog.dialogWidth
-                            freeTextResizeHandle.startHeight = freeTextDialog.dialogHeight
-                        }
-                    }
-                    onTranslationChanged: {
-                        if (active) {
-                            freeTextDialog.dialogWidth = Math.max(300, freeTextResizeHandle.startWidth + translation.x)
-                            freeTextDialog.dialogHeight = Math.max(120, freeTextResizeHandle.startHeight + translation.y)
-                        }
-                    }
-                }
-            }
-        }
-
-        footer: DialogButtonBox {
-            id: freeTextDialogButtons
-            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
-
-            Component.onCompleted: {
-                var okButton = freeTextDialogButtons.standardButton(DialogButtonBox.Ok)
-                if (okButton)
-                    okButton.text = "Save (Ctrl+Enter)"
-            }
-        }
-
-        onAccepted: {
-            if (!diagramModel)
-                return
-            if (freeTextDialog.editingItemId.length === 0) {
-                diagramModel.addPresetItemWithText(
-                    "freetext",
-                    root.snapValue(freeTextDialog.targetX),
-                    root.snapValue(freeTextDialog.targetY),
-                    freeTextDialog.textValue
-                )
-            } else {
-                diagramModel.setItemText(freeTextDialog.editingItemId, freeTextDialog.textValue)
-            }
-            freeTextDialog.close()
-        }
-        onRejected: freeTextDialog.close()
-
-        onClosed: {
-            freeTextDialog.textValue = ""
-            freeTextDialog.editingItemId = ""
         }
     }
 

@@ -1,4 +1,4 @@
-"""Standalone window for editing markdown notes."""
+"""Standalone window for editing markdown and free-text content."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from .qml import MARKDOWN_NOTE_EDITOR_QML_PATH, QML_DIR
 
 
 class MarkdownNoteEditor(QObject):
-    """Standalone window for editing markdown notes."""
+    """Standalone window for editing markdown notes and free text."""
 
     noteSaved = Signal(str, str)
     noteCanceled = Signal(str)
@@ -33,9 +33,20 @@ class MarkdownNoteEditor(QObject):
         self._root.saveRequested.connect(self._handle_save)
         self._root.cancelRequested.connect(self._handle_cancel)
 
-    def open(self, note_id: str, note_text: str, note_title: str) -> None:
+    def open(
+        self,
+        note_id: str,
+        note_text: str,
+        note_title: str,
+        editor_type: str = "note",
+        target_x: float = 0.0,
+        target_y: float = 0.0,
+    ) -> None:
+        self._root.setProperty("editorType", editor_type or "note")
         self._root.setProperty("noteId", note_id)
         self._root.setProperty("noteTitle", note_title)
+        self._root.setProperty("targetX", float(target_x))
+        self._root.setProperty("targetY", float(target_y))
         # Clear first to avoid stale editor state when reusing the same window instance.
         self._root.setProperty("noteText", "")
         self._root.setProperty("noteText", note_text or "")

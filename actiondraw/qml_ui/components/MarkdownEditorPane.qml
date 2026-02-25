@@ -8,6 +8,7 @@ Item {
     property string textValue: ""
     property string placeholderText: ""
     property bool allowCreateTask: false
+    property bool previewVisible: true
     property string sourceItemId: ""
     property string _cachedSelectionText: ""
 
@@ -114,6 +115,7 @@ Item {
             }
 
             Rectangle {
+                visible: root.previewVisible
                 SplitView.fillWidth: true
                 SplitView.fillHeight: true
                 SplitView.minimumWidth: 220
