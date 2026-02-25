@@ -106,7 +106,12 @@ ApplicationWindow {
 
             Button {
                 text: "Save"
-                onClicked: editorRoot.saveRequested(editorRoot.noteId, markdownEditor.textValue)
+                onClicked: editorRoot.saveRequested(
+                    editorRoot.noteId,
+                    markdownImagePaster
+                        ? markdownImagePaster.expandMarkdownImages(markdownEditor.textValue)
+                        : markdownEditor.textValue
+                )
             }
         }
     }
@@ -129,13 +134,23 @@ ApplicationWindow {
     Shortcut {
         sequence: "Ctrl+Return"
         enabled: editorRoot.visible
-        onActivated: editorRoot.saveRequested(editorRoot.noteId, markdownEditor.textValue)
+        onActivated: editorRoot.saveRequested(
+            editorRoot.noteId,
+            markdownImagePaster
+                ? markdownImagePaster.expandMarkdownImages(markdownEditor.textValue)
+                : markdownEditor.textValue
+        )
     }
 
     Shortcut {
         sequence: "Ctrl+Enter"
         enabled: editorRoot.visible
-        onActivated: editorRoot.saveRequested(editorRoot.noteId, markdownEditor.textValue)
+        onActivated: editorRoot.saveRequested(
+            editorRoot.noteId,
+            markdownImagePaster
+                ? markdownImagePaster.expandMarkdownImages(markdownEditor.textValue)
+                : markdownEditor.textValue
+        )
     }
 
     onClosing: function(close) {

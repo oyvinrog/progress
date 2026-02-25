@@ -63,7 +63,7 @@ Item {
             editor.paste()
             return
         }
-        var imageMarkdown = markdownImagePaster.clipboardImageMarkdown()
+        var imageMarkdown = markdownImagePaster.clipboardImageMarkdownToken()
         if (imageMarkdown.length > 0) {
             insertTextAtCursor(imageMarkdown)
             return
@@ -147,7 +147,9 @@ Item {
 
                         Text {
                             width: parent.width
-                            text: root.normalizeLineBreaks(root.textValue)
+                            text: root.normalizeLineBreaks(markdownImagePaster
+                                ? markdownImagePaster.expandMarkdownImages(root.textValue)
+                                : root.textValue)
                             textFormat: Text.MarkdownText
                             wrapMode: Text.WordWrap
                             color: "#f5f6f8"
@@ -184,7 +186,10 @@ Item {
     }
 
     onTextValueChanged: {
-        if (root.normalizeLineBreaks(editor.text) !== root.normalizeLineBreaks(textValue))
-            editor.text = root.normalizeLineBreaks(textValue)
+        var incoming = root.normalizeLineBreaks(textValue)
+        if (markdownImagePaster)
+            incoming = markdownImagePaster.compactMarkdownImages(incoming)
+        if (root.normalizeLineBreaks(editor.text) !== incoming)
+            editor.text = incoming
     }
 }
