@@ -11,13 +11,11 @@ ApplicationWindow {
     font.family: "Trebuchet MS"
     font.pixelSize: 13
     title: {
-        if (projectManager && projectManager.currentFilePath) {
-            var name = projectManager.currentFilePath.split("/").pop()
-            if (name.endsWith(".progress"))
-                name = name.slice(0, -9)
-            return name
-        }
-        return "ActionDraw - Progress Tracker"
+        var tabName = activeTabDisplayName()
+        var projectName = projectDisplayName()
+        if (projectName !== "")
+            return "ActionDraw - " + tabName + " - " + projectName
+        return "ActionDraw - " + tabName
     }
 
     property var diagramModelRef: diagramModel
@@ -77,6 +75,28 @@ ApplicationWindow {
     function showWindow() {
         root.visible = true
         root.requestActivate()
+    }
+
+    function activeTabDisplayName() {
+        if (tabModelRef && tabModelRef.currentTabName) {
+            var name = String(tabModelRef.currentTabName).trim()
+            if (name.length > 0)
+                return name
+        }
+        return "Main"
+    }
+
+    function projectDisplayName() {
+        if (projectManagerRef && projectManagerRef.currentFilePath) {
+            var path = String(projectManagerRef.currentFilePath)
+            if (path.length > 0) {
+                var name = path.split("/").pop()
+                if (name.endsWith(".progress"))
+                    name = name.slice(0, -9)
+                return name
+            }
+        }
+        return ""
     }
 
     function openPriorityPlotWindow() {
@@ -847,6 +867,42 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 14
+
+            Rectangle {
+                Layout.fillWidth: true
+                height: 38
+                radius: 10
+                color: "#14202b"
+                border.color: "#2c3f53"
+                border.width: 1
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 12
+                    spacing: 10
+
+                    Text {
+                        text: "Current Tab: " + root.activeTabDisplayName()
+                        color: "#dfefff"
+                        font.pixelSize: 13
+                        font.bold: true
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+
+                    Text {
+                        property string projectName: root.projectDisplayName()
+                        visible: projectName !== ""
+                        text: "Project: " + projectName
+                        color: "#8da6bc"
+                        font.pixelSize: 11
+                        elide: Text.ElideRight
+                        horizontalAlignment: Text.AlignRight
+                        Layout.maximumWidth: parent.width * 0.42
+                    }
+                }
+            }
 
             ProgressStatsRow {
                 root: root
