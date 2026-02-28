@@ -2092,6 +2092,61 @@ class TestMultiTabSupport:
         project_manager.drillToTask(0)
         assert diagram_model.currentTaskIndex == 0
 
+    def test_project_manager_open_tab_task_switches_and_drills(self, app):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        task_model.addTask("Main Task", -1)
+        diagram_model.addTask(0, 20.0, 20.0)
+
+        tab_model.addTab("Second")
+        tab_model.setTabData(
+            1,
+            {"tasks": [{"title": "Second Task", "completed": False}]},
+            {
+                "items": [{
+                    "id": "task_0",
+                    "item_type": "task",
+                    "x": 40.0,
+                    "y": 60.0,
+                    "width": 140.0,
+                    "height": 70.0,
+                    "text": "Second Task",
+                    "task_index": 0,
+                    "color": "#2e5c88",
+                    "text_color": "#f5f6f8",
+                }],
+                "edges": [],
+                "strokes": [],
+                "current_task_index": -1,
+            },
+        )
+
+        project_manager.openTabTask(1, 0)
+        assert tab_model.currentTabIndex == 1
+        assert diagram_model.currentTaskIndex == 0
+
+    def test_project_manager_open_reminder_task_uses_open_tab_task(self, app, monkeypatch):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        captured = []
+
+        def _capture_open(tab_index, task_index):
+            captured.append((tab_index, task_index))
+
+        monkeypatch.setattr(project_manager, "openTabTask", _capture_open)
+        project_manager.openReminderTask(3, 7)
+        assert captured == [(3, 7)]
+
     def test_project_manager_add_tab_as_drill_task(self, app):
         from task_model import TaskModel, ProjectManager, TabModel
 
@@ -2843,6 +2898,207 @@ class TestTabModelCompletion:
         )
 
         assert model.getTabsLinkingToCurrentTab() == []
+
+    def test_get_hierarchy_tree_includes_all_nodes(self, app):
+        from task_model import TabModel, Tab
+
+        model = TabModel()
+        model.setTabs(
+            [
+                Tab(
+                    name="Main",
+                    tasks={"tasks": [{"title": "API", "completed": False}]},
+                    diagram={
+                        "items": [
+                            {
+                                "id": "task_0",
+                                "item_type": "task",
+                                "text": "API",
+                                "task_index": 0,
+                            },
+                            {
+                                "id": "note_0",
+                                "item_type": "note",
+                                "text": "Ideas",
+                                "task_index": -1,
+                            },
+                        ],
+                        "edges": [],
+                        "strokes": [],
+                        "current_task_index": -1,
+                    },
+                ),
+                Tab(
+                    name="API",
+                    tasks={"tasks": [{"title": "Ship", "completed": False}]},
+                    diagram={"items": [], "edges": [], "strokes": [], "current_task_index": -1},
+                ),
+            ],
+            active_tab=0,
+        )
+
+        tree = model.getHierarchyTree()
+        assert len(tree) == 2
+        main = tree[0]
+        assert main["kind"] == "tab"
+        assert main["tabName"] == "Main"
+        assert len(main["children"]) == 2
+        assert main["children"][0]["itemId"] == "task_0"
+        assert main["children"][0]["hasLinkedSubtab"] is True
+        assert main["children"][0]["linkedTabName"] == "API"
+        assert main["children"][1]["itemId"] == "note_0"
+        assert main["children"][1]["hasLinkedSubtab"] is False
+
+    def test_get_hierarchy_tree_builds_recursive_subdiagram(self, app):
+        from task_model import TabModel, Tab
+
+        model = TabModel()
+        model.setTabs(
+            [
+                Tab(
+                    name="Main",
+                    tasks={"tasks": [{"title": "API", "completed": False}]},
+                    diagram={
+                        "items": [{"id": "task_main", "item_type": "task", "text": "API", "task_index": 0}],
+                        "edges": [],
+                        "strokes": [],
+                        "current_task_index": -1,
+                    },
+                ),
+                Tab(
+                    name="API",
+                    tasks={"tasks": [{"title": "DB", "completed": False}]},
+                    diagram={
+                        "items": [{"id": "task_api", "item_type": "task", "text": "DB", "task_index": 0}],
+                        "edges": [],
+                        "strokes": [],
+                        "current_task_index": -1,
+                    },
+                ),
+                Tab(
+                    name="DB",
+                    tasks={"tasks": []},
+                    diagram={"items": [], "edges": [], "strokes": [], "current_task_index": -1},
+                ),
+            ],
+            active_tab=0,
+        )
+
+        tree = model.getHierarchyTree()
+        main_link = tree[0]["children"][0]
+        assert len(main_link["children"]) == 1
+        api_tab = main_link["children"][0]
+        assert api_tab["kind"] == "tab"
+        assert api_tab["tabName"] == "API"
+        assert api_tab["children"][0]["linkedTabName"] == "DB"
+
+    def test_get_hierarchy_tree_marks_cycles(self, app):
+        from task_model import TabModel, Tab
+
+        model = TabModel()
+        model.setTabs(
+            [
+                Tab(
+                    name="Main",
+                    tasks={"tasks": [{"title": "API", "completed": False}]},
+                    diagram={
+                        "items": [{"id": "task_main", "item_type": "task", "text": "API", "task_index": 0}],
+                        "edges": [],
+                        "strokes": [],
+                        "current_task_index": -1,
+                    },
+                ),
+                Tab(
+                    name="API",
+                    tasks={"tasks": [{"title": "Main", "completed": False}]},
+                    diagram={
+                        "items": [{"id": "task_api", "item_type": "task", "text": "Main", "task_index": 0}],
+                        "edges": [],
+                        "strokes": [],
+                        "current_task_index": -1,
+                    },
+                ),
+            ],
+            active_tab=0,
+        )
+
+        tree = model.getHierarchyTree()
+        api_tab = tree[0]["children"][0]["children"][0]
+        cycle_entry = api_tab["children"][0]["children"][0]
+        assert cycle_entry["kind"] == "cycleRef"
+        assert cycle_entry["tabName"] == "Main"
+
+    def test_get_hierarchy_tree_with_root_index_returns_single_root(self, app):
+        from task_model import TabModel, Tab
+
+        model = TabModel()
+        model.setTabs(
+            [
+                Tab(
+                    name="Main",
+                    tasks={"tasks": [{"title": "API", "completed": False}]},
+                    diagram={
+                        "items": [{"id": "task_main", "item_type": "task", "text": "API", "task_index": 0}],
+                        "edges": [],
+                        "strokes": [],
+                        "current_task_index": -1,
+                    },
+                ),
+                Tab(
+                    name="API",
+                    tasks={"tasks": [{"title": "Deploy", "completed": False}]},
+                    diagram={"items": [], "edges": [], "strokes": [], "current_task_index": -1},
+                ),
+            ],
+            active_tab=1,
+        )
+
+        rooted = model.getHierarchyTree(1)
+        assert len(rooted) == 1
+        assert rooted[0]["kind"] == "tab"
+        assert rooted[0]["tabName"] == "API"
+
+    def test_get_hierarchy_tree_with_invalid_root_index_returns_empty(self, app):
+        from task_model import TabModel
+
+        model = TabModel()
+        assert model.getHierarchyTree(999) == []
+
+    def test_get_hierarchy_tree_hides_completed_task_nodes(self, app):
+        from task_model import TabModel, Tab
+
+        model = TabModel()
+        model.setTabs(
+            [
+                Tab(
+                    name="Main",
+                    tasks={
+                        "tasks": [
+                            {"title": "Done Task", "completed": True},
+                            {"title": "Next Task", "completed": False},
+                        ]
+                    },
+                    diagram={
+                        "items": [
+                            {"id": "task_done", "item_type": "task", "text": "Done Task", "task_index": 0},
+                            {"id": "task_next", "item_type": "task", "text": "Next Task", "task_index": 1},
+                            {"id": "note_0", "item_type": "note", "text": "Keep", "task_index": -1},
+                        ],
+                        "edges": [],
+                        "strokes": [],
+                        "current_task_index": -1,
+                    },
+                ),
+            ],
+            active_tab=0,
+        )
+
+        tree = model.getHierarchyTree(0)
+        assert len(tree) == 1
+        child_ids = [child.get("itemId") for child in tree[0]["children"]]
+        assert "task_done" not in child_ids
+        assert "task_next" in child_ids
+        assert "note_0" in child_ids
 
     def test_priority_plot_roles_exist(self, app):
         """Priority plot roles are exposed to QML."""

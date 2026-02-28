@@ -8,6 +8,7 @@ Rectangle {
     property var projectManager
     property var onTabDragMoved
     property var onTabDragReleased
+    property var onAnalyzeHierarchy
     property int expandedWidth: 252
     property int collapsedWidth: 48
     readonly property bool keepExpanded: tabContextMenu.visible || renameTabDialog.visible
@@ -425,6 +426,16 @@ Rectangle {
                     tabModel.setIncludeInPriorityPlot(tabContextMenu.tabIndex, !tabContextMenu.includeInPlot)
                     tabContextMenu.includeInPlot = !tabContextMenu.includeInPlot
                 }
+            }
+        }
+
+        MenuSeparator {}
+
+        MenuItem {
+            text: "Analyze Hierarchy..."
+            onTriggered: {
+                if (typeof sidebar.onAnalyzeHierarchy === "function")
+                    sidebar.onAnalyzeHierarchy(tabContextMenu.tabIndex)
             }
         }
 

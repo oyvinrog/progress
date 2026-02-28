@@ -13,7 +13,7 @@ import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from PySide6.QtCore import (
     QAbstractListModel,
@@ -1033,6 +1033,134 @@ class TabModel(QAbstractListModel):
             )
         return links
 
+    def _tab_name_to_index_map(self) -> Dict[str, int]:
+        name_to_index: Dict[str, int] = {}
+        for idx, tab in enumerate(self._tabs):
+            name = str(getattr(tab, "name", "") or "").strip()
+            if not name or name in name_to_index:
+                continue
+            name_to_index[name] = idx
+        return name_to_index
+
+    def _extract_tab_tasks(self, tab: Tab) -> List[Dict[str, Any]]:
+        tasks_payload = tab.tasks if isinstance(tab.tasks, dict) else {}
+        tasks = tasks_payload.get("tasks", []) if isinstance(tasks_payload, dict) else []
+        if not isinstance(tasks, list):
+            return []
+        normalized: List[Dict[str, Any]] = []
+        for task in tasks:
+            normalized.append(task if isinstance(task, dict) else {})
+        return normalized
+
+    def _extract_tab_items(self, tab: Tab) -> List[Dict[str, Any]]:
+        diagram_payload = tab.diagram if isinstance(tab.diagram, dict) else {}
+        items = diagram_payload.get("items", []) if isinstance(diagram_payload, dict) else []
+        if not isinstance(items, list):
+            return []
+        return [item for item in items if isinstance(item, dict)]
+
+    def _build_hierarchy_tab_node(
+        self,
+        tab_index: int,
+        name_to_index: Dict[str, int],
+        path_tab_indices: Set[int],
+    ) -> Dict[str, Any]:
+        if tab_index < 0 or tab_index >= len(self._tabs):
+            return {}
+
+        tab = self._tabs[tab_index]
+        tab_path = set(path_tab_indices)
+        tab_path.add(tab_index)
+
+        tasks = self._extract_tab_tasks(tab)
+        items = self._extract_tab_items(tab)
+
+        children: List[Dict[str, Any]] = []
+        for item in items:
+            item_id = str(item.get("id", ""))
+            item_type = str(item.get("item_type", ""))
+            item_text = str(item.get("text", ""))
+            try:
+                task_index = int(item.get("task_index", -1))
+            except (TypeError, ValueError):
+                task_index = -1
+
+            # Navigator should hide completed tasks.
+            if item_type == "task" and 0 <= task_index < len(tasks):
+                if bool(tasks[task_index].get("completed", False)):
+                    continue
+
+            linked_tab_index = -1
+            linked_tab_name = ""
+            if 0 <= task_index < len(tasks):
+                task_title = str(tasks[task_index].get("title", "")).strip()
+                linked_tab_index = name_to_index.get(task_title, -1)
+                if linked_tab_index >= 0:
+                    linked_tab_name = str(self._tabs[linked_tab_index].name)
+
+            item_node: Dict[str, Any] = {
+                "kind": "diagramNode",
+                "itemId": item_id,
+                "itemType": item_type,
+                "text": item_text,
+                "taskIndex": task_index,
+                "sourceTabIndex": tab_index,
+                "sourceTabName": tab.name,
+                "linkedTabIndex": linked_tab_index,
+                "linkedTabName": linked_tab_name,
+                "hasLinkedSubtab": linked_tab_index >= 0,
+                "children": [],
+            }
+
+            if linked_tab_index >= 0:
+                if linked_tab_index in tab_path:
+                    item_node["children"] = [{
+                        "kind": "cycleRef",
+                        "tabIndex": linked_tab_index,
+                        "tabName": linked_tab_name,
+                    }]
+                else:
+                    linked_node = self._build_hierarchy_tab_node(linked_tab_index, name_to_index, tab_path)
+                    if linked_node:
+                        item_node["children"] = [linked_node]
+
+            children.append(item_node)
+
+        return {
+            "kind": "tab",
+            "tabIndex": tab_index,
+            "tabName": tab.name,
+            "completionPercent": self._calculateTabCompletion(tab),
+            "activeTaskTitle": self._getActiveTaskTitle(tab),
+            "children": children,
+        }
+
+    @Slot(result=list)
+    @Slot(int, result=list)
+    def getHierarchyTree(self, root_tab_index: int = -1) -> List[Dict[str, Any]]:
+        """Return recursive linked-subdiagram hierarchy.
+
+        Args:
+            root_tab_index: Optional tab index to use as a single hierarchy root.
+                If negative, all tabs are returned as top-level roots.
+        """
+        name_to_index = self._tab_name_to_index_map()
+        hierarchy: List[Dict[str, Any]] = []
+
+        if root_tab_index >= 0:
+            if root_tab_index >= len(self._tabs):
+                return []
+            node = self._build_hierarchy_tab_node(root_tab_index, name_to_index, set())
+            if node:
+                hierarchy.append(node)
+            return hierarchy
+
+        for index in range(len(self._tabs)):
+            node = self._build_hierarchy_tab_node(index, name_to_index, set())
+            if node:
+                hierarchy.append(node)
+        return hierarchy
+
     @Slot(str)
     def addTab(self, name: str = "") -> None:
         """Add a new empty tab."""
@@ -1929,6 +2057,11 @@ class ProjectManager(QObject):
     @Slot(int, int)
     def openReminderTask(self, tab_index: int, task_index: int) -> None:
         """Open the tab and task targeted by a due reminder."""
+        self.openTabTask(tab_index, task_index)
+
+    @Slot(int, int)
+    def openTabTask(self, tab_index: int, task_index: int) -> None:
+        """Open a tab and focus a task index within that tab."""
         if self._tab_model is not None:
             if tab_index < 0 or tab_index >= self._tab_model.tabCount:
                 return

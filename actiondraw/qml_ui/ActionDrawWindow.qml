@@ -24,6 +24,8 @@ ApplicationWindow {
     property var markdownNoteManagerRef: markdownNoteManager
     property var tabModelRef: tabModel
     property var priorityPlotWindowRef: null
+    property var hierarchyWindowRef: null
+    property real hierarchyFocusZoom: 1.2
     property bool yubiKeyPromptVisible: false
     property string yubiKeyPromptText: "Touch your YubiKey to continue."
     property bool suppressClosePrompt: false
@@ -125,6 +127,93 @@ ApplicationWindow {
         win.show()
         win.raise()
         win.requestActivate()
+    }
+
+    function openHierarchyWindow(scopeTabIndex) {
+        if (!tabModelRef || !projectManagerRef)
+            return
+        var resolvedScope = -1
+        if (scopeTabIndex !== undefined && scopeTabIndex !== null) {
+            resolvedScope = Number(scopeTabIndex)
+        } else if (tabModelRef && tabModelRef.currentTabIndex !== undefined) {
+            resolvedScope = Number(tabModelRef.currentTabIndex)
+        }
+        if (hierarchyWindowRef) {
+            if (hierarchyWindowRef.setScopeTabIndex) {
+                hierarchyWindowRef.setScopeTabIndex(resolvedScope)
+            } else if (hierarchyWindowRef.scopeTabIndex !== undefined) {
+                hierarchyWindowRef.scopeTabIndex = resolvedScope
+            }
+            hierarchyWindowRef.show()
+            hierarchyWindowRef.raise()
+            hierarchyWindowRef.requestActivate()
+            return
+        }
+        var component = Qt.createComponent(Qt.resolvedUrl("HierarchyWindow.qml"))
+        if (component.status === Component.Error) {
+            console.log("Failed to load HierarchyWindow:", component.errorString())
+            return
+        }
+        var win = component.createObject(root, {
+            "tabModel": tabModelRef,
+            "projectManager": projectManagerRef,
+            "hostWindow": root,
+            "scopeTabIndex": resolvedScope
+        })
+        if (!win) {
+            console.log("Failed to instantiate HierarchyWindow")
+            return
+        }
+        hierarchyWindowRef = win
+        win.closing.connect(function() {
+            hierarchyWindowRef = null
+        })
+        win.show()
+        win.raise()
+        win.requestActivate()
+    }
+
+    function focusHierarchyTarget(tabIndex, taskIndex, itemId, closeNavigator) {
+        if (!projectManagerRef || !diagramModelRef)
+            return
+
+        var resolvedTabIndex = Number(tabIndex)
+        var resolvedTaskIndex = Number(taskIndex)
+        var resolvedItemId = itemId ? String(itemId) : ""
+        var shouldClose = (closeNavigator === undefined) ? true : !!closeNavigator
+
+        if (resolvedTaskIndex >= 0 && projectManagerRef.openTabTask) {
+            projectManagerRef.openTabTask(resolvedTabIndex, resolvedTaskIndex)
+        } else if (resolvedTabIndex >= 0 && projectManagerRef.switchTab) {
+            projectManagerRef.switchTab(resolvedTabIndex)
+        }
+
+        var applyFocus = function() {
+            root.setZoomDirect(root.hierarchyFocusZoom)
+
+            if (resolvedItemId.length > 0 && diagramModelRef.getItemSnapshot) {
+                var snapshot = diagramModelRef.getItemSnapshot(resolvedItemId)
+                if (snapshot && (snapshot.x || snapshot.x === 0) && (snapshot.y || snapshot.y === 0)) {
+                    var width = Number(snapshot.width || 0)
+                    var height = Number(snapshot.height || 0)
+                    root.centerOnPoint(snapshot.x + (width / 2), snapshot.y + (height / 2))
+                    return
+                }
+            }
+
+            if (resolvedTaskIndex >= 0) {
+                root.drillToTask(resolvedTaskIndex)
+                return
+            }
+            root.scrollToContent()
+        }
+
+        Qt.callLater(function() {
+            Qt.callLater(applyFocus)
+        })
+
+        if (shouldClose && hierarchyWindowRef)
+            hierarchyWindowRef.close()
     }
 
     function drillToTask(taskIndex) {
@@ -860,6 +949,7 @@ ApplicationWindow {
             projectManager: projectManagerRef
             onTabDragMoved: root.updateTabDragHover
             onTabDragReleased: root.handleTabDragRelease
+            onAnalyzeHierarchy: function(tabIndex) { root.openHierarchyWindow(tabIndex) }
         }
 
         // Main content area (right side)
