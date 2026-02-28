@@ -4,6 +4,7 @@ import QtQuick.Controls 2.15
 Rectangle {
     id: root
     property var tabModel: null
+    property int selectedTabIndex: -1
     property real minTimeHours: 1.01
     property real maxTimeHours: 12.0
     property real minSubjectiveValue: 0.0
@@ -12,6 +13,8 @@ Rectangle {
     property real rightPadding: 24
     property real topPadding: 28
     property real bottomPadding: 44
+    signal pointClicked(int tabIndex)
+    signal pointDoubleClicked(int tabIndex)
 
     radius: 12
     color: "#0f1e2b"
@@ -110,6 +113,7 @@ Rectangle {
             width: 14
             height: 14
             visible: model.includeInPriorityPlot !== false
+            property bool isSelected: index === root.selectedTabIndex
             property real pointTime: model.priorityTimeHours || 1.01
             property real pointValue: model.prioritySubjectiveValue || 0.0
             x: root.toX(pointTime) - width / 2
@@ -118,9 +122,9 @@ Rectangle {
             Rectangle {
                 anchors.fill: parent
                 radius: width / 2
-                color: "#54c6ff"
-                border.color: "#d8f5ff"
-                border.width: dragArea.drag.active ? 2 : 1
+                color: pointItem.isSelected ? "#7cd7ff" : "#54c6ff"
+                border.color: pointItem.isSelected ? "#ffffff" : "#d8f5ff"
+                border.width: dragArea.drag.active || pointItem.isSelected ? 2 : 1
             }
 
             Text {
@@ -142,6 +146,8 @@ Rectangle {
                 drag.minimumY: root.topPadding - pointItem.height / 2
                 drag.maximumY: root.height - root.bottomPadding - pointItem.height / 2
                 onPressed: cursorShape = Qt.ClosedHandCursor
+                onClicked: root.pointClicked(index)
+                onDoubleClicked: root.pointDoubleClicked(index)
                 onReleased: {
                     cursorShape = Qt.OpenHandCursor
                     var centerX = pointItem.x + pointItem.width / 2
