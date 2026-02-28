@@ -100,23 +100,19 @@ Item {
         return "![" + safeAlt + "](" + safeUrl + "){width=" + w + " height=" + h + "}"
     }
 
-    function parsePreviewBlocks(markdown) {
-        var source = normalizeLineBreaks(markdown)
-        if (!source || source.length === 0)
-            return []
-
+    function appendTextAndImageBlocks(blocks, source, startOffset, endOffset) {
         var imageRegex = /!\[([^\]]*)\]\(([^)\s]+)\)(\{[^}]*\})?/g
-        var blocks = []
+        var chunk = source.slice(startOffset, endOffset)
         var cursor = 0
         var match
 
-        while ((match = imageRegex.exec(source)) !== null) {
+        while ((match = imageRegex.exec(chunk)) !== null) {
             var start = match.index
             var end = imageRegex.lastIndex
             if (start > cursor) {
                 blocks.push({
                     kind: "text",
-                    text: source.slice(cursor, start)
+                    text: chunk.slice(cursor, start)
                 })
             }
             var attrs = parseImageAttrs(match[3] || "")
@@ -126,17 +122,93 @@ Item {
                 url: match[2] || "",
                 width: attrs.width,
                 height: attrs.height,
-                start: start,
-                end: end
+                start: startOffset + start,
+                end: startOffset + end
             })
             cursor = end
         }
 
-        if (cursor < source.length) {
+        if (cursor < chunk.length) {
             blocks.push({
                 kind: "text",
-                text: source.slice(cursor)
+                text: chunk.slice(cursor)
             })
+        }
+    }
+
+    function escapeHtml(value) {
+        var source = value || ""
+        return source
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;")
+    }
+
+    function codeBlockHtml(language, code) {
+        var lang = language || ""
+        var source = code || ""
+        if (markdownPreviewFormatter && markdownPreviewFormatter.fencedCodeToHtml)
+            return markdownPreviewFormatter.fencedCodeToHtml(lang, source)
+        return "<pre style=\"background:#111826;color:#dbe2f2;border:1px solid #334155;border-radius:6px;padding:10px;white-space:pre-wrap;font-family:Monospace;font-size:13px;\"><code>"
+            + escapeHtml(source)
+            + "</code></pre>"
+    }
+
+    function parsePreviewBlocks(markdown) {
+        var source = normalizeLineBreaks(markdown)
+        if (!source || source.length === 0)
+            return []
+
+        var blocks = []
+        var inCode = false
+        var language = ""
+        var textStart = 0
+        var codeStart = 0
+        var codeContentStart = 0
+        var cursor = 0
+
+        while (cursor < source.length) {
+            var newline = source.indexOf("\n", cursor)
+            var lineEnd = newline >= 0 ? newline : source.length
+            var lineAfter = newline >= 0 ? newline + 1 : source.length
+            var line = source.slice(cursor, lineEnd)
+            var fenceMatch = line.match(/^\s*```+\s*([A-Za-z0-9_+-]*)\s*$/)
+
+            if (!inCode && fenceMatch) {
+                appendTextAndImageBlocks(blocks, source, textStart, cursor)
+                inCode = true
+                language = (fenceMatch[1] || "").toLowerCase()
+                codeStart = cursor
+                codeContentStart = lineAfter
+                textStart = lineAfter
+            } else if (inCode && fenceMatch) {
+                blocks.push({
+                    kind: "code",
+                    language: language,
+                    code: source.slice(codeContentStart, cursor),
+                    start: codeStart,
+                    end: lineAfter
+                })
+                inCode = false
+                language = ""
+                textStart = lineAfter
+            }
+
+            cursor = lineAfter
+        }
+
+        if (inCode) {
+            blocks.push({
+                kind: "code",
+                language: language,
+                code: source.slice(codeContentStart),
+                start: codeStart,
+                end: source.length
+            })
+        } else {
+            appendTextAndImageBlocks(blocks, source, textStart, source.length)
         }
         return blocks
     }
@@ -194,6 +266,10 @@ Item {
                     onTextChanged: root.textValue = root.normalizeLineBreaks(text)
                     onSelectionStartChanged: root.refreshSelectionCache()
                     onSelectionEndChanged: root.refreshSelectionCache()
+                    Component.onCompleted: {
+                        if (markdownHighlighterBridge && markdownHighlighterBridge.attachToTextDocument)
+                            markdownHighlighterBridge.attachToTextDocument(editor.textDocument)
+                    }
                 }
             }
 
@@ -253,7 +329,9 @@ Item {
                                             width: parent.width
                                             implicitHeight: textPreview.visible
                                                 ? textPreview.implicitHeight
-                                                : imagePreview.implicitHeight
+                                                : (codePreview.visible
+                                                    ? codePreview.implicitHeight
+                                                    : imagePreview.implicitHeight)
 
                                             Text {
                                                 id: textPreview
@@ -265,6 +343,16 @@ Item {
                                                 textFormat: Text.MarkdownText
                                                 wrapMode: Text.WordWrap
                                                 color: "#f5f6f8"
+                                            }
+
+                                            Text {
+                                                id: codePreview
+                                                visible: modelData && modelData.kind === "code"
+                                                width: parent.width
+                                                text: root.codeBlockHtml(modelData.language || "", modelData.code || "")
+                                                textFormat: Text.RichText
+                                                wrapMode: Text.WrapAtWordBoundaryOrAnywhere
+                                                color: "#dbe2f2"
                                             }
 
                                             Item {
