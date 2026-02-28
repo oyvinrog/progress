@@ -13,6 +13,7 @@ from actiondraw import (
     DrawingStroke,
     create_actiondraw_window,
 )
+from actiondraw.markdown_note_manager import MarkdownNoteManager
 from progress_crypto import CryptoError, EncryptionCredentials, yubikey_support_guidance
 from task_model import TaskModel
 
@@ -3647,6 +3648,54 @@ class TestYubiKeyGuidance:
         message = yubikey_support_guidance()
         assert "YubiKey support detected" in message
         assert "/tmp/ykman" in message
+
+
+class TestMarkdownNoteManager:
+    def test_request_project_save_emits_signal(self, empty_diagram_model, monkeypatch):
+        class _DummySignal:
+            def connect(self, _callback):
+                return None
+
+        class _DummyEditor:
+            def __init__(self, *_args, **_kwargs):
+                self.noteSaved = _DummySignal()
+                self.noteCanceled = _DummySignal()
+
+        monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
+        manager = MarkdownNoteManager(empty_diagram_model)
+        events = []
+        manager.projectSaveRequested.connect(lambda: events.append("save"))
+
+        manager.requestProjectSave()
+
+        assert events == ["save"]
+
+    def test_save_freetext_keeps_editor_open(self, empty_diagram_model, monkeypatch):
+        class _DummySignal:
+            def connect(self, _callback):
+                return None
+
+        class _DummyEditor:
+            def __init__(self, *_args, **_kwargs):
+                self.noteSaved = _DummySignal()
+                self.noteCanceled = _DummySignal()
+                self.note_id = ""
+
+            def set_note_id(self, note_id):
+                self.note_id = note_id
+
+        monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
+        manager = MarkdownNoteManager(empty_diagram_model)
+        manager._set_editor_state("freetext", "", 120.0, 80.0, True)
+
+        manager._save_note("", "Draft text")
+
+        assert manager.editorOpen is True
+        assert manager.activeEditorType == "freetext"
+        assert manager.activeItemId.startswith("freetext_")
+        item = empty_diagram_model.getItem(manager.activeItemId)
+        assert item is not None
+        assert item.text == "Draft text"
 
 
 if __name__ == "__main__":

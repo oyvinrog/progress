@@ -11,6 +11,7 @@ class MarkdownNoteManager(QObject):
     """Open markdown notes tied to diagram items."""
     taskCreated = Signal(str)
     itemSaved = Signal(str)
+    projectSaveRequested = Signal()
     editorStateChanged = Signal()
 
     def __init__(self, diagram_model) -> None:
@@ -93,11 +94,19 @@ class MarkdownNoteManager(QObject):
                     self._active_target_y,
                     note_text,
                 )
+                if saved_item_id:
+                    self._set_editor_state(
+                        "freetext",
+                        saved_item_id,
+                        self._active_target_x,
+                        self._active_target_y,
+                        True,
+                    )
+                    self._editor.set_note_id(saved_item_id)
         else:
             self._diagram_model.setItemMarkdown(item_id, note_text)
             saved_item_id = item_id
 
-        self._set_editor_state("", "", 0.0, 0.0, False)
         if saved_item_id:
             self.itemSaved.emit(saved_item_id)
 
@@ -165,3 +174,7 @@ class MarkdownNoteManager(QObject):
         if task_id:
             self.taskCreated.emit(task_id)
         return task_id
+
+    @Slot()
+    def requestProjectSave(self) -> None:
+        self.projectSaveRequested.emit()

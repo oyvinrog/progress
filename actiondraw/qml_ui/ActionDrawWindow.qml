@@ -3402,6 +3402,10 @@ ApplicationWindow {
     Connections {
         target: markdownNoteManager
         enabled: markdownNoteManager !== null
+        function onProjectSaveRequested() {
+            root.performSave()
+        }
+
         function onTaskCreated(taskId) {
             if (!taskId || !diagramModel)
                 return
