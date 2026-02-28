@@ -19,11 +19,14 @@ SUPPORTED_IMAGE_MIME_TYPES = (
     "image/gif",
 )
 
+_IMAGE_ATTRS_PATTERN = r"(?P<attrs>\{[^}]*\})?"
 _DATA_IMAGE_MARKDOWN_RE = re.compile(
     r"!\[(?P<alt>[^\]]*)\]\((?P<url>data:image/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+)\)"
+    + _IMAGE_ATTRS_PATTERN
 )
 _TOKEN_IMAGE_MARKDOWN_RE = re.compile(
     r"!\[(?P<alt>[^\]]*)\]\((?P<url>adimg://(?P<token>[a-f0-9]{8}(?:-\d+)?))\)"
+    + _IMAGE_ATTRS_PATTERN
 )
 
 
@@ -105,6 +108,17 @@ class MarkdownImagePaster(QObject):
         self._markdown_to_token[markdown] = token
         return token
 
+    def _resolve_token_url(self, token: str) -> str:
+        if not token:
+            return ""
+        markdown = self._token_to_markdown.get(token, "")
+        if not markdown:
+            return ""
+        match = _DATA_IMAGE_MARKDOWN_RE.fullmatch(markdown)
+        if not match:
+            return ""
+        return match.group("url")
+
     @Slot(str, result=str)
     def compactMarkdownImages(self, markdown: str) -> str:
         if not markdown:
@@ -113,10 +127,11 @@ class MarkdownImagePaster(QObject):
         def _replace(match: re.Match[str]) -> str:
             alt = match.group("alt")
             full_markdown = match.group(0)
+            attrs = match.group("attrs") or ""
             token = self._register_markdown_image(full_markdown)
             if not token:
                 return full_markdown
-            return f"![{alt}](adimg://{token})"
+            return f"![{alt}](adimg://{token}){attrs}"
 
         return _DATA_IMAGE_MARKDOWN_RE.sub(_replace, markdown)
 
@@ -127,9 +142,11 @@ class MarkdownImagePaster(QObject):
 
         def _replace(match: re.Match[str]) -> str:
             token = match.group("token")
-            expanded = self._token_to_markdown.get(token)
-            if expanded:
-                return expanded
+            alt = match.group("alt")
+            attrs = match.group("attrs") or ""
+            resolved_url = self._resolve_token_url(token)
+            if resolved_url:
+                return f"![{alt}]({resolved_url}){attrs}"
             return match.group(0)
 
         return _TOKEN_IMAGE_MARKDOWN_RE.sub(_replace, markdown)
@@ -173,3 +190,15 @@ class MarkdownImagePaster(QObject):
                     return markdown
 
         return ""
+
+    @Slot(str, result=str)
+    def resolveMarkdownImageUrl(self, url: str) -> str:
+        if not url:
+            return ""
+        token_prefix = "adimg://"
+        if not url.startswith(token_prefix):
+            return url
+        token = url[len(token_prefix) :]
+        if not token:
+            return ""
+        return self._resolve_token_url(token)
