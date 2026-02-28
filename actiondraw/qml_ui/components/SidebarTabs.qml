@@ -20,6 +20,12 @@ Rectangle {
         projectManager.setSidebarExpanded(!persistedExpanded)
     }
 
+    function openTabRenameDialog(tabIndex, tabName) {
+        renameTabDialog.tabIndex = tabIndex
+        renameTabDialog.currentName = tabName
+        renameTabDialog.open()
+    }
+
     Layout.fillHeight: true
     Layout.preferredWidth: isExpanded ? expandedWidth : collapsedWidth
     Behavior on Layout.preferredWidth {
@@ -314,6 +320,11 @@ Rectangle {
                                         projectManager.switchTab(index)
                                 }
                             }
+                            onDoubleClicked: function(mouse) {
+                                if (mouse.button !== Qt.LeftButton)
+                                    return
+                                sidebar.openTabRenameDialog(index, model.name)
+                            }
                         }
                     }
                 }
@@ -438,9 +449,7 @@ Rectangle {
         MenuItem {
             text: "Rename..."
             onTriggered: {
-                renameTabDialog.tabIndex = tabContextMenu.tabIndex
-                renameTabDialog.currentName = tabContextMenu.tabName
-                renameTabDialog.open()
+                sidebar.openTabRenameDialog(tabContextMenu.tabIndex, tabContextMenu.tabName)
             }
         }
         MenuItem {
