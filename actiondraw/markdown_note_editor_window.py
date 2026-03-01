@@ -63,6 +63,9 @@ class MarkdownNoteEditor(QObject):
     def set_note_id(self, note_id: str) -> None:
         self._root.setProperty("noteId", note_id or "")
 
+    def close(self) -> None:
+        self._root.hide()
+
     def _handle_save(self, note_id: str, note_text: str) -> None:
         self.noteSaved.emit(note_id, note_text)
 

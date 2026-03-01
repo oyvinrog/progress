@@ -3953,6 +3953,33 @@ class TestMarkdownNoteManager:
         assert item is not None
         assert item.text == "Draft text"
 
+    def test_save_note_closes_editor(self, empty_diagram_model, monkeypatch):
+        class _DummySignal:
+            def connect(self, _callback):
+                return None
+
+        class _DummyEditor:
+            def __init__(self, *_args, **_kwargs):
+                self.noteSaved = _DummySignal()
+                self.noteCanceled = _DummySignal()
+                self.close_calls = 0
+
+            def close(self):
+                self.close_calls += 1
+
+        item_id = empty_diagram_model.addBox(40.0, 30.0, "Task")
+        monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
+        manager = MarkdownNoteManager(empty_diagram_model)
+        manager._set_editor_state("note", item_id, 40.0, 30.0, True)
+
+        manager._save_note(item_id, "Updated markdown")
+
+        assert manager.editorOpen is False
+        assert manager.activeEditorType == ""
+        assert manager.activeItemId == ""
+        assert manager._editor.close_calls == 1
+        assert empty_diagram_model.getItemMarkdown(item_id) == "Updated markdown"
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
