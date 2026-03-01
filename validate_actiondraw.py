@@ -244,7 +244,7 @@ def main():
         'actiondraw/model.py',
         'actiondraw/qml.py',
         'task_model.py',
-        'test_actiondraw.py',
+        'tests/test_actiondraw.py',
     ]
     
     print("\n1. Syntax Checks")
