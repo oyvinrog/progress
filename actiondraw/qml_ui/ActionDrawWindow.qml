@@ -11,13 +11,11 @@ ApplicationWindow {
     font.family: "Trebuchet MS"
     font.pixelSize: 13
     title: {
-        if (projectManager && projectManager.currentFilePath) {
-            var name = projectManager.currentFilePath.split("/").pop()
-            if (name.endsWith(".progress"))
-                name = name.slice(0, -9)
-            return name
-        }
-        return "ActionDraw - Progress Tracker"
+        var tabName = activeTabDisplayName()
+        var projectName = projectDisplayName()
+        if (projectName !== "")
+            return "ActionDraw - " + tabName + " - " + projectName
+        return "ActionDraw - " + tabName
     }
 
     property var diagramModelRef: diagramModel
@@ -26,6 +24,8 @@ ApplicationWindow {
     property var markdownNoteManagerRef: markdownNoteManager
     property var tabModelRef: tabModel
     property var priorityPlotWindowRef: null
+    property var hierarchyWindowRef: null
+    property real hierarchyFocusZoom: 1.2
     property bool yubiKeyPromptVisible: false
     property string yubiKeyPromptText: "Touch your YubiKey to continue."
     property bool suppressClosePrompt: false
@@ -79,6 +79,28 @@ ApplicationWindow {
         root.requestActivate()
     }
 
+    function activeTabDisplayName() {
+        if (tabModelRef && tabModelRef.currentTabName) {
+            var name = String(tabModelRef.currentTabName).trim()
+            if (name.length > 0)
+                return name
+        }
+        return "Main"
+    }
+
+    function projectDisplayName() {
+        if (projectManagerRef && projectManagerRef.currentFilePath) {
+            var path = String(projectManagerRef.currentFilePath)
+            if (path.length > 0) {
+                var name = path.split("/").pop()
+                if (name.endsWith(".progress"))
+                    name = name.slice(0, -9)
+                return name
+            }
+        }
+        return ""
+    }
+
     function openPriorityPlotWindow() {
         if (!tabModelRef)
             return
@@ -105,6 +127,93 @@ ApplicationWindow {
         win.show()
         win.raise()
         win.requestActivate()
+    }
+
+    function openHierarchyWindow(scopeTabIndex) {
+        if (!tabModelRef || !projectManagerRef)
+            return
+        var resolvedScope = -1
+        if (scopeTabIndex !== undefined && scopeTabIndex !== null) {
+            resolvedScope = Number(scopeTabIndex)
+        } else if (tabModelRef && tabModelRef.currentTabIndex !== undefined) {
+            resolvedScope = Number(tabModelRef.currentTabIndex)
+        }
+        if (hierarchyWindowRef) {
+            if (hierarchyWindowRef.setScopeTabIndex) {
+                hierarchyWindowRef.setScopeTabIndex(resolvedScope)
+            } else if (hierarchyWindowRef.scopeTabIndex !== undefined) {
+                hierarchyWindowRef.scopeTabIndex = resolvedScope
+            }
+            hierarchyWindowRef.show()
+            hierarchyWindowRef.raise()
+            hierarchyWindowRef.requestActivate()
+            return
+        }
+        var component = Qt.createComponent(Qt.resolvedUrl("HierarchyWindow.qml"))
+        if (component.status === Component.Error) {
+            console.log("Failed to load HierarchyWindow:", component.errorString())
+            return
+        }
+        var win = component.createObject(root, {
+            "tabModel": tabModelRef,
+            "projectManager": projectManagerRef,
+            "hostWindow": root,
+            "scopeTabIndex": resolvedScope
+        })
+        if (!win) {
+            console.log("Failed to instantiate HierarchyWindow")
+            return
+        }
+        hierarchyWindowRef = win
+        win.closing.connect(function() {
+            hierarchyWindowRef = null
+        })
+        win.show()
+        win.raise()
+        win.requestActivate()
+    }
+
+    function focusHierarchyTarget(tabIndex, taskIndex, itemId, closeNavigator) {
+        if (!projectManagerRef || !diagramModelRef)
+            return
+
+        var resolvedTabIndex = Number(tabIndex)
+        var resolvedTaskIndex = Number(taskIndex)
+        var resolvedItemId = itemId ? String(itemId) : ""
+        var shouldClose = (closeNavigator === undefined) ? true : !!closeNavigator
+
+        if (resolvedTaskIndex >= 0 && projectManagerRef.openTabTask) {
+            projectManagerRef.openTabTask(resolvedTabIndex, resolvedTaskIndex)
+        } else if (resolvedTabIndex >= 0 && projectManagerRef.switchTab) {
+            projectManagerRef.switchTab(resolvedTabIndex)
+        }
+
+        var applyFocus = function() {
+            root.setZoomDirect(root.hierarchyFocusZoom)
+
+            if (resolvedItemId.length > 0 && diagramModelRef.getItemSnapshot) {
+                var snapshot = diagramModelRef.getItemSnapshot(resolvedItemId)
+                if (snapshot && (snapshot.x || snapshot.x === 0) && (snapshot.y || snapshot.y === 0)) {
+                    var width = Number(snapshot.width || 0)
+                    var height = Number(snapshot.height || 0)
+                    root.centerOnPoint(snapshot.x + (width / 2), snapshot.y + (height / 2))
+                    return
+                }
+            }
+
+            if (resolvedTaskIndex >= 0) {
+                root.drillToTask(resolvedTaskIndex)
+                return
+            }
+            root.scrollToContent()
+        }
+
+        Qt.callLater(function() {
+            Qt.callLater(applyFocus)
+        })
+
+        if (shouldClose && hierarchyWindowRef)
+            hierarchyWindowRef.close()
     }
 
     function drillToTask(taskIndex) {
@@ -199,6 +308,42 @@ ApplicationWindow {
             root.showNextReminderAlert()
     }
 
+    function refreshActiveContracts() {
+        if (!projectManager || !projectManager.getActiveContracts) {
+            activeContracts = []
+            return
+        }
+        activeContracts = projectManager.getActiveContracts()
+    }
+
+    function showNextContractAlert() {
+        if (root.contractPopupBusy)
+            return
+        if (!root.contractQueue || root.contractQueue.length === 0)
+            return
+        root.contractPopupBusy = true
+        var nextContract = root.contractQueue.shift()
+        root.pendingContractTabIndex = nextContract.tabIndex
+        root.pendingContractTaskIndex = nextContract.taskIndex
+        root.pendingContractTaskTitle = nextContract.taskTitle
+        root.pendingContractPunishment = nextContract.punishment
+        root.pendingContractDeadline = nextContract.deadlineText
+        contractPopup.open()
+    }
+
+    function showContractAlert(tabIndex, taskIndex, taskTitle, punishment, deadlineText) {
+        var contractAlert = {
+            tabIndex: tabIndex,
+            taskIndex: taskIndex,
+            taskTitle: taskTitle && taskTitle.length > 0 ? taskTitle : "Task",
+            punishment: punishment && punishment.length > 0 ? punishment : "Punishment",
+            deadlineText: deadlineText && deadlineText.length > 0 ? deadlineText : "",
+        }
+        root.contractQueue.push(contractAlert)
+        if (!contractPopup.visible)
+            root.showNextContractAlert()
+    }
+
     property int minBoardSize: 2000
     property int boardMargin: 500
     property real currentMinItemX: 0
@@ -212,6 +357,8 @@ ApplicationWindow {
     property real originOffsetY: boardMargin - boundMinItemY
     property int boardWidth: Math.max(minBoardSize, (currentMaxItemX - boundMinItemX) + (boardMargin * 2))
     property int boardHeight: Math.max(minBoardSize, (currentMaxItemY - boundMinItemY) + (boardMargin * 2))
+    property int sceneWidth: Math.max(1, Math.ceil(originOffsetX + boardWidth))
+    property int sceneHeight: Math.max(1, Math.ceil(originOffsetY + boardHeight))
 
     function updateBoardBounds() {
         if (diagramModel) {
@@ -289,6 +436,14 @@ ApplicationWindow {
     property string pendingReminderTaskTitle: ""
     property var reminderQueue: []
     property bool reminderPopupBusy: false
+    property int pendingContractTabIndex: 0
+    property int pendingContractTaskIndex: -1
+    property string pendingContractTaskTitle: ""
+    property string pendingContractPunishment: ""
+    property string pendingContractDeadline: ""
+    property var contractQueue: []
+    property bool contractPopupBusy: false
+    property var activeContracts: []
     property bool tabDragActive: false
     property bool tabDragInsideViewport: false
     property string tabDragPreviewName: ""
@@ -357,6 +512,7 @@ ApplicationWindow {
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
+            && !contractPopup.visible
         onActivated: root.deleteSelectedItem()
     }
 
@@ -366,6 +522,7 @@ ApplicationWindow {
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
+            && !contractPopup.visible
         onActivated: root.navigateConnectedItem("left")
     }
 
@@ -375,6 +532,7 @@ ApplicationWindow {
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
+            && !contractPopup.visible
         onActivated: root.navigateConnectedItem("right")
     }
 
@@ -384,6 +542,7 @@ ApplicationWindow {
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
+            && !contractPopup.visible
         onActivated: root.navigateConnectedItem("up")
     }
 
@@ -393,7 +552,16 @@ ApplicationWindow {
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
+            && !contractPopup.visible
         onActivated: root.navigateConnectedItem("down")
+    }
+
+    Timer {
+        id: contractRefreshTimer
+        interval: 1000
+        repeat: true
+        running: true
+        onTriggered: root.refreshActiveContracts()
     }
 
     function addTaskOrConnectedTask() {
@@ -840,6 +1008,7 @@ ApplicationWindow {
             projectManager: projectManagerRef
             onTabDragMoved: root.updateTabDragHover
             onTabDragReleased: root.handleTabDragRelease
+            onAnalyzeHierarchy: function(tabIndex) { root.openHierarchyWindow(tabIndex) }
         }
 
         // Main content area (right side)
@@ -847,6 +1016,133 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 14
+
+            Rectangle {
+                Layout.fillWidth: true
+                height: 38
+                radius: 10
+                color: "#14202b"
+                border.color: "#2c3f53"
+                border.width: 1
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 12
+                    spacing: 10
+
+                    Text {
+                        text: "Current Tab: " + root.activeTabDisplayName()
+                        color: "#dfefff"
+                        font.pixelSize: 13
+                        font.bold: true
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+
+                    Text {
+                        property string projectName: root.projectDisplayName()
+                        visible: projectName !== ""
+                        text: "Project: " + projectName
+                        color: "#8da6bc"
+                        font.pixelSize: 11
+                        elide: Text.ElideRight
+                        horizontalAlignment: Text.AlignRight
+                        Layout.maximumWidth: parent.width * 0.42
+                    }
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                visible: root.activeContracts && root.activeContracts.length > 0
+                radius: 10
+                color: "#2b1b1f"
+                border.color: "#b25d6d"
+                border.width: 1
+                implicitHeight: contractBannerColumn.implicitHeight + 16
+
+                Column {
+                    id: contractBannerColumn
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    spacing: 6
+
+                    Text {
+                        text: "Active Contracts"
+                        color: "#ffd4d4"
+                        font.pixelSize: 12
+                        font.bold: true
+                    }
+
+                    Repeater {
+                        model: root.activeContracts
+                        delegate: Rectangle {
+                            width: contractBannerColumn.width
+                            height: contractPunishmentText.visible ? 50 : 32
+                            radius: 6
+                            color: modelData.breached ? "#4a2222" : "#37252a"
+                            border.color: modelData.breached ? "#d46a6a" : "#84515e"
+                            border.width: 1
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 8
+                                anchors.rightMargin: 8
+                                spacing: 8
+
+                                Column {
+                                    Layout.fillWidth: true
+                                    spacing: 1
+
+                                    Text {
+                                        text: "[" + modelData.tabName + "] " + modelData.taskTitle
+                                        color: "#f6f7fa"
+                                        font.pixelSize: 11
+                                        font.bold: true
+                                        elide: Text.ElideRight
+                                    }
+
+                                    Text {
+                                        id: contractPunishmentText
+                                        visible: modelData.punishment && modelData.punishment.length > 0
+                                        text: "Punishment: " + modelData.punishment
+                                        color: "#f0c6c6"
+                                        font.pixelSize: 10
+                                        elide: Text.ElideRight
+                                    }
+                                }
+
+                                Text {
+                                    text: {
+                                        var remaining = Number(modelData.remainingSeconds)
+                                        if (modelData.breached || remaining <= 0)
+                                            return "OVERDUE"
+                                        var totalSecs = Math.floor(remaining)
+                                        var hours = Math.floor(totalSecs / 3600)
+                                        var mins = Math.floor((totalSecs % 3600) / 60)
+                                        var secs = totalSecs % 60
+                                        if (hours > 0)
+                                            return hours + "h " + mins + "m " + secs + "s"
+                                        return mins + "m " + secs + "s"
+                                    }
+                                    color: modelData.breached ? "#ff9b9b" : "#ffd9a8"
+                                    font.pixelSize: 10
+                                    font.bold: true
+                                }
+
+                                Button {
+                                    text: "Open Task"
+                                    onClicked: {
+                                        if (projectManager && projectManager.openTabTask)
+                                            projectManager.openTabTask(Number(modelData.tabIndex), Number(modelData.taskIndex))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
 
             ProgressStatsRow {
                 root: root
@@ -987,8 +1283,8 @@ ApplicationWindow {
             Flickable {
                 id: viewport
                 anchors.fill: parent
-                contentWidth: root.boardWidth * root.zoomLevel
-                contentHeight: root.boardHeight * root.zoomLevel
+                contentWidth: root.sceneWidth * root.zoomLevel
+                contentHeight: root.sceneHeight * root.zoomLevel
                 clip: true
                 interactive: !diagramModel || !diagramModel.drawingMode
 
@@ -1615,6 +1911,11 @@ ApplicationWindow {
                             property bool taskCountdownActive: model.taskCountdownActive
                             property bool taskReminderActive: model.taskReminderActive
                             property string taskReminderAt: model.taskReminderAt
+                            property bool taskContractActive: model.taskContractActive
+                            property string taskContractDeadline: model.taskContractDeadline
+                            property real taskContractRemaining: model.taskContractRemaining
+                            property bool taskContractBreached: model.taskContractBreached
+                            property string taskContractPunishment: model.taskContractPunishment
                             property real linkedSubtabCompletion: model.linkedSubtabCompletion
                             property string linkedSubtabActiveAction: model.linkedSubtabActiveAction
                             property bool hasLinkedSubtab: model.hasLinkedSubtab
@@ -1660,8 +1961,8 @@ ApplicationWindow {
                             height: model.height
                             radius: itemRect.itemType === "cloud" ? Math.min(width, height) / 2 : 12
                             color: itemRect.itemType === "image" ? "transparent" : (itemRect.isTask && itemRect.taskCompleted ? Qt.darker(model.color, 1.5) : model.color)
-                            border.width: itemRect.taskCountdownExpired ? 4 : (itemRect.taskCurrent ? 4 : (isEdgeDropTarget ? 3 : 1))
-                            border.color: itemRect.taskCountdownExpired ? "#e74c3c" : (itemRect.taskCurrent ? "#ffcc00" : (isEdgeDropTarget ? "#74d9a0" : (itemDrag.active ? Qt.lighter(model.color, 1.4) : Qt.darker(model.color, 1.6))))
+                            border.width: (itemRect.taskCountdownExpired || itemRect.taskContractBreached) ? 4 : (itemRect.taskCurrent ? 4 : (isEdgeDropTarget ? 3 : 1))
+                            border.color: (itemRect.taskCountdownExpired || itemRect.taskContractBreached) ? "#e74c3c" : (itemRect.taskCurrent ? "#ffcc00" : (isEdgeDropTarget ? "#74d9a0" : (itemDrag.active ? Qt.lighter(model.color, 1.4) : Qt.darker(model.color, 1.6))))
                             z: itemRect.taskCurrent ? 15 : (isEdgeDropTarget ? 10 : 5)
                             scale: isEdgeDropTarget ? 1.08 : 1.0
                             transformOrigin: Item.Center
@@ -1895,7 +2196,7 @@ ApplicationWindow {
                                 width: 18
                                 height: 18
                                 radius: 4
-                                anchors.left: itemRect.isTask ? reminderButton.right : parent.left
+                                anchors.left: itemRect.isTask ? contractButton.right : parent.left
                                 anchors.leftMargin: itemRect.isTask ? 6 : 8
                                 anchors.top: parent.top
                                 anchors.topMargin: 8
@@ -1949,6 +2250,48 @@ ApplicationWindow {
                                             dialogs.reminderDialog.dateValue = ""
                                             dialogs.reminderDialog.timeValue = ""
                                             dialogs.reminderDialog.open()
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                id: contractButton
+                                visible: itemRect.isTask
+                                width: 20
+                                height: 20
+                                radius: 10
+                                anchors.left: reminderButton.right
+                                anchors.top: parent.top
+                                anchors.leftMargin: 4
+                                anchors.topMargin: 8
+                                color: itemRect.taskContractBreached ? "#d14c4c" : (itemRect.taskContractActive ? "#9b59b6" : "#1a2230")
+                                border.color: itemRect.taskContractBreached ? "#b23a3a" : (itemRect.taskContractActive ? "#8e44ad" : "#4b5b72")
+                                border.width: 2
+                                z: 20
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "⚑"
+                                    color: (itemRect.taskContractActive || itemRect.taskContractBreached) ? "#ffffff" : "#8a93a5"
+                                    font.pixelSize: 10
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                    onClicked: function(mouse) {
+                                        dialogs.contractContextMenu.taskIndex = itemRect.taskIndex
+                                        dialogs.contractContextMenu.deadlineAt = itemRect.taskContractDeadline
+                                        dialogs.contractContextMenu.punishment = itemRect.taskContractPunishment
+                                        if (mouse.button === Qt.RightButton || itemRect.taskContractActive) {
+                                            dialogs.contractContextMenu.popup()
+                                        } else {
+                                            dialogs.contractDialog.taskIndex = itemRect.taskIndex
+                                            dialogs.contractDialog.dateValue = ""
+                                            dialogs.contractDialog.timeValue = ""
+                                            dialogs.contractDialog.punishmentValue = ""
+                                            dialogs.contractDialog.open()
                                         }
                                     }
                                 }
@@ -2734,6 +3077,12 @@ ApplicationWindow {
                                         if (itemRect.linkedSubtabActiveAction !== "")
                                             text += "\nActive: " + itemRect.linkedSubtabActiveAction
                                     }
+                                    if (itemRect.taskContractActive) {
+                                        text += "\n\nContract deadline: " + itemRect.taskContractDeadline
+                                        if (itemRect.taskContractBreached)
+                                            text += "\nStatus: OVERDUE"
+                                        text += "\nPunishment: " + itemRect.taskContractPunishment
+                                    }
                                     return text
                                 }
 
@@ -3330,6 +3679,86 @@ ApplicationWindow {
         }
     }
 
+    Popup {
+        id: contractPopup
+        modal: false
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        x: (root.width - width) / 2
+        y: 120
+        width: Math.min(root.width - 40, 500)
+
+        background: Rectangle {
+            radius: 10
+            color: "#2b1a1f"
+            border.color: "#d46a6a"
+            border.width: 2
+        }
+
+        contentItem: ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 12
+            spacing: 10
+
+            Text {
+                text: "Contract Breached"
+                color: "#ffb1b1"
+                font.pixelSize: 14
+                font.bold: true
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: root.pendingContractTaskTitle && root.pendingContractTaskTitle.length > 0 ? root.pendingContractTaskTitle : "Task"
+                color: "#f5f6f8"
+                wrapMode: Text.WordWrap
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: "Deadline: " + root.pendingContractDeadline
+                color: "#f2c8c8"
+                wrapMode: Text.WordWrap
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: "Punishment: " + root.pendingContractPunishment
+                color: "#ffd4a8"
+                wrapMode: Text.WordWrap
+                font.bold: true
+            }
+
+            RowLayout {
+                spacing: 8
+
+                Button {
+                    text: "Open Task"
+                    onClicked: {
+                        var tabIndex = root.pendingContractTabIndex
+                        var taskIndex = root.pendingContractTaskIndex
+                        contractPopup.close()
+                        if (projectManager && projectManager.openTabTask) {
+                            projectManager.openTabTask(tabIndex, taskIndex)
+                        } else {
+                            root.drillToTask(taskIndex)
+                        }
+                    }
+                }
+
+                Button {
+                    text: "Acknowledge"
+                    onClicked: contractPopup.close()
+                }
+            }
+        }
+
+        onClosed: {
+            root.contractPopupBusy = false
+            root.showNextContractAlert()
+        }
+    }
+
     Connections {
         target: projectManager
         enabled: projectManager !== null
@@ -3339,11 +3768,13 @@ ApplicationWindow {
         function onLoadCompleted(filePath) {
             root.updateBoardBounds()
             root.refreshLinkingTabsPanel()
+            root.refreshActiveContracts()
             Qt.callLater(root.scrollToContent)
         }
         function onTabSwitched() {
             root.updateBoardBounds()
             root.refreshLinkingTabsPanel()
+            root.refreshActiveContracts()
             Qt.callLater(root.scrollToContent)
         }
         function onTaskDrillRequested(taskIndex) {
@@ -3371,6 +3802,11 @@ ApplicationWindow {
             root.showWindow()
             root.showReminderAlert(tabIndex, taskIndex, taskTitle)
         }
+        function onTaskContractBreached(tabIndex, taskIndex, taskTitle, punishment, deadlineText) {
+            root.showWindow()
+            root.refreshActiveContracts()
+            root.showContractAlert(tabIndex, taskIndex, taskTitle, punishment, deadlineText)
+        }
     }
 
     Connections {
@@ -3378,30 +3814,41 @@ ApplicationWindow {
         enabled: tabModel !== null
         function onTabsChanged() {
             root.refreshLinkingTabsPanel()
+            root.refreshActiveContracts()
         }
         function onCurrentTabChanged() {
             root.refreshLinkingTabsPanel()
+            root.refreshActiveContracts()
         }
         function onCurrentTabIndexChanged() {
             root.refreshLinkingTabsPanel()
+            root.refreshActiveContracts()
         }
         function onDataChanged() {
             root.refreshLinkingTabsPanel()
+            root.refreshActiveContracts()
         }
         function onRowsInserted() {
             root.refreshLinkingTabsPanel()
+            root.refreshActiveContracts()
         }
         function onRowsRemoved() {
             root.refreshLinkingTabsPanel()
+            root.refreshActiveContracts()
         }
         function onModelReset() {
             root.refreshLinkingTabsPanel()
+            root.refreshActiveContracts()
         }
     }
 
     Connections {
         target: markdownNoteManager
         enabled: markdownNoteManager !== null
+        function onProjectSaveRequested() {
+            root.performSave()
+        }
+
         function onTaskCreated(taskId) {
             if (!taskId || !diagramModel)
                 return
@@ -3422,6 +3869,7 @@ ApplicationWindow {
     Component.onCompleted: {
         updateBoardBounds()
         refreshLinkingTabsPanel()
+        refreshActiveContracts()
         Qt.callLater(resetView)
     }
 

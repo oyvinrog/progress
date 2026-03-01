@@ -14,6 +14,23 @@ Window {
 
     property var tabModel: null
     property var tabModelRef: tabModel
+    property int selectedTabIndex: -1
+
+    function modelCount() {
+        if (!tabModelRef)
+            return 0
+        if (tabModelRef.rowCount)
+            return tabModelRef.rowCount()
+        if (tabModelRef.count !== undefined)
+            return Number(tabModelRef.count)
+        return 0
+    }
+
+    onSelectedTabIndexChanged: {
+        if (selectedTabIndex < 0 || selectedTabIndex >= tabScoreList.count)
+            return
+        tabScoreList.positionViewAtIndex(selectedTabIndex, ListView.Contain)
+    }
 
     Rectangle {
         anchors.fill: parent
@@ -68,6 +85,18 @@ Window {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 tabModel: root.tabModelRef
+                selectedTabIndex: root.selectedTabIndex
+                onPointClicked: function(tabIndex) {
+                    root.selectedTabIndex = tabIndex
+                }
+                onPointDoubleClicked: function(tabIndex) {
+                    root.selectedTabIndex = tabIndex
+                    if (!root.tabModelRef || !root.tabModelRef.setCurrentTab)
+                        return
+                    if (tabIndex < 0 || tabIndex >= root.modelCount())
+                        return
+                    root.tabModelRef.setCurrentTab(tabIndex)
+                }
             }
 
             Rectangle {
@@ -78,7 +107,7 @@ Window {
                 border.color: "#2a4e68"
                 border.width: 1
 
-                Column {
+                ColumnLayout {
                     anchors.fill: parent
                     anchors.margins: 12
                     spacing: 8
@@ -90,16 +119,28 @@ Window {
                         font.bold: true
                     }
 
-                    Repeater {
+                    ListView {
+                        id: tabScoreList
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
                         model: root.tabModelRef
+                        clip: true
+                        spacing: 8
+                        boundsBehavior: Flickable.StopAtBounds
+                        flickableDirection: Flickable.VerticalFlick
+                        ScrollBar.vertical: ScrollBar {
+                            policy: ScrollBar.AsNeeded
+                            width: 8
+                        }
 
                         delegate: Rectangle {
-                            width: parent.width
+                            width: tabScoreList.width
                             height: 66
                             radius: 8
-                            color: index === 0 ? "#244e67" : "#173245"
-                            border.color: "#3b6682"
-                            border.width: 1
+                            property bool isSelected: index === root.selectedTabIndex
+                            color: isSelected ? "#244e67" : "#173245"
+                            border.color: isSelected ? "#79cbff" : "#3b6682"
+                            border.width: isSelected ? 2 : 1
 
                             Column {
                                 anchors.fill: parent
@@ -154,6 +195,20 @@ Window {
                     }
                 }
             }
+        }
+    }
+
+    Connections {
+        target: root.tabModelRef
+        function onModelReset() {
+            var count = root.modelCount()
+            if (root.selectedTabIndex >= count)
+                root.selectedTabIndex = -1
+        }
+        function onRowsRemoved() {
+            var count = root.modelCount()
+            if (root.selectedTabIndex >= count)
+                root.selectedTabIndex = -1
         }
     }
 }

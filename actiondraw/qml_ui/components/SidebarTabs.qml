@@ -8,6 +8,7 @@ Rectangle {
     property var projectManager
     property var onTabDragMoved
     property var onTabDragReleased
+    property var onAnalyzeHierarchy
     property int expandedWidth: 252
     property int collapsedWidth: 48
     readonly property bool keepExpanded: tabContextMenu.visible || renameTabDialog.visible
@@ -18,6 +19,12 @@ Rectangle {
         if (!projectManager || !projectManager.setSidebarExpanded)
             return
         projectManager.setSidebarExpanded(!persistedExpanded)
+    }
+
+    function openTabRenameDialog(tabIndex, tabName) {
+        renameTabDialog.tabIndex = tabIndex
+        renameTabDialog.currentName = tabName
+        renameTabDialog.open()
     }
 
     Layout.fillHeight: true
@@ -314,6 +321,11 @@ Rectangle {
                                         projectManager.switchTab(index)
                                 }
                             }
+                            onDoubleClicked: function(mouse) {
+                                if (mouse.button !== Qt.LeftButton)
+                                    return
+                                sidebar.openTabRenameDialog(index, model.name)
+                            }
                         }
                     }
                 }
@@ -420,6 +432,16 @@ Rectangle {
         MenuSeparator {}
 
         MenuItem {
+            text: "Analyze Hierarchy..."
+            onTriggered: {
+                if (typeof sidebar.onAnalyzeHierarchy === "function")
+                    sidebar.onAnalyzeHierarchy(tabContextMenu.tabIndex)
+            }
+        }
+
+        MenuSeparator {}
+
+        MenuItem {
             text: "Move Left"
             enabled: tabModel ? tabContextMenu.tabIndex > 0 : false
             onTriggered: {
@@ -438,9 +460,7 @@ Rectangle {
         MenuItem {
             text: "Rename..."
             onTriggered: {
-                renameTabDialog.tabIndex = tabContextMenu.tabIndex
-                renameTabDialog.currentName = tabContextMenu.tabName
-                renameTabDialog.open()
+                sidebar.openTabRenameDialog(tabContextMenu.tabIndex, tabContextMenu.tabName)
             }
         }
         MenuItem {

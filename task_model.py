@@ -13,7 +13,7 @@ import sys
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from PySide6.QtCore import (
     QAbstractListModel,
@@ -57,6 +57,10 @@ class Task:
     countdown_duration: Optional[float] = None  # countdown duration in seconds
     countdown_start: Optional[float] = None  # timestamp when countdown started
     reminder_at: Optional[float] = None  # local timestamp when reminder should fire
+    contract_deadline_at: Optional[float] = None  # local timestamp when contract deadline is due
+    contract_punishment: str = ""  # user-defined punishment text
+    contract_breached: bool = False  # whether deadline has passed before completion
+    contract_breach_notified: bool = False  # whether breach alert has been emitted
 
 
 @dataclass
@@ -89,6 +93,11 @@ class TaskModel(QAbstractListModel):
     CountdownActiveRole = Qt.UserRole + 12
     ReminderActiveRole = Qt.UserRole + 13
     ReminderAtRole = Qt.UserRole + 14
+    ContractActiveRole = Qt.UserRole + 15
+    ContractDeadlineRole = Qt.UserRole + 16
+    ContractRemainingRole = Qt.UserRole + 17
+    ContractBreachedRole = Qt.UserRole + 18
+    ContractPunishmentRole = Qt.UserRole + 19
 
     avgTimeChanged = Signal()
     totalEstimateChanged = Signal()
@@ -98,6 +107,14 @@ class TaskModel(QAbstractListModel):
     taskCountdownChanged = Signal(int, arguments=['taskIndex'])
     taskReminderChanged = Signal(int, arguments=['taskIndex'])
     taskReminderDue = Signal(int, str, arguments=['taskIndex', 'taskTitle'])
+    taskContractChanged = Signal(int, arguments=['taskIndex'])
+    taskContractBreached = Signal(
+        int,
+        str,
+        str,
+        str,
+        arguments=['taskIndex', 'taskTitle', 'punishment', 'deadlineText'],
+    )
 
     def __init__(self, tasks: Optional[List[Task]] = None):
         super().__init__()
@@ -154,6 +171,16 @@ class TaskModel(QAbstractListModel):
             return self._isReminderActive(task)
         elif role == self.ReminderAtRole:
             return self._formatReminderAt(task)
+        elif role == self.ContractActiveRole:
+            return self._isContractActive(task)
+        elif role == self.ContractDeadlineRole:
+            return self._formatContractDeadline(task)
+        elif role == self.ContractRemainingRole:
+            return self._getContractRemaining(task)
+        elif role == self.ContractBreachedRole:
+            return self._isContractBreached(task)
+        elif role == self.ContractPunishmentRole:
+            return self._getContractPunishment(task)
         return None
 
     def roleNames(self):  # type: ignore[override]
@@ -172,6 +199,11 @@ class TaskModel(QAbstractListModel):
             self.CountdownActiveRole: b"countdownActive",
             self.ReminderActiveRole: b"reminderActive",
             self.ReminderAtRole: b"reminderAt",
+            self.ContractActiveRole: b"contractActive",
+            self.ContractDeadlineRole: b"contractDeadline",
+            self.ContractRemainingRole: b"contractRemaining",
+            self.ContractBreachedRole: b"contractBreached",
+            self.ContractPunishmentRole: b"contractPunishment",
         }
 
     def _getAverageTaskTime(self) -> float:
@@ -336,6 +368,38 @@ class TaskModel(QAbstractListModel):
             return ""
         return datetime.fromtimestamp(task.reminder_at).strftime("%Y-%m-%d %H:%M")
 
+    def _isContractActive(self, task: Task) -> bool:
+        """Return True when a task has an active contract."""
+        return (
+            not task.completed
+            and task.contract_deadline_at is not None
+            and bool(task.contract_punishment.strip())
+        )
+
+    def _formatContractDeadline(self, task: Task) -> str:
+        """Return contract deadline as local datetime string."""
+        if not self._isContractActive(task):
+            return ""
+        return datetime.fromtimestamp(task.contract_deadline_at).strftime("%Y-%m-%d %H:%M")
+
+    def _getContractRemaining(self, task: Task) -> float:
+        """Return seconds until deadline, or -1 if no active contract."""
+        if not self._isContractActive(task):
+            return -1.0
+        return float(task.contract_deadline_at - time.time())
+
+    def _isContractBreached(self, task: Task) -> bool:
+        """Return True if task contract is breached."""
+        if not self._isContractActive(task):
+            return False
+        return bool(task.contract_breached)
+
+    def _getContractPunishment(self, task: Task) -> str:
+        """Return punishment text for an active contract."""
+        if not self._isContractActive(task):
+            return ""
+        return str(task.contract_punishment)
+
     def _parseReminderDateTime(self, reminder_str: str) -> Optional[float]:
         """Parse reminder datetime string as local time and return timestamp."""
         normalized = reminder_str.strip()
@@ -435,6 +499,43 @@ class TaskModel(QAbstractListModel):
         self.taskReminderChanged.emit(row)
         return True
 
+    @Slot(int, str, str, result=bool)
+    def setContractAt(self, row: int, contract_deadline_str: str, punishment: str) -> bool:
+        """Set a task contract with absolute local deadline and punishment."""
+        if row < 0 or row >= len(self._tasks):
+            return False
+
+        punishment_text = punishment.strip()
+        if not punishment_text:
+            return False
+
+        contract_deadline_at = self._parseReminderDateTime(contract_deadline_str)
+        if contract_deadline_at is None:
+            return False
+        if contract_deadline_at <= time.time():
+            return False
+
+        task = self._tasks[row]
+        task.contract_deadline_at = contract_deadline_at
+        task.contract_punishment = punishment_text
+        task.contract_breached = False
+        task.contract_breach_notified = False
+
+        idx = self.index(row, 0)
+        self.dataChanged.emit(
+            idx,
+            idx,
+            [
+                self.ContractActiveRole,
+                self.ContractDeadlineRole,
+                self.ContractRemainingRole,
+                self.ContractBreachedRole,
+                self.ContractPunishmentRole,
+            ],
+        )
+        self.taskContractChanged.emit(row)
+        return True
+
     @Slot(int)
     def clearReminderAt(self, row: int) -> None:
         """Clear a task reminder."""
@@ -449,6 +550,36 @@ class TaskModel(QAbstractListModel):
         idx = self.index(row, 0)
         self.dataChanged.emit(idx, idx, [self.ReminderActiveRole, self.ReminderAtRole])
         self.taskReminderChanged.emit(row)
+
+    @Slot(int)
+    def clearContract(self, row: int) -> None:
+        """Clear a task contract."""
+        if row < 0 or row >= len(self._tasks):
+            return
+
+        task = self._tasks[row]
+        had_contract = self._isContractActive(task) or task.contract_deadline_at is not None
+        if not had_contract:
+            return
+
+        task.contract_deadline_at = None
+        task.contract_punishment = ""
+        task.contract_breached = False
+        task.contract_breach_notified = False
+
+        idx = self.index(row, 0)
+        self.dataChanged.emit(
+            idx,
+            idx,
+            [
+                self.ContractActiveRole,
+                self.ContractDeadlineRole,
+                self.ContractRemainingRole,
+                self.ContractBreachedRole,
+                self.ContractPunishmentRole,
+            ],
+        )
+        self.taskContractChanged.emit(row)
 
     @Slot(int)
     def clearCountdownTimer(self, row: int) -> None:
@@ -504,6 +635,8 @@ class TaskModel(QAbstractListModel):
         changed = False
         countdown_task_indices = []
         due_reminders: List[Tuple[int, str]] = []
+        contract_task_indices = []
+        due_contracts: List[Tuple[int, str, str, str]] = []
 
         for i, task in enumerate(self._tasks):
             if not task.completed and task.start_time:
@@ -518,6 +651,20 @@ class TaskModel(QAbstractListModel):
 
             if task.reminder_at is not None and not task.completed and task.reminder_at <= current_time:
                 due_reminders.append((i, task.title))
+
+            if self._isContractActive(task):
+                contract_task_indices.append(i)
+                if task.contract_deadline_at <= current_time and not task.contract_breached:
+                    task.contract_breached = True
+                if task.contract_breached and not task.contract_breach_notified:
+                    due_contracts.append(
+                        (
+                            i,
+                            task.title,
+                            task.contract_punishment,
+                            datetime.fromtimestamp(task.contract_deadline_at).strftime("%Y-%m-%d %H:%M"),
+                        )
+                    )
 
         # Update all rows if any task changed, since completion times are interdependent
         if changed and len(self._tasks) > 0:
@@ -536,6 +683,21 @@ class TaskModel(QAbstractListModel):
             # Emit signal so DiagramModel can update its own dataChanged
             self.taskCountdownChanged.emit(i)
 
+        for i in contract_task_indices:
+            idx = self.index(i, 0)
+            self.dataChanged.emit(
+                idx,
+                idx,
+                [
+                    self.ContractActiveRole,
+                    self.ContractDeadlineRole,
+                    self.ContractRemainingRole,
+                    self.ContractBreachedRole,
+                    self.ContractPunishmentRole,
+                ],
+            )
+            self.taskContractChanged.emit(i)
+
         for i, task_title in due_reminders:
             task = self._tasks[i]
             task.reminder_at = None
@@ -543,6 +705,14 @@ class TaskModel(QAbstractListModel):
             self.dataChanged.emit(idx, idx, [self.ReminderActiveRole, self.ReminderAtRole])
             self.taskReminderChanged.emit(i)
             self.taskReminderDue.emit(i, task_title)
+
+        for i, task_title, punishment, deadline_text in due_contracts:
+            task = self._tasks[i]
+            task.contract_breach_notified = True
+            idx = self.index(i, 0)
+            self.dataChanged.emit(idx, idx, [self.ContractBreachedRole])
+            self.taskContractChanged.emit(i)
+            self.taskContractBreached.emit(i, task_title, punishment, deadline_text)
 
     def addTask(self, title: str, parent_row: int = -1) -> None:
         """Add a new task to the model."""
@@ -611,6 +781,7 @@ class TaskModel(QAbstractListModel):
 
         task = self._tasks[row]
         had_active_reminder = task.reminder_at is not None
+        had_active_contract = self._isContractActive(task)
         task.completed = completed
 
         if completed:
@@ -623,6 +794,10 @@ class TaskModel(QAbstractListModel):
             task.countdown_duration = None
             task.countdown_start = None
             task.reminder_at = None
+            task.contract_deadline_at = None
+            task.contract_punishment = ""
+            task.contract_breached = False
+            task.contract_breach_notified = False
         else:
             # Restart timing
             task.start_time = time.time()
@@ -632,6 +807,8 @@ class TaskModel(QAbstractListModel):
         self.taskCompletionChanged.emit(row, completed)
         if completed and had_active_reminder:
             self.taskReminderChanged.emit(row)
+        if completed and had_active_contract:
+            self.taskContractChanged.emit(row)
         self.avgTimeChanged.emit()
         self.totalEstimateChanged.emit()
 
@@ -782,6 +959,11 @@ class TaskModel(QAbstractListModel):
             task_dict["countdown_start"] = task.countdown_start
         if task.reminder_at is not None:
             task_dict["reminder_at"] = task.reminder_at
+        if task.contract_deadline_at is not None:
+            task_dict["contract_deadline_at"] = task.contract_deadline_at
+            task_dict["contract_punishment"] = task.contract_punishment
+            task_dict["contract_breached"] = task.contract_breached
+            task_dict["contract_breach_notified"] = task.contract_breach_notified
         return task_dict
 
     def getSubtasksData(self, parent_row: int) -> Dict[str, Any]:
@@ -879,6 +1061,10 @@ class TaskModel(QAbstractListModel):
                         countdown_duration=task_data.get("countdown_duration"),
                         countdown_start=task_data.get("countdown_start"),
                         reminder_at=task_data.get("reminder_at"),
+                        contract_deadline_at=task_data.get("contract_deadline_at"),
+                        contract_punishment=task_data.get("contract_punishment", ""),
+                        contract_breached=task_data.get("contract_breached", False),
+                        contract_breach_notified=task_data.get("contract_breach_notified", False),
                     )
                     # Don't auto-start timing for loaded tasks
                     if not task.completed:
@@ -1032,6 +1218,134 @@ class TabModel(QAbstractListModel):
                 }
             )
         return links
+
+    def _tab_name_to_index_map(self) -> Dict[str, int]:
+        name_to_index: Dict[str, int] = {}
+        for idx, tab in enumerate(self._tabs):
+            name = str(getattr(tab, "name", "") or "").strip()
+            if not name or name in name_to_index:
+                continue
+            name_to_index[name] = idx
+        return name_to_index
+
+    def _extract_tab_tasks(self, tab: Tab) -> List[Dict[str, Any]]:
+        tasks_payload = tab.tasks if isinstance(tab.tasks, dict) else {}
+        tasks = tasks_payload.get("tasks", []) if isinstance(tasks_payload, dict) else []
+        if not isinstance(tasks, list):
+            return []
+        normalized: List[Dict[str, Any]] = []
+        for task in tasks:
+            normalized.append(task if isinstance(task, dict) else {})
+        return normalized
+
+    def _extract_tab_items(self, tab: Tab) -> List[Dict[str, Any]]:
+        diagram_payload = tab.diagram if isinstance(tab.diagram, dict) else {}
+        items = diagram_payload.get("items", []) if isinstance(diagram_payload, dict) else []
+        if not isinstance(items, list):
+            return []
+        return [item for item in items if isinstance(item, dict)]
+
+    def _build_hierarchy_tab_node(
+        self,
+        tab_index: int,
+        name_to_index: Dict[str, int],
+        path_tab_indices: Set[int],
+    ) -> Dict[str, Any]:
+        if tab_index < 0 or tab_index >= len(self._tabs):
+            return {}
+
+        tab = self._tabs[tab_index]
+        tab_path = set(path_tab_indices)
+        tab_path.add(tab_index)
+
+        tasks = self._extract_tab_tasks(tab)
+        items = self._extract_tab_items(tab)
+
+        children: List[Dict[str, Any]] = []
+        for item in items:
+            item_id = str(item.get("id", ""))
+            item_type = str(item.get("item_type", ""))
+            item_text = str(item.get("text", ""))
+            try:
+                task_index = int(item.get("task_index", -1))
+            except (TypeError, ValueError):
+                task_index = -1
+
+            # Navigator should hide completed tasks.
+            if item_type == "task" and 0 <= task_index < len(tasks):
+                if bool(tasks[task_index].get("completed", False)):
+                    continue
+
+            linked_tab_index = -1
+            linked_tab_name = ""
+            if 0 <= task_index < len(tasks):
+                task_title = str(tasks[task_index].get("title", "")).strip()
+                linked_tab_index = name_to_index.get(task_title, -1)
+                if linked_tab_index >= 0:
+                    linked_tab_name = str(self._tabs[linked_tab_index].name)
+
+            item_node: Dict[str, Any] = {
+                "kind": "diagramNode",
+                "itemId": item_id,
+                "itemType": item_type,
+                "text": item_text,
+                "taskIndex": task_index,
+                "sourceTabIndex": tab_index,
+                "sourceTabName": tab.name,
+                "linkedTabIndex": linked_tab_index,
+                "linkedTabName": linked_tab_name,
+                "hasLinkedSubtab": linked_tab_index >= 0,
+                "children": [],
+            }
+
+            if linked_tab_index >= 0:
+                if linked_tab_index in tab_path:
+                    item_node["children"] = [{
+                        "kind": "cycleRef",
+                        "tabIndex": linked_tab_index,
+                        "tabName": linked_tab_name,
+                    }]
+                else:
+                    linked_node = self._build_hierarchy_tab_node(linked_tab_index, name_to_index, tab_path)
+                    if linked_node:
+                        item_node["children"] = [linked_node]
+
+            children.append(item_node)
+
+        return {
+            "kind": "tab",
+            "tabIndex": tab_index,
+            "tabName": tab.name,
+            "completionPercent": self._calculateTabCompletion(tab),
+            "activeTaskTitle": self._getActiveTaskTitle(tab),
+            "children": children,
+        }
+
+    @Slot(result=list)
+    @Slot(int, result=list)
+    def getHierarchyTree(self, root_tab_index: int = -1) -> List[Dict[str, Any]]:
+        """Return recursive linked-subdiagram hierarchy.
+
+        Args:
+            root_tab_index: Optional tab index to use as a single hierarchy root.
+                If negative, all tabs are returned as top-level roots.
+        """
+        name_to_index = self._tab_name_to_index_map()
+        hierarchy: List[Dict[str, Any]] = []
+
+        if root_tab_index >= 0:
+            if root_tab_index >= len(self._tabs):
+                return []
+            node = self._build_hierarchy_tab_node(root_tab_index, name_to_index, set())
+            if node:
+                hierarchy.append(node)
+            return hierarchy
+
+        for index in range(len(self._tabs)):
+            node = self._build_hierarchy_tab_node(index, name_to_index, set())
+            if node:
+                hierarchy.append(node)
+        return hierarchy
 
     @Slot(str)
     def addTab(self, name: str = "") -> None:
@@ -1296,6 +1610,14 @@ class ProjectManager(QObject):
     tabSwitched = Signal()  # Emitted when switching to a different tab
     taskDrillRequested = Signal(int, arguments=["taskIndex"])
     taskReminderDue = Signal(int, int, str, arguments=["tabIndex", "taskIndex", "taskTitle"])
+    taskContractBreached = Signal(
+        int,
+        int,
+        str,
+        str,
+        str,
+        arguments=["tabIndex", "taskIndex", "taskTitle", "punishment", "deadlineText"],
+    )
     yubiKeyInteractionStarted = Signal(str, arguments=["message"])
     yubiKeyInteractionFinished = Signal()
 
@@ -1327,11 +1649,13 @@ class ProjectManager(QObject):
         self._reminder_timer.timeout.connect(self._checkBackgroundTabReminders)
         self._reminder_timer.start(1000)
         self._task_model.taskReminderDue.connect(self._onCurrentTabReminderDue)
+        self._task_model.taskContractBreached.connect(self._onCurrentTabContractBreached)
         if self._tab_model is not None:
             self._task_model.taskCompletionChanged.connect(self._refreshCurrentTabTasks)
             self._task_model.taskCountChanged.connect(self._refreshCurrentTabTasks)
             self._task_model.taskRenamed.connect(self._refreshCurrentTabTasks)
             self._task_model.taskReminderChanged.connect(self._refreshCurrentTabTasks)
+            self._task_model.taskContractChanged.connect(self._refreshCurrentTabTasks)
             # Connect diagram model's currentTaskChanged to update tab sidebar
             if hasattr(self._diagram_model, 'currentTaskChanged'):
                 self._diagram_model.currentTaskChanged.connect(self._refreshCurrentTabDiagram)
@@ -1343,8 +1667,18 @@ class ProjectManager(QObject):
         tab_index = self._tab_model.currentTabIndex if self._tab_model is not None else 0
         self.taskReminderDue.emit(tab_index, task_index, task_title)
 
+    def _onCurrentTabContractBreached(
+        self,
+        task_index: int,
+        task_title: str,
+        punishment: str,
+        deadline_text: str,
+    ) -> None:
+        tab_index = self._tab_model.currentTabIndex if self._tab_model is not None else 0
+        self.taskContractBreached.emit(tab_index, task_index, task_title, punishment, deadline_text)
+
     def _checkBackgroundTabReminders(self) -> None:
-        """Emit due reminders from non-active tabs."""
+        """Emit due reminders and contract breaches from non-active tabs."""
         if self._tab_model is None:
             return
 
@@ -1368,21 +1702,45 @@ class ProjectManager(QObject):
 
                 reminder_at = task.get("reminder_at")
                 if reminder_at is None:
+                    reminder_ts = None
+                else:
+                    try:
+                        reminder_ts = float(reminder_at)
+                    except (TypeError, ValueError):
+                        reminder_ts = None
+
+                if reminder_ts is not None and reminder_ts <= now:
+                    task.pop("reminder_at", None)
+                    tab_changed = True
+                    title = str(task.get("title", "")).strip() or "Task"
+                    self.taskReminderDue.emit(tab_index, task_index, title)
+
+                deadline_at = task.get("contract_deadline_at")
+                punishment = str(task.get("contract_punishment", "")).strip()
+                if deadline_at is None or not punishment:
                     continue
 
                 try:
-                    reminder_ts = float(reminder_at)
+                    deadline_ts = float(deadline_at)
                 except (TypeError, ValueError):
                     continue
 
-                if reminder_ts > now:
+                if task.get("completed", False):
                     continue
 
-                task.pop("reminder_at", None)
+                if deadline_ts > now:
+                    continue
+
+                if bool(task.get("contract_breached", False)) and bool(task.get("contract_breach_notified", False)):
+                    continue
+
+                task["contract_breached"] = True
+                task["contract_breach_notified"] = True
                 tab_changed = True
 
                 title = str(task.get("title", "")).strip() or "Task"
-                self.taskReminderDue.emit(tab_index, task_index, title)
+                deadline_text = datetime.fromtimestamp(deadline_ts).strftime("%Y-%m-%d %H:%M")
+                self.taskContractBreached.emit(tab_index, task_index, title, punishment, deadline_text)
 
             if tab_changed:
                 model_index = self._tab_model.index(tab_index, 0)
@@ -1391,6 +1749,81 @@ class ProjectManager(QObject):
                     model_index,
                     [self._tab_model.CompletionRole, self._tab_model.ActiveTaskTitleRole],
                 )
+
+    @Slot(result="QVariantList")
+    def getActiveContracts(self) -> List[Dict[str, Any]]:
+        """Return active contracts across all tabs with countdown/overdue metadata."""
+        now = time.time()
+        contracts: List[Dict[str, Any]] = []
+
+        if self._tab_model is None:
+            tasks = self._task_model.to_dict().get("tasks", [])
+            for task_index, task in enumerate(tasks):
+                if not isinstance(task, dict):
+                    continue
+                if task.get("completed", False):
+                    continue
+                deadline_at = task.get("contract_deadline_at")
+                punishment = str(task.get("contract_punishment", "")).strip()
+                if deadline_at is None or not punishment:
+                    continue
+                try:
+                    deadline_ts = float(deadline_at)
+                except (TypeError, ValueError):
+                    continue
+                title = str(task.get("title", "")).strip() or "Task"
+                contracts.append(
+                    {
+                        "tabIndex": 0,
+                        "tabName": "Main",
+                        "taskIndex": task_index,
+                        "taskTitle": title,
+                        "deadlineText": datetime.fromtimestamp(deadline_ts).strftime("%Y-%m-%d %H:%M"),
+                        "deadlineAt": deadline_ts,
+                        "remainingSeconds": float(deadline_ts - now),
+                        "breached": bool(task.get("contract_breached", False)) or deadline_ts <= now,
+                        "punishment": punishment,
+                    }
+                )
+            return contracts
+
+        current_tab_index = self._tab_model.currentTabIndex
+        for tab_index, tab in enumerate(self._tab_model.getAllTabs()):
+            tab_tasks_payload = self._task_model.to_dict() if tab_index == current_tab_index else tab.tasks
+            tasks = tab_tasks_payload.get("tasks", []) if isinstance(tab_tasks_payload, dict) else []
+            if not isinstance(tasks, list):
+                continue
+            tab_name = getattr(tab, "name", "") or "Tab"
+            for task_index, task in enumerate(tasks):
+                if not isinstance(task, dict):
+                    continue
+                if task.get("completed", False):
+                    continue
+                deadline_at = task.get("contract_deadline_at")
+                punishment = str(task.get("contract_punishment", "")).strip()
+                if deadline_at is None or not punishment:
+                    continue
+                try:
+                    deadline_ts = float(deadline_at)
+                except (TypeError, ValueError):
+                    continue
+                title = str(task.get("title", "")).strip() or "Task"
+                contracts.append(
+                    {
+                        "tabIndex": tab_index,
+                        "tabName": tab_name,
+                        "taskIndex": task_index,
+                        "taskTitle": title,
+                        "deadlineText": datetime.fromtimestamp(deadline_ts).strftime("%Y-%m-%d %H:%M"),
+                        "deadlineAt": deadline_ts,
+                        "remainingSeconds": float(deadline_ts - now),
+                        "breached": bool(task.get("contract_breached", False)) or deadline_ts <= now,
+                        "punishment": punishment,
+                    }
+                )
+
+        contracts.sort(key=lambda entry: float(entry.get("deadlineAt", 0.0)))
+        return contracts
 
     def _load_recent_projects(self) -> List[str]:
         """Load recent projects list from settings."""
@@ -1929,6 +2362,11 @@ class ProjectManager(QObject):
     @Slot(int, int)
     def openReminderTask(self, tab_index: int, task_index: int) -> None:
         """Open the tab and task targeted by a due reminder."""
+        self.openTabTask(tab_index, task_index)
+
+    @Slot(int, int)
+    def openTabTask(self, tab_index: int, task_index: int) -> None:
+        """Open a tab and focus a task index within that tab."""
         if self._tab_model is not None:
             if tab_index < 0 or tab_index >= self._tab_model.tabCount:
                 return

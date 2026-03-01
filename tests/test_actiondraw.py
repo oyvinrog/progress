@@ -1,5 +1,7 @@
 """Tests for the rewritten actiondraw module."""
 
+import time
+
 import pytest
 from PySide6.QtCore import QModelIndex
 from PySide6.QtQml import QQmlApplicationEngine
@@ -13,6 +15,7 @@ from actiondraw import (
     DrawingStroke,
     create_actiondraw_window,
 )
+from actiondraw.markdown_note_manager import MarkdownNoteManager
 from progress_crypto import CryptoError, EncryptionCredentials, yubikey_support_guidance
 from task_model import TaskModel
 
@@ -2091,6 +2094,61 @@ class TestMultiTabSupport:
         project_manager.drillToTask(0)
         assert diagram_model.currentTaskIndex == 0
 
+    def test_project_manager_open_tab_task_switches_and_drills(self, app):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        task_model.addTask("Main Task", -1)
+        diagram_model.addTask(0, 20.0, 20.0)
+
+        tab_model.addTab("Second")
+        tab_model.setTabData(
+            1,
+            {"tasks": [{"title": "Second Task", "completed": False}]},
+            {
+                "items": [{
+                    "id": "task_0",
+                    "item_type": "task",
+                    "x": 40.0,
+                    "y": 60.0,
+                    "width": 140.0,
+                    "height": 70.0,
+                    "text": "Second Task",
+                    "task_index": 0,
+                    "color": "#2e5c88",
+                    "text_color": "#f5f6f8",
+                }],
+                "edges": [],
+                "strokes": [],
+                "current_task_index": -1,
+            },
+        )
+
+        project_manager.openTabTask(1, 0)
+        assert tab_model.currentTabIndex == 1
+        assert diagram_model.currentTaskIndex == 0
+
+    def test_project_manager_open_reminder_task_uses_open_tab_task(self, app, monkeypatch):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        captured = []
+
+        def _capture_open(tab_index, task_index):
+            captured.append((tab_index, task_index))
+
+        monkeypatch.setattr(project_manager, "openTabTask", _capture_open)
+        project_manager.openReminderTask(3, 7)
+        assert captured == [(3, 7)]
+
     def test_project_manager_add_tab_as_drill_task(self, app):
         from task_model import TaskModel, ProjectManager, TabModel
 
@@ -2595,6 +2653,250 @@ class TestTaskReminders:
         assert "reminder_at" not in task_data
 
 
+class TestTaskContracts:
+    """Tests for deadline-based task contracts."""
+
+    @pytest.fixture
+    def task_model_with_contract(self, app):
+        model = TaskModel()
+        model.addTask("Task with contract", -1)
+        return model
+
+    @pytest.fixture
+    def diagram_model_with_contract_task(self, app, task_model_with_contract):
+        model = DiagramModel(task_model=task_model_with_contract)
+        model.addTask(0, 100.0, 100.0)
+        return model, task_model_with_contract
+
+    def test_contract_defaults(self, task_model_with_contract):
+        index = task_model_with_contract.index(0, 0)
+        assert task_model_with_contract.data(index, task_model_with_contract.ContractActiveRole) is False
+        assert task_model_with_contract.data(index, task_model_with_contract.ContractDeadlineRole) == ""
+        assert task_model_with_contract.data(index, task_model_with_contract.ContractRemainingRole) == -1.0
+        assert task_model_with_contract.data(index, task_model_with_contract.ContractBreachedRole) is False
+        assert task_model_with_contract.data(index, task_model_with_contract.ContractPunishmentRole) == ""
+
+    def test_set_contract_valid(self, task_model_with_contract):
+        from datetime import datetime, timedelta
+
+        deadline_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        assert task_model_with_contract.setContractAt(0, deadline_str, "Throw away coke") is True
+
+        index = task_model_with_contract.index(0, 0)
+        assert task_model_with_contract.data(index, task_model_with_contract.ContractActiveRole) is True
+        assert task_model_with_contract.data(index, task_model_with_contract.ContractDeadlineRole) == deadline_str
+        assert task_model_with_contract.data(index, task_model_with_contract.ContractPunishmentRole) == "Throw away coke"
+
+    def test_set_contract_invalid_inputs(self, task_model_with_contract):
+        assert task_model_with_contract.setContractAt(0, "not-a-date", "Punishment") is False
+        assert task_model_with_contract.setContractAt(0, "", "Punishment") is False
+        assert task_model_with_contract.setContractAt(0, "2099-01-01 09:00", "") is False
+
+    def test_set_contract_rejects_past_datetime(self, task_model_with_contract):
+        from datetime import datetime, timedelta
+
+        past_str = (datetime.now() - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M")
+        assert task_model_with_contract.setContractAt(0, past_str, "Punishment") is False
+
+    def test_contract_remaining_decreases(self, task_model_with_contract):
+        import time
+        from datetime import datetime, timedelta
+
+        deadline_str = (datetime.now() + timedelta(seconds=2)).strftime("%Y-%m-%d %H:%M:%S")
+        assert task_model_with_contract.setContractAt(0, deadline_str, "Punishment") is True
+        index = task_model_with_contract.index(0, 0)
+        remaining_1 = task_model_with_contract.data(index, task_model_with_contract.ContractRemainingRole)
+        time.sleep(0.2)
+        remaining_2 = task_model_with_contract.data(index, task_model_with_contract.ContractRemainingRole)
+        assert remaining_2 < remaining_1
+
+    def test_contract_breach_emits_once(self, task_model_with_contract):
+        from datetime import datetime, timedelta
+
+        deadline_str = (datetime.now() + timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M")
+        assert task_model_with_contract.setContractAt(0, deadline_str, "Punishment") is True
+
+        task = task_model_with_contract._tasks[0]
+        task.contract_deadline_at = time.time() - 1
+        due = []
+        task_model_with_contract.taskContractBreached.connect(
+            lambda idx, title, punishment, deadline: due.append((idx, title, punishment, deadline))
+        )
+        task_model_with_contract._updateActiveTasks()
+        task_model_with_contract._updateActiveTasks()
+
+        assert len(due) == 1
+        index = task_model_with_contract.index(0, 0)
+        assert task_model_with_contract.data(index, task_model_with_contract.ContractBreachedRole) is True
+
+    def test_complete_task_clears_contract(self, task_model_with_contract):
+        from datetime import datetime, timedelta
+
+        deadline_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        assert task_model_with_contract.setContractAt(0, deadline_str, "Punishment") is True
+        task_model_with_contract.toggleComplete(0, True)
+        index = task_model_with_contract.index(0, 0)
+        assert task_model_with_contract.data(index, task_model_with_contract.ContractActiveRole) is False
+
+    def test_clear_contract(self, task_model_with_contract):
+        from datetime import datetime, timedelta
+
+        deadline_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        assert task_model_with_contract.setContractAt(0, deadline_str, "Punishment") is True
+        task_model_with_contract.clearContract(0)
+        index = task_model_with_contract.index(0, 0)
+        assert task_model_with_contract.data(index, task_model_with_contract.ContractActiveRole) is False
+        assert task_model_with_contract.data(index, task_model_with_contract.ContractPunishmentRole) == ""
+
+    def test_contract_serialization(self, task_model_with_contract):
+        from datetime import datetime, timedelta
+
+        deadline_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        assert task_model_with_contract.setContractAt(0, deadline_str, "Punishment") is True
+        data = task_model_with_contract.to_dict()
+        task_data = data["tasks"][0]
+        assert "contract_deadline_at" in task_data
+        assert task_data["contract_punishment"] == "Punishment"
+
+    def test_contract_deserialization(self, app):
+        model = TaskModel()
+        data = {
+            "tasks": [{
+                "title": "Contract Task",
+                "completed": False,
+                "time_spent": 0.0,
+                "parent_index": -1,
+                "indent_level": 0,
+                "custom_estimate": None,
+                "contract_deadline_at": time.time() + 3600,
+                "contract_punishment": "No coke",
+                "contract_breached": False,
+                "contract_breach_notified": False,
+            }]
+        }
+        model.from_dict(data)
+        index = model.index(0, 0)
+        assert model.data(index, model.ContractActiveRole) is True
+        assert model.data(index, model.ContractPunishmentRole) == "No coke"
+
+    def test_diagram_contract_roles_exist(self, diagram_model_with_contract_task):
+        model, _ = diagram_model_with_contract_task
+        role_names = model.roleNames()
+        assert b"taskContractActive" in role_names.values()
+        assert b"taskContractDeadline" in role_names.values()
+        assert b"taskContractRemaining" in role_names.values()
+        assert b"taskContractBreached" in role_names.values()
+        assert b"taskContractPunishment" in role_names.values()
+
+    def test_diagram_contract_reflects_task_model(self, diagram_model_with_contract_task):
+        from datetime import datetime, timedelta
+
+        diagram_model, task_model = diagram_model_with_contract_task
+        deadline_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        assert task_model.setContractAt(0, deadline_str, "Punishment") is True
+        index = diagram_model.index(0, 0)
+        assert diagram_model.data(index, diagram_model.TaskContractActiveRole) is True
+        assert diagram_model.data(index, diagram_model.TaskContractDeadlineRole) == deadline_str
+        assert diagram_model.data(index, diagram_model.TaskContractPunishmentRole) == "Punishment"
+
+    def test_diagram_set_and_clear_contract_slot(self, diagram_model_with_contract_task):
+        from datetime import datetime, timedelta
+
+        diagram_model, task_model = diagram_model_with_contract_task
+        deadline_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        assert diagram_model.setTaskContractAt(0, deadline_str, "Punishment") is True
+        index = task_model.index(0, 0)
+        assert task_model.data(index, task_model.ContractActiveRole) is True
+        diagram_model.clearTaskContract(0)
+        assert task_model.data(index, task_model.ContractActiveRole) is False
+
+    def test_project_manager_emits_current_tab_contract_breached(self, app):
+        from datetime import datetime, timedelta
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        task_model.addTask("Current Contract", -1)
+        deadline_str = (datetime.now() + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M")
+        assert task_model.setContractAt(0, deadline_str, "Punishment") is True
+        task_model._tasks[0].contract_deadline_at = time.time() - 1
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        due = []
+        project_manager.taskContractBreached.connect(
+            lambda tab_idx, task_idx, title, punishment, deadline: due.append(
+                (tab_idx, task_idx, title, punishment, deadline)
+            )
+        )
+        task_model._updateActiveTasks()
+
+        assert len(due) == 1
+        assert due[0][0] == 0
+        assert due[0][1] == 0
+        assert due[0][2] == "Current Contract"
+
+    def test_project_manager_emits_background_tab_contract_breached_once(self, app):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        task_model.addTask("Tab 1 Task", -1)
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        tab_model.addTab("Tab 2")
+        tab_model.setTabData(
+            1,
+            {
+                "tasks": [{
+                    "title": "Background Contract",
+                    "completed": False,
+                    "time_spent": 0.0,
+                    "parent_index": -1,
+                    "indent_level": 0,
+                    "custom_estimate": None,
+                    "contract_deadline_at": time.time() - 1,
+                    "contract_punishment": "Throw away coke",
+                    "contract_breached": False,
+                    "contract_breach_notified": False,
+                }]
+            },
+            {"items": [], "edges": [], "strokes": [], "current_task_index": -1},
+        )
+
+        due = []
+        project_manager.taskContractBreached.connect(
+            lambda tab_idx, task_idx, title, punishment, deadline: due.append(
+                (tab_idx, task_idx, title, punishment, deadline)
+            )
+        )
+        project_manager._checkBackgroundTabReminders()
+        project_manager._checkBackgroundTabReminders()
+
+        assert len(due) == 1
+        assert due[0][0] == 1
+        assert due[0][1] == 0
+        assert due[0][2] == "Background Contract"
+
+    def test_project_manager_get_active_contracts(self, app):
+        from datetime import datetime, timedelta
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        task_model.addTask("Active Contract", -1)
+        deadline_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        assert task_model.setContractAt(0, deadline_str, "No coke") is True
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        contracts = project_manager.getActiveContracts()
+        assert len(contracts) == 1
+        assert contracts[0]["taskTitle"] == "Active Contract"
+        assert contracts[0]["punishment"] == "No coke"
+
+
 class TestLinkedSubtabMetadata:
     """Tests for task-level linked subtab metadata on diagram items."""
 
@@ -2842,6 +3144,207 @@ class TestTabModelCompletion:
         )
 
         assert model.getTabsLinkingToCurrentTab() == []
+
+    def test_get_hierarchy_tree_includes_all_nodes(self, app):
+        from task_model import TabModel, Tab
+
+        model = TabModel()
+        model.setTabs(
+            [
+                Tab(
+                    name="Main",
+                    tasks={"tasks": [{"title": "API", "completed": False}]},
+                    diagram={
+                        "items": [
+                            {
+                                "id": "task_0",
+                                "item_type": "task",
+                                "text": "API",
+                                "task_index": 0,
+                            },
+                            {
+                                "id": "note_0",
+                                "item_type": "note",
+                                "text": "Ideas",
+                                "task_index": -1,
+                            },
+                        ],
+                        "edges": [],
+                        "strokes": [],
+                        "current_task_index": -1,
+                    },
+                ),
+                Tab(
+                    name="API",
+                    tasks={"tasks": [{"title": "Ship", "completed": False}]},
+                    diagram={"items": [], "edges": [], "strokes": [], "current_task_index": -1},
+                ),
+            ],
+            active_tab=0,
+        )
+
+        tree = model.getHierarchyTree()
+        assert len(tree) == 2
+        main = tree[0]
+        assert main["kind"] == "tab"
+        assert main["tabName"] == "Main"
+        assert len(main["children"]) == 2
+        assert main["children"][0]["itemId"] == "task_0"
+        assert main["children"][0]["hasLinkedSubtab"] is True
+        assert main["children"][0]["linkedTabName"] == "API"
+        assert main["children"][1]["itemId"] == "note_0"
+        assert main["children"][1]["hasLinkedSubtab"] is False
+
+    def test_get_hierarchy_tree_builds_recursive_subdiagram(self, app):
+        from task_model import TabModel, Tab
+
+        model = TabModel()
+        model.setTabs(
+            [
+                Tab(
+                    name="Main",
+                    tasks={"tasks": [{"title": "API", "completed": False}]},
+                    diagram={
+                        "items": [{"id": "task_main", "item_type": "task", "text": "API", "task_index": 0}],
+                        "edges": [],
+                        "strokes": [],
+                        "current_task_index": -1,
+                    },
+                ),
+                Tab(
+                    name="API",
+                    tasks={"tasks": [{"title": "DB", "completed": False}]},
+                    diagram={
+                        "items": [{"id": "task_api", "item_type": "task", "text": "DB", "task_index": 0}],
+                        "edges": [],
+                        "strokes": [],
+                        "current_task_index": -1,
+                    },
+                ),
+                Tab(
+                    name="DB",
+                    tasks={"tasks": []},
+                    diagram={"items": [], "edges": [], "strokes": [], "current_task_index": -1},
+                ),
+            ],
+            active_tab=0,
+        )
+
+        tree = model.getHierarchyTree()
+        main_link = tree[0]["children"][0]
+        assert len(main_link["children"]) == 1
+        api_tab = main_link["children"][0]
+        assert api_tab["kind"] == "tab"
+        assert api_tab["tabName"] == "API"
+        assert api_tab["children"][0]["linkedTabName"] == "DB"
+
+    def test_get_hierarchy_tree_marks_cycles(self, app):
+        from task_model import TabModel, Tab
+
+        model = TabModel()
+        model.setTabs(
+            [
+                Tab(
+                    name="Main",
+                    tasks={"tasks": [{"title": "API", "completed": False}]},
+                    diagram={
+                        "items": [{"id": "task_main", "item_type": "task", "text": "API", "task_index": 0}],
+                        "edges": [],
+                        "strokes": [],
+                        "current_task_index": -1,
+                    },
+                ),
+                Tab(
+                    name="API",
+                    tasks={"tasks": [{"title": "Main", "completed": False}]},
+                    diagram={
+                        "items": [{"id": "task_api", "item_type": "task", "text": "Main", "task_index": 0}],
+                        "edges": [],
+                        "strokes": [],
+                        "current_task_index": -1,
+                    },
+                ),
+            ],
+            active_tab=0,
+        )
+
+        tree = model.getHierarchyTree()
+        api_tab = tree[0]["children"][0]["children"][0]
+        cycle_entry = api_tab["children"][0]["children"][0]
+        assert cycle_entry["kind"] == "cycleRef"
+        assert cycle_entry["tabName"] == "Main"
+
+    def test_get_hierarchy_tree_with_root_index_returns_single_root(self, app):
+        from task_model import TabModel, Tab
+
+        model = TabModel()
+        model.setTabs(
+            [
+                Tab(
+                    name="Main",
+                    tasks={"tasks": [{"title": "API", "completed": False}]},
+                    diagram={
+                        "items": [{"id": "task_main", "item_type": "task", "text": "API", "task_index": 0}],
+                        "edges": [],
+                        "strokes": [],
+                        "current_task_index": -1,
+                    },
+                ),
+                Tab(
+                    name="API",
+                    tasks={"tasks": [{"title": "Deploy", "completed": False}]},
+                    diagram={"items": [], "edges": [], "strokes": [], "current_task_index": -1},
+                ),
+            ],
+            active_tab=1,
+        )
+
+        rooted = model.getHierarchyTree(1)
+        assert len(rooted) == 1
+        assert rooted[0]["kind"] == "tab"
+        assert rooted[0]["tabName"] == "API"
+
+    def test_get_hierarchy_tree_with_invalid_root_index_returns_empty(self, app):
+        from task_model import TabModel
+
+        model = TabModel()
+        assert model.getHierarchyTree(999) == []
+
+    def test_get_hierarchy_tree_hides_completed_task_nodes(self, app):
+        from task_model import TabModel, Tab
+
+        model = TabModel()
+        model.setTabs(
+            [
+                Tab(
+                    name="Main",
+                    tasks={
+                        "tasks": [
+                            {"title": "Done Task", "completed": True},
+                            {"title": "Next Task", "completed": False},
+                        ]
+                    },
+                    diagram={
+                        "items": [
+                            {"id": "task_done", "item_type": "task", "text": "Done Task", "task_index": 0},
+                            {"id": "task_next", "item_type": "task", "text": "Next Task", "task_index": 1},
+                            {"id": "note_0", "item_type": "note", "text": "Keep", "task_index": -1},
+                        ],
+                        "edges": [],
+                        "strokes": [],
+                        "current_task_index": -1,
+                    },
+                ),
+            ],
+            active_tab=0,
+        )
+
+        tree = model.getHierarchyTree(0)
+        assert len(tree) == 1
+        child_ids = [child.get("itemId") for child in tree[0]["children"]]
+        assert "task_done" not in child_ids
+        assert "task_next" in child_ids
+        assert "note_0" in child_ids
 
     def test_priority_plot_roles_exist(self, app):
         """Priority plot roles are exposed to QML."""
@@ -3647,6 +4150,81 @@ class TestYubiKeyGuidance:
         message = yubikey_support_guidance()
         assert "YubiKey support detected" in message
         assert "/tmp/ykman" in message
+
+
+class TestMarkdownNoteManager:
+    def test_request_project_save_emits_signal(self, empty_diagram_model, monkeypatch):
+        class _DummySignal:
+            def connect(self, _callback):
+                return None
+
+        class _DummyEditor:
+            def __init__(self, *_args, **_kwargs):
+                self.noteSaved = _DummySignal()
+                self.noteCanceled = _DummySignal()
+
+        monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
+        manager = MarkdownNoteManager(empty_diagram_model)
+        events = []
+        manager.projectSaveRequested.connect(lambda: events.append("save"))
+
+        manager.requestProjectSave()
+
+        assert events == ["save"]
+
+    def test_save_freetext_keeps_editor_open(self, empty_diagram_model, monkeypatch):
+        class _DummySignal:
+            def connect(self, _callback):
+                return None
+
+        class _DummyEditor:
+            def __init__(self, *_args, **_kwargs):
+                self.noteSaved = _DummySignal()
+                self.noteCanceled = _DummySignal()
+                self.note_id = ""
+
+            def set_note_id(self, note_id):
+                self.note_id = note_id
+
+        monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
+        manager = MarkdownNoteManager(empty_diagram_model)
+        manager._set_editor_state("freetext", "", 120.0, 80.0, True)
+
+        manager._save_note("", "Draft text")
+
+        assert manager.editorOpen is True
+        assert manager.activeEditorType == "freetext"
+        assert manager.activeItemId.startswith("freetext_")
+        item = empty_diagram_model.getItem(manager.activeItemId)
+        assert item is not None
+        assert item.text == "Draft text"
+
+    def test_save_note_closes_editor(self, empty_diagram_model, monkeypatch):
+        class _DummySignal:
+            def connect(self, _callback):
+                return None
+
+        class _DummyEditor:
+            def __init__(self, *_args, **_kwargs):
+                self.noteSaved = _DummySignal()
+                self.noteCanceled = _DummySignal()
+                self.close_calls = 0
+
+            def close(self):
+                self.close_calls += 1
+
+        item_id = empty_diagram_model.addBox(40.0, 30.0, "Task")
+        monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
+        manager = MarkdownNoteManager(empty_diagram_model)
+        manager._set_editor_state("note", item_id, 40.0, 30.0, True)
+
+        manager._save_note(item_id, "Updated markdown")
+
+        assert manager.editorOpen is False
+        assert manager.activeEditorType == ""
+        assert manager.activeItemId == ""
+        assert manager._editor.close_calls == 1
+        assert empty_diagram_model.getItemMarkdown(item_id) == "Updated markdown"
 
 
 if __name__ == "__main__":

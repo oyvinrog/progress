@@ -10,6 +10,8 @@ from PySide6.QtQml import QQmlApplicationEngine
 
 from .model import DiagramModel
 from .markdown_image_paster import MarkdownImagePaster
+from .markdown_preview_formatter import MarkdownPreviewFormatter
+from .markdown_syntax_highlighter import MarkdownHighlighterBridge
 from .qml import ACTIONDRAW_QML_PATH, QML_DIR
 
 
@@ -29,14 +31,20 @@ def create_actiondraw_window(
         markdown_note_manager = MarkdownNoteManager(diagram_model)
     if markdown_image_paster is None:
         markdown_image_paster = MarkdownImagePaster()
+    markdown_preview_formatter = MarkdownPreviewFormatter()
+    markdown_highlighter_bridge = MarkdownHighlighterBridge()
     engine.rootContext().setContextProperty("diagramModel", diagram_model)
     engine.rootContext().setContextProperty("taskModel", task_model)
     engine.rootContext().setContextProperty("projectManager", project_manager)
     engine.rootContext().setContextProperty("markdownNoteManager", markdown_note_manager)
     engine.rootContext().setContextProperty("markdownImagePaster", markdown_image_paster)
+    engine.rootContext().setContextProperty("markdownPreviewFormatter", markdown_preview_formatter)
+    engine.rootContext().setContextProperty("markdownHighlighterBridge", markdown_highlighter_bridge)
     engine.rootContext().setContextProperty("tabModel", tab_model)
     engine._markdown_note_manager = markdown_note_manager
     engine._markdown_image_paster = markdown_image_paster
+    engine._markdown_preview_formatter = markdown_preview_formatter
+    engine._markdown_highlighter_bridge = markdown_highlighter_bridge
     engine.addImportPath(str(QML_DIR))
     engine.load(QUrl.fromLocalFile(str(ACTIONDRAW_QML_PATH)))
     return engine

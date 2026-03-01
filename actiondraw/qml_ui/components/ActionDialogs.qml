@@ -25,6 +25,8 @@ Item {
     property alias timerContextMenu: timerContextMenu
     property alias reminderDialog: reminderDialog
     property alias reminderContextMenu: reminderContextMenu
+    property alias contractDialog: contractDialog
+    property alias contractContextMenu: contractContextMenu
     property alias edgeDropMenu: edgeDropMenu
     property alias edgeDropTaskDialog: edgeDropTaskDialog
     property alias saveDialog: saveDialog
@@ -42,6 +44,7 @@ Item {
         || taskRenameDialog.visible
         || timerDialog.visible
         || reminderDialog.visible
+        || contractDialog.visible
         || edgeDropTaskDialog.visible
         || clipboardPasteDialog.visible
         || saveDialog.visible
@@ -950,6 +953,185 @@ Item {
             onTriggered: {
                 if (diagramModel && reminderContextMenu.taskIndex >= 0) {
                     diagramModel.clearTaskReminderAt(reminderContextMenu.taskIndex)
+                }
+            }
+        }
+    }
+
+    Dialog {
+        id: contractDialog
+        modal: true
+        title: "Set Contract"
+        property int taskIndex: -1
+        property string dateValue: ""
+        property string timeValue: ""
+        property string punishmentValue: ""
+
+        function parseDeadlineParts(value) {
+            var trimmed = value ? value.trim() : ""
+            if (!trimmed.length)
+                return { date: "", time: "" }
+            var parts = trimmed.split(" ")
+            if (parts.length < 2)
+                return { date: "", time: "" }
+            var datePart = parts[0]
+            var timePart = parts[1]
+            if (timePart.length >= 5)
+                timePart = timePart.slice(0, 5)
+            return { date: datePart, time: timePart }
+        }
+
+        function setToOffsetMinutes(minutesFromNow) {
+            var dt = new Date()
+            dt.setMinutes(dt.getMinutes() + minutesFromNow)
+            contractDialog.dateValue = Qt.formatDateTime(dt, "yyyy-MM-dd")
+            contractDialog.timeValue = Qt.formatDateTime(dt, "HH:mm")
+        }
+
+        onOpened: {
+            if (contractDialog.dateValue.trim().length === 0 || contractDialog.timeValue.trim().length === 0) {
+                setToOffsetMinutes(60)
+            }
+            contractDateField.forceActiveFocus()
+        }
+
+        contentItem: ColumnLayout {
+            width: 340
+            spacing: 12
+
+            Label {
+                text: "Set an absolute deadline and punishment. Contract is satisfied only when task is completed."
+                color: "#8a93a5"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            TextField {
+                id: contractDateField
+                Layout.fillWidth: true
+                text: contractDialog.dateValue
+                placeholderText: "YYYY-MM-DD"
+                selectByMouse: true
+                color: "#f5f6f8"
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#384458"
+                }
+                onTextChanged: contractDialog.dateValue = text
+            }
+
+            TextField {
+                id: contractTimeField
+                Layout.fillWidth: true
+                text: contractDialog.timeValue
+                placeholderText: "HH:MM"
+                selectByMouse: true
+                color: "#f5f6f8"
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#384458"
+                }
+                onTextChanged: contractDialog.timeValue = text
+            }
+
+            TextField {
+                id: contractPunishmentField
+                Layout.fillWidth: true
+                text: contractDialog.punishmentValue
+                placeholderText: "Punishment if missed (required)"
+                selectByMouse: true
+                color: "#f5f6f8"
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#384458"
+                }
+                onTextChanged: contractDialog.punishmentValue = text
+                Keys.onReturnPressed: contractDialog.accept()
+                Keys.onEnterPressed: contractDialog.accept()
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                Button {
+                    text: "+15m"
+                    onClicked: contractDialog.setToOffsetMinutes(15)
+                }
+                Button {
+                    text: "+1h"
+                    onClicked: contractDialog.setToOffsetMinutes(60)
+                }
+                Button {
+                    text: "+1d"
+                    onClicked: contractDialog.setToOffsetMinutes(24 * 60)
+                }
+            }
+        }
+
+        footer: DialogButtonBox {
+            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+        }
+
+        onAccepted: {
+            if (diagramModel && contractDialog.taskIndex >= 0) {
+                var deadlineValue = contractDialog.dateValue.trim() + " " + contractDialog.timeValue.trim()
+                var punishmentValue = contractDialog.punishmentValue.trim()
+                if (!deadlineValue.trim().length || !punishmentValue.length) {
+                    if (root && root.showSaveNotification)
+                        root.showSaveNotification("Contract requires datetime and punishment")
+                    return
+                }
+                var saved = diagramModel.setTaskContractAt(contractDialog.taskIndex, deadlineValue, punishmentValue)
+                if (!saved) {
+                    if (root && root.showSaveNotification)
+                        root.showSaveNotification("Invalid contract. Use future YYYY-MM-DD HH:MM and punishment")
+                    return
+                }
+            }
+            contractDialog.close()
+        }
+        onRejected: contractDialog.close()
+
+        onClosed: {
+            contractDialog.taskIndex = -1
+            contractDialog.dateValue = ""
+            contractDialog.timeValue = ""
+            contractDialog.punishmentValue = ""
+        }
+    }
+
+    Menu {
+        id: contractContextMenu
+        property int taskIndex: -1
+        property string deadlineAt: ""
+        property string punishment: ""
+
+        function openEditor() {
+            if (contractContextMenu.taskIndex < 0)
+                return
+            contractDialog.taskIndex = contractContextMenu.taskIndex
+            var parts = contractDialog.parseDeadlineParts(contractContextMenu.deadlineAt)
+            contractDialog.dateValue = parts.date
+            contractDialog.timeValue = parts.time
+            contractDialog.punishmentValue = contractContextMenu.punishment
+            contractDialog.open()
+        }
+
+        MenuItem {
+            text: contractContextMenu.deadlineAt && contractContextMenu.deadlineAt.length > 0 ? "Update Contract" : "Set Contract"
+            onTriggered: contractContextMenu.openEditor()
+        }
+
+        MenuItem {
+            text: "Clear Contract"
+            visible: contractContextMenu.deadlineAt && contractContextMenu.deadlineAt.length > 0
+            onTriggered: {
+                if (diagramModel && contractContextMenu.taskIndex >= 0) {
+                    diagramModel.clearTaskContract(contractContextMenu.taskIndex)
                 }
             }
         }

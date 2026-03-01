@@ -143,6 +143,20 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Ctrl+S"
+        enabled: editorRoot.visible && markdownNoteManager && markdownNoteManager.requestProjectSave
+        onActivated: {
+            editorRoot.saveRequested(
+                editorRoot.noteId,
+                markdownImagePaster
+                    ? markdownImagePaster.expandMarkdownImages(markdownEditor.textValue)
+                    : markdownEditor.textValue
+            )
+            markdownNoteManager.requestProjectSave()
+        }
+    }
+
+    Shortcut {
         sequence: "Ctrl+Enter"
         enabled: editorRoot.visible
         onActivated: editorRoot.saveRequested(

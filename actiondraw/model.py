@@ -64,6 +64,11 @@ class DiagramModel(
     HasLinkedSubtabRole = Qt.UserRole + 22
     TaskReminderActiveRole = Qt.UserRole + 23
     TaskReminderAtRole = Qt.UserRole + 24
+    TaskContractActiveRole = Qt.UserRole + 25
+    TaskContractDeadlineRole = Qt.UserRole + 26
+    TaskContractRemainingRole = Qt.UserRole + 27
+    TaskContractBreachedRole = Qt.UserRole + 28
+    TaskContractPunishmentRole = Qt.UserRole + 29
 
     itemsChanged = Signal()
     edgesChanged = Signal()
@@ -94,6 +99,7 @@ class DiagramModel(
             self._task_model.taskCompletionChanged.connect(self.onTaskCompletionChanged)
             self._task_model.taskCountdownChanged.connect(self.onTaskCountdownChanged)
             self._task_model.taskReminderChanged.connect(self.onTaskReminderChanged)
+            self._task_model.taskContractChanged.connect(self.onTaskContractChanged)
 
         self._edge_drag_x: float = 0.0
         self._edge_drag_y: float = 0.0
@@ -246,6 +252,16 @@ class DiagramModel(
             return self._isTaskReminderActive(item.task_index)
         if role == self.TaskReminderAtRole:
             return self._getTaskReminderAt(item.task_index)
+        if role == self.TaskContractActiveRole:
+            return self._isTaskContractActive(item.task_index)
+        if role == self.TaskContractDeadlineRole:
+            return self._getTaskContractDeadline(item.task_index)
+        if role == self.TaskContractRemainingRole:
+            return self._getTaskContractRemaining(item.task_index)
+        if role == self.TaskContractBreachedRole:
+            return self._isTaskContractBreached(item.task_index)
+        if role == self.TaskContractPunishmentRole:
+            return self._getTaskContractPunishment(item.task_index)
         return None
 
     def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
@@ -274,6 +290,11 @@ class DiagramModel(
             self.HasLinkedSubtabRole: b"hasLinkedSubtab",
             self.TaskReminderActiveRole: b"taskReminderActive",
             self.TaskReminderAtRole: b"taskReminderAt",
+            self.TaskContractActiveRole: b"taskContractActive",
+            self.TaskContractDeadlineRole: b"taskContractDeadline",
+            self.TaskContractRemainingRole: b"taskContractRemaining",
+            self.TaskContractBreachedRole: b"taskContractBreached",
+            self.TaskContractPunishmentRole: b"taskContractPunishment",
         }
 
     def setTabModel(self, tab_model) -> None:
@@ -800,6 +821,20 @@ class DiagramModel(
                     self.TaskReminderAtRole,
                 ])
 
+    @Slot(int)
+    def onTaskContractChanged(self, task_index: int) -> None:
+        """Handle contract updates from the task list."""
+        for row, item in enumerate(self._items):
+            if item.task_index == task_index:
+                index = self.index(row, 0)
+                self.dataChanged.emit(index, index, [
+                    self.TaskContractActiveRole,
+                    self.TaskContractDeadlineRole,
+                    self.TaskContractRemainingRole,
+                    self.TaskContractBreachedRole,
+                    self.TaskContractPunishmentRole,
+                ])
+
     def _isTaskReminderActive(self, task_index: int) -> bool:
         """Return True if task has an active reminder."""
         if self._task_model is None:
@@ -817,6 +852,51 @@ class DiagramModel(
             return ""
         idx = self._task_model.index(task_index, 0)
         return str(self._task_model.data(idx, self._task_model.ReminderAtRole) or "")
+
+    def _isTaskContractActive(self, task_index: int) -> bool:
+        """Return True if task has an active contract."""
+        if self._task_model is None:
+            return False
+        if task_index < 0 or task_index >= self._task_model.rowCount():
+            return False
+        idx = self._task_model.index(task_index, 0)
+        return bool(self._task_model.data(idx, self._task_model.ContractActiveRole))
+
+    def _getTaskContractDeadline(self, task_index: int) -> str:
+        """Get contract deadline datetime string for a task."""
+        if self._task_model is None:
+            return ""
+        if task_index < 0 or task_index >= self._task_model.rowCount():
+            return ""
+        idx = self._task_model.index(task_index, 0)
+        return str(self._task_model.data(idx, self._task_model.ContractDeadlineRole) or "")
+
+    def _getTaskContractRemaining(self, task_index: int) -> float:
+        """Get seconds remaining until contract deadline, or -1 if no contract."""
+        if self._task_model is None:
+            return -1.0
+        if task_index < 0 or task_index >= self._task_model.rowCount():
+            return -1.0
+        idx = self._task_model.index(task_index, 0)
+        return float(self._task_model.data(idx, self._task_model.ContractRemainingRole))
+
+    def _isTaskContractBreached(self, task_index: int) -> bool:
+        """Return True if task contract has been breached."""
+        if self._task_model is None:
+            return False
+        if task_index < 0 or task_index >= self._task_model.rowCount():
+            return False
+        idx = self._task_model.index(task_index, 0)
+        return bool(self._task_model.data(idx, self._task_model.ContractBreachedRole))
+
+    def _getTaskContractPunishment(self, task_index: int) -> str:
+        """Return punishment text for task contract."""
+        if self._task_model is None:
+            return ""
+        if task_index < 0 or task_index >= self._task_model.rowCount():
+            return ""
+        idx = self._task_model.index(task_index, 0)
+        return str(self._task_model.data(idx, self._task_model.ContractPunishmentRole) or "")
 
     def _getTaskCountdownRemaining(self, task_index: int) -> float:
         """Get seconds remaining on task countdown, or -1 if no timer."""
@@ -884,6 +964,19 @@ class DiagramModel(
         """Clear the reminder datetime for a task from QML."""
         if self._task_model is not None:
             self._task_model.clearReminderAt(task_index)
+
+    @Slot(int, str, str, result=bool)
+    def setTaskContractAt(self, task_index: int, contract_deadline_str: str, punishment: str) -> bool:
+        """Set a contract deadline and punishment for a task from QML."""
+        if self._task_model is not None:
+            return bool(self._task_model.setContractAt(task_index, contract_deadline_str, punishment))
+        return False
+
+    @Slot(int)
+    def clearTaskContract(self, task_index: int) -> None:
+        """Clear task contract from QML."""
+        if self._task_model is not None:
+            self._task_model.clearContract(task_index)
 
     @Slot(str, str)
     def convertItemType(self, item_id: str, preset_name: str) -> None:
@@ -1450,6 +1543,11 @@ class DiagramModel(
             "linkedSubtabCompletion": self._getLinkedSubtabCompletion(item.task_index),
             "linkedSubtabActiveAction": self._getLinkedSubtabActiveAction(item.task_index),
             "hasLinkedSubtab": self._hasLinkedSubtab(item.task_index),
+            "taskContractActive": self._isTaskContractActive(item.task_index),
+            "taskContractDeadline": self._getTaskContractDeadline(item.task_index),
+            "taskContractRemaining": self._getTaskContractRemaining(item.task_index),
+            "taskContractBreached": self._isTaskContractBreached(item.task_index),
+            "taskContractPunishment": self._getTaskContractPunishment(item.task_index),
         }
 
     def getItemAt(self, x: float, y: float) -> Optional[str]:
