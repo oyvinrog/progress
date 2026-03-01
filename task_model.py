@@ -8,10 +8,11 @@ independent use by actiondraw.
 import copy
 import json
 import os
+import random
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -70,6 +71,48 @@ class Tab:
     priority_subjective_value: float = 1.0
     priority_score: float = 0.0
     include_in_priority_plot: bool = True
+
+
+@dataclass
+class GamificationState:
+    """Project-wide gamification progression state."""
+
+    xp_total: int = 0
+    coins_total: int = 0
+    current_streak_hours: int = 0
+    best_streak_hours: int = 0
+    last_progress_hour_epoch: Optional[int] = None
+    hourly_completions: int = 0
+    hourly_goal_completions: int = 3
+    pouch_items: Dict[str, int] = field(default_factory=dict)
+    pouch_capacity: int = 20
+    active_effects: Dict[str, int] = field(default_factory=dict)
+    shop_catalog_version: str = "v1"
+    coins_earned_total: int = 0
+    coins_spent_total: int = 0
+    items_used_total: int = 0
+    items_dropped_total: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "xp_total": self.xp_total,
+            "coins_total": self.coins_total,
+            "current_streak_hours": self.current_streak_hours,
+            "best_streak_hours": self.best_streak_hours,
+            "hourly_completions": self.hourly_completions,
+            "hourly_goal_completions": self.hourly_goal_completions,
+            "pouch_items": dict(self.pouch_items),
+            "pouch_capacity": self.pouch_capacity,
+            "active_effects": dict(self.active_effects),
+            "shop_catalog_version": self.shop_catalog_version,
+            "coins_earned_total": self.coins_earned_total,
+            "coins_spent_total": self.coins_spent_total,
+            "items_used_total": self.items_used_total,
+            "items_dropped_total": self.items_dropped_total,
+        }
+        if self.last_progress_hour_epoch is not None:
+            payload["last_progress_hour_epoch"] = self.last_progress_hour_epoch
+        return payload
 
 
 class TaskModel(QAbstractListModel):
@@ -1414,6 +1457,88 @@ class ProjectManager(QObject):
     PROJECT_VERSION = "1.1"
     ENCRYPTED_PROJECT_VERSION = "1.2"
     MAX_RECENT_PROJECTS = 8
+    BASE_COMPLETION_XP = 10
+    FIRST_COMPLETION_IN_HOUR_XP = 3
+    MAX_STREAK_BONUS_XP = 7
+    BASE_COMPLETION_COINS = 5
+    FIRST_COMPLETION_IN_HOUR_COINS = 2
+    MAX_STREAK_BONUS_COINS = 3
+    BASE_DROP_CHANCE = 0.12
+    LUCKY_CHARM_DROP_BONUS = 0.18
+    FOCUS_POTION_COIN_BONUS = 2
+    LUCKY_CHARM_USES = 3
+    DEFAULT_POUCH_CAPACITY = 20
+
+    ITEM_DEFS: Dict[str, Dict[str, Any]] = {
+        "focus_potion": {
+            "name": "Focus Potion",
+            "description": "+2 coins on the next completion",
+            "price": 18,
+            "icon": "🧪",
+            "item_type": "consumable",
+        },
+        "streak_shield": {
+            "name": "Streak Shield",
+            "description": "Prevents one streak reset from an hourly gap",
+            "price": 30,
+            "icon": "🛡️",
+            "item_type": "consumable",
+        },
+        "lucky_charm": {
+            "name": "Lucky Charm",
+            "description": "Higher item drop chance for the next 3 completions",
+            "price": 24,
+            "icon": "🍀",
+            "item_type": "consumable",
+        },
+        "cola": {
+            "name": "Cola",
+            "description": "Spend coins reward",
+            "price": 50,
+            "icon": "🥤",
+            "item_type": "reward",
+        },
+        "snus": {
+            "name": "Snus",
+            "description": "Spend coins reward",
+            "price": 100,
+            "icon": "🧊",
+            "item_type": "reward",
+        },
+        "bolle": {
+            "name": "Bolle",
+            "description": "Spend coins reward",
+            "price": 100,
+            "icon": "🥐",
+            "item_type": "reward",
+        },
+        "cinema": {
+            "name": "Cinema",
+            "description": "Spend coins reward",
+            "price": 500,
+            "icon": "🎬",
+            "item_type": "reward",
+        },
+        "espresso_shot": {
+            "name": "Espresso Shot",
+            "description": "Spend coins reward",
+            "price": 20,
+            "icon": "☕",
+            "item_type": "reward",
+        },
+        "cocoa": {
+            "name": "Cocoa",
+            "description": "Spend coins reward",
+            "price": 40,
+            "icon": "🍫",
+            "item_type": "reward",
+        },
+    }
+    DROP_WEIGHTS: Tuple[Tuple[str, int], ...] = (
+        ("focus_potion", 50),
+        ("streak_shield", 30),
+        ("lucky_charm", 20),
+    )
 
     saveCompleted = Signal(str)  # Emitted with file path after successful save
     loadCompleted = Signal(str)  # Emitted with file path after successful load
@@ -1426,6 +1551,7 @@ class ProjectManager(QObject):
     taskReminderDue = Signal(int, int, str, arguments=["tabIndex", "taskIndex", "taskTitle"])
     yubiKeyInteractionStarted = Signal(str, arguments=["message"])
     yubiKeyInteractionFinished = Signal()
+    gamificationChanged = Signal()
 
     def __init__(self, task_model: TaskModel, diagram_model_or_manager, tab_model: Optional["TabModel"] = None):
         """Initialize ProjectManager.
@@ -1451,10 +1577,12 @@ class ProjectManager(QObject):
         self._settings = QSettings("ProgressTracker", "ProgressTracker")
         self._sidebar_expanded = self._load_sidebar_expanded_setting()
         self._recent_projects: List[str] = self._load_recent_projects()
+        self._gamification_state = GamificationState()
         self._reminder_timer = QTimer(self)
         self._reminder_timer.timeout.connect(self._checkBackgroundTabReminders)
         self._reminder_timer.start(1000)
         self._task_model.taskReminderDue.connect(self._onCurrentTabReminderDue)
+        self._task_model.taskCompletionChanged.connect(self._onTaskCompletionChanged)
         if self._tab_model is not None:
             self._task_model.taskCompletionChanged.connect(self._refreshCurrentTabTasks)
             self._task_model.taskCountChanged.connect(self._refreshCurrentTabTasks)
@@ -1532,6 +1660,213 @@ class ProjectManager(QObject):
             # Filter out non-existent files
             return [p for p in stored if p and os.path.exists(p)][:self.MAX_RECENT_PROJECTS]
         return []
+
+    @staticmethod
+    def _safe_int(value: Any, default: int = 0) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _currentHourEpoch() -> int:
+        return int(time.time() // 3600)
+
+    def _hourlyCompletionsForDisplay(self) -> int:
+        current_hour = self._currentHourEpoch()
+        if self._gamification_state.last_progress_hour_epoch != current_hour:
+            return 0
+        return self._gamification_state.hourly_completions
+
+    def _normalizeItemCounts(self, payload: Any) -> Dict[str, int]:
+        if not isinstance(payload, dict):
+            return {}
+        normalized: Dict[str, int] = {}
+        for item_id in self.ITEM_DEFS.keys():
+            count = max(0, self._safe_int(payload.get(item_id), 0))
+            if count > 0:
+                normalized[item_id] = count
+        return normalized
+
+    def _normalizeEffects(self, payload: Any) -> Dict[str, int]:
+        if not isinstance(payload, dict):
+            return {}
+        normalized: Dict[str, int] = {}
+        for effect_key in ("focus_next_completion", "streak_shield_charges", "lucky_charm_remaining"):
+            count = max(0, self._safe_int(payload.get(effect_key), 0))
+            if count > 0:
+                normalized[effect_key] = count
+        return normalized
+
+    def _pouchItemCount(self, item_id: str) -> int:
+        return max(0, self._safe_int(self._gamification_state.pouch_items.get(item_id), 0))
+
+    def _pouchTotalCount(self) -> int:
+        return sum(max(0, self._safe_int(v, 0)) for v in self._gamification_state.pouch_items.values())
+
+    def _hasPouchSpace(self, quantity: int = 1) -> bool:
+        if quantity <= 0:
+            return True
+        return self._pouchTotalCount() + quantity <= max(1, self._gamification_state.pouch_capacity)
+
+    def _addPouchItem(self, item_id: str, quantity: int = 1) -> bool:
+        if item_id not in self.ITEM_DEFS or quantity <= 0:
+            return False
+        if not self._hasPouchSpace(quantity):
+            return False
+        self._gamification_state.pouch_items[item_id] = self._pouchItemCount(item_id) + quantity
+        return True
+
+    def _consumePouchItem(self, item_id: str, quantity: int = 1) -> bool:
+        if item_id not in self.ITEM_DEFS or quantity <= 0:
+            return False
+        count = self._pouchItemCount(item_id)
+        if count < quantity:
+            return False
+        new_count = count - quantity
+        if new_count <= 0:
+            self._gamification_state.pouch_items.pop(item_id, None)
+        else:
+            self._gamification_state.pouch_items[item_id] = new_count
+        return True
+
+    def _effectCount(self, effect_key: str) -> int:
+        return max(0, self._safe_int(self._gamification_state.active_effects.get(effect_key), 0))
+
+    def _setEffectCount(self, effect_key: str, count: int) -> None:
+        if count <= 0:
+            self._gamification_state.active_effects.pop(effect_key, None)
+        else:
+            self._gamification_state.active_effects[effect_key] = int(count)
+
+    def _chooseDropItemId(self) -> str:
+        total_weight = sum(weight for _, weight in self.DROP_WEIGHTS)
+        if total_weight <= 0:
+            return ""
+        roll = random.uniform(0.0, float(total_weight))
+        cumulative = 0.0
+        for item_id, weight in self.DROP_WEIGHTS:
+            cumulative += float(weight)
+            if roll <= cumulative:
+                return item_id
+        return self.DROP_WEIGHTS[-1][0]
+
+    def _advanceHourlyStreakState(self, current_hour: int, first_completion_in_hour: bool) -> None:
+        state = self._gamification_state
+        if not first_completion_in_hour:
+            state.hourly_completions += 1
+            return
+
+        previous_hour = state.last_progress_hour_epoch
+        if previous_hour is None:
+            state.current_streak_hours = 1
+        elif current_hour == previous_hour + 1:
+            state.current_streak_hours = max(1, state.current_streak_hours + 1)
+        elif current_hour > previous_hour + 1:
+            shield_charges = self._effectCount("streak_shield_charges")
+            if shield_charges > 0:
+                self._setEffectCount("streak_shield_charges", shield_charges - 1)
+                state.current_streak_hours = max(1, state.current_streak_hours)
+            else:
+                state.current_streak_hours = 1
+        else:
+            state.current_streak_hours = max(1, state.current_streak_hours)
+
+        state.last_progress_hour_epoch = current_hour
+        state.hourly_completions = 1
+        if state.current_streak_hours > state.best_streak_hours:
+            state.best_streak_hours = state.current_streak_hours
+
+    def _awardCompletionCoinsAndDrops(self, first_completion_in_hour: bool) -> None:
+        state = self._gamification_state
+        coins_gain = self.BASE_COMPLETION_COINS
+        if first_completion_in_hour:
+            coins_gain += self.FIRST_COMPLETION_IN_HOUR_COINS
+            coins_gain += min(self.MAX_STREAK_BONUS_COINS, max(0, state.current_streak_hours - 1))
+
+        focus_charges = self._effectCount("focus_next_completion")
+        if focus_charges > 0:
+            coins_gain += self.FOCUS_POTION_COIN_BONUS
+            self._setEffectCount("focus_next_completion", focus_charges - 1)
+
+        state.coins_total += coins_gain
+        state.coins_earned_total += coins_gain
+
+        drop_chance = self.BASE_DROP_CHANCE
+        lucky_remaining = self._effectCount("lucky_charm_remaining")
+        if lucky_remaining > 0:
+            drop_chance += self.LUCKY_CHARM_DROP_BONUS
+            self._setEffectCount("lucky_charm_remaining", lucky_remaining - 1)
+
+        if self._hasPouchSpace() and random.random() < drop_chance:
+            dropped_item = self._chooseDropItemId()
+            if dropped_item and self._addPouchItem(dropped_item):
+                state.items_dropped_total += 1
+
+    @staticmethod
+    def _computeLevelFields(xp_total: int) -> Tuple[int, int, int]:
+        level = 1
+        xp_remaining = max(0, int(xp_total))
+        xp_for_next = 100
+        while xp_remaining >= xp_for_next:
+            xp_remaining -= xp_for_next
+            level += 1
+            xp_for_next = 100 * level
+        return level, xp_remaining, xp_for_next
+
+    def _loadGamificationState(self, payload: Any) -> None:
+        if not isinstance(payload, dict):
+            self._gamification_state = GamificationState()
+            self.gamificationChanged.emit()
+            return
+
+        hourly_goal = max(1, self._safe_int(payload.get("hourly_goal_completions"), 3))
+        last_hour_raw = payload.get("last_progress_hour_epoch")
+        last_hour = self._safe_int(last_hour_raw) if last_hour_raw is not None else None
+        pouch_items = self._normalizeItemCounts(payload.get("pouch_items"))
+        active_effects = self._normalizeEffects(payload.get("active_effects"))
+        pouch_capacity = max(1, self._safe_int(payload.get("pouch_capacity"), self.DEFAULT_POUCH_CAPACITY))
+        self._gamification_state = GamificationState(
+            xp_total=max(0, self._safe_int(payload.get("xp_total"), 0)),
+            coins_total=max(0, self._safe_int(payload.get("coins_total"), 0)),
+            current_streak_hours=max(0, self._safe_int(payload.get("current_streak_hours"), 0)),
+            best_streak_hours=max(0, self._safe_int(payload.get("best_streak_hours"), 0)),
+            last_progress_hour_epoch=last_hour,
+            hourly_completions=max(0, self._safe_int(payload.get("hourly_completions"), 0)),
+            hourly_goal_completions=hourly_goal,
+            pouch_items=pouch_items,
+            pouch_capacity=pouch_capacity,
+            active_effects=active_effects,
+            shop_catalog_version=str(payload.get("shop_catalog_version", "v1")),
+            coins_earned_total=max(0, self._safe_int(payload.get("coins_earned_total"), 0)),
+            coins_spent_total=max(0, self._safe_int(payload.get("coins_spent_total"), 0)),
+            items_used_total=max(0, self._safe_int(payload.get("items_used_total"), 0)),
+            items_dropped_total=max(0, self._safe_int(payload.get("items_dropped_total"), 0)),
+        )
+        if self._gamification_state.best_streak_hours < self._gamification_state.current_streak_hours:
+            self._gamification_state.best_streak_hours = self._gamification_state.current_streak_hours
+        self.gamificationChanged.emit()
+
+    def _awardCompletionGamification(self) -> None:
+        state = self._gamification_state
+        current_hour = self._currentHourEpoch()
+        first_completion_in_hour = state.last_progress_hour_epoch != current_hour
+
+        self._advanceHourlyStreakState(current_hour, first_completion_in_hour)
+
+        xp_gain = self.BASE_COMPLETION_XP
+        if first_completion_in_hour:
+            xp_gain += self.FIRST_COMPLETION_IN_HOUR_XP
+            streak_bonus = min(self.MAX_STREAK_BONUS_XP, max(0, state.current_streak_hours - 1))
+            xp_gain += streak_bonus
+        state.xp_total += xp_gain
+        self._awardCompletionCoinsAndDrops(first_completion_in_hour)
+        self.gamificationChanged.emit()
+
+    def _onTaskCompletionChanged(self, _task_index: int, completed: bool) -> None:
+        if not completed:
+            return
+        self._awardCompletionGamification()
 
     def _load_sidebar_expanded_setting(self) -> bool:
         """Load persisted sidebar expansion preference."""
@@ -1618,6 +1953,204 @@ class ProjectManager(QObject):
         """Return the current project file path."""
         return self._current_file_path
 
+    @Property(int, notify=gamificationChanged)
+    def gamificationXp(self) -> int:
+        return self._gamification_state.xp_total
+
+    @Property(int, notify=gamificationChanged)
+    def gamificationLevel(self) -> int:
+        level, _, _ = self._computeLevelFields(self._gamification_state.xp_total)
+        return level
+
+    @Property(int, notify=gamificationChanged)
+    def gamificationXpIntoLevel(self) -> int:
+        _, xp_into_level, _ = self._computeLevelFields(self._gamification_state.xp_total)
+        return xp_into_level
+
+    @Property(int, notify=gamificationChanged)
+    def gamificationXpForNextLevel(self) -> int:
+        _, _, xp_for_next = self._computeLevelFields(self._gamification_state.xp_total)
+        return xp_for_next
+
+    @Property(float, notify=gamificationChanged)
+    def gamificationLevelProgress(self) -> float:
+        _, xp_into_level, xp_for_next = self._computeLevelFields(self._gamification_state.xp_total)
+        if xp_for_next <= 0:
+            return 0.0
+        return xp_into_level / float(xp_for_next)
+
+    @Property(int, notify=gamificationChanged)
+    def gamificationCurrentStreakHours(self) -> int:
+        return self._gamification_state.current_streak_hours
+
+    @Property(int, notify=gamificationChanged)
+    def gamificationBestStreakHours(self) -> int:
+        return self._gamification_state.best_streak_hours
+
+    @Property(int, notify=gamificationChanged)
+    def gamificationHourlyGoalCompletions(self) -> int:
+        return self._gamification_state.hourly_goal_completions
+
+    @Property(int, notify=gamificationChanged)
+    def gamificationHourlyCompletions(self) -> int:
+        return self._hourlyCompletionsForDisplay()
+
+    @Property(float, notify=gamificationChanged)
+    def gamificationHourlyGoalProgress(self) -> float:
+        goal = max(1, self._gamification_state.hourly_goal_completions)
+        return min(1.0, self._hourlyCompletionsForDisplay() / float(goal))
+
+    @Property(int, notify=gamificationChanged)
+    def gamificationCoins(self) -> int:
+        return self._gamification_state.coins_total
+
+    @Property(int, notify=gamificationChanged)
+    def gamificationPouchCount(self) -> int:
+        return self._pouchTotalCount()
+
+    @Property(int, notify=gamificationChanged)
+    def gamificationPouchCapacity(self) -> int:
+        return max(1, self._gamification_state.pouch_capacity)
+
+    @Property(float, notify=gamificationChanged)
+    def gamificationPouchFillPercent(self) -> float:
+        capacity = max(1, self._gamification_state.pouch_capacity)
+        return min(1.0, self._pouchTotalCount() / float(capacity))
+
+    @Property("QVariantList", notify=gamificationChanged)
+    def gamificationPouchSlots(self) -> List[Dict[str, Any]]:
+        slots: List[Dict[str, Any]] = []
+        capacity = max(1, self._gamification_state.pouch_capacity)
+        flattened_ids: List[str] = []
+
+        for item_id in self.ITEM_DEFS.keys():
+            count = self._pouchItemCount(item_id)
+            if count <= 0:
+                continue
+            flattened_ids.extend([item_id] * count)
+
+        for idx in range(capacity):
+            if idx < len(flattened_ids):
+                item_id = flattened_ids[idx]
+                item_def = self.ITEM_DEFS.get(item_id, {})
+                slots.append(
+                    {
+                        "index": idx,
+                        "filled": True,
+                        "itemId": item_id,
+                        "name": str(item_def.get("name", item_id)),
+                        "icon": str(item_def.get("icon", "")),
+                    }
+                )
+            else:
+                slots.append(
+                    {
+                        "index": idx,
+                        "filled": False,
+                        "itemId": "",
+                        "name": "",
+                        "icon": "",
+                    }
+                )
+        return slots
+
+    @Property("QVariantList", notify=gamificationChanged)
+    def gamificationPouchItems(self) -> List[Dict[str, Any]]:
+        items: List[Dict[str, Any]] = []
+        for item_id, item_def in self.ITEM_DEFS.items():
+            count = self._pouchItemCount(item_id)
+            if count <= 0:
+                continue
+            items.append(
+                {
+                    "id": item_id,
+                    "name": item_def["name"],
+                    "description": item_def["description"],
+                    "icon": str(item_def.get("icon", "")),
+                    "itemType": str(item_def.get("item_type", "consumable")),
+                    "count": count,
+                }
+            )
+        return items
+
+    @Property("QVariantList", notify=gamificationChanged)
+    def gamificationShopItems(self) -> List[Dict[str, Any]]:
+        items: List[Dict[str, Any]] = []
+        for item_id, item_def in self.ITEM_DEFS.items():
+            items.append(
+                {
+                    "id": item_id,
+                    "name": item_def["name"],
+                    "description": item_def["description"],
+                    "price": max(0, self._safe_int(item_def.get("price"), 0)),
+                    "icon": str(item_def.get("icon", "")),
+                    "itemType": str(item_def.get("item_type", "consumable")),
+                    "canAfford": self._gamification_state.coins_total >= max(0, self._safe_int(item_def.get("price"), 0)),
+                }
+            )
+        return items
+
+    @Property(bool, notify=gamificationChanged)
+    def gamificationCanAffordAnyShopItem(self) -> bool:
+        if not self._hasPouchSpace():
+            return False
+        for item_def in self.ITEM_DEFS.values():
+            price = max(0, self._safe_int(item_def.get("price"), 0))
+            if self._gamification_state.coins_total >= price:
+                return True
+        return False
+
+    @Slot(str, result=int)
+    def getPouchItemCount(self, item_id: str) -> int:
+        return self._pouchItemCount(str(item_id or ""))
+
+    @Slot(str, result=bool)
+    def buyShopItem(self, item_id: str) -> bool:
+        item_key = str(item_id or "")
+        item_def = self.ITEM_DEFS.get(item_key)
+        if item_def is None:
+            return False
+        if not self._hasPouchSpace():
+            return False
+        price = max(0, self._safe_int(item_def.get("price"), 0))
+        if self._gamification_state.coins_total < price:
+            return False
+        if not self._addPouchItem(item_key):
+            return False
+        self._gamification_state.coins_total -= price
+        self._gamification_state.coins_spent_total += price
+        self.gamificationChanged.emit()
+        return True
+
+    @Slot(str, result=bool)
+    def usePouchItem(self, item_id: str) -> bool:
+        item_key = str(item_id or "")
+        item_def = self.ITEM_DEFS.get(item_key)
+        if item_def is None:
+            return False
+        item_type = str(item_def.get("item_type", "consumable"))
+        known_consumables = {"focus_potion", "streak_shield", "lucky_charm"}
+        if item_type == "consumable" and item_key not in known_consumables:
+            return False
+        if not self._consumePouchItem(item_key):
+            return False
+
+        if item_key == "focus_potion":
+            self._setEffectCount("focus_next_completion", self._effectCount("focus_next_completion") + 1)
+        elif item_key == "streak_shield":
+            self._setEffectCount("streak_shield_charges", self._effectCount("streak_shield_charges") + 1)
+        elif item_key == "lucky_charm":
+            self._setEffectCount("lucky_charm_remaining", self._effectCount("lucky_charm_remaining") + self.LUCKY_CHARM_USES)
+        elif item_type == "reward":
+            # Reward purchases are consumable from the pouch but have no gameplay effect.
+            pass
+        else:
+            return False
+
+        self._gamification_state.items_used_total += 1
+        self.gamificationChanged.emit()
+        return True
+
     def _normalize_file_path(self, file_path: str) -> str:
         """Convert file URLs into local paths, including Windows file URLs."""
         if file_path.startswith("file:"):
@@ -1658,6 +2191,7 @@ class ProjectManager(QObject):
                 "version": self.PROJECT_VERSION,
                 "tabs": tabs_data,
                 "active_tab": current_tab_index,
+                "gamification": self._gamification_state.to_dict(),
             }
 
         return {
@@ -1668,6 +2202,7 @@ class ProjectManager(QObject):
                 "diagram": self._diagram_model.to_dict(),
             }],
             "active_tab": 0,
+            "gamification": self._gamification_state.to_dict(),
         }
 
     def _serialize_project_payload(self, project_data: Dict[str, Any]) -> str:
@@ -2008,6 +2543,7 @@ class ProjectManager(QObject):
             # Update tab model if available
             if self._tab_model is not None:
                 self._tab_model.setTabs(tabs, active_tab)
+            self._loadGamificationState(project_data.get("gamification"))
 
             # Load the active tab's data into the models
             active_tab_data = tabs[active_tab]

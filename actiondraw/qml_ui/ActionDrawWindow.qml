@@ -998,6 +998,11 @@ ApplicationWindow {
                 root: root
                 taskModel: taskModelRef
                 diagramModel: diagramModelRef
+                projectManager: projectManagerRef
+                onOpenPouchShopRequested: {
+                    if (dialogs && dialogs.pouchShopDialog)
+                        dialogs.pouchShopDialog.open()
+                }
             }
 
             ToolbarRow {

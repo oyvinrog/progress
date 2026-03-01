@@ -31,6 +31,7 @@ Item {
     property alias loadDialog: loadDialog
     property alias folderDialog: folderDialog
     property alias clipboardPasteDialog: clipboardPasteDialog
+    property alias pouchShopDialog: pouchShopDialog
     property bool anyDialogVisible: (
         addDialog.visible
         || boxDialog.visible
@@ -44,6 +45,7 @@ Item {
         || reminderDialog.visible
         || edgeDropTaskDialog.visible
         || clipboardPasteDialog.visible
+        || pouchShopDialog.visible
         || saveDialog.visible
         || loadDialog.visible
     )
@@ -1320,6 +1322,284 @@ Item {
                     onClicked: clipboardPasteDialog.close()
                 }
             }
+        }
+    }
+
+    Dialog {
+        id: pouchShopDialog
+        title: "Pouch & Shop"
+        modal: true
+        width: 760
+        height: 460
+
+        contentItem: ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+
+            Rectangle {
+                Layout.fillWidth: true
+                height: 42
+                radius: 8
+                color: "#14202b"
+                border.color: "#2c3f53"
+                border.width: 1
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 12
+                    spacing: 10
+
+                    Label {
+                        text: "\u25c9 " + (projectManager ? projectManager.gamificationCoins : 0) + " coins"
+                        color: "#ffd166"
+                        font.pixelSize: 14
+                        font.bold: true
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        horizontalAlignment: Text.AlignRight
+                        text: "Pouch " + (projectManager ? projectManager.gamificationPouchCount : 0)
+                              + "/" + (projectManager ? projectManager.gamificationPouchCapacity : 20)
+                        color: "#9ec8e7"
+                        font.pixelSize: 12
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: 12
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    radius: 8
+                    color: "#13212d"
+                    border.color: "#33546a"
+                    border.width: 1
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        spacing: 8
+
+                        Label {
+                            text: "Pouch Items"
+                            color: "#d9ebf8"
+                            font.pixelSize: 13
+                            font.bold: true
+                        }
+
+                        ListView {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 170
+                            clip: true
+                            model: projectManager ? projectManager.gamificationPouchItems : []
+
+                            delegate: Rectangle {
+                                width: ListView.view.width
+                                height: 66
+                                radius: 6
+                                color: "#182b3a"
+                                border.color: "#33546a"
+                                border.width: 1
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 8
+                                    anchors.rightMargin: 8
+                                    spacing: 8
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 2
+                                        Label {
+                                            text: ((modelData.icon || "").length > 0 ? (modelData.icon + " ") : "")
+                                                  + (modelData.name || modelData.id) + " x" + modelData.count
+                                            color: "#f5f6f8"
+                                            font.pixelSize: 12
+                                            font.bold: true
+                                        }
+                                        Label {
+                                            text: modelData.description || ""
+                                            color: "#8da6bc"
+                                            font.pixelSize: 10
+                                            wrapMode: Text.WordWrap
+                                        }
+                                    }
+
+                                    Button {
+                                        text: "Use"
+                                        enabled: projectManager
+                                                 && modelData.count > 0
+                                        onClicked: {
+                                            if (projectManager)
+                                                projectManager.usePouchItem(modelData.id)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            height: 8
+                            radius: 4
+                            color: "#1b2b3a"
+                            border.color: "#33546a"
+                            border.width: 1
+
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: parent.width * (projectManager ? projectManager.gamificationPouchFillPercent : 0)
+                                height: parent.height
+                                radius: parent.radius
+                                color: "#58a9ff"
+                            }
+                        }
+
+                        Label {
+                            text: "Pouch Slots"
+                            color: "#9ec8e7"
+                            font.pixelSize: 11
+                            font.bold: true
+                        }
+
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: 10
+                            columnSpacing: 5
+                            rowSpacing: 5
+
+                            Repeater {
+                                model: projectManager ? projectManager.gamificationPouchSlots : []
+
+                                delegate: Rectangle {
+                                    required property var modelData
+                                    implicitWidth: 24
+                                    implicitHeight: 24
+                                    radius: 4
+                                    color: modelData.filled ? "#284965" : "#1a2a39"
+                                    border.color: modelData.filled ? "#6fb8ff" : "#33546a"
+                                    border.width: 1
+
+                                    Label {
+                                        anchors.centerIn: parent
+                                        text: modelData.filled
+                                              ? (((modelData.icon || "").length > 0)
+                                                    ? modelData.icon
+                                                    : (modelData.name.length > 0 ? modelData.name.charAt(0) : ""))
+                                              : ""
+                                        color: "#dff2ff"
+                                        font.pixelSize: 11
+                                        font.bold: true
+                                    }
+
+                                    ToolTip.visible: slotMouse.containsMouse && modelData.filled
+                                    ToolTip.text: modelData.name
+
+                                    MouseArea {
+                                        id: slotMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    radius: 8
+                    color: "#13212d"
+                    border.color: "#33546a"
+                    border.width: 1
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        spacing: 8
+
+                        Label {
+                            text: "Coin Shop"
+                            color: "#d9ebf8"
+                            font.pixelSize: 13
+                            font.bold: true
+                        }
+
+                        ListView {
+                            id: shopListView
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            clip: true
+                            boundsBehavior: Flickable.StopAtBounds
+                            flickableDirection: Flickable.VerticalFlick
+                            interactive: true
+                            keyNavigationEnabled: true
+                            model: projectManager ? projectManager.gamificationShopItems : []
+                            ScrollBar.vertical: ScrollBar {
+                                policy: ScrollBar.AlwaysOn
+                            }
+
+                            delegate: Rectangle {
+                                width: ListView.view.width
+                                height: 66
+                                radius: 6
+                                color: "#182b3a"
+                                border.color: "#33546a"
+                                border.width: 1
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 8
+                                    anchors.rightMargin: 8
+                                    spacing: 8
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 2
+                                        Label {
+                                            text: ((modelData.icon || "").length > 0 ? (modelData.icon + " ") : "")
+                                                  + (modelData.name || modelData.id)
+                                            color: "#f5f6f8"
+                                            font.pixelSize: 12
+                                            font.bold: true
+                                        }
+                                        Label {
+                                            text: (modelData.description || "") + " \u00b7 " + (modelData.price || 0) + " coins"
+                                            color: "#8da6bc"
+                                            font.pixelSize: 10
+                                            wrapMode: Text.WordWrap
+                                        }
+                                    }
+
+                                    Button {
+                                        text: "Buy"
+                                        enabled: projectManager
+                                                 && (projectManager.gamificationCoins >= (modelData.price || 0))
+                                                 && (projectManager.gamificationPouchCount < projectManager.gamificationPouchCapacity)
+                                        onClicked: {
+                                            if (projectManager)
+                                                projectManager.buyShopItem(modelData.id)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        footer: DialogButtonBox {
+            standardButtons: DialogButtonBox.Close
+            onRejected: pouchShopDialog.close()
         }
     }
 }
