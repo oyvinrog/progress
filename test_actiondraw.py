@@ -1,5 +1,7 @@
 """Tests for the rewritten actiondraw module."""
 
+import time
+
 import pytest
 from PySide6.QtCore import QModelIndex
 from PySide6.QtQml import QQmlApplicationEngine
@@ -2649,6 +2651,250 @@ class TestTaskReminders:
         tabs = tab_model.getAllTabs()
         task_data = tabs[1].tasks["tasks"][0]
         assert "reminder_at" not in task_data
+
+
+class TestTaskContracts:
+    """Tests for deadline-based task contracts."""
+
+    @pytest.fixture
+    def task_model_with_contract(self, app):
+        model = TaskModel()
+        model.addTask("Task with contract", -1)
+        return model
+
+    @pytest.fixture
+    def diagram_model_with_contract_task(self, app, task_model_with_contract):
+        model = DiagramModel(task_model=task_model_with_contract)
+        model.addTask(0, 100.0, 100.0)
+        return model, task_model_with_contract
+
+    def test_contract_defaults(self, task_model_with_contract):
+        index = task_model_with_contract.index(0, 0)
+        assert task_model_with_contract.data(index, task_model_with_contract.ContractActiveRole) is False
+        assert task_model_with_contract.data(index, task_model_with_contract.ContractDeadlineRole) == ""
+        assert task_model_with_contract.data(index, task_model_with_contract.ContractRemainingRole) == -1.0
+        assert task_model_with_contract.data(index, task_model_with_contract.ContractBreachedRole) is False
+        assert task_model_with_contract.data(index, task_model_with_contract.ContractPunishmentRole) == ""
+
+    def test_set_contract_valid(self, task_model_with_contract):
+        from datetime import datetime, timedelta
+
+        deadline_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        assert task_model_with_contract.setContractAt(0, deadline_str, "Throw away coke") is True
+
+        index = task_model_with_contract.index(0, 0)
+        assert task_model_with_contract.data(index, task_model_with_contract.ContractActiveRole) is True
+        assert task_model_with_contract.data(index, task_model_with_contract.ContractDeadlineRole) == deadline_str
+        assert task_model_with_contract.data(index, task_model_with_contract.ContractPunishmentRole) == "Throw away coke"
+
+    def test_set_contract_invalid_inputs(self, task_model_with_contract):
+        assert task_model_with_contract.setContractAt(0, "not-a-date", "Punishment") is False
+        assert task_model_with_contract.setContractAt(0, "", "Punishment") is False
+        assert task_model_with_contract.setContractAt(0, "2099-01-01 09:00", "") is False
+
+    def test_set_contract_rejects_past_datetime(self, task_model_with_contract):
+        from datetime import datetime, timedelta
+
+        past_str = (datetime.now() - timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M")
+        assert task_model_with_contract.setContractAt(0, past_str, "Punishment") is False
+
+    def test_contract_remaining_decreases(self, task_model_with_contract):
+        import time
+        from datetime import datetime, timedelta
+
+        deadline_str = (datetime.now() + timedelta(seconds=2)).strftime("%Y-%m-%d %H:%M:%S")
+        assert task_model_with_contract.setContractAt(0, deadline_str, "Punishment") is True
+        index = task_model_with_contract.index(0, 0)
+        remaining_1 = task_model_with_contract.data(index, task_model_with_contract.ContractRemainingRole)
+        time.sleep(0.2)
+        remaining_2 = task_model_with_contract.data(index, task_model_with_contract.ContractRemainingRole)
+        assert remaining_2 < remaining_1
+
+    def test_contract_breach_emits_once(self, task_model_with_contract):
+        from datetime import datetime, timedelta
+
+        deadline_str = (datetime.now() + timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M")
+        assert task_model_with_contract.setContractAt(0, deadline_str, "Punishment") is True
+
+        task = task_model_with_contract._tasks[0]
+        task.contract_deadline_at = time.time() - 1
+        due = []
+        task_model_with_contract.taskContractBreached.connect(
+            lambda idx, title, punishment, deadline: due.append((idx, title, punishment, deadline))
+        )
+        task_model_with_contract._updateActiveTasks()
+        task_model_with_contract._updateActiveTasks()
+
+        assert len(due) == 1
+        index = task_model_with_contract.index(0, 0)
+        assert task_model_with_contract.data(index, task_model_with_contract.ContractBreachedRole) is True
+
+    def test_complete_task_clears_contract(self, task_model_with_contract):
+        from datetime import datetime, timedelta
+
+        deadline_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        assert task_model_with_contract.setContractAt(0, deadline_str, "Punishment") is True
+        task_model_with_contract.toggleComplete(0, True)
+        index = task_model_with_contract.index(0, 0)
+        assert task_model_with_contract.data(index, task_model_with_contract.ContractActiveRole) is False
+
+    def test_clear_contract(self, task_model_with_contract):
+        from datetime import datetime, timedelta
+
+        deadline_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        assert task_model_with_contract.setContractAt(0, deadline_str, "Punishment") is True
+        task_model_with_contract.clearContract(0)
+        index = task_model_with_contract.index(0, 0)
+        assert task_model_with_contract.data(index, task_model_with_contract.ContractActiveRole) is False
+        assert task_model_with_contract.data(index, task_model_with_contract.ContractPunishmentRole) == ""
+
+    def test_contract_serialization(self, task_model_with_contract):
+        from datetime import datetime, timedelta
+
+        deadline_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        assert task_model_with_contract.setContractAt(0, deadline_str, "Punishment") is True
+        data = task_model_with_contract.to_dict()
+        task_data = data["tasks"][0]
+        assert "contract_deadline_at" in task_data
+        assert task_data["contract_punishment"] == "Punishment"
+
+    def test_contract_deserialization(self, app):
+        model = TaskModel()
+        data = {
+            "tasks": [{
+                "title": "Contract Task",
+                "completed": False,
+                "time_spent": 0.0,
+                "parent_index": -1,
+                "indent_level": 0,
+                "custom_estimate": None,
+                "contract_deadline_at": time.time() + 3600,
+                "contract_punishment": "No coke",
+                "contract_breached": False,
+                "contract_breach_notified": False,
+            }]
+        }
+        model.from_dict(data)
+        index = model.index(0, 0)
+        assert model.data(index, model.ContractActiveRole) is True
+        assert model.data(index, model.ContractPunishmentRole) == "No coke"
+
+    def test_diagram_contract_roles_exist(self, diagram_model_with_contract_task):
+        model, _ = diagram_model_with_contract_task
+        role_names = model.roleNames()
+        assert b"taskContractActive" in role_names.values()
+        assert b"taskContractDeadline" in role_names.values()
+        assert b"taskContractRemaining" in role_names.values()
+        assert b"taskContractBreached" in role_names.values()
+        assert b"taskContractPunishment" in role_names.values()
+
+    def test_diagram_contract_reflects_task_model(self, diagram_model_with_contract_task):
+        from datetime import datetime, timedelta
+
+        diagram_model, task_model = diagram_model_with_contract_task
+        deadline_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        assert task_model.setContractAt(0, deadline_str, "Punishment") is True
+        index = diagram_model.index(0, 0)
+        assert diagram_model.data(index, diagram_model.TaskContractActiveRole) is True
+        assert diagram_model.data(index, diagram_model.TaskContractDeadlineRole) == deadline_str
+        assert diagram_model.data(index, diagram_model.TaskContractPunishmentRole) == "Punishment"
+
+    def test_diagram_set_and_clear_contract_slot(self, diagram_model_with_contract_task):
+        from datetime import datetime, timedelta
+
+        diagram_model, task_model = diagram_model_with_contract_task
+        deadline_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        assert diagram_model.setTaskContractAt(0, deadline_str, "Punishment") is True
+        index = task_model.index(0, 0)
+        assert task_model.data(index, task_model.ContractActiveRole) is True
+        diagram_model.clearTaskContract(0)
+        assert task_model.data(index, task_model.ContractActiveRole) is False
+
+    def test_project_manager_emits_current_tab_contract_breached(self, app):
+        from datetime import datetime, timedelta
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        task_model.addTask("Current Contract", -1)
+        deadline_str = (datetime.now() + timedelta(minutes=5)).strftime("%Y-%m-%d %H:%M")
+        assert task_model.setContractAt(0, deadline_str, "Punishment") is True
+        task_model._tasks[0].contract_deadline_at = time.time() - 1
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        due = []
+        project_manager.taskContractBreached.connect(
+            lambda tab_idx, task_idx, title, punishment, deadline: due.append(
+                (tab_idx, task_idx, title, punishment, deadline)
+            )
+        )
+        task_model._updateActiveTasks()
+
+        assert len(due) == 1
+        assert due[0][0] == 0
+        assert due[0][1] == 0
+        assert due[0][2] == "Current Contract"
+
+    def test_project_manager_emits_background_tab_contract_breached_once(self, app):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        task_model.addTask("Tab 1 Task", -1)
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        tab_model.addTab("Tab 2")
+        tab_model.setTabData(
+            1,
+            {
+                "tasks": [{
+                    "title": "Background Contract",
+                    "completed": False,
+                    "time_spent": 0.0,
+                    "parent_index": -1,
+                    "indent_level": 0,
+                    "custom_estimate": None,
+                    "contract_deadline_at": time.time() - 1,
+                    "contract_punishment": "Throw away coke",
+                    "contract_breached": False,
+                    "contract_breach_notified": False,
+                }]
+            },
+            {"items": [], "edges": [], "strokes": [], "current_task_index": -1},
+        )
+
+        due = []
+        project_manager.taskContractBreached.connect(
+            lambda tab_idx, task_idx, title, punishment, deadline: due.append(
+                (tab_idx, task_idx, title, punishment, deadline)
+            )
+        )
+        project_manager._checkBackgroundTabReminders()
+        project_manager._checkBackgroundTabReminders()
+
+        assert len(due) == 1
+        assert due[0][0] == 1
+        assert due[0][1] == 0
+        assert due[0][2] == "Background Contract"
+
+    def test_project_manager_get_active_contracts(self, app):
+        from datetime import datetime, timedelta
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        task_model.addTask("Active Contract", -1)
+        deadline_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        assert task_model.setContractAt(0, deadline_str, "No coke") is True
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        contracts = project_manager.getActiveContracts()
+        assert len(contracts) == 1
+        assert contracts[0]["taskTitle"] == "Active Contract"
+        assert contracts[0]["punishment"] == "No coke"
 
 
 class TestLinkedSubtabMetadata:
