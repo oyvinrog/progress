@@ -321,6 +321,8 @@ ApplicationWindow {
     property real originOffsetY: boardMargin - boundMinItemY
     property int boardWidth: Math.max(minBoardSize, (currentMaxItemX - boundMinItemX) + (boardMargin * 2))
     property int boardHeight: Math.max(minBoardSize, (currentMaxItemY - boundMinItemY) + (boardMargin * 2))
+    property int sceneWidth: Math.max(1, Math.ceil(originOffsetX + boardWidth))
+    property int sceneHeight: Math.max(1, Math.ceil(originOffsetY + boardHeight))
 
     function updateBoardBounds() {
         if (diagramModel) {
@@ -1133,8 +1135,8 @@ ApplicationWindow {
             Flickable {
                 id: viewport
                 anchors.fill: parent
-                contentWidth: root.boardWidth * root.zoomLevel
-                contentHeight: root.boardHeight * root.zoomLevel
+                contentWidth: root.sceneWidth * root.zoomLevel
+                contentHeight: root.sceneHeight * root.zoomLevel
                 clip: true
                 interactive: !diagramModel || !diagramModel.drawingMode
 
