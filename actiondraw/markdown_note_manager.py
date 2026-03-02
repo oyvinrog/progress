@@ -110,9 +110,8 @@ class MarkdownNoteManager(QObject):
         if saved_item_id:
             self.itemSaved.emit(saved_item_id)
 
-        if self._active_editor_type != "freetext":
-            self._editor.close()
-            self._set_editor_state("", "", 0.0, 0.0, False)
+        self._editor.close()
+        self._set_editor_state("", "", 0.0, 0.0, False)
 
     def _cancel_note(self, _item_id: str) -> None:
         self._set_editor_state("", "", 0.0, 0.0, False)

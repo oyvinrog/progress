@@ -4172,7 +4172,7 @@ class TestMarkdownNoteManager:
 
         assert events == ["save"]
 
-    def test_save_freetext_keeps_editor_open(self, empty_diagram_model, monkeypatch):
+    def test_save_freetext_closes_editor(self, empty_diagram_model, monkeypatch):
         class _DummySignal:
             def connect(self, _callback):
                 return None
@@ -4182,9 +4182,13 @@ class TestMarkdownNoteManager:
                 self.noteSaved = _DummySignal()
                 self.noteCanceled = _DummySignal()
                 self.note_id = ""
+                self.close_calls = 0
 
             def set_note_id(self, note_id):
                 self.note_id = note_id
+
+            def close(self):
+                self.close_calls += 1
 
         monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
         manager = MarkdownNoteManager(empty_diagram_model)
@@ -4192,10 +4196,12 @@ class TestMarkdownNoteManager:
 
         manager._save_note("", "Draft text")
 
-        assert manager.editorOpen is True
-        assert manager.activeEditorType == "freetext"
-        assert manager.activeItemId.startswith("freetext_")
-        item = empty_diagram_model.getItem(manager.activeItemId)
+        assert manager.editorOpen is False
+        assert manager.activeEditorType == ""
+        assert manager.activeItemId == ""
+        assert manager._editor.close_calls == 1
+        assert manager._editor.note_id.startswith("freetext_")
+        item = empty_diagram_model.getItem(manager._editor.note_id)
         assert item is not None
         assert item.text == "Draft text"
 
