@@ -11,7 +11,21 @@ Rectangle {
     property var onAnalyzeHierarchy
     property int expandedWidth: 252
     property int collapsedWidth: 48
-    readonly property bool keepExpanded: tabContextMenu.visible || renameTabDialog.visible
+    readonly property var iconPresetValues: [
+        "⭐", "✅", "⚠", "📌", "🚩", "🎯",
+        "📝", "📅", "🔒", "🔗", "💡", "🧠"
+    ]
+    readonly property var colorPresetValues: [
+        "#4aa3ff", "#2fd7c4", "#45d66f", "#f5c542",
+        "#ff8a3d", "#ff5d73", "#d46bff", "#7a8cff",
+        "#6b7c93", "#7f8c8d", "#a77d54", "#e6e6e6"
+    ]
+    readonly property bool keepExpanded: (
+        tabContextMenu.visible
+        || renameTabDialog.visible
+        || tabIconDialog.visible
+        || tabColorDialog.visible
+    )
     readonly property bool persistedExpanded: projectManager ? projectManager.sidebarExpanded : true
     readonly property bool isExpanded: persistedExpanded || keepExpanded
 
@@ -25,6 +39,20 @@ Rectangle {
         renameTabDialog.tabIndex = tabIndex
         renameTabDialog.currentName = tabName
         renameTabDialog.open()
+    }
+
+    function openTabIconDialog(tabIndex, tabIcon, tabName) {
+        tabIconDialog.tabIndex = tabIndex
+        tabIconDialog.currentIcon = tabIcon || ""
+        tabIconDialog.currentName = tabName || ""
+        tabIconDialog.open()
+    }
+
+    function openTabColorDialog(tabIndex, tabColor, tabName) {
+        tabColorDialog.tabIndex = tabIndex
+        tabColorDialog.currentColor = tabColor || ""
+        tabColorDialog.currentName = tabName || ""
+        tabColorDialog.open()
     }
 
     Layout.fillHeight: true
@@ -151,6 +179,11 @@ Rectangle {
                         property real tabPriorityScore: model.priorityScore || 0
                         property int dragTabIndex: index
                         property string dragTabName: model.name || ""
+                        property string tabIcon: model.icon || ""
+                        property string tabColor: model.color || ""
+                        property color tabAccentColor: tabColor !== ""
+                            ? tabColor
+                            : (isActive ? "#64c1ff" : "#2a4358")
                         property bool suppressClick: false
                         property bool dragging: tabDragHandler.active
                         width: tabColumnContent.width
@@ -159,7 +192,7 @@ Rectangle {
                         scale: dragging ? 1.03 : 1.0
                         opacity: dragging ? 0.9 : 1.0
                         color: isActive ? "#1f3b54" : (tabMouseArea.containsMouse ? "#1a2f42" : "#132535")
-                        border.color: dragging ? "#8fe2ff" : (isActive ? "#64c1ff" : "#2a4358")
+                        border.color: dragging ? "#8fe2ff" : tabAccentColor
                         border.width: dragging ? 2 : 1
 
                         Behavior on color {
@@ -226,6 +259,26 @@ Rectangle {
                                 spacing: 6
 
                                 Rectangle {
+                                    id: tabAccentSwatch
+                                    width: 12
+                                    height: 12
+                                    radius: 6
+                                    color: tabButton.tabAccentColor
+                                    border.color: isActive ? "#d9efff" : "#aac2d8"
+                                    border.width: 1
+                                    visible: sidebar.isExpanded
+                                }
+
+                                Text {
+                                    id: tabIconText
+                                    text: tabButton.tabIcon
+                                    visible: sidebar.isExpanded && tabButton.tabIcon.length > 0
+                                    color: isActive ? "#ffffff" : "#d9e8f6"
+                                    font.pixelSize: 12
+                                    font.bold: true
+                                }
+
+                                Rectangle {
                                     id: priorityBadge
                                     visible: tabButton.tabPriorityScore > 0
                                     width: 36
@@ -256,7 +309,9 @@ Rectangle {
                                 }
 
                                 Text {
-                                    text: model.name.length > 0 ? model.name.charAt(0).toUpperCase() : "T"
+                                    text: tabButton.tabIcon.length > 0
+                                        ? tabButton.tabIcon
+                                        : (model.name.length > 0 ? model.name.charAt(0).toUpperCase() : "T")
                                     visible: !sidebar.isExpanded
                                     color: isActive ? "#ffffff" : "#b0c2d4"
                                     font.pixelSize: 12
@@ -314,6 +369,8 @@ Rectangle {
                                 if (mouse.button === Qt.RightButton) {
                                     tabContextMenu.tabIndex = index
                                     tabContextMenu.tabName = model.name
+                                    tabContextMenu.tabIcon = model.icon || ""
+                                    tabContextMenu.tabColor = model.color || ""
                                     tabContextMenu.includeInPlot = model.includeInPriorityPlot !== false
                                     tabContextMenu.popup()
                                 } else {
@@ -379,6 +436,8 @@ Rectangle {
         id: tabContextMenu
         property int tabIndex: -1
         property string tabName: ""
+        property string tabIcon: ""
+        property string tabColor: ""
         property bool includeInPlot: true
 
         Menu {
@@ -432,6 +491,37 @@ Rectangle {
         MenuSeparator {}
 
         MenuItem {
+            text: "Set Icon..."
+            onTriggered: {
+                sidebar.openTabIconDialog(tabContextMenu.tabIndex, tabContextMenu.tabIcon, tabContextMenu.tabName)
+            }
+        }
+        MenuItem {
+            text: "Clear Icon"
+            enabled: tabContextMenu.tabIcon.length > 0
+            onTriggered: {
+                if (tabModel && tabModel.setTabIcon)
+                    tabModel.setTabIcon(tabContextMenu.tabIndex, "")
+            }
+        }
+        MenuItem {
+            text: "Set Color..."
+            onTriggered: {
+                sidebar.openTabColorDialog(tabContextMenu.tabIndex, tabContextMenu.tabColor, tabContextMenu.tabName)
+            }
+        }
+        MenuItem {
+            text: "Clear Color"
+            enabled: tabContextMenu.tabColor.length > 0
+            onTriggered: {
+                if (tabModel && tabModel.setTabColor)
+                    tabModel.setTabColor(tabContextMenu.tabIndex, "")
+            }
+        }
+
+        MenuSeparator {}
+
+        MenuItem {
             text: "Analyze Hierarchy..."
             onTriggered: {
                 if (typeof sidebar.onAnalyzeHierarchy === "function")
@@ -474,6 +564,265 @@ Rectangle {
                         projectManager.reloadCurrentTab()
                 }
             }
+        }
+    }
+
+    Dialog {
+        id: tabIconDialog
+        property int tabIndex: -1
+        property string currentIcon: ""
+        property string currentName: ""
+        property string selectedIcon: ""
+        title: "Set Tab Icon"
+        modal: true
+        anchors.centerIn: parent
+        width: 360
+        standardButtons: Dialog.Ok | Dialog.Cancel
+
+        contentItem: ColumnLayout {
+            width: tabIconDialog.width - 32
+            spacing: 10
+
+            Rectangle {
+                Layout.fillWidth: true
+                height: 36
+                radius: 7
+                color: "#122638"
+                border.color: "#325771"
+                border.width: 1
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 10
+                    anchors.rightMargin: 10
+                    spacing: 8
+
+                    Text {
+                        text: tabIconDialog.selectedIcon.length > 0 ? tabIconDialog.selectedIcon : "T"
+                        color: "#f1f7ff"
+                        font.pixelSize: 14
+                        font.bold: true
+                    }
+
+                    Text {
+                        text: tabIconDialog.currentName.length > 0 ? tabIconDialog.currentName : "Tab Preview"
+                        color: "#c8d8e8"
+                        font.pixelSize: 11
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                }
+            }
+
+            Text {
+                text: "Choose an icon"
+                color: "#b6c9db"
+                font.pixelSize: 11
+            }
+
+            GridLayout {
+                Layout.fillWidth: true
+                columns: 6
+                rowSpacing: 6
+                columnSpacing: 6
+
+                Repeater {
+                    model: sidebar.iconPresetValues
+
+                    delegate: Rectangle {
+                        required property string modelData
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 30
+                        radius: 6
+                        color: tabIconDialog.selectedIcon === modelData ? "#2a4a63" : "#1a2f42"
+                        border.color: tabIconDialog.selectedIcon === modelData ? "#7bc6ff" : "#33546d"
+                        border.width: 1
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: modelData
+                            color: "#eaf3fd"
+                            font.pixelSize: 12
+                            font.bold: true
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                tabIconDialog.selectedIcon = modelData
+                                customIconField.text = modelData
+                            }
+                        }
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                Button {
+                    text: "None"
+                    onClicked: {
+                        tabIconDialog.selectedIcon = ""
+                        customIconField.text = ""
+                    }
+                }
+
+                TextField {
+                    id: customIconField
+                    Layout.fillWidth: true
+                    placeholderText: "Custom icon (emoji/symbol)"
+                    selectByMouse: true
+                    maximumLength: 4
+                    onTextChanged: {
+                        tabIconDialog.selectedIcon = text.trim()
+                    }
+                    onAccepted: tabIconDialog.accept()
+                }
+            }
+        }
+
+        onOpened: {
+            selectedIcon = currentIcon
+            customIconField.text = currentIcon
+            customIconField.selectAll()
+            customIconField.forceActiveFocus()
+        }
+
+        onAccepted: {
+            if (tabModel && tabModel.setTabIcon)
+                tabModel.setTabIcon(tabIndex, selectedIcon.trim())
+        }
+    }
+
+    Dialog {
+        id: tabColorDialog
+        property int tabIndex: -1
+        property string currentColor: ""
+        property string currentName: ""
+        property string selectedColor: ""
+        title: "Set Tab Color"
+        modal: true
+        anchors.centerIn: parent
+        width: 360
+        standardButtons: Dialog.Ok | Dialog.Cancel
+
+        contentItem: ColumnLayout {
+            width: tabColorDialog.width - 32
+            spacing: 10
+
+            Rectangle {
+                Layout.fillWidth: true
+                height: 36
+                radius: 7
+                color: "#122638"
+                border.color: "#325771"
+                border.width: 1
+
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 10
+                    anchors.rightMargin: 10
+                    spacing: 8
+
+                    Rectangle {
+                        width: 14
+                        height: 14
+                        radius: 7
+                        color: tabColorDialog.selectedColor.length > 0 ? tabColorDialog.selectedColor : "#2a4358"
+                        border.color: "#aac2d8"
+                        border.width: 1
+                    }
+
+                    Text {
+                        text: tabColorDialog.currentName.length > 0 ? tabColorDialog.currentName : "Tab Preview"
+                        color: "#c8d8e8"
+                        font.pixelSize: 11
+                        elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+
+                    Text {
+                        text: tabColorDialog.selectedColor.length > 0 ? tabColorDialog.selectedColor : "default"
+                        color: "#9fc1d9"
+                        font.pixelSize: 10
+                    }
+                }
+            }
+
+            Text {
+                text: "Choose a color"
+                color: "#b6c9db"
+                font.pixelSize: 11
+            }
+
+            GridLayout {
+                Layout.fillWidth: true
+                columns: 6
+                rowSpacing: 6
+                columnSpacing: 6
+
+                Repeater {
+                    model: sidebar.colorPresetValues
+
+                    delegate: Rectangle {
+                        required property string modelData
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 26
+                        radius: 6
+                        color: modelData
+                        border.color: tabColorDialog.selectedColor === modelData ? "#ecf6ff" : "#355268"
+                        border.width: tabColorDialog.selectedColor === modelData ? 2 : 1
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                tabColorDialog.selectedColor = modelData
+                                customColorField.text = modelData
+                            }
+                        }
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                Button {
+                    text: "Default"
+                    onClicked: {
+                        tabColorDialog.selectedColor = ""
+                        customColorField.text = ""
+                    }
+                }
+
+                TextField {
+                    id: customColorField
+                    Layout.fillWidth: true
+                    placeholderText: "Custom color (for example: #4aa3ff)"
+                    selectByMouse: true
+                    onTextChanged: {
+                        tabColorDialog.selectedColor = text.trim()
+                    }
+                    onAccepted: tabColorDialog.accept()
+                }
+            }
+        }
+
+        onOpened: {
+            selectedColor = currentColor
+            customColorField.text = currentColor
+            customColorField.selectAll()
+            customColorField.forceActiveFocus()
+        }
+
+        onAccepted: {
+            if (tabModel && tabModel.setTabColor)
+                tabModel.setTabColor(tabIndex, selectedColor.trim())
         }
     }
 

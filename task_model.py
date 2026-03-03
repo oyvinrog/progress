@@ -28,6 +28,7 @@ from PySide6.QtCore import (
     Slot,
     Property,
 )
+from PySide6.QtGui import QColor
 from progress_crypto import (
     CryptoError,
     EncryptionCredentials,
@@ -74,6 +75,8 @@ class Tab:
     priority_subjective_value: float = 1.0
     priority_score: float = 0.0
     include_in_priority_plot: bool = True
+    icon: str = ""
+    color: str = ""
 
 
 class TaskModel(QAbstractListModel):
@@ -1098,6 +1101,8 @@ class TabModel(QAbstractListModel):
     PrioritySubjectiveValueRole = Qt.UserRole + 7
     PriorityScoreRole = Qt.UserRole + 8
     IncludeInPriorityPlotRole = Qt.UserRole + 9
+    IconRole = Qt.UserRole + 10
+    ColorRole = Qt.UserRole + 11
 
     tabsChanged = Signal()
     currentTabChanged = Signal()
@@ -1134,6 +1139,10 @@ class TabModel(QAbstractListModel):
             return tab.priority_score
         if role == self.IncludeInPriorityPlotRole:
             return tab.include_in_priority_plot
+        if role == self.IconRole:
+            return tab.icon
+        if role == self.ColorRole:
+            return tab.color
         return None
 
     def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
@@ -1147,6 +1156,8 @@ class TabModel(QAbstractListModel):
             self.PrioritySubjectiveValueRole: b"prioritySubjectiveValue",
             self.PriorityScoreRole: b"priorityScore",
             self.IncludeInPriorityPlotRole: b"includeInPriorityPlot",
+            self.IconRole: b"icon",
+            self.ColorRole: b"color",
         }
 
     @Property(int, notify=currentTabIndexChanged)
@@ -1413,6 +1424,39 @@ class TabModel(QAbstractListModel):
         model_index = self.index(index, 0)
         self.dataChanged.emit(model_index, model_index, [self.PriorityRole])
 
+    def _normalizeTabColor(self, color: str) -> str:
+        color_text = str(color or "").strip()
+        if not color_text:
+            return ""
+        parsed_color = QColor(color_text)
+        if not parsed_color.isValid():
+            return ""
+        return parsed_color.name(QColor.HexRgb)
+
+    @Slot(int, str)
+    def setTabIcon(self, index: int, icon: str) -> None:
+        """Set a tab icon glyph/text."""
+        if index < 0 or index >= len(self._tabs):
+            return
+        normalized = str(icon or "").strip()
+        if self._tabs[index].icon == normalized:
+            return
+        self._tabs[index].icon = normalized
+        model_index = self.index(index, 0)
+        self.dataChanged.emit(model_index, model_index, [self.IconRole])
+
+    @Slot(int, str)
+    def setTabColor(self, index: int, color: str) -> None:
+        """Set a tab accent color using any valid Qt color string."""
+        if index < 0 or index >= len(self._tabs):
+            return
+        normalized = self._normalizeTabColor(color)
+        if self._tabs[index].color == normalized:
+            return
+        self._tabs[index].color = normalized
+        model_index = self.index(index, 0)
+        self.dataChanged.emit(model_index, model_index, [self.ColorRole])
+
     def _computePriorityScore(self, value: float, time_hours: float) -> float:
         return compute_priority_score(value, time_hours)
 
@@ -1548,6 +1592,8 @@ class TabModel(QAbstractListModel):
                 )
             else:
                 tab.priority_score = 0.0
+            tab.icon = str(getattr(tab, "icon", "") or "").strip()
+            tab.color = self._normalizeTabColor(getattr(tab, "color", ""))
         self.endResetModel()
 
         # Validate and set active tab index
@@ -1957,6 +2003,8 @@ class ProjectManager(QObject):
                     "priority_subjective_value": tab.priority_subjective_value,
                     "priority_score": tab.priority_score,
                     "include_in_priority_plot": tab.include_in_priority_plot,
+                    "icon": tab.icon,
+                    "color": tab.color,
                 })
 
             return {
@@ -2299,6 +2347,8 @@ class ProjectManager(QObject):
                         priority_subjective_value=tab_data.get("priority_subjective_value", 1.0),
                         priority_score=tab_data.get("priority_score", 0.0),
                         include_in_priority_plot=tab_data.get("include_in_priority_plot", True),
+                        icon=tab_data.get("icon", ""),
+                        color=tab_data.get("color", ""),
                     ))
                 active_tab = project_data.get("active_tab", 0)
 
