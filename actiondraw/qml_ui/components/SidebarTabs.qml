@@ -184,6 +184,9 @@ Rectangle {
                         property color tabAccentColor: tabColor !== ""
                             ? tabColor
                             : (isActive ? "#64c1ff" : "#2a4358")
+                        property color idleTabColor: Qt.darker(tabAccentColor, 4.2)
+                        property color hoverTabColor: Qt.darker(tabAccentColor, 3.6)
+                        property color activeTabColor: Qt.darker(tabAccentColor, 2.9)
                         property bool suppressClick: false
                         property bool dragging: tabDragHandler.active
                         width: tabColumnContent.width
@@ -191,7 +194,7 @@ Rectangle {
                         radius: 9
                         scale: dragging ? 1.03 : 1.0
                         opacity: dragging ? 0.9 : 1.0
-                        color: isActive ? "#1f3b54" : (tabMouseArea.containsMouse ? "#1a2f42" : "#132535")
+                        color: isActive ? activeTabColor : (tabMouseArea.containsMouse ? hoverTabColor : idleTabColor)
                         border.color: dragging ? "#8fe2ff" : tabAccentColor
                         border.width: dragging ? 2 : 1
 
