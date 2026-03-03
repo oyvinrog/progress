@@ -7,6 +7,7 @@ independent use by actiondraw.
 
 import copy
 import json
+import math
 import os
 import subprocess
 import sys
@@ -43,6 +44,213 @@ from actiondraw.priorityplot.model import (
     clamp_time_hours,
     compute_priority_score,
 )
+
+
+CRACK_MODEL_PROFILE_NAME = "Top-end GPU cluster"
+CRACK_MODEL_ARGON2_GUESSES_PER_SECOND = 300_000_000.0
+CRACK_MODEL_UNIVERSE_AGE_SECONDS = 13.8e9 * 365.25 * 24 * 60 * 60
+CRACK_MODEL_COMMON_WORDS = (
+    "password",
+    "passphrase",
+    "secret",
+    "welcome",
+    "qwerty",
+    "letmein",
+    "admin",
+    "iloveyou",
+    "dragon",
+    "progress",
+)
+CRACK_MODEL_KDF_PARAMS_TEXT = "Argon2id t=3, m=65536, p=1"
+
+
+def _infer_charset_size(passphrase: str) -> int:
+    """Infer the brute-force character pool from observed passphrase characters."""
+    has_lower = any("a" <= ch <= "z" for ch in passphrase)
+    has_upper = any("A" <= ch <= "Z" for ch in passphrase)
+    has_digit = any(ch.isdigit() for ch in passphrase)
+    has_space = any(ch.isspace() for ch in passphrase)
+    has_symbol = any((not ch.isalnum()) and (not ch.isspace()) and ord(ch) <= 127 for ch in passphrase)
+    has_non_ascii = any(ord(ch) > 127 for ch in passphrase)
+
+    charset = 0
+    if has_lower:
+        charset += 26
+    if has_upper:
+        charset += 26
+    if has_digit:
+        charset += 10
+    if has_symbol:
+        charset += 33
+    if has_space:
+        charset += 1
+    if has_non_ascii:
+        # Use a broad bucket for non-ASCII scripts/symbols.
+        charset += 2048
+    return max(charset, 1)
+
+
+def _estimate_bruteforce_guesses(passphrase: str) -> int:
+    """Estimate brute-force search space C^L."""
+    if not passphrase:
+        return 0
+    charset = _infer_charset_size(passphrase)
+    return charset ** len(passphrase)
+
+
+def _has_sequence_run(text: str) -> bool:
+    if len(text) < 3:
+        return False
+    for i in range(len(text) - 2):
+        a = ord(text[i])
+        b = ord(text[i + 1])
+        c = ord(text[i + 2])
+        if (b - a == 1 and c - b == 1) or (b - a == -1 and c - b == -1):
+            return True
+    return False
+
+
+def _estimate_human_effective_bits(passphrase: str) -> float:
+    """Estimate effective entropy bits for user-chosen passphrases."""
+    if not passphrase:
+        return 0.0
+
+    charset = _infer_charset_size(passphrase)
+    base_bits = len(passphrase) * math.log2(charset)
+
+    lower = passphrase.lower()
+    penalties = 0.0
+
+    if lower in CRACK_MODEL_COMMON_WORDS:
+        penalties += 26.0
+
+    for token in CRACK_MODEL_COMMON_WORDS:
+        if token in lower:
+            penalties += 8.0
+            break
+
+    if len(set(passphrase)) <= max(1, len(passphrase) // 4):
+        penalties += 8.0
+
+    if _has_sequence_run(lower):
+        penalties += 6.0
+
+    if len(passphrase) < 12:
+        penalties += float(12 - len(passphrase)) * 1.5
+
+    if passphrase.isdigit():
+        penalties += 10.0
+    elif passphrase.isalpha():
+        penalties += 7.0
+
+    year_like = any(str(year) in lower for year in range(1950, 2101))
+    if year_like:
+        penalties += 5.0
+
+    effective_bits = max(4.0, min(base_bits, base_bits - penalties))
+    return effective_bits
+
+
+def _estimate_human_guesses(passphrase: str) -> float:
+    """Convert effective entropy bits into an equivalent search-space size."""
+    bits = _estimate_human_effective_bits(passphrase)
+    if bits <= 0:
+        return 0.0
+    return 2.0 ** bits
+
+
+def _estimate_crack_seconds(guesses: float, guesses_per_second: float) -> Tuple[float, float]:
+    """Return (expected_seconds, worst_case_seconds)."""
+    if guesses <= 0 or guesses_per_second <= 0:
+        return (0.0, 0.0)
+    worst = guesses / guesses_per_second
+    return (worst / 2.0, worst)
+
+
+def _format_duration_human(seconds: float) -> str:
+    if not math.isfinite(seconds):
+        return "not available"
+    if seconds <= 1.0:
+        return "less than a second"
+    if seconds >= CRACK_MODEL_UNIVERSE_AGE_SECONDS:
+        return "longer than the age of the universe"
+
+    hour = 3600.0
+    day = 24.0 * hour
+    year = 365.25 * day
+
+    def _fmt(value: float, digits: int = 1) -> str:
+        if value >= 1000:
+            return f"{value:,.0f}"
+        rounded = round(value, digits)
+        if float(rounded).is_integer():
+            return str(int(rounded))
+        return f"{rounded}"
+
+    if seconds < 48 * hour:
+        primary_value = seconds / hour
+        primary = f"{_fmt(primary_value)} hours"
+    elif seconds < 730 * day:
+        primary_value = seconds / day
+        primary = f"{_fmt(primary_value)} days"
+    else:
+        primary_value = seconds / year
+        primary = f"{_fmt(primary_value)} years"
+
+    days_value = seconds / day
+    hours_value = seconds / hour
+    years_value = seconds / year
+    return (
+        f"{primary} (~{_fmt(days_value)} days, "
+        f"~{_fmt(hours_value)} hours, "
+        f"~{_fmt(years_value, 2)} years)"
+    )
+
+
+def _build_passphrase_crack_time_report(passphrase: str, *, include_yubikey_note: bool = False) -> str:
+    """Build a human-readable dual estimate from the current passphrase."""
+    if not passphrase:
+        return "Enter a passphrase to see a crack-time estimate."
+
+    brute_guesses = float(_estimate_bruteforce_guesses(passphrase))
+    human_guesses = _estimate_human_guesses(passphrase)
+    brute_expected, brute_worst = _estimate_crack_seconds(
+        brute_guesses,
+        CRACK_MODEL_ARGON2_GUESSES_PER_SECOND,
+    )
+    human_expected, human_worst = _estimate_crack_seconds(
+        human_guesses,
+        CRACK_MODEL_ARGON2_GUESSES_PER_SECOND,
+    )
+
+    lines = [
+        f"Model: {CRACK_MODEL_PROFILE_NAME}, {CRACK_MODEL_KDF_PARAMS_TEXT}.",
+        "Assumes offline attack against Argon2id-derived key material.",
+        (
+            "Brute-force (charset^length): "
+            f"Expected {_format_duration_human(brute_expected)}; "
+            f"Worst-case {_format_duration_human(brute_worst)}."
+        ),
+        (
+            "Human-pattern adjusted: "
+            f"Expected {_format_duration_human(human_expected)}; "
+            f"Worst-case {_format_duration_human(human_worst)}."
+        ),
+    ]
+    if include_yubikey_note:
+        lines.append("Note: Passphrase+YubiKey mode also requires YubiKey-derived secret material.")
+    return "\n".join(lines)
+
+
+def _validate_passphrase_confirmation(passphrase: str, confirmation: str) -> Tuple[bool, str]:
+    """Validate passphrase + confirmation fields for save operations."""
+    if not passphrase:
+        return False, "Passphrase cannot be empty."
+    if not confirmation:
+        return False, "Confirm your passphrase."
+    if passphrase != confirmation:
+        return False, "Passphrases do not match."
+    return True, "Passphrases match."
 
 
 @dataclass
@@ -2152,14 +2360,23 @@ class ProjectManager(QObject):
 
         passphrase: Optional[str] = None
         if require_passphrase:
-            prompt = "Enter passphrase:"
-            entered, ok = QInputDialog.getText(None, title, prompt, QLineEdit.Password)
-            if not ok:
-                return None
-            if not entered:
-                self.errorOccurred.emit("Passphrase cannot be empty")
-                return None
-            passphrase = entered
+            if save_mode:
+                entered = self._prompt_save_passphrase_with_confirmation(
+                    title=title,
+                    include_yubikey_note=require_yubikey,
+                )
+                if entered is None:
+                    return None
+                passphrase = entered
+            else:
+                prompt = "Enter passphrase:"
+                entered, ok = QInputDialog.getText(None, title, prompt, QLineEdit.Password)
+                if not ok:
+                    return None
+                if not entered:
+                    self.errorOccurred.emit("Passphrase cannot be empty")
+                    return None
+                passphrase = entered
 
         slot = "2"
         if require_yubikey:
@@ -2182,6 +2399,115 @@ class ProjectManager(QObject):
             use_yubikey=require_yubikey,
             yubikey_slot=slot,
         )
+
+    def _prompt_save_passphrase_with_confirmation(
+        self,
+        *,
+        title: str,
+        include_yubikey_note: bool,
+    ) -> Optional[str]:
+        """Prompt for passphrase and confirmation with live crack-time estimate."""
+        from PySide6.QtWidgets import (
+            QDialog,
+            QDialogButtonBox,
+            QFormLayout,
+            QLabel,
+            QLineEdit,
+            QPlainTextEdit,
+            QSizePolicy,
+            QVBoxLayout,
+        )
+        from PySide6.QtGui import QGuiApplication
+
+        dialog = QDialog()
+        dialog.setWindowTitle(title)
+        dialog.setModal(True)
+        dialog.setMinimumWidth(680)
+        dialog.resize(680, 420)
+
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(10)
+
+        intro = QLabel(
+            "Enter your passphrase twice. The estimate below is based on offline attacks "
+            "against Argon2id-derived key material."
+        )
+        intro.setWordWrap(True)
+        intro.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        layout.addWidget(intro)
+
+        form = QFormLayout()
+        passphrase_edit = QLineEdit()
+        passphrase_edit.setObjectName("savePassphraseEdit")
+        passphrase_edit.setEchoMode(QLineEdit.Password)
+        confirm_edit = QLineEdit()
+        confirm_edit.setObjectName("confirmPassphraseEdit")
+        confirm_edit.setEchoMode(QLineEdit.Password)
+        form.addRow("Passphrase:", passphrase_edit)
+        form.addRow("Confirm passphrase:", confirm_edit)
+        layout.addLayout(form)
+
+        status_label = QLabel("Passphrase cannot be empty.")
+        status_label.setObjectName("passphraseStatusLabel")
+        status_label.setStyleSheet("color: #d67f4b;")
+        status_label.setWordWrap(True)
+        status_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        layout.addWidget(status_label)
+
+        estimate_label = QPlainTextEdit()
+        estimate_label.setObjectName("passphraseEstimateLabel")
+        estimate_label.setReadOnly(True)
+        estimate_label.setLineWrapMode(QPlainTextEdit.WidgetWidth)
+        estimate_label.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        estimate_label.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        estimate_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        estimate_label.setMinimumHeight(150)
+        estimate_label.setMaximumHeight(340)
+        estimate_label.setPlainText("Enter a passphrase to see a crack-time estimate.")
+        layout.addWidget(estimate_label)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setObjectName("savePassphraseOkButton")
+        buttons.button(QDialogButtonBox.Cancel).setObjectName("savePassphraseCancelButton")
+        layout.addWidget(buttons)
+
+        min_height = 380
+        max_height = 900
+        screen = dialog.screen() or QGuiApplication.primaryScreen()
+        if screen is not None:
+            max_height = int(screen.availableGeometry().height() * 0.9)
+
+        def _fit_dialog_height() -> None:
+            layout.activate()
+            target_height = max(min_height, layout.sizeHint().height() + 24)
+            target_height = min(target_height, max_height)
+            if dialog.height() != target_height:
+                dialog.resize(dialog.width(), target_height)
+
+        def _refresh() -> None:
+            passphrase = passphrase_edit.text()
+            confirmation = confirm_edit.text()
+            valid, message = _validate_passphrase_confirmation(passphrase, confirmation)
+            status_label.setText(message)
+            status_label.setStyleSheet("color: #6dc37b;" if valid else "color: #d67f4b;")
+            buttons.button(QDialogButtonBox.Ok).setEnabled(valid)
+            estimate_label.setPlainText(
+                _build_passphrase_crack_time_report(
+                    passphrase,
+                    include_yubikey_note=include_yubikey_note,
+                )
+            )
+            _fit_dialog_height()
+
+        passphrase_edit.textChanged.connect(_refresh)
+        confirm_edit.textChanged.connect(_refresh)
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+
+        _refresh()
+        if dialog.exec() != QDialog.Accepted:
+            return None
+        return passphrase_edit.text()
 
     @Slot(result=bool)
     def hasYubiKeySupport(self) -> bool:
