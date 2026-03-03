@@ -3263,25 +3263,7 @@ ApplicationWindow {
                                         edgeCanvas.selectedEdgeId = ""
                                 }
                                 onDoubleTapped: function(eventPoint) {
-                                    // Check if double-click is on the edge handle (26x26 button, 6px from top-right)
-                                    var localPos = eventPoint.position
-                                    var handleLeft = itemRect.width - 6 - 26
-                                    var handleRight = itemRect.width - 6
-                                    var handleTop = 6
-                                    var handleBottom = 6 + 26
-                                    var onEdgeHandle = (localPos.x >= handleLeft) && (localPos.x <= handleRight) &&
-                                                       (localPos.y >= handleTop) && (localPos.y <= handleBottom)
-
-                                    if (onEdgeHandle) {
-                                        // Double-click on edge handle - create connected item of same type
-                                        var newX = model.x + model.width + 40
-                                        var newY = model.y
-                                        dialogs.edgeDropTaskDialog.sourceId = itemRect.itemId
-                                        dialogs.edgeDropTaskDialog.sourceType = itemRect.itemType
-                                        dialogs.edgeDropTaskDialog.dropX = newX
-                                        dialogs.edgeDropTaskDialog.dropY = newY
-                                        dialogs.edgeDropTaskDialog.open()
-                                    } else if (itemRect.itemType === "chatgpt") {
+                                    if (itemRect.itemType === "chatgpt") {
                                         diagramModel.openChatGpt(itemRect.itemId)
                                     } else if (itemRect.itemType === "wish" || itemRect.itemType === "obstacle") {
                                         if (markdownNoteManager) {
@@ -3318,14 +3300,14 @@ ApplicationWindow {
                                 width: 26
                                 height: 26
                                 radius: 4
-                                anchors.top: parent.top
-                                anchors.topMargin: 6
-                                anchors.right: parent.right
-                                anchors.rightMargin: 6
+                                // Keep connector outside the node to avoid collisions with in-node controls.
+                                x: parent.width - (width / 2)
+                                y: Math.round((parent.height - height) / 2)
                                 color: edgeDrag.active ? "#4c627f" : "#2a3444"
                                 border.color: edgeDrag.active ? "#74a0d9" : "#3b485c"
                                 property point dragPoint: Qt.point(model.x, model.y)
                                 property bool hoverActive: false
+                                z: 26
 
                                 Timer {
                                     id: edgeHoverMenuTimer
@@ -3359,6 +3341,20 @@ ApplicationWindow {
                                     text: "→"
                                     color: "#d2d9e7"
                                     font.pixelSize: 16
+                                }
+
+                                TapHandler {
+                                    acceptedButtons: Qt.LeftButton
+                                    gesturePolicy: TapHandler.DragThreshold
+                                    onDoubleTapped: {
+                                        var newX = model.x + model.width + 40
+                                        var newY = model.y
+                                        dialogs.edgeDropTaskDialog.sourceId = itemRect.itemId
+                                        dialogs.edgeDropTaskDialog.sourceType = itemRect.itemType
+                                        dialogs.edgeDropTaskDialog.dropX = newX
+                                        dialogs.edgeDropTaskDialog.dropY = newY
+                                        dialogs.edgeDropTaskDialog.open()
+                                    }
                                 }
 
                                 DragHandler {

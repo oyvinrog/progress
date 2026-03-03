@@ -258,6 +258,12 @@ Item {
                     Keys.onShortcutOverride: function(event) {
                         var isPaste = event.matches(StandardKey.Paste)
                         var isShiftInsert = ((event.modifiers & Qt.ShiftModifier) && event.key === Qt.Key_Insert)
+                        if (isPaste || isShiftInsert)
+                            event.accepted = true
+                    }
+                    Keys.onPressed: function(event) {
+                        var isPaste = event.matches(StandardKey.Paste)
+                        var isShiftInsert = ((event.modifiers & Qt.ShiftModifier) && event.key === Qt.Key_Insert)
                         if (isPaste || isShiftInsert) {
                             root.handlePasteFromClipboard()
                             event.accepted = true

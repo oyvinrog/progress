@@ -3356,6 +3356,22 @@ class TestTabModelCompletion:
         assert b"prioritySubjectiveValue" in role_names.values()
         assert b"priorityScore" in role_names.values()
         assert b"includeInPriorityPlot" in role_names.values()
+        assert b"icon" in role_names.values()
+        assert b"color" in role_names.values()
+
+    def test_set_tab_icon_and_color(self, app):
+        """Tab icon and color setters update model roles."""
+        from task_model import TabModel
+
+        model = TabModel()
+        model.setTabIcon(0, "!")
+        model.setTabColor(0, "#336699")
+        assert model.data(model.index(0, 0), model.IconRole) == "!"
+        assert model.data(model.index(0, 0), model.ColorRole) == "#336699"
+
+        # Invalid colors are normalized to empty.
+        model.setTabColor(0, "not-a-color")
+        assert model.data(model.index(0, 0), model.ColorRole) == ""
 
     def test_priority_plot_score_and_sort(self, app):
         """Setting plot coordinates recomputes score and reorders tabs."""
@@ -3591,6 +3607,47 @@ class TestPriorityPlotPersistence:
         loaded = {tab.name: tab for tab in tab_model2.getAllTabs()}
         assert loaded["Included"].include_in_priority_plot is True
         assert loaded["Excluded"].include_in_priority_plot is False
+
+    def test_tab_icon_and_color_roundtrip(self, app, tmp_path):
+        """Tab icon and color are persisted."""
+        from task_model import ProjectManager, Tab, TabModel, TaskModel
+
+        project_file = tmp_path / "tab_icon_color.progress"
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        tab_model.setTabs(
+            [
+                Tab(
+                    name="Styled",
+                    tasks={"tasks": []},
+                    diagram={"items": [], "edges": [], "strokes": []},
+                    icon="!",
+                    color="#2277aa",
+                ),
+                Tab(
+                    name="Plain",
+                    tasks={"tasks": []},
+                    diagram={"items": [], "edges": [], "strokes": []},
+                ),
+            ],
+            active_tab=0,
+        )
+
+        manager = ProjectManager(task_model, diagram_model, tab_model)
+        manager.saveProject(str(project_file))
+
+        task_model2 = TaskModel()
+        diagram_model2 = DiagramModel(task_model=task_model2)
+        tab_model2 = TabModel()
+        manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
+        manager2.loadProject(str(project_file))
+
+        loaded = {tab.name: tab for tab in tab_model2.getAllTabs()}
+        assert loaded["Styled"].icon == "!"
+        assert loaded["Styled"].color == "#2277aa"
+        assert loaded["Plain"].icon == ""
+        assert loaded["Plain"].color == ""
 
 
 class TestPriorityPlotStandalone:
@@ -4172,7 +4229,7 @@ class TestMarkdownNoteManager:
 
         assert events == ["save"]
 
-    def test_save_freetext_keeps_editor_open(self, empty_diagram_model, monkeypatch):
+    def test_save_freetext_closes_editor(self, empty_diagram_model, monkeypatch):
         class _DummySignal:
             def connect(self, _callback):
                 return None
@@ -4182,9 +4239,13 @@ class TestMarkdownNoteManager:
                 self.noteSaved = _DummySignal()
                 self.noteCanceled = _DummySignal()
                 self.note_id = ""
+                self.close_calls = 0
 
             def set_note_id(self, note_id):
                 self.note_id = note_id
+
+            def close(self):
+                self.close_calls += 1
 
         monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
         manager = MarkdownNoteManager(empty_diagram_model)
@@ -4192,10 +4253,12 @@ class TestMarkdownNoteManager:
 
         manager._save_note("", "Draft text")
 
-        assert manager.editorOpen is True
-        assert manager.activeEditorType == "freetext"
-        assert manager.activeItemId.startswith("freetext_")
-        item = empty_diagram_model.getItem(manager.activeItemId)
+        assert manager.editorOpen is False
+        assert manager.activeEditorType == ""
+        assert manager.activeItemId == ""
+        assert manager._editor.close_calls == 1
+        assert manager._editor.note_id.startswith("freetext_")
+        item = empty_diagram_model.getItem(manager._editor.note_id)
         assert item is not None
         assert item.text == "Draft text"
 
