@@ -719,6 +719,60 @@ class TestTaskIntegration:
         task_count_after = diagram_model_with_task_model._task_model.rowCount()
         assert task_count_after == task_count_before + 1
 
+    def test_insert_task_on_edge(self, diagram_model_with_task_model):
+        """Inserting a task on an edge replaces it with two connected edges."""
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(200.0, 0.0, "Target")
+        diagram_model_with_task_model.addEdge(source, target)
+        edge_id = diagram_model_with_task_model.edges[0]["id"]
+        task_count_before = diagram_model_with_task_model._task_model.rowCount()
+
+        inserted = diagram_model_with_task_model.insertTaskOnEdge(
+            edge_id, "Inserted Task", 100.0, 50.0
+        )
+
+        assert inserted != ""
+        assert diagram_model_with_task_model._task_model.rowCount() == task_count_before + 1
+        inserted_item = diagram_model_with_task_model.getItemSnapshot(inserted)
+        assert inserted_item["text"] == "Inserted Task"
+        assert len(diagram_model_with_task_model.edges) == 2
+        assert diagram_model_with_task_model.edges[0]["fromId"] == source
+        assert diagram_model_with_task_model.edges[0]["toId"] == inserted
+        assert diagram_model_with_task_model.edges[1]["fromId"] == inserted
+        assert diagram_model_with_task_model.edges[1]["toId"] == target
+
+    def test_insert_task_on_edge_preserves_description_upstream(self, diagram_model_with_task_model):
+        """Splitting an edge keeps its description on the upstream replacement edge."""
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(200.0, 0.0, "Target")
+        diagram_model_with_task_model.addEdge(source, target)
+        edge_id = diagram_model_with_task_model.edges[0]["id"]
+        diagram_model_with_task_model.setEdgeDescription(edge_id, "depends on")
+
+        inserted = diagram_model_with_task_model.insertTaskOnEdge(
+            edge_id, "Inserted Task", 100.0, 50.0
+        )
+
+        assert inserted != ""
+        assert diagram_model_with_task_model.edges[0]["description"] == "depends on"
+        assert diagram_model_with_task_model.edges[1]["description"] == ""
+
+    def test_insert_task_on_invalid_edge_is_noop(self, diagram_model_with_task_model):
+        """Invalid edge ids leave the graph and task list unchanged."""
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(200.0, 0.0, "Target")
+        diagram_model_with_task_model.addEdge(source, target)
+        task_count_before = diagram_model_with_task_model._task_model.rowCount()
+        edges_before = list(diagram_model_with_task_model.edges)
+
+        inserted = diagram_model_with_task_model.insertTaskOnEdge(
+            "missing_edge", "Inserted Task", 100.0, 50.0
+        )
+
+        assert inserted == ""
+        assert diagram_model_with_task_model._task_model.rowCount() == task_count_before
+        assert diagram_model_with_task_model.edges == edges_before
+
     def test_add_task_uses_title(self, diagram_model_with_task_model):
         item_id = diagram_model_with_task_model.addTask(1, 25.0, 35.0)
         index = diagram_model_with_task_model.index(0, 0)
@@ -2651,6 +2705,107 @@ class TestTaskReminders:
         tabs = tab_model.getAllTabs()
         task_data = tabs[1].tasks["tasks"][0]
         assert "reminder_at" not in task_data
+
+    def test_project_manager_get_active_reminders_returns_sorted_cross_tab_results(self, app):
+        from datetime import datetime, timedelta
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        task_model.addTask("Current Reminder", -1)
+        current_str = (datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
+        assert task_model.setReminderAt(0, current_str) is True
+
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        earlier = (datetime.now() + timedelta(minutes=15)).timestamp()
+        later = (datetime.now() + timedelta(hours=5)).timestamp()
+        tab_model.addTab("Tab 2")
+        tab_model.setTabData(
+            1,
+            {
+                "tasks": [
+                    {
+                        "title": "Completed Reminder",
+                        "completed": True,
+                        "time_spent": 0.0,
+                        "parent_index": -1,
+                        "indent_level": 0,
+                        "custom_estimate": None,
+                        "reminder_at": later,
+                    },
+                    {
+                        "title": "Background Reminder",
+                        "completed": False,
+                        "time_spent": 0.0,
+                        "parent_index": -1,
+                        "indent_level": 0,
+                        "custom_estimate": None,
+                        "reminder_at": earlier,
+                    },
+                ]
+            },
+            {"items": [], "edges": [], "strokes": [], "current_task_index": -1},
+        )
+
+        reminders = project_manager.getActiveReminders()
+
+        assert [entry["taskTitle"] for entry in reminders] == ["Background Reminder", "Current Reminder"]
+        assert reminders[0]["tabName"] == "Tab 2"
+        assert reminders[1]["tabName"] == "Main"
+
+    def test_project_manager_clear_reminder_clears_current_tab(self, app):
+        from datetime import datetime, timedelta
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        task_model.addTask("Current Reminder", -1)
+        reminder_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        assert task_model.setReminderAt(0, reminder_str) is True
+
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        project_manager.clearReminder(0, 0)
+
+        index = task_model.index(0, 0)
+        assert task_model.data(index, task_model.ReminderActiveRole) is False
+        assert project_manager.getActiveReminders() == []
+
+    def test_project_manager_clear_reminder_clears_background_tab(self, app):
+        import time
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        task_model.addTask("Current Task", -1)
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        tab_model.addTab("Tab 2")
+        tab_model.setTabData(
+            1,
+            {
+                "tasks": [{
+                    "title": "Background Reminder",
+                    "completed": False,
+                    "time_spent": 0.0,
+                    "parent_index": -1,
+                    "indent_level": 0,
+                    "custom_estimate": None,
+                    "reminder_at": time.time() + 600,
+                }]
+            },
+            {"items": [], "edges": [], "strokes": [], "current_task_index": -1},
+        )
+
+        project_manager.clearReminder(1, 0)
+
+        tabs = tab_model.getAllTabs()
+        assert "reminder_at" not in tabs[1].tasks["tasks"][0]
+        assert project_manager.getActiveReminders() == []
 
 
 class TestTaskContracts:

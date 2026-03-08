@@ -12,6 +12,7 @@ Item {
     property var markdownNoteManager: null
     property var tabModel: null
     property var diagramLayer: null
+    property var edgeCanvas: null
 
     property alias addDialog: addDialog
     property alias boxDialog: boxDialog
@@ -464,6 +465,10 @@ Item {
         title: "New Task"
         property real targetX: 0
         property real targetY: 0
+        property bool edgeInsertMode: false
+        property string edgeId: ""
+        property string edgeFromId: ""
+        property string edgeToId: ""
 
         onOpened: quickTaskField.forceActiveFocus()
 
@@ -501,14 +506,28 @@ Item {
 
         onAccepted: {
             if (diagramModel && quickTaskField.text.trim().length > 0) {
-                var newId = diagramModel.addTaskFromText(
-                    quickTaskField.text,
-                    root.snapValue(quickTaskDialog.targetX),
-                    root.snapValue(quickTaskDialog.targetY)
-                )
+                var newId = ""
+                var targetX = root.snapValue(quickTaskDialog.targetX)
+                var targetY = root.snapValue(quickTaskDialog.targetY)
+                if (quickTaskDialog.edgeInsertMode && quickTaskDialog.edgeId.length > 0) {
+                    newId = diagramModel.insertTaskOnEdge(
+                        quickTaskDialog.edgeId,
+                        quickTaskField.text,
+                        targetX,
+                        targetY
+                    )
+                } else {
+                    newId = diagramModel.addTaskFromText(
+                        quickTaskField.text,
+                        targetX,
+                        targetY
+                    )
+                }
                 if (newId && newId.length > 0) {
                     root.lastCreatedTaskId = newId
                     root.selectedItemId = newId
+                    if (edgeCanvas)
+                        edgeCanvas.selectedEdgeId = ""
                 }
             }
             quickTaskDialog.close()
@@ -517,6 +536,10 @@ Item {
 
         onClosed: {
             quickTaskField.text = ""
+            quickTaskDialog.edgeInsertMode = false
+            quickTaskDialog.edgeId = ""
+            quickTaskDialog.edgeFromId = ""
+            quickTaskDialog.edgeToId = ""
         }
     }
 

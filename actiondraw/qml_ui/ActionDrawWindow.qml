@@ -308,12 +308,42 @@ ApplicationWindow {
             root.showNextReminderAlert()
     }
 
+    function refreshActiveReminders() {
+        if (!projectManager || !projectManager.getActiveReminders) {
+            activeReminders = []
+            return
+        }
+        var hadReminders = activeReminders && activeReminders.length > 0
+        activeReminders = projectManager.getActiveReminders()
+        if ((!hadReminders || !reminderOverviewTouched) && activeReminders.length > 0)
+            reminderOverviewExpanded = true
+        if (activeReminders.length === 0)
+            reminderOverviewTouched = false
+    }
+
     function refreshActiveContracts() {
         if (!projectManager || !projectManager.getActiveContracts) {
             activeContracts = []
             return
         }
         activeContracts = projectManager.getActiveContracts()
+    }
+
+    function refreshOverviewData() {
+        refreshActiveReminders()
+        refreshActiveContracts()
+    }
+
+    function formatRemainingTime(totalSeconds) {
+        var totalSecs = Math.floor(Number(totalSeconds))
+        if (totalSecs < 0)
+            totalSecs = 0
+        var hours = Math.floor(totalSecs / 3600)
+        var mins = Math.floor((totalSecs % 3600) / 60)
+        var secs = totalSecs % 60
+        if (hours > 0)
+            return hours + "h " + mins + "m " + secs + "s"
+        return mins + "m " + secs + "s"
     }
 
     function showNextContractAlert() {
@@ -443,7 +473,11 @@ ApplicationWindow {
     property string pendingContractDeadline: ""
     property var contractQueue: []
     property bool contractPopupBusy: false
+    property var activeReminders: []
     property var activeContracts: []
+    property bool reminderOverviewExpanded: false
+    property bool reminderOverviewTouched: false
+    property bool contractOverviewExpanded: true
     property bool tabDragActive: false
     property bool tabDragInsideViewport: false
     property string tabDragPreviewName: ""
@@ -557,16 +591,57 @@ ApplicationWindow {
     }
 
     Timer {
-        id: contractRefreshTimer
+        id: overviewRefreshTimer
         interval: 1000
         repeat: true
         running: true
-        onTriggered: root.refreshActiveContracts()
+        onTriggered: root.refreshOverviewData()
+    }
+
+    function findEdgeById(edgeId) {
+        if (!diagramModel || !edgeId || edgeId.length === 0)
+            return null
+        var edges = diagramModel.edges
+        for (var i = 0; i < edges.length; ++i) {
+            if (edges[i].id === edgeId)
+                return edges[i]
+        }
+        return null
+    }
+
+    function openQuickTaskDialogForEdge(edge) {
+        if (!diagramModel || !edge)
+            return false
+        var fromItem = diagramModel.getItemSnapshot(edge.fromId)
+        var toItem = diagramModel.getItemSnapshot(edge.toId)
+        if (!fromItem || !(fromItem.x || fromItem.x === 0) || !toItem || !(toItem.x || toItem.x === 0))
+            return false
+
+        var midCenterX = ((fromItem.x + fromItem.width / 2) + (toItem.x + toItem.width / 2)) / 2
+        var midCenterY = ((fromItem.y + fromItem.height / 2) + (toItem.y + toItem.height / 2)) / 2
+        var taskWidth = 140
+        var taskHeight = 70
+        var targetPoint = Qt.point(midCenterX - taskWidth / 2, midCenterY - taskHeight / 2)
+
+        dialogs.quickTaskDialog.edgeInsertMode = true
+        dialogs.quickTaskDialog.edgeId = edge.id
+        dialogs.quickTaskDialog.edgeFromId = edge.fromId
+        dialogs.quickTaskDialog.edgeToId = edge.toId
+        dialogs.quickTaskDialog.targetX = targetPoint.x
+        dialogs.quickTaskDialog.targetY = targetPoint.y
+        dialogs.quickTaskDialog.open()
+        return true
     }
 
     function addTaskOrConnectedTask() {
         if (!diagramModel)
             return
+        if (edgeCanvas && edgeCanvas.selectedEdgeId && edgeCanvas.selectedEdgeId.length > 0) {
+            var selectedEdge = findEdgeById(edgeCanvas.selectedEdgeId)
+            if (selectedEdge && openQuickTaskDialogForEdge(selectedEdge))
+                return
+            edgeCanvas.selectedEdgeId = ""
+        }
         var sourceId = ""
         var item = null
         if (root.selectedItemId && root.selectedItemId.length > 0) {
@@ -996,6 +1071,7 @@ ApplicationWindow {
         markdownNoteManager: markdownNoteManagerRef
         tabModel: tabModelRef
         diagramLayer: diagramLayer
+        edgeCanvas: edgeCanvas
     }
 
     RowLayout {
@@ -1055,87 +1131,229 @@ ApplicationWindow {
 
             Rectangle {
                 Layout.fillWidth: true
-                visible: root.activeContracts && root.activeContracts.length > 0
+                visible: (root.activeReminders && root.activeReminders.length > 0)
+                    || (root.activeContracts && root.activeContracts.length > 0)
                 radius: 10
-                color: "#2b1b1f"
-                border.color: "#b25d6d"
+                color: "#18232d"
+                border.color: "#3a5266"
                 border.width: 1
-                implicitHeight: contractBannerColumn.implicitHeight + 16
+                implicitHeight: overviewColumn.implicitHeight + 16
 
                 Column {
-                    id: contractBannerColumn
+                    id: overviewColumn
                     anchors.fill: parent
                     anchors.margins: 8
-                    spacing: 6
+                    spacing: 8
 
-                    Text {
-                        text: "Active Contracts"
-                        color: "#ffd4d4"
-                        font.pixelSize: 12
-                        font.bold: true
+                    Rectangle {
+                        width: overviewColumn.width
+                        height: reminderHeaderRow.implicitHeight + 12
+                        radius: 8
+                        color: "#21313d"
+                        border.color: "#3b566a"
+                        border.width: 1
+                        visible: root.activeReminders && root.activeReminders.length > 0
+
+                        RowLayout {
+                            id: reminderHeaderRow
+                            anchors.fill: parent
+                            anchors.leftMargin: 10
+                            anchors.rightMargin: 10
+                            spacing: 10
+
+                            Text {
+                                text: "Waiting Reminders"
+                                color: "#ffe4c7"
+                                font.pixelSize: 12
+                                font.bold: true
+                            }
+
+                            Text {
+                                text: root.activeReminders.length + " pending"
+                                color: "#d6a66b"
+                                font.pixelSize: 10
+                                font.bold: true
+                            }
+
+                            Item {
+                                Layout.fillWidth: true
+                            }
+
+                            Button {
+                                text: root.reminderOverviewExpanded ? "Roll Up" : "Roll Down"
+                                onClicked: {
+                                    root.reminderOverviewExpanded = !root.reminderOverviewExpanded
+                                    root.reminderOverviewTouched = true
+                                }
+                            }
+                        }
                     }
 
-                    Repeater {
-                        model: root.activeContracts
-                        delegate: Rectangle {
-                            width: contractBannerColumn.width
-                            height: contractPunishmentText.visible ? 50 : 32
-                            radius: 6
-                            color: modelData.breached ? "#4a2222" : "#37252a"
-                            border.color: modelData.breached ? "#d46a6a" : "#84515e"
-                            border.width: 1
+                    Column {
+                        width: overviewColumn.width
+                        spacing: 6
+                        visible: root.activeReminders && root.activeReminders.length > 0 && root.reminderOverviewExpanded
 
-                            RowLayout {
-                                anchors.fill: parent
-                                anchors.leftMargin: 8
-                                anchors.rightMargin: 8
-                                spacing: 8
+                        Repeater {
+                            model: root.activeReminders
+                            delegate: Rectangle {
+                                width: overviewColumn.width
+                                height: 40
+                                radius: 6
+                                color: "#2e261f"
+                                border.color: "#8d6948"
+                                border.width: 1
 
-                                Column {
-                                    Layout.fillWidth: true
-                                    spacing: 1
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 8
+                                    anchors.rightMargin: 8
+                                    spacing: 8
 
-                                    Text {
-                                        text: "[" + modelData.tabName + "] " + modelData.taskTitle
-                                        color: "#f6f7fa"
-                                        font.pixelSize: 11
-                                        font.bold: true
-                                        elide: Text.ElideRight
+                                    Column {
+                                        Layout.fillWidth: true
+                                        spacing: 1
+
+                                        Text {
+                                            text: "[" + modelData.tabName + "] " + modelData.taskTitle
+                                            color: "#fff7ef"
+                                            font.pixelSize: 11
+                                            font.bold: true
+                                            elide: Text.ElideRight
+                                        }
+
+                                        Text {
+                                            text: "Remind at " + modelData.reminderText
+                                            color: "#f1c892"
+                                            font.pixelSize: 10
+                                            elide: Text.ElideRight
+                                        }
+                                    }
+
+                                    Button {
+                                        text: "Open Task"
+                                        onClicked: {
+                                            if (projectManager && projectManager.openTabTask)
+                                                projectManager.openTabTask(Number(modelData.tabIndex), Number(modelData.taskIndex))
+                                        }
+                                    }
+
+                                    Button {
+                                        text: "Clear"
+                                        onClicked: {
+                                            if (projectManager && projectManager.clearReminder) {
+                                                projectManager.clearReminder(Number(modelData.tabIndex), Number(modelData.taskIndex))
+                                                root.refreshActiveReminders()
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        width: overviewColumn.width
+                        height: contractHeaderRow.implicitHeight + 12
+                        radius: 8
+                        color: "#2b1b1f"
+                        border.color: "#b25d6d"
+                        border.width: 1
+                        visible: root.activeContracts && root.activeContracts.length > 0
+
+                        RowLayout {
+                            id: contractHeaderRow
+                            anchors.fill: parent
+                            anchors.leftMargin: 10
+                            anchors.rightMargin: 10
+                            spacing: 10
+
+                            Text {
+                                text: "Active Contracts"
+                                color: "#ffd4d4"
+                                font.pixelSize: 12
+                                font.bold: true
+                            }
+
+                            Text {
+                                text: root.activeContracts.length + " active"
+                                color: "#f0aeb7"
+                                font.pixelSize: 10
+                                font.bold: true
+                            }
+
+                            Item {
+                                Layout.fillWidth: true
+                            }
+
+                            Button {
+                                text: root.contractOverviewExpanded ? "Roll Up" : "Roll Down"
+                                onClicked: root.contractOverviewExpanded = !root.contractOverviewExpanded
+                            }
+                        }
+                    }
+
+                    Column {
+                        width: overviewColumn.width
+                        spacing: 6
+                        visible: root.activeContracts && root.activeContracts.length > 0 && root.contractOverviewExpanded
+
+                        Repeater {
+                            model: root.activeContracts
+                            delegate: Rectangle {
+                                width: overviewColumn.width
+                                height: contractPunishmentText.visible ? 50 : 32
+                                radius: 6
+                                color: modelData.breached ? "#4a2222" : "#37252a"
+                                border.color: modelData.breached ? "#d46a6a" : "#84515e"
+                                border.width: 1
+
+                                RowLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 8
+                                    anchors.rightMargin: 8
+                                    spacing: 8
+
+                                    Column {
+                                        Layout.fillWidth: true
+                                        spacing: 1
+
+                                        Text {
+                                            text: "[" + modelData.tabName + "] " + modelData.taskTitle
+                                            color: "#f6f7fa"
+                                            font.pixelSize: 11
+                                            font.bold: true
+                                            elide: Text.ElideRight
+                                        }
+
+                                        Text {
+                                            id: contractPunishmentText
+                                            visible: modelData.punishment && modelData.punishment.length > 0
+                                            text: "Punishment: " + modelData.punishment
+                                            color: "#f0c6c6"
+                                            font.pixelSize: 10
+                                            elide: Text.ElideRight
+                                        }
                                     }
 
                                     Text {
-                                        id: contractPunishmentText
-                                        visible: modelData.punishment && modelData.punishment.length > 0
-                                        text: "Punishment: " + modelData.punishment
-                                        color: "#f0c6c6"
+                                        text: {
+                                            var remaining = Number(modelData.remainingSeconds)
+                                            if (modelData.breached || remaining <= 0)
+                                                return "OVERDUE"
+                                            return root.formatRemainingTime(remaining)
+                                        }
+                                        color: modelData.breached ? "#ff9b9b" : "#ffd9a8"
                                         font.pixelSize: 10
-                                        elide: Text.ElideRight
+                                        font.bold: true
                                     }
-                                }
 
-                                Text {
-                                    text: {
-                                        var remaining = Number(modelData.remainingSeconds)
-                                        if (modelData.breached || remaining <= 0)
-                                            return "OVERDUE"
-                                        var totalSecs = Math.floor(remaining)
-                                        var hours = Math.floor(totalSecs / 3600)
-                                        var mins = Math.floor((totalSecs % 3600) / 60)
-                                        var secs = totalSecs % 60
-                                        if (hours > 0)
-                                            return hours + "h " + mins + "m " + secs + "s"
-                                        return mins + "m " + secs + "s"
-                                    }
-                                    color: modelData.breached ? "#ff9b9b" : "#ffd9a8"
-                                    font.pixelSize: 10
-                                    font.bold: true
-                                }
-
-                                Button {
-                                    text: "Open Task"
-                                    onClicked: {
-                                        if (projectManager && projectManager.openTabTask)
-                                            projectManager.openTabTask(Number(modelData.tabIndex), Number(modelData.taskIndex))
+                                    Button {
+                                        text: "Open Task"
+                                        onClicked: {
+                                            if (projectManager && projectManager.openTabTask)
+                                                projectManager.openTabTask(Number(modelData.tabIndex), Number(modelData.taskIndex))
+                                        }
                                     }
                                 }
                             }
@@ -3764,13 +3982,13 @@ ApplicationWindow {
         function onLoadCompleted(filePath) {
             root.updateBoardBounds()
             root.refreshLinkingTabsPanel()
-            root.refreshActiveContracts()
+            root.refreshOverviewData()
             Qt.callLater(root.scrollToContent)
         }
         function onTabSwitched() {
             root.updateBoardBounds()
             root.refreshLinkingTabsPanel()
-            root.refreshActiveContracts()
+            root.refreshOverviewData()
             Qt.callLater(root.scrollToContent)
         }
         function onTaskDrillRequested(taskIndex) {
@@ -3796,11 +4014,12 @@ ApplicationWindow {
         enabled: projectManager !== null
         function onTaskReminderDue(tabIndex, taskIndex, taskTitle) {
             root.showWindow()
+            root.refreshActiveReminders()
             root.showReminderAlert(tabIndex, taskIndex, taskTitle)
         }
         function onTaskContractBreached(tabIndex, taskIndex, taskTitle, punishment, deadlineText) {
             root.showWindow()
-            root.refreshActiveContracts()
+            root.refreshOverviewData()
             root.showContractAlert(tabIndex, taskIndex, taskTitle, punishment, deadlineText)
         }
     }
@@ -3810,31 +4029,31 @@ ApplicationWindow {
         enabled: tabModel !== null
         function onTabsChanged() {
             root.refreshLinkingTabsPanel()
-            root.refreshActiveContracts()
+            root.refreshOverviewData()
         }
         function onCurrentTabChanged() {
             root.refreshLinkingTabsPanel()
-            root.refreshActiveContracts()
+            root.refreshOverviewData()
         }
         function onCurrentTabIndexChanged() {
             root.refreshLinkingTabsPanel()
-            root.refreshActiveContracts()
+            root.refreshOverviewData()
         }
         function onDataChanged() {
             root.refreshLinkingTabsPanel()
-            root.refreshActiveContracts()
+            root.refreshOverviewData()
         }
         function onRowsInserted() {
             root.refreshLinkingTabsPanel()
-            root.refreshActiveContracts()
+            root.refreshOverviewData()
         }
         function onRowsRemoved() {
             root.refreshLinkingTabsPanel()
-            root.refreshActiveContracts()
+            root.refreshOverviewData()
         }
         function onModelReset() {
             root.refreshLinkingTabsPanel()
-            root.refreshActiveContracts()
+            root.refreshOverviewData()
         }
     }
 
@@ -3865,7 +4084,7 @@ ApplicationWindow {
     Component.onCompleted: {
         updateBoardBounds()
         refreshLinkingTabsPanel()
-        refreshActiveContracts()
+        refreshOverviewData()
         Qt.callLater(resetView)
     }
 

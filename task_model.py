@@ -2004,6 +2004,92 @@ class ProjectManager(QObject):
                     [self._tab_model.CompletionRole, self._tab_model.ActiveTaskTitleRole],
                 )
 
+    def _get_cross_tab_tasks(self, tab_index: int) -> Optional[List[Dict[str, Any]]]:
+        """Return mutable task dictionaries for a tab, if available."""
+        if self._tab_model is None:
+            if tab_index != 0:
+                return None
+            payload = self._task_model.to_dict()
+        else:
+            if tab_index < 0 or tab_index >= self._tab_model.tabCount:
+                return None
+            if tab_index == self._tab_model.currentTabIndex:
+                payload = self._task_model.to_dict()
+            else:
+                tab = self._tab_model.getAllTabs()[tab_index]
+                payload = tab.tasks if isinstance(tab.tasks, dict) else {}
+
+        if not isinstance(payload, dict):
+            return None
+        tasks = payload.get("tasks", [])
+        if not isinstance(tasks, list):
+            return None
+        return tasks
+
+    def _emit_tab_summary_changed(self, tab_index: int) -> None:
+        """Notify listeners that summary data for a tab may have changed."""
+        if self._tab_model is None:
+            return
+        model_index = self._tab_model.index(tab_index, 0)
+        self._tab_model.dataChanged.emit(
+            model_index,
+            model_index,
+            [self._tab_model.CompletionRole, self._tab_model.ActiveTaskTitleRole],
+        )
+
+    @Slot(result="QVariantList")
+    def getActiveReminders(self) -> List[Dict[str, Any]]:
+        """Return active reminders across all tabs sorted by soonest first."""
+        now = time.time()
+        reminders: List[Dict[str, Any]] = []
+
+        if self._tab_model is None:
+            tab_indices = [0]
+            current_tab_index = 0
+        else:
+            tab_indices = list(range(self._tab_model.tabCount))
+            current_tab_index = self._tab_model.currentTabIndex
+
+        for tab_index in tab_indices:
+            tasks = self._get_cross_tab_tasks(tab_index)
+            if tasks is None:
+                continue
+            if self._tab_model is None:
+                tab_name = "Main"
+            else:
+                tab = self._tab_model.getAllTabs()[tab_index]
+                tab_name = getattr(tab, "name", "") or "Tab"
+
+            for task_index, task in enumerate(tasks):
+                if not isinstance(task, dict):
+                    continue
+                if task.get("completed", False):
+                    continue
+                reminder_at = task.get("reminder_at")
+                if reminder_at is None:
+                    continue
+                try:
+                    reminder_ts = float(reminder_at)
+                except (TypeError, ValueError):
+                    continue
+                if reminder_ts <= now:
+                    continue
+                title = str(task.get("title", "")).strip() or "Task"
+                reminders.append(
+                    {
+                        "tabIndex": tab_index,
+                        "tabName": tab_name,
+                        "taskIndex": task_index,
+                        "taskTitle": title,
+                        "reminderAt": reminder_ts,
+                        "reminderText": datetime.fromtimestamp(reminder_ts).strftime("%Y-%m-%d %H:%M"),
+                        "isCurrentTab": tab_index == current_tab_index,
+                    }
+                )
+
+        reminders.sort(key=lambda entry: float(entry.get("reminderAt", 0.0)))
+        return reminders
+
     @Slot(result="QVariantList")
     def getActiveContracts(self) -> List[Dict[str, Any]]:
         """Return active contracts across all tabs with countdown/overdue metadata."""
@@ -2078,6 +2164,25 @@ class ProjectManager(QObject):
 
         contracts.sort(key=lambda entry: float(entry.get("deadlineAt", 0.0)))
         return contracts
+
+    @Slot(int, int)
+    def clearReminder(self, tab_index: int, task_index: int) -> None:
+        """Clear a reminder in the current tab or a background tab."""
+        tasks = self._get_cross_tab_tasks(tab_index)
+        if tasks is None:
+            return
+        if task_index < 0 or task_index >= len(tasks):
+            return
+        task = tasks[task_index]
+        if not isinstance(task, dict) or task.get("reminder_at") is None:
+            return
+
+        if self._tab_model is None or tab_index == self._tab_model.currentTabIndex:
+            self._task_model.clearReminderAt(task_index)
+            return
+
+        task.pop("reminder_at", None)
+        self._emit_tab_summary_changed(tab_index)
 
     def _load_recent_projects(self) -> List[str]:
         """Load recent projects list from settings."""
