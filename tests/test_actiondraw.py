@@ -719,6 +719,60 @@ class TestTaskIntegration:
         task_count_after = diagram_model_with_task_model._task_model.rowCount()
         assert task_count_after == task_count_before + 1
 
+    def test_insert_task_on_edge(self, diagram_model_with_task_model):
+        """Inserting a task on an edge replaces it with two connected edges."""
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(200.0, 0.0, "Target")
+        diagram_model_with_task_model.addEdge(source, target)
+        edge_id = diagram_model_with_task_model.edges[0]["id"]
+        task_count_before = diagram_model_with_task_model._task_model.rowCount()
+
+        inserted = diagram_model_with_task_model.insertTaskOnEdge(
+            edge_id, "Inserted Task", 100.0, 50.0
+        )
+
+        assert inserted != ""
+        assert diagram_model_with_task_model._task_model.rowCount() == task_count_before + 1
+        inserted_item = diagram_model_with_task_model.getItemSnapshot(inserted)
+        assert inserted_item["text"] == "Inserted Task"
+        assert len(diagram_model_with_task_model.edges) == 2
+        assert diagram_model_with_task_model.edges[0]["fromId"] == source
+        assert diagram_model_with_task_model.edges[0]["toId"] == inserted
+        assert diagram_model_with_task_model.edges[1]["fromId"] == inserted
+        assert diagram_model_with_task_model.edges[1]["toId"] == target
+
+    def test_insert_task_on_edge_preserves_description_upstream(self, diagram_model_with_task_model):
+        """Splitting an edge keeps its description on the upstream replacement edge."""
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(200.0, 0.0, "Target")
+        diagram_model_with_task_model.addEdge(source, target)
+        edge_id = diagram_model_with_task_model.edges[0]["id"]
+        diagram_model_with_task_model.setEdgeDescription(edge_id, "depends on")
+
+        inserted = diagram_model_with_task_model.insertTaskOnEdge(
+            edge_id, "Inserted Task", 100.0, 50.0
+        )
+
+        assert inserted != ""
+        assert diagram_model_with_task_model.edges[0]["description"] == "depends on"
+        assert diagram_model_with_task_model.edges[1]["description"] == ""
+
+    def test_insert_task_on_invalid_edge_is_noop(self, diagram_model_with_task_model):
+        """Invalid edge ids leave the graph and task list unchanged."""
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(200.0, 0.0, "Target")
+        diagram_model_with_task_model.addEdge(source, target)
+        task_count_before = diagram_model_with_task_model._task_model.rowCount()
+        edges_before = list(diagram_model_with_task_model.edges)
+
+        inserted = diagram_model_with_task_model.insertTaskOnEdge(
+            "missing_edge", "Inserted Task", 100.0, 50.0
+        )
+
+        assert inserted == ""
+        assert diagram_model_with_task_model._task_model.rowCount() == task_count_before
+        assert diagram_model_with_task_model.edges == edges_before
+
     def test_add_task_uses_title(self, diagram_model_with_task_model):
         item_id = diagram_model_with_task_model.addTask(1, 25.0, 35.0)
         index = diagram_model_with_task_model.index(0, 0)

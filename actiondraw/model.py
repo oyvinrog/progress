@@ -1140,6 +1140,12 @@ class DiagramModel(
         self._edges.append(DiagramEdge(edge_id, from_id, to_id))
         self.edgesChanged.emit()
 
+    def _find_edge(self, edge_id: str) -> Optional[DiagramEdge]:
+        for edge in self._edges:
+            if edge.id == edge_id:
+                return edge
+        return None
+
     @Slot(str)
     def removeEdge(self, edge_id: str) -> None:
         """Remove an edge by its ID."""
@@ -1172,10 +1178,37 @@ class DiagramModel(
     @Slot(str, result=str)
     def getEdgeDescription(self, edge_id: str) -> str:
         """Get description text for an edge."""
-        for edge in self._edges:
-            if edge.id == edge_id:
-                return edge.description
+        edge = self._find_edge(edge_id)
+        if edge is not None:
+            return edge.description
         return ""
+
+    @Slot(str, str, float, float, result=str)
+    def insertTaskOnEdge(self, edge_id: str, text: str, x: float, y: float) -> str:
+        """Create a task on an existing edge and reconnect around it."""
+        edge = self._find_edge(edge_id)
+        if edge is None:
+            return ""
+
+        from_id = edge.from_id
+        to_id = edge.to_id
+        description = edge.description
+
+        new_id = self.addTaskFromText(text, x, y)
+        if not new_id:
+            return ""
+
+        self.removeEdge(edge_id)
+        self.addEdge(from_id, new_id)
+        self.addEdge(new_id, to_id)
+
+        if description:
+            upstream_edge = self._edges[-2] if len(self._edges) >= 2 else None
+            if upstream_edge is not None and upstream_edge.from_id == from_id and upstream_edge.to_id == new_id:
+                upstream_edge.description = description
+                self.edgesChanged.emit()
+
+        return new_id
 
     @Slot(str)
     def removeItem(self, item_id: str) -> None:

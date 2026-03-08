@@ -598,9 +598,50 @@ ApplicationWindow {
         onTriggered: root.refreshOverviewData()
     }
 
+    function findEdgeById(edgeId) {
+        if (!diagramModel || !edgeId || edgeId.length === 0)
+            return null
+        var edges = diagramModel.edges
+        for (var i = 0; i < edges.length; ++i) {
+            if (edges[i].id === edgeId)
+                return edges[i]
+        }
+        return null
+    }
+
+    function openQuickTaskDialogForEdge(edge) {
+        if (!diagramModel || !edge)
+            return false
+        var fromItem = diagramModel.getItemSnapshot(edge.fromId)
+        var toItem = diagramModel.getItemSnapshot(edge.toId)
+        if (!fromItem || !(fromItem.x || fromItem.x === 0) || !toItem || !(toItem.x || toItem.x === 0))
+            return false
+
+        var midCenterX = ((fromItem.x + fromItem.width / 2) + (toItem.x + toItem.width / 2)) / 2
+        var midCenterY = ((fromItem.y + fromItem.height / 2) + (toItem.y + toItem.height / 2)) / 2
+        var taskWidth = 140
+        var taskHeight = 70
+        var targetPoint = Qt.point(midCenterX - taskWidth / 2, midCenterY - taskHeight / 2)
+
+        dialogs.quickTaskDialog.edgeInsertMode = true
+        dialogs.quickTaskDialog.edgeId = edge.id
+        dialogs.quickTaskDialog.edgeFromId = edge.fromId
+        dialogs.quickTaskDialog.edgeToId = edge.toId
+        dialogs.quickTaskDialog.targetX = targetPoint.x
+        dialogs.quickTaskDialog.targetY = targetPoint.y
+        dialogs.quickTaskDialog.open()
+        return true
+    }
+
     function addTaskOrConnectedTask() {
         if (!diagramModel)
             return
+        if (edgeCanvas && edgeCanvas.selectedEdgeId && edgeCanvas.selectedEdgeId.length > 0) {
+            var selectedEdge = findEdgeById(edgeCanvas.selectedEdgeId)
+            if (selectedEdge && openQuickTaskDialogForEdge(selectedEdge))
+                return
+            edgeCanvas.selectedEdgeId = ""
+        }
         var sourceId = ""
         var item = null
         if (root.selectedItemId && root.selectedItemId.length > 0) {
@@ -1030,6 +1071,7 @@ ApplicationWindow {
         markdownNoteManager: markdownNoteManagerRef
         tabModel: tabModelRef
         diagramLayer: diagramLayer
+        edgeCanvas: edgeCanvas
     }
 
     RowLayout {
