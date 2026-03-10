@@ -15,7 +15,9 @@ from actiondraw import (
     DrawingStroke,
     create_actiondraw_window,
 )
+from actiondraw.qml import QML_DIR
 from actiondraw.markdown_note_manager import MarkdownNoteManager
+from actiondraw.qml import load_actiondraw_qml
 from progress_crypto import CryptoError, EncryptionCredentials, yubikey_support_guidance
 from task_model import TaskModel
 
@@ -2186,6 +2188,182 @@ class TestMultiTabSupport:
         assert tab_model.currentTabIndex == 1
         assert diagram_model.currentTaskIndex == 0
 
+    def test_project_manager_open_tab_task_enables_back_and_restores_origin(self, app):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        task_model.addTask("Main Task", -1)
+        diagram_model.addTask(0, 20.0, 20.0)
+        diagram_model.focusTask(0)
+
+        tab_model.addTab("Second")
+        tab_model.setTabData(
+            1,
+            {"tasks": [{"title": "Second Task", "completed": False}]},
+            {
+                "items": [{
+                    "id": "task_0",
+                    "item_type": "task",
+                    "x": 40.0,
+                    "y": 60.0,
+                    "width": 140.0,
+                    "height": 70.0,
+                    "text": "Second Task",
+                    "task_index": 0,
+                    "color": "#2e5c88",
+                    "text_color": "#f5f6f8",
+                }],
+                "edges": [],
+                "strokes": [],
+                "current_task_index": -1,
+            },
+        )
+
+        project_manager.openTabTask(1, 0)
+
+        assert project_manager.canGoBack is True
+        assert tab_model.currentTabIndex == 1
+        assert diagram_model.currentTaskIndex == 0
+
+        project_manager.goBack()
+
+        assert project_manager.canGoBack is False
+        assert tab_model.currentTabIndex == 0
+        assert diagram_model.currentTaskIndex == 0
+
+    def test_project_manager_manual_switch_tab_does_not_enable_back(self, app):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        tab_model.addTab("Second")
+
+        project_manager.switchTab(1)
+
+        assert tab_model.currentTabIndex == 1
+        assert project_manager.canGoBack is False
+
+    def test_project_manager_go_back_unwinds_multiple_drills(self, app):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        task_model.addTask("Tab 1 Task", -1)
+        diagram_model.addTask(0, 10.0, 10.0)
+
+        tab_model.addTab("Tab 2")
+        tab_model.addTab("Tab 3")
+        tab_model.setTabData(
+            1,
+            {"tasks": [{"title": "Tab 2 Task", "completed": False}]},
+            {
+                "items": [{
+                    "id": "task_0",
+                    "item_type": "task",
+                    "x": 30.0,
+                    "y": 30.0,
+                    "width": 140.0,
+                    "height": 70.0,
+                    "text": "Tab 2 Task",
+                    "task_index": 0,
+                    "color": "#2e5c88",
+                    "text_color": "#f5f6f8",
+                }],
+                "edges": [],
+                "strokes": [],
+                "current_task_index": -1,
+            },
+        )
+        tab_model.setTabData(
+            2,
+            {"tasks": [{"title": "Tab 3 Task", "completed": False}]},
+            {
+                "items": [{
+                    "id": "task_0",
+                    "item_type": "task",
+                    "x": 50.0,
+                    "y": 50.0,
+                    "width": 140.0,
+                    "height": 70.0,
+                    "text": "Tab 3 Task",
+                    "task_index": 0,
+                    "color": "#2e5c88",
+                    "text_color": "#f5f6f8",
+                }],
+                "edges": [],
+                "strokes": [],
+                "current_task_index": -1,
+            },
+        )
+
+        project_manager.openTabTask(1, 0)
+        project_manager.openTabTask(2, 0)
+
+        assert tab_model.currentTabIndex == 2
+        assert project_manager.canGoBack is True
+
+        project_manager.goBack()
+        assert tab_model.currentTabIndex == 1
+        assert diagram_model.currentTaskIndex == 0
+        assert project_manager.canGoBack is True
+
+        project_manager.goBack()
+        assert tab_model.currentTabIndex == 0
+        assert diagram_model.currentTaskIndex == -1
+        assert project_manager.canGoBack is False
+
+    def test_project_manager_load_clears_back_history(self, app, tmp_path):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        task_model.addTask("Main Task", -1)
+        diagram_model.addTask(0, 20.0, 20.0)
+        tab_model.addTab("Second")
+        tab_model.setTabData(
+            1,
+            {"tasks": [{"title": "Second Task", "completed": False}]},
+            {
+                "items": [{
+                    "id": "task_0",
+                    "item_type": "task",
+                    "x": 40.0,
+                    "y": 60.0,
+                    "width": 140.0,
+                    "height": 70.0,
+                    "text": "Second Task",
+                    "task_index": 0,
+                    "color": "#2e5c88",
+                    "text_color": "#f5f6f8",
+                }],
+                "edges": [],
+                "strokes": [],
+                "current_task_index": -1,
+            },
+        )
+
+        project_manager.openTabTask(1, 0)
+        assert project_manager.canGoBack is True
+
+        project_file = tmp_path / "back_history.progress"
+        project_manager.saveProject(str(project_file))
+        project_manager.loadProject(str(project_file))
+
+        assert project_manager.canGoBack is False
+
     def test_project_manager_open_reminder_task_uses_open_tab_task(self, app, monkeypatch):
         from task_model import TaskModel, ProjectManager, TabModel
 
@@ -2220,6 +2398,36 @@ class TestMultiTabSupport:
         item = diagram_model.getItemSnapshot(created_item_id)
         assert item["taskIndex"] == 0
         assert item["text"] == "Backend API"
+
+
+class TestActionDrawQmlTaskInteractions:
+    def test_linked_task_double_click_drills_to_tab(self):
+        qml = load_actiondraw_qml()
+
+        assert "Task linked to task list - drill into its tab" in qml
+        assert "projectManager.drillToTab(itemRect.taskIndex)" in qml
+        assert "dialogs.taskRenameDialog.openWithItem(itemRect.itemId, model.text)" not in qml
+
+    def test_task_context_menu_exposes_rename_and_drill(self):
+        qml = load_actiondraw_qml()
+
+        assert 'id: renameTaskMenuItem' in qml
+        assert 'text: "Rename Task..."' in qml
+        assert 'id: drillToTabMenuItem' in qml
+
+    def test_toolbar_exposes_back_button(self):
+        qml = (QML_DIR / "components" / "ToolbarRow.qml").read_text(encoding="utf-8")
+
+        assert 'text: "\\u2190 Back"' in qml
+        assert 'projectManager.goBack()' in qml
+        assert 'projectManager.canGoBack' in qml
+
+    def test_shortcut_exposes_back_navigation(self):
+        qml = load_actiondraw_qml()
+
+        assert 'sequence: "Alt+Left"' in qml
+        assert 'onActivated: projectManager.goBack()' in qml
+        assert 'projectManager: projectManagerRef' in qml
 
 
 class TestCountdownTimer:
@@ -3833,6 +4041,21 @@ class TestClipboardFunctionality:
         result = empty_diagram_model.copyItemsToClipboard([item_id])
         assert result == True
 
+    def test_copy_items_to_clipboard_sets_opml_text(self, empty_diagram_model):
+        """Copying items publishes OPML text alongside the custom MIME payload."""
+        from PySide6.QtGui import QGuiApplication
+
+        item_id = empty_diagram_model.addBox(100.0, 100.0, "Test Box")
+        assert empty_diagram_model.copyItemsToClipboard([item_id]) == True
+
+        clipboard = QGuiApplication.clipboard()
+        assert clipboard is not None
+        mime_data = clipboard.mimeData()
+        assert mime_data is not None
+        assert mime_data.hasText()
+        assert "<opml" in mime_data.text()
+        assert 'outline text="Test Box"' in mime_data.text()
+
     def test_copy_items_to_clipboard_multiple(self, empty_diagram_model):
         """Copying multiple items preserves edges."""
         id1 = empty_diagram_model.addBox(100.0, 100.0, "Box 1")
@@ -3878,6 +4101,28 @@ class TestClipboardFunctionality:
         empty_diagram_model.copyItemsToClipboard([item_id])
         result = empty_diagram_model.hasClipboardDiagram()
         assert result == True
+
+    def test_has_clipboard_opml_true_for_valid_opml(self, empty_diagram_model):
+        from PySide6.QtGui import QGuiApplication
+
+        clipboard = QGuiApplication.clipboard()
+        assert clipboard is not None
+        clipboard.setText(
+            '<?xml version="1.0" encoding="UTF-8"?><opml version="1.0">'
+            "<head><title>Example</title></head><body><outline text=\"Parent\">"
+            "<outline text=\"Child\"></outline></outline></body></opml>"
+        )
+
+        assert empty_diagram_model.hasClipboardOpml() == True
+
+    def test_has_clipboard_opml_false_for_invalid_xml(self, empty_diagram_model):
+        from PySide6.QtGui import QGuiApplication
+
+        clipboard = QGuiApplication.clipboard()
+        assert clipboard is not None
+        clipboard.setText("<opml><body><outline text='Broken'></body>")
+
+        assert empty_diagram_model.hasClipboardOpml() == False
 
     def test_paste_diagram_from_clipboard(self, empty_diagram_model):
         """Pasting diagram creates new items."""
@@ -4011,6 +4256,62 @@ class TestPasteTextFromClipboard:
         assert result == True
         assert diagram_model_with_task_model._task_model.rowCount() == initial_task_count + 2
 
+    def test_paste_opml_as_tasks_preserves_hierarchy(self, diagram_model_with_task_model):
+        """OPML paste creates nested task hierarchy."""
+        from PySide6.QtGui import QGuiApplication
+
+        clipboard = QGuiApplication.clipboard()
+        assert clipboard is not None
+        clipboard.setText(
+            '<?xml version="1.0" encoding="UTF-8"?><opml version="1.0">'
+            "<head><title>Example</title></head><body>"
+            '<outline text="Parent"><outline text="Child"></outline></outline>'
+            "</body></opml>"
+        )
+
+        initial_task_count = diagram_model_with_task_model._task_model.rowCount()
+        result = diagram_model_with_task_model.pasteTextFromClipboard(100.0, 100.0, True)
+
+        assert result == True
+        assert diagram_model_with_task_model._task_model.rowCount() == initial_task_count + 2
+        parent_task = diagram_model_with_task_model._task_model._tasks[initial_task_count]
+        child_task = diagram_model_with_task_model._task_model._tasks[initial_task_count + 1]
+        assert parent_task.title == "Parent"
+        assert child_task.title == "Child"
+        assert child_task.parent_index == initial_task_count
+        assert child_task.indent_level == parent_task.indent_level + 1
+
+    def test_paste_opml_as_boxes_creates_items_and_edges(self, empty_diagram_model):
+        """OPML paste as boxes uses the existing item creation path."""
+        from PySide6.QtGui import QGuiApplication
+
+        clipboard = QGuiApplication.clipboard()
+        assert clipboard is not None
+        clipboard.setText(
+            '<?xml version="1.0" encoding="UTF-8"?><opml version="1.0">'
+            "<body><outline text=\"One\"><outline text=\"Two\"></outline></outline></body></opml>"
+        )
+
+        result = empty_diagram_model.pasteTextFromClipboard(100.0, 100.0, False)
+        assert result == True
+        assert empty_diagram_model.count == 2
+        assert len(empty_diagram_model.edges) == 1
+
+    def test_paste_opml_preserves_multiline_text(self, diagram_model_with_task_model):
+        """XML character references in OPML text survive paste."""
+        from PySide6.QtGui import QGuiApplication
+
+        clipboard = QGuiApplication.clipboard()
+        assert clipboard is not None
+        clipboard.setText(
+            '<?xml version="1.0" encoding="UTF-8"?><opml version="1.0">'
+            "<body><outline text=\"Line 1&#10;Line 2\"></outline></body></opml>"
+        )
+
+        initial_task_count = diagram_model_with_task_model._task_model.rowCount()
+        assert diagram_model_with_task_model.pasteTextFromClipboard(100.0, 100.0, True) == True
+        assert diagram_model_with_task_model._task_model._tasks[initial_task_count].title == "Line 1\nLine 2"
+
     def test_paste_text_empty_clipboard(self, empty_diagram_model):
         """Pasting from empty clipboard returns False."""
         from PySide6.QtGui import QGuiApplication
@@ -4040,6 +4341,37 @@ class TestPasteTextFromClipboard:
 
         result = empty_diagram_model.pasteTextFromClipboard(100.0, 100.0, True)
         assert result == False
+
+    def test_non_opml_text_still_uses_existing_multiline_parser(self, empty_diagram_model):
+        """Plain text fallback remains unchanged when clipboard text is not OPML."""
+        from PySide6.QtGui import QGuiApplication
+
+        clipboard = QGuiApplication.clipboard()
+        assert clipboard is not None
+        clipboard.setText("Parent\n  Child")
+
+        result = empty_diagram_model.pasteTextFromClipboard(100.0, 100.0, False)
+        assert result == True
+        assert empty_diagram_model.count == 2
+        assert len(empty_diagram_model.edges) == 1
+
+    def test_copy_task_selection_exports_nested_opml(self, diagram_model_with_task_model):
+        """Copying parent and child task items exports nested OPML text."""
+        from PySide6.QtGui import QGuiApplication
+
+        parent_task_index = diagram_model_with_task_model._task_model.addTaskWithParent("Parent")
+        child_task_index = diagram_model_with_task_model._task_model.addTaskWithParent("Child", parent_task_index)
+        parent_item_id = diagram_model_with_task_model.addTask(parent_task_index, 100.0, 100.0)
+        child_item_id = diagram_model_with_task_model.addTask(child_task_index, 220.0, 100.0)
+
+        assert diagram_model_with_task_model.copyItemsToClipboard([parent_item_id, child_item_id]) == True
+
+        clipboard = QGuiApplication.clipboard()
+        assert clipboard is not None
+        text = clipboard.text()
+        assert 'outline text="Parent"' in text
+        assert 'outline text="Child"' in text
+        assert "<outline text=\"Parent\"><outline text=\"Child\">" in text
 
 
 class TestProjectManagerRefreshTasks:

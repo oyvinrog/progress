@@ -485,6 +485,17 @@ ApplicationWindow {
     property real tabDragPreviewY: 0
 
     Shortcut {
+        sequence: "Alt+Left"
+        enabled: projectManager !== null
+            && projectManager.canGoBack
+            && (!dialogs || !dialogs.anyDialogVisible)
+            && !reminderPopup.visible
+            && !contractPopup.visible
+            && (!markdownNoteManager || !markdownNoteManager.editorOpen)
+        onActivated: projectManager.goBack()
+    }
+
+    Shortcut {
         sequence: "Ctrl+S"
         enabled: projectManager !== null
         onActivated: root.performSave()
@@ -951,7 +962,7 @@ ApplicationWindow {
             diagramModel.pasteImageFromClipboard(center.x, center.y)
             return
         }
-        if (diagramModel.hasClipboardTextLines()) {
+        if (diagramModel.hasClipboardOpml() || diagramModel.hasClipboardTextLines()) {
             dialogs.clipboardPasteDialog.pasteX = center.x
             dialogs.clipboardPasteDialog.pasteY = center.y
             dialogs.clipboardPasteDialog.open()
@@ -1371,6 +1382,7 @@ ApplicationWindow {
             ToolbarRow {
                 root: root
                 diagramModel: diagramModelRef
+                projectManager: projectManagerRef
                 viewport: viewport
             }
 
@@ -1601,6 +1613,21 @@ ApplicationWindow {
                                     return false
                                 var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
                                 return item && (item.type === "note" || item.type === "wish" || item.type === "obstacle")
+                            }
+                            height: visible ? implicitHeight : 0
+                            onTriggered: {
+                                root.renameItemById(diagramLayer.contextMenuItemId)
+                            }
+                        }
+                        MenuItem {
+                            id: renameTaskMenuItem
+                            text: "Rename Task..."
+                            icon.name: "edit-rename"
+                            visible: {
+                                if (!diagramModel || !diagramLayer.contextMenuItemId)
+                                    return false
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                return item && item.type === "task" && item.taskIndex >= 0
                             }
                             height: visible ? implicitHeight : 0
                             onTriggered: {
@@ -3493,8 +3520,9 @@ ApplicationWindow {
                                         // Task not yet linked to task list - create new task
                                         dialogs.newTaskDialog.openWithItem(itemRect.itemId, model.text)
                                     } else if (itemRect.itemType === "task" && itemRect.taskIndex >= 0) {
-                                        // Task linked to task list - rename it (syncs both ways)
-                                        dialogs.taskRenameDialog.openWithItem(itemRect.itemId, model.text)
+                                        // Task linked to task list - drill into its tab
+                                        if (projectManager)
+                                            projectManager.drillToTab(itemRect.taskIndex)
                                     } else if (itemRect.itemType === "freetext") {
                                         // Free text uses dedicated dialog with TextArea
                                         root.openFreeTextDialog(Qt.point(model.x, model.y), itemRect.itemId, model.text)

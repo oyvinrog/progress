@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import json
+import xml.etree.ElementTree as ET
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
 
 from PySide6.QtCore import QByteArray, QBuffer, QIODevice, QMimeData, Signal, Slot
@@ -58,16 +59,114 @@ class ClipboardMixin:
             "folderPath": item.folder_path,
         }
 
-    def _write_clipboard_payload(self, payload: Dict[str, Any]) -> bool:
+    def _build_opml_text(self, items: List[DiagramItem]) -> str:
+        opml = ET.Element("opml", {"version": "1.0"})
+        head = ET.SubElement(opml, "head")
+        title = ET.SubElement(head, "title")
+        title.text = "ActionDraw Clipboard"
+        body = ET.SubElement(opml, "body")
+
+        selected_task_items: Dict[int, DiagramItem] = {}
+        task_children: Dict[int, List[DiagramItem]] = {}
+        top_level_items: List[DiagramItem] = []
+
+        for item in items:
+            if item.item_type == DiagramItemType.TASK and item.task_index >= 0:
+                selected_task_items[item.task_index] = item
+
+        for item in items:
+            if item.item_type != DiagramItemType.TASK or item.task_index < 0 or self._task_model is None:
+                top_level_items.append(item)
+                continue
+
+            parent_index = -1
+            task_list = getattr(self._task_model, "_tasks", [])
+            if 0 <= item.task_index < len(task_list):
+                parent_index = int(task_list[item.task_index].parent_index)
+
+            if parent_index in selected_task_items:
+                task_children.setdefault(parent_index, []).append(item)
+            else:
+                top_level_items.append(item)
+
+        def append_outline(parent: ET.Element, item: DiagramItem) -> None:
+            outline = ET.SubElement(parent, "outline", {"text": item.text})
+            if item.item_type == DiagramItemType.TASK and item.task_index in task_children:
+                for child in task_children[item.task_index]:
+                    append_outline(outline, child)
+
+        for item in top_level_items:
+            append_outline(body, item)
+
+        xml_text = ET.tostring(opml, encoding="unicode", short_empty_elements=False)
+        return f'<?xml version="1.0" encoding="UTF-8"?>{xml_text}'
+
+    def _write_clipboard_payload(self, payload: Dict[str, Any], opml_text: str) -> bool:
         clipboard = QGuiApplication.clipboard()
         if clipboard is None:
             return False
         payload_text = json.dumps(payload)
         mime_data = QMimeData()
         mime_data.setData(CLIPBOARD_MIME_TYPE, QByteArray(payload_text.encode("utf-8")))
-        mime_data.setText(payload_text)
+        mime_data.setText(opml_text)
         clipboard.setMimeData(mime_data)
         return True
+
+    def _read_clipboard_text(self) -> str:
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is None:
+            return ""
+        mime_data = clipboard.mimeData()
+        if mime_data is None or not mime_data.hasText():
+            return ""
+        return mime_data.text() or ""
+
+    @staticmethod
+    def _xml_local_name(tag: str) -> str:
+        if "}" in tag:
+            return tag.rsplit("}", 1)[-1]
+        return tag
+
+    def _parse_opml_text(self, text: str) -> Optional[List[Dict[str, Any]]]:
+        if not text or "<opml" not in text.lower():
+            return None
+        try:
+            root = ET.fromstring(text)
+        except ET.ParseError:
+            return None
+
+        if self._xml_local_name(root.tag).lower() != "opml":
+            return None
+
+        body = None
+        for child in root:
+            if self._xml_local_name(child.tag).lower() == "body":
+                body = child
+                break
+        if body is None:
+            return None
+
+        entries: List[Dict[str, Any]] = []
+
+        def visit(outline: ET.Element, level: int) -> None:
+            text_value = outline.get("text")
+            if text_value is None:
+                text_value = outline.get("title")
+            if text_value is None:
+                text_value = (outline.text or "").strip()
+            if text_value.strip():
+                entries.append({"text": text_value, "level": level})
+
+            next_level = level + 1 if text_value.strip() else level
+            for child_outline in outline:
+                if self._xml_local_name(child_outline.tag).lower() == "outline":
+                    visit(child_outline, next_level)
+
+        for child in body:
+            if self._xml_local_name(child.tag).lower() == "outline":
+                visit(child, 0)
+
+        return entries or None
 
     def _read_clipboard_payload(self) -> Optional[Dict[str, Any]]:
         clipboard = QGuiApplication.clipboard()
@@ -105,12 +204,14 @@ class ClipboardMixin:
         normalized_ids = [str(item_id) for item_id in item_ids if item_id]
         if not normalized_ids:
             return False
+        selected_items: List[DiagramItem] = []
         items = []
         valid_ids = set()
         for item_id in normalized_ids:
             item = self.getItem(item_id)
             if item is None:
                 continue
+            selected_items.append(item)
             items.append(self._serialize_item_for_clipboard(item))
             valid_ids.add(item_id)
         if not items:
@@ -129,7 +230,7 @@ class ClipboardMixin:
             "items": items,
             "edges": edges,
         }
-        return self._write_clipboard_payload(payload)
+        return self._write_clipboard_payload(payload, self._build_opml_text(selected_items))
 
     @Slot(str, result=bool)
     def copyEdgeToClipboard(self, edge_id: str) -> bool:
@@ -161,7 +262,11 @@ class ClipboardMixin:
                 }
             ],
         }
-        return self._write_clipboard_payload(payload)
+        ordered_items = [self.getItem(item_id) for item_id in item_ids]
+        return self._write_clipboard_payload(
+            payload,
+            self._build_opml_text([item for item in ordered_items if item is not None]),
+        )
 
     @Slot(result=bool)
     def hasClipboardDiagram(self) -> bool:
@@ -169,15 +274,13 @@ class ClipboardMixin:
 
     @Slot(result=bool)
     def hasClipboardTextLines(self) -> bool:
-        clipboard = QGuiApplication.clipboard()
-        if clipboard is None:
-            return False
-        mime_data = clipboard.mimeData()
-        if mime_data is None or not mime_data.hasText():
-            return False
-        text = mime_data.text() or ""
+        text = self._read_clipboard_text()
         lines = [line for line in text.splitlines() if line.strip()]
         return len(lines) > 1
+
+    @Slot(result=bool)
+    def hasClipboardOpml(self) -> bool:
+        return self._parse_opml_text(self._read_clipboard_text()) is not None
 
     def _parse_text_hierarchy(self, text: str) -> List[Dict[str, Any]]:
         entries: List[Dict[str, Any]] = []
@@ -211,14 +314,12 @@ class ClipboardMixin:
 
     @Slot(float, float, bool, result=bool)
     def pasteTextFromClipboard(self, x: float, y: float, as_tasks: bool) -> bool:
-        clipboard = QGuiApplication.clipboard()
-        if clipboard is None:
+        text = self._read_clipboard_text()
+        if not text:
             return False
-        mime_data = clipboard.mimeData()
-        if mime_data is None or not mime_data.hasText():
-            return False
-        text = mime_data.text() or ""
-        entries = self._parse_text_hierarchy(text)
+        entries = self._parse_opml_text(text)
+        if entries is None:
+            entries = self._parse_text_hierarchy(text)
         if not entries:
             return False
         if as_tasks and self._task_model is None:
