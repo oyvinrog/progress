@@ -1608,6 +1608,21 @@ ApplicationWindow {
                             }
                         }
                         MenuItem {
+                            id: renameTaskMenuItem
+                            text: "Rename Task..."
+                            icon.name: "edit-rename"
+                            visible: {
+                                if (!diagramModel || !diagramLayer.contextMenuItemId)
+                                    return false
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                return item && item.type === "task" && item.taskIndex >= 0
+                            }
+                            height: visible ? implicitHeight : 0
+                            onTriggered: {
+                                root.renameItemById(diagramLayer.contextMenuItemId)
+                            }
+                        }
+                        MenuItem {
                             id: drillToTabMenuItem
                             text: "Drill to Tab"
                             icon.name: "go-next"
@@ -3493,8 +3508,9 @@ ApplicationWindow {
                                         // Task not yet linked to task list - create new task
                                         dialogs.newTaskDialog.openWithItem(itemRect.itemId, model.text)
                                     } else if (itemRect.itemType === "task" && itemRect.taskIndex >= 0) {
-                                        // Task linked to task list - rename it (syncs both ways)
-                                        dialogs.taskRenameDialog.openWithItem(itemRect.itemId, model.text)
+                                        // Task linked to task list - drill into its tab
+                                        if (projectManager)
+                                            projectManager.drillToTab(itemRect.taskIndex)
                                     } else if (itemRect.itemType === "freetext") {
                                         // Free text uses dedicated dialog with TextArea
                                         root.openFreeTextDialog(Qt.point(model.x, model.y), itemRect.itemId, model.text)

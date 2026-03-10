@@ -16,6 +16,7 @@ from actiondraw import (
     create_actiondraw_window,
 )
 from actiondraw.markdown_note_manager import MarkdownNoteManager
+from actiondraw.qml import load_actiondraw_qml
 from progress_crypto import CryptoError, EncryptionCredentials, yubikey_support_guidance
 from task_model import TaskModel
 
@@ -2220,6 +2221,22 @@ class TestMultiTabSupport:
         item = diagram_model.getItemSnapshot(created_item_id)
         assert item["taskIndex"] == 0
         assert item["text"] == "Backend API"
+
+
+class TestActionDrawQmlTaskInteractions:
+    def test_linked_task_double_click_drills_to_tab(self):
+        qml = load_actiondraw_qml()
+
+        assert "Task linked to task list - drill into its tab" in qml
+        assert "projectManager.drillToTab(itemRect.taskIndex)" in qml
+        assert "dialogs.taskRenameDialog.openWithItem(itemRect.itemId, model.text)" not in qml
+
+    def test_task_context_menu_exposes_rename_and_drill(self):
+        qml = load_actiondraw_qml()
+
+        assert 'id: renameTaskMenuItem' in qml
+        assert 'text: "Rename Task..."' in qml
+        assert 'id: drillToTabMenuItem' in qml
 
 
 class TestCountdownTimer:
