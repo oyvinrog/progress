@@ -15,6 +15,7 @@ from actiondraw import (
     DrawingStroke,
     create_actiondraw_window,
 )
+from actiondraw.qml import QML_DIR
 from actiondraw.markdown_note_manager import MarkdownNoteManager
 from actiondraw.qml import load_actiondraw_qml
 from progress_crypto import CryptoError, EncryptionCredentials, yubikey_support_guidance
@@ -2187,6 +2188,182 @@ class TestMultiTabSupport:
         assert tab_model.currentTabIndex == 1
         assert diagram_model.currentTaskIndex == 0
 
+    def test_project_manager_open_tab_task_enables_back_and_restores_origin(self, app):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        task_model.addTask("Main Task", -1)
+        diagram_model.addTask(0, 20.0, 20.0)
+        diagram_model.focusTask(0)
+
+        tab_model.addTab("Second")
+        tab_model.setTabData(
+            1,
+            {"tasks": [{"title": "Second Task", "completed": False}]},
+            {
+                "items": [{
+                    "id": "task_0",
+                    "item_type": "task",
+                    "x": 40.0,
+                    "y": 60.0,
+                    "width": 140.0,
+                    "height": 70.0,
+                    "text": "Second Task",
+                    "task_index": 0,
+                    "color": "#2e5c88",
+                    "text_color": "#f5f6f8",
+                }],
+                "edges": [],
+                "strokes": [],
+                "current_task_index": -1,
+            },
+        )
+
+        project_manager.openTabTask(1, 0)
+
+        assert project_manager.canGoBack is True
+        assert tab_model.currentTabIndex == 1
+        assert diagram_model.currentTaskIndex == 0
+
+        project_manager.goBack()
+
+        assert project_manager.canGoBack is False
+        assert tab_model.currentTabIndex == 0
+        assert diagram_model.currentTaskIndex == 0
+
+    def test_project_manager_manual_switch_tab_does_not_enable_back(self, app):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        tab_model.addTab("Second")
+
+        project_manager.switchTab(1)
+
+        assert tab_model.currentTabIndex == 1
+        assert project_manager.canGoBack is False
+
+    def test_project_manager_go_back_unwinds_multiple_drills(self, app):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        task_model.addTask("Tab 1 Task", -1)
+        diagram_model.addTask(0, 10.0, 10.0)
+
+        tab_model.addTab("Tab 2")
+        tab_model.addTab("Tab 3")
+        tab_model.setTabData(
+            1,
+            {"tasks": [{"title": "Tab 2 Task", "completed": False}]},
+            {
+                "items": [{
+                    "id": "task_0",
+                    "item_type": "task",
+                    "x": 30.0,
+                    "y": 30.0,
+                    "width": 140.0,
+                    "height": 70.0,
+                    "text": "Tab 2 Task",
+                    "task_index": 0,
+                    "color": "#2e5c88",
+                    "text_color": "#f5f6f8",
+                }],
+                "edges": [],
+                "strokes": [],
+                "current_task_index": -1,
+            },
+        )
+        tab_model.setTabData(
+            2,
+            {"tasks": [{"title": "Tab 3 Task", "completed": False}]},
+            {
+                "items": [{
+                    "id": "task_0",
+                    "item_type": "task",
+                    "x": 50.0,
+                    "y": 50.0,
+                    "width": 140.0,
+                    "height": 70.0,
+                    "text": "Tab 3 Task",
+                    "task_index": 0,
+                    "color": "#2e5c88",
+                    "text_color": "#f5f6f8",
+                }],
+                "edges": [],
+                "strokes": [],
+                "current_task_index": -1,
+            },
+        )
+
+        project_manager.openTabTask(1, 0)
+        project_manager.openTabTask(2, 0)
+
+        assert tab_model.currentTabIndex == 2
+        assert project_manager.canGoBack is True
+
+        project_manager.goBack()
+        assert tab_model.currentTabIndex == 1
+        assert diagram_model.currentTaskIndex == 0
+        assert project_manager.canGoBack is True
+
+        project_manager.goBack()
+        assert tab_model.currentTabIndex == 0
+        assert diagram_model.currentTaskIndex == -1
+        assert project_manager.canGoBack is False
+
+    def test_project_manager_load_clears_back_history(self, app, tmp_path):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        task_model.addTask("Main Task", -1)
+        diagram_model.addTask(0, 20.0, 20.0)
+        tab_model.addTab("Second")
+        tab_model.setTabData(
+            1,
+            {"tasks": [{"title": "Second Task", "completed": False}]},
+            {
+                "items": [{
+                    "id": "task_0",
+                    "item_type": "task",
+                    "x": 40.0,
+                    "y": 60.0,
+                    "width": 140.0,
+                    "height": 70.0,
+                    "text": "Second Task",
+                    "task_index": 0,
+                    "color": "#2e5c88",
+                    "text_color": "#f5f6f8",
+                }],
+                "edges": [],
+                "strokes": [],
+                "current_task_index": -1,
+            },
+        )
+
+        project_manager.openTabTask(1, 0)
+        assert project_manager.canGoBack is True
+
+        project_file = tmp_path / "back_history.progress"
+        project_manager.saveProject(str(project_file))
+        project_manager.loadProject(str(project_file))
+
+        assert project_manager.canGoBack is False
+
     def test_project_manager_open_reminder_task_uses_open_tab_task(self, app, monkeypatch):
         from task_model import TaskModel, ProjectManager, TabModel
 
@@ -2237,6 +2414,20 @@ class TestActionDrawQmlTaskInteractions:
         assert 'id: renameTaskMenuItem' in qml
         assert 'text: "Rename Task..."' in qml
         assert 'id: drillToTabMenuItem' in qml
+
+    def test_toolbar_exposes_back_button(self):
+        qml = (QML_DIR / "components" / "ToolbarRow.qml").read_text(encoding="utf-8")
+
+        assert 'text: "\\u2190 Back"' in qml
+        assert 'projectManager.goBack()' in qml
+        assert 'projectManager.canGoBack' in qml
+
+    def test_shortcut_exposes_back_navigation(self):
+        qml = load_actiondraw_qml()
+
+        assert 'sequence: "Alt+Left"' in qml
+        assert 'onActivated: projectManager.goBack()' in qml
+        assert 'projectManager: projectManagerRef' in qml
 
 
 class TestCountdownTimer:

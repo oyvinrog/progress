@@ -287,6 +287,13 @@ class Tab:
     color: str = ""
 
 
+@dataclass
+class NavigationSnapshot:
+    """Represents a restorable drill-navigation context."""
+    tab_index: int
+    task_index: int = -1
+
+
 class TaskModel(QAbstractListModel):
     """Qt model for managing a list of tasks with time estimation."""
     
@@ -1861,6 +1868,7 @@ class ProjectManager(QObject):
     recentProjectsChanged = Signal()  # Emitted when recent projects list changes
     currentFilePathChanged = Signal()  # Emitted when current file path changes
     sidebarExpandedChanged = Signal()
+    canGoBackChanged = Signal()
     tabSwitched = Signal()  # Emitted when switching to a different tab
     taskDrillRequested = Signal(int, arguments=["taskIndex"])
     taskReminderDue = Signal(int, int, str, arguments=["tabIndex", "taskIndex", "taskTitle"])
@@ -1899,6 +1907,8 @@ class ProjectManager(QObject):
         self._settings = QSettings("ProgressTracker", "ProgressTracker")
         self._sidebar_expanded = self._load_sidebar_expanded_setting()
         self._recent_projects: List[str] = self._load_recent_projects()
+        self._navigation_back_stack: List[NavigationSnapshot] = []
+        self._restoring_navigation = False
         self._reminder_timer = QTimer(self)
         self._reminder_timer.timeout.connect(self._checkBackgroundTabReminders)
         self._reminder_timer.start(1000)
@@ -1910,12 +1920,72 @@ class ProjectManager(QObject):
             self._task_model.taskRenamed.connect(self._refreshCurrentTabTasks)
             self._task_model.taskReminderChanged.connect(self._refreshCurrentTabTasks)
             self._task_model.taskContractChanged.connect(self._refreshCurrentTabTasks)
+            self._tab_model.rowsRemoved.connect(self._clearNavigationHistory)
+            self._tab_model.rowsMoved.connect(self._clearNavigationHistory)
+            self._tab_model.modelReset.connect(self._clearNavigationHistory)
             # Connect diagram model's currentTaskChanged to update tab sidebar
             if hasattr(self._diagram_model, 'currentTaskChanged'):
                 self._diagram_model.currentTaskChanged.connect(self._refreshCurrentTabDiagram)
         self._cached_encryption_credentials: Optional[EncryptionCredentials] = None
         self._cached_encryption_file_path: str = ""
         self._last_saved_snapshot = self._serialize_project_payload(self._build_project_data())
+
+    @Property(bool, notify=canGoBackChanged)
+    def canGoBack(self) -> bool:
+        """Return whether drill-navigation history is available."""
+        return bool(self._navigation_back_stack)
+
+    def _emitCanGoBackChanged(self, was_enabled: bool) -> None:
+        if was_enabled != bool(self._navigation_back_stack):
+            self.canGoBackChanged.emit()
+
+    def _currentNavigationSnapshot(self) -> NavigationSnapshot:
+        tab_index = self._tab_model.currentTabIndex if self._tab_model is not None else 0
+        task_index = -1
+        current_task_index = getattr(self._diagram_model, "currentTaskIndex", -1)
+        if isinstance(current_task_index, int) and current_task_index >= 0:
+            task_index = current_task_index
+        return NavigationSnapshot(tab_index=tab_index, task_index=task_index)
+
+    def _pushNavigationSnapshot(self, snapshot: NavigationSnapshot) -> None:
+        if self._restoring_navigation:
+            return
+        if self._navigation_back_stack and self._navigation_back_stack[-1] == snapshot:
+            return
+        was_enabled = bool(self._navigation_back_stack)
+        self._navigation_back_stack.append(snapshot)
+        self._emitCanGoBackChanged(was_enabled)
+
+    def _clearNavigationHistory(self, *args) -> None:
+        was_enabled = bool(self._navigation_back_stack)
+        if not was_enabled:
+            return
+        self._navigation_back_stack.clear()
+        self._emitCanGoBackChanged(was_enabled)
+
+    def _shouldCaptureNavigation(self, destination_tab_index: int, destination_task_index: int = -1) -> bool:
+        if self._tab_model is not None:
+            if destination_tab_index < 0 or destination_tab_index >= self._tab_model.tabCount:
+                return False
+        current_snapshot = self._currentNavigationSnapshot()
+        return (
+            current_snapshot.tab_index != destination_tab_index
+            or current_snapshot.task_index != destination_task_index
+        )
+
+    def _restoreNavigationSnapshot(self, snapshot: NavigationSnapshot) -> None:
+        if self._tab_model is not None:
+            if snapshot.tab_index < 0 or snapshot.tab_index >= self._tab_model.tabCount:
+                return
+            self.switchTab(snapshot.tab_index)
+
+        focus_task = getattr(self._diagram_model, "focusTask", None)
+        if (
+            snapshot.task_index >= 0
+            and callable(focus_task)
+            and snapshot.task_index < self._task_model.rowCount()
+        ):
+            focus_task(snapshot.task_index)
 
     def _onCurrentTabReminderDue(self, task_index: int, task_title: str) -> None:
         tab_index = self._tab_model.currentTabIndex if self._tab_model is not None else 0
@@ -2803,6 +2873,7 @@ class ProjectManager(QObject):
             self._current_file_path = file_path
             self.currentFilePathChanged.emit()
             self._add_to_recent(file_path)
+            self._clearNavigationHistory()
             self._last_saved_snapshot = self._serialize_project_payload(self._build_project_data())
             self.loadCompleted.emit(file_path)
             print(f"Project loaded from: {file_path}")
@@ -2848,6 +2919,8 @@ class ProjectManager(QObject):
     @Slot(int, int)
     def openTabTask(self, tab_index: int, task_index: int) -> None:
         """Open a tab and focus a task index within that tab."""
+        if self._shouldCaptureNavigation(tab_index, task_index):
+            self._pushNavigationSnapshot(self._currentNavigationSnapshot())
         if self._tab_model is not None:
             if tab_index < 0 or tab_index >= self._tab_model.tabCount:
                 return
@@ -2885,7 +2958,29 @@ class ProjectManager(QObject):
             target_index = self._tab_model.tabCount - 1
             self._tab_model.setTabData(target_index, subtasks_data, diagram_data)
 
+        if self._shouldCaptureNavigation(target_index):
+            self._pushNavigationSnapshot(self._currentNavigationSnapshot())
         self.switchTab(target_index)
+
+    @Slot()
+    def goBack(self) -> None:
+        """Restore the previous drill-navigation context."""
+        if not self._navigation_back_stack:
+            return
+
+        while self._navigation_back_stack:
+            was_enabled = bool(self._navigation_back_stack)
+            snapshot = self._navigation_back_stack.pop()
+            self._emitCanGoBackChanged(was_enabled)
+            if self._tab_model is not None:
+                if snapshot.tab_index < 0 or snapshot.tab_index >= self._tab_model.tabCount:
+                    continue
+            self._restoring_navigation = True
+            try:
+                self._restoreNavigationSnapshot(snapshot)
+            finally:
+                self._restoring_navigation = False
+            return
 
     @Slot(int, float, float, result=str)
     def addTabAsDrillTask(self, tab_index: int, x: float, y: float) -> str:

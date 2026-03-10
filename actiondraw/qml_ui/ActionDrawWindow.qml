@@ -485,6 +485,17 @@ ApplicationWindow {
     property real tabDragPreviewY: 0
 
     Shortcut {
+        sequence: "Alt+Left"
+        enabled: projectManager !== null
+            && projectManager.canGoBack
+            && (!dialogs || !dialogs.anyDialogVisible)
+            && !reminderPopup.visible
+            && !contractPopup.visible
+            && (!markdownNoteManager || !markdownNoteManager.editorOpen)
+        onActivated: projectManager.goBack()
+    }
+
+    Shortcut {
         sequence: "Ctrl+S"
         enabled: projectManager !== null
         onActivated: root.performSave()
@@ -1371,6 +1382,7 @@ ApplicationWindow {
             ToolbarRow {
                 root: root
                 diagramModel: diagramModelRef
+                projectManager: projectManagerRef
                 viewport: viewport
             }
 

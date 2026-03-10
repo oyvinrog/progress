@@ -6,6 +6,7 @@ Rectangle {
     id: toolbar
     property var root: null
     property var diagramModel: null
+    property var projectManager: null
     property var viewport: null
 
     Layout.fillWidth: true
@@ -50,6 +51,34 @@ Rectangle {
             height: 34
             color: "#33485d"
             Layout.alignment: Qt.AlignVCenter
+        }
+
+        Button {
+            id: backButton
+            text: "\u2190 Back"
+            enabled: !!(projectManager && projectManager.canGoBack)
+            flat: true
+            padding: 10
+            contentItem: Text {
+                text: backButton.text
+                color: backButton.enabled ? "#d6e2ee" : "#728699"
+                font.pixelSize: 12
+                font.bold: true
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+            }
+            background: Rectangle {
+                radius: 8
+                color: backButton.enabled
+                    ? (backButton.hovered ? "#26394b" : "#1c2e3e")
+                    : "#16232e"
+                border.color: backButton.enabled ? "#355069" : "#243848"
+                border.width: 1
+            }
+            onClicked: {
+                if (projectManager && projectManager.goBack)
+                    projectManager.goBack()
+            }
         }
 
         Button {
