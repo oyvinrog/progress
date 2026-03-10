@@ -951,7 +951,7 @@ ApplicationWindow {
             diagramModel.pasteImageFromClipboard(center.x, center.y)
             return
         }
-        if (diagramModel.hasClipboardTextLines()) {
+        if (diagramModel.hasClipboardOpml() || diagramModel.hasClipboardTextLines()) {
             dialogs.clipboardPasteDialog.pasteX = center.x
             dialogs.clipboardPasteDialog.pasteY = center.y
             dialogs.clipboardPasteDialog.open()

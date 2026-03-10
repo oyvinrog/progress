@@ -3833,6 +3833,21 @@ class TestClipboardFunctionality:
         result = empty_diagram_model.copyItemsToClipboard([item_id])
         assert result == True
 
+    def test_copy_items_to_clipboard_sets_opml_text(self, empty_diagram_model):
+        """Copying items publishes OPML text alongside the custom MIME payload."""
+        from PySide6.QtGui import QGuiApplication
+
+        item_id = empty_diagram_model.addBox(100.0, 100.0, "Test Box")
+        assert empty_diagram_model.copyItemsToClipboard([item_id]) == True
+
+        clipboard = QGuiApplication.clipboard()
+        assert clipboard is not None
+        mime_data = clipboard.mimeData()
+        assert mime_data is not None
+        assert mime_data.hasText()
+        assert "<opml" in mime_data.text()
+        assert 'outline text="Test Box"' in mime_data.text()
+
     def test_copy_items_to_clipboard_multiple(self, empty_diagram_model):
         """Copying multiple items preserves edges."""
         id1 = empty_diagram_model.addBox(100.0, 100.0, "Box 1")
@@ -3878,6 +3893,28 @@ class TestClipboardFunctionality:
         empty_diagram_model.copyItemsToClipboard([item_id])
         result = empty_diagram_model.hasClipboardDiagram()
         assert result == True
+
+    def test_has_clipboard_opml_true_for_valid_opml(self, empty_diagram_model):
+        from PySide6.QtGui import QGuiApplication
+
+        clipboard = QGuiApplication.clipboard()
+        assert clipboard is not None
+        clipboard.setText(
+            '<?xml version="1.0" encoding="UTF-8"?><opml version="1.0">'
+            "<head><title>Example</title></head><body><outline text=\"Parent\">"
+            "<outline text=\"Child\"></outline></outline></body></opml>"
+        )
+
+        assert empty_diagram_model.hasClipboardOpml() == True
+
+    def test_has_clipboard_opml_false_for_invalid_xml(self, empty_diagram_model):
+        from PySide6.QtGui import QGuiApplication
+
+        clipboard = QGuiApplication.clipboard()
+        assert clipboard is not None
+        clipboard.setText("<opml><body><outline text='Broken'></body>")
+
+        assert empty_diagram_model.hasClipboardOpml() == False
 
     def test_paste_diagram_from_clipboard(self, empty_diagram_model):
         """Pasting diagram creates new items."""
@@ -4011,6 +4048,62 @@ class TestPasteTextFromClipboard:
         assert result == True
         assert diagram_model_with_task_model._task_model.rowCount() == initial_task_count + 2
 
+    def test_paste_opml_as_tasks_preserves_hierarchy(self, diagram_model_with_task_model):
+        """OPML paste creates nested task hierarchy."""
+        from PySide6.QtGui import QGuiApplication
+
+        clipboard = QGuiApplication.clipboard()
+        assert clipboard is not None
+        clipboard.setText(
+            '<?xml version="1.0" encoding="UTF-8"?><opml version="1.0">'
+            "<head><title>Example</title></head><body>"
+            '<outline text="Parent"><outline text="Child"></outline></outline>'
+            "</body></opml>"
+        )
+
+        initial_task_count = diagram_model_with_task_model._task_model.rowCount()
+        result = diagram_model_with_task_model.pasteTextFromClipboard(100.0, 100.0, True)
+
+        assert result == True
+        assert diagram_model_with_task_model._task_model.rowCount() == initial_task_count + 2
+        parent_task = diagram_model_with_task_model._task_model._tasks[initial_task_count]
+        child_task = diagram_model_with_task_model._task_model._tasks[initial_task_count + 1]
+        assert parent_task.title == "Parent"
+        assert child_task.title == "Child"
+        assert child_task.parent_index == initial_task_count
+        assert child_task.indent_level == parent_task.indent_level + 1
+
+    def test_paste_opml_as_boxes_creates_items_and_edges(self, empty_diagram_model):
+        """OPML paste as boxes uses the existing item creation path."""
+        from PySide6.QtGui import QGuiApplication
+
+        clipboard = QGuiApplication.clipboard()
+        assert clipboard is not None
+        clipboard.setText(
+            '<?xml version="1.0" encoding="UTF-8"?><opml version="1.0">'
+            "<body><outline text=\"One\"><outline text=\"Two\"></outline></outline></body></opml>"
+        )
+
+        result = empty_diagram_model.pasteTextFromClipboard(100.0, 100.0, False)
+        assert result == True
+        assert empty_diagram_model.count == 2
+        assert len(empty_diagram_model.edges) == 1
+
+    def test_paste_opml_preserves_multiline_text(self, diagram_model_with_task_model):
+        """XML character references in OPML text survive paste."""
+        from PySide6.QtGui import QGuiApplication
+
+        clipboard = QGuiApplication.clipboard()
+        assert clipboard is not None
+        clipboard.setText(
+            '<?xml version="1.0" encoding="UTF-8"?><opml version="1.0">'
+            "<body><outline text=\"Line 1&#10;Line 2\"></outline></body></opml>"
+        )
+
+        initial_task_count = diagram_model_with_task_model._task_model.rowCount()
+        assert diagram_model_with_task_model.pasteTextFromClipboard(100.0, 100.0, True) == True
+        assert diagram_model_with_task_model._task_model._tasks[initial_task_count].title == "Line 1\nLine 2"
+
     def test_paste_text_empty_clipboard(self, empty_diagram_model):
         """Pasting from empty clipboard returns False."""
         from PySide6.QtGui import QGuiApplication
@@ -4040,6 +4133,37 @@ class TestPasteTextFromClipboard:
 
         result = empty_diagram_model.pasteTextFromClipboard(100.0, 100.0, True)
         assert result == False
+
+    def test_non_opml_text_still_uses_existing_multiline_parser(self, empty_diagram_model):
+        """Plain text fallback remains unchanged when clipboard text is not OPML."""
+        from PySide6.QtGui import QGuiApplication
+
+        clipboard = QGuiApplication.clipboard()
+        assert clipboard is not None
+        clipboard.setText("Parent\n  Child")
+
+        result = empty_diagram_model.pasteTextFromClipboard(100.0, 100.0, False)
+        assert result == True
+        assert empty_diagram_model.count == 2
+        assert len(empty_diagram_model.edges) == 1
+
+    def test_copy_task_selection_exports_nested_opml(self, diagram_model_with_task_model):
+        """Copying parent and child task items exports nested OPML text."""
+        from PySide6.QtGui import QGuiApplication
+
+        parent_task_index = diagram_model_with_task_model._task_model.addTaskWithParent("Parent")
+        child_task_index = diagram_model_with_task_model._task_model.addTaskWithParent("Child", parent_task_index)
+        parent_item_id = diagram_model_with_task_model.addTask(parent_task_index, 100.0, 100.0)
+        child_item_id = diagram_model_with_task_model.addTask(child_task_index, 220.0, 100.0)
+
+        assert diagram_model_with_task_model.copyItemsToClipboard([parent_item_id, child_item_id]) == True
+
+        clipboard = QGuiApplication.clipboard()
+        assert clipboard is not None
+        text = clipboard.text()
+        assert 'outline text="Parent"' in text
+        assert 'outline text="Child"' in text
+        assert "<outline text=\"Parent\"><outline text=\"Child\">" in text
 
 
 class TestProjectManagerRefreshTasks:
