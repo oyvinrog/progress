@@ -13,6 +13,11 @@ Item {
     property var tabModel: null
     property var diagramLayer: null
     property var edgeCanvas: null
+    property var monthNames: [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    ]
+    property var weekdayNames: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
     property alias addDialog: addDialog
     property alias boxDialog: boxDialog
@@ -53,6 +58,189 @@ Item {
     )
 
     anchors.fill: parent
+
+    function formatDateValue(dateObj) {
+        return Qt.formatDateTime(dateObj, "yyyy-MM-dd")
+    }
+
+    function parseDateValue(dateValue) {
+        var trimmed = dateValue ? dateValue.trim() : ""
+        var match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed)
+        if (match) {
+            var year = parseInt(match[1], 10)
+            var monthIndex = parseInt(match[2], 10) - 1
+            var day = parseInt(match[3], 10)
+            var parsed = new Date(year, monthIndex, day, 12, 0, 0, 0)
+            if (!isNaN(parsed.getTime()) && parsed.getFullYear() === year && parsed.getMonth() === monthIndex && parsed.getDate() === day)
+                return parsed
+        }
+        var now = new Date()
+        return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0, 0)
+    }
+
+    function daysInMonth(year, monthIndex) {
+        return new Date(year, monthIndex + 1, 0).getDate()
+    }
+
+    function firstDayOffset(year, monthIndex) {
+        return (new Date(year, monthIndex, 1).getDay() + 6) % 7
+    }
+
+    function calendarCellDay(cellIndex, year, monthIndex) {
+        var offset = dialogHost.firstDayOffset(year, monthIndex)
+        var dayNumber = cellIndex - offset + 1
+        if (dayNumber < 1 || dayNumber > dialogHost.daysInMonth(year, monthIndex))
+            return 0
+        return dayNumber
+    }
+
+    function openDatePicker(targetDialog) {
+        if (!targetDialog)
+            return
+        datePickerPopup.targetDialog = targetDialog
+        var currentDate = dialogHost.parseDateValue(targetDialog.dateValue)
+        datePickerPopup.displayYear = currentDate.getFullYear()
+        datePickerPopup.displayMonth = currentDate.getMonth()
+        datePickerPopup.selectedDay = currentDate.getDate()
+        datePickerPopup.open()
+    }
+
+    Popup {
+        id: datePickerPopup
+        modal: true
+        focus: true
+        padding: 12
+        width: 320
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        anchors.centerIn: Overlay.overlay
+        property var targetDialog: null
+        property int displayYear: 0
+        property int displayMonth: 0
+        property int selectedDay: 0
+
+        function applySelection(day) {
+            if (!targetDialog || day <= 0)
+                return
+            targetDialog.dateValue = dialogHost.formatDateValue(new Date(displayYear, displayMonth, day, 12, 0, 0, 0))
+            selectedDay = day
+            close()
+        }
+
+        background: Rectangle {
+            radius: 8
+            color: "#1b2028"
+            border.color: "#384458"
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 10
+
+            RowLayout {
+                Layout.fillWidth: true
+
+                Button {
+                    text: "<"
+                    onClicked: {
+                        if (datePickerPopup.displayMonth === 0) {
+                            datePickerPopup.displayMonth = 11
+                            datePickerPopup.displayYear -= 1
+                        } else {
+                            datePickerPopup.displayMonth -= 1
+                        }
+                    }
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    horizontalAlignment: Text.AlignHCenter
+                    text: dialogHost.monthNames[datePickerPopup.displayMonth] + " " + datePickerPopup.displayYear
+                    color: "#f5f6f8"
+                    font.bold: true
+                }
+
+                Button {
+                    text: ">"
+                    onClicked: {
+                        if (datePickerPopup.displayMonth === 11) {
+                            datePickerPopup.displayMonth = 0
+                            datePickerPopup.displayYear += 1
+                        } else {
+                            datePickerPopup.displayMonth += 1
+                        }
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 6
+
+                Repeater {
+                    model: dialogHost.weekdayNames
+
+                    delegate: Label {
+                        required property string modelData
+                        Layout.fillWidth: true
+                        horizontalAlignment: Text.AlignHCenter
+                        text: modelData
+                        color: "#8a93a5"
+                        font.pixelSize: 11
+                    }
+                }
+            }
+
+            GridLayout {
+                Layout.fillWidth: true
+                columns: 7
+                columnSpacing: 6
+                rowSpacing: 6
+
+                Repeater {
+                    model: 42
+
+                    delegate: Button {
+                        id: dayButton
+                        required property int index
+                        readonly property int dayNumber: dialogHost.calendarCellDay(index, datePickerPopup.displayYear, datePickerPopup.displayMonth)
+                        readonly property bool isSelected: {
+                            if (!datePickerPopup.targetDialog || dayNumber <= 0)
+                                return false
+                            var selectedDate = dialogHost.parseDateValue(datePickerPopup.targetDialog.dateValue)
+                            return selectedDate.getFullYear() === datePickerPopup.displayYear
+                                && selectedDate.getMonth() === datePickerPopup.displayMonth
+                                && selectedDate.getDate() === dayNumber
+                        }
+
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 32
+                        enabled: dayNumber > 0
+                        text: dayNumber > 0 ? String(dayNumber) : ""
+
+                        background: Rectangle {
+                            radius: 4
+                            color: dayButton.isSelected ? "#e67e22" : "#1a2230"
+                            border.color: dayButton.enabled ? (dayButton.isSelected ? "#d35400" : "#4b5b72") : "#222a36"
+                        }
+
+                        contentItem: Text {
+                            text: dayButton.text
+                            color: dayButton.enabled ? "#f5f6f8" : "#4b5b72"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+
+                        onClicked: datePickerPopup.applySelection(dayNumber)
+                    }
+                }
+            }
+
+            Button {
+                Layout.alignment: Qt.AlignRight
+                text: "Cancel"
+                onClicked: datePickerPopup.close()
+            }
+        }
+    }
 
     Dialog {
         id: addDialog
@@ -858,7 +1046,7 @@ Item {
             if (reminderDialog.dateValue.trim().length === 0 || reminderDialog.timeValue.trim().length === 0) {
                 setToOffsetMinutes(60)
             }
-            reminderDateField.forceActiveFocus()
+            reminderDateButton.forceActiveFocus()
         }
 
         contentItem: ColumnLayout {
@@ -872,19 +1060,21 @@ Item {
                 Layout.fillWidth: true
             }
 
-            TextField {
-                id: reminderDateField
+            Button {
+                id: reminderDateButton
                 Layout.fillWidth: true
-                text: reminderDialog.dateValue
-                placeholderText: "YYYY-MM-DD"
-                selectByMouse: true
-                color: "#f5f6f8"
+                text: reminderDialog.dateValue.trim().length > 0 ? reminderDialog.dateValue : "Select date"
+                contentItem: Text {
+                    text: parent.text
+                    color: "#f5f6f8"
+                    verticalAlignment: Text.AlignVCenter
+                }
                 background: Rectangle {
                     color: "#1b2028"
                     radius: 4
                     border.color: "#384458"
                 }
-                onTextChanged: reminderDialog.dateValue = text
+                onClicked: dialogHost.openDatePicker(reminderDialog)
             }
 
             TextField {
@@ -1015,7 +1205,7 @@ Item {
             if (contractDialog.dateValue.trim().length === 0 || contractDialog.timeValue.trim().length === 0) {
                 setToOffsetMinutes(60)
             }
-            contractDateField.forceActiveFocus()
+            contractDateButton.forceActiveFocus()
         }
 
         contentItem: ColumnLayout {
@@ -1029,19 +1219,21 @@ Item {
                 Layout.fillWidth: true
             }
 
-            TextField {
-                id: contractDateField
+            Button {
+                id: contractDateButton
                 Layout.fillWidth: true
-                text: contractDialog.dateValue
-                placeholderText: "YYYY-MM-DD"
-                selectByMouse: true
-                color: "#f5f6f8"
+                text: contractDialog.dateValue.trim().length > 0 ? contractDialog.dateValue : "Select date"
+                contentItem: Text {
+                    text: parent.text
+                    color: "#f5f6f8"
+                    verticalAlignment: Text.AlignVCenter
+                }
                 background: Rectangle {
                     color: "#1b2028"
                     radius: 4
                     border.color: "#384458"
                 }
-                onTextChanged: contractDialog.dateValue = text
+                onClicked: dialogHost.openDatePicker(contractDialog)
             }
 
             TextField {
