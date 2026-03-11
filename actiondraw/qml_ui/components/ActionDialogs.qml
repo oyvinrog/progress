@@ -1179,6 +1179,45 @@ Item {
         property string dateValue: ""
         property string timeValue: ""
         property string punishmentValue: ""
+        property string punishmentMode: "fixed"
+        property var fixedPunishmentOptions: [
+            { value: "coffee", label: "Coffee", icon: "\u2615" },
+            { value: "tv", label: "TV", icon: "\ud83d\udcfa" },
+            { value: "cacao", label: "Cacao", icon: "\ud83c\udf6b" },
+            { value: "chocolate", label: "Chocolate", icon: "\ud83c\udf6c" },
+            { value: "soda", label: "Soda", icon: "\ud83e\udd64" },
+            { value: "cigar/snus", label: "Cigar / Snus", icon: "\ud83d\udebc" }
+        ]
+        property var fixedPunishmentIcons: ({
+            "coffee": "\u2615",
+            "tv": "\ud83d\udcfa",
+            "cacao": "\ud83c\udf6b",
+            "chocolate": "\ud83c\udf6c",
+            "soda": "\ud83e\udd64",
+            "cigar/snus": "\ud83d\udebc"
+        })
+
+        function normalizedPunishmentValue(value) {
+            return value ? value.trim().toLowerCase() : ""
+        }
+
+        function isFixedPunishment(value) {
+            return fixedPunishmentIcons[normalizedPunishmentValue(value)] !== undefined
+        }
+
+        function punishmentDisplayText(value) {
+            var trimmed = value ? value.trim() : ""
+            if (!trimmed.length)
+                return ""
+            var icon = fixedPunishmentIcons[normalizedPunishmentValue(trimmed)]
+            return icon ? icon + " " + trimmed : trimmed
+        }
+
+        function selectPunishment(value) {
+            var trimmed = value ? value.trim() : ""
+            punishmentValue = trimmed
+            punishmentMode = isFixedPunishment(trimmed) ? "fixed" : "custom"
+        }
 
         function parseDeadlineParts(value) {
             var trimmed = value ? value.trim() : ""
@@ -1219,6 +1258,13 @@ Item {
                 Layout.fillWidth: true
             }
 
+            Label {
+                text: "Choose a fixed punishment or enter your own."
+                color: "#8a93a5"
+                font.pixelSize: 11
+                Layout.fillWidth: true
+            }
+
             Button {
                 id: contractDateButton
                 Layout.fillWidth: true
@@ -1251,11 +1297,69 @@ Item {
                 onTextChanged: contractDialog.timeValue = text
             }
 
+            GridLayout {
+                Layout.fillWidth: true
+                columns: 2
+                columnSpacing: 8
+                rowSpacing: 8
+
+                Repeater {
+                    model: contractDialog.fixedPunishmentOptions
+
+                    delegate: Button {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        text: modelData.icon + "  " + modelData.label
+
+                        background: Rectangle {
+                            radius: 6
+                            color: contractDialog.normalizedPunishmentValue(contractDialog.punishmentValue) === modelData.value
+                                && contractDialog.punishmentMode === "fixed"
+                                ? "#3c4b63"
+                                : "#1b2028"
+                            border.width: 1
+                            border.color: contractDialog.normalizedPunishmentValue(contractDialog.punishmentValue) === modelData.value
+                                && contractDialog.punishmentMode === "fixed"
+                                ? "#9eb8e8"
+                                : "#384458"
+                        }
+
+                        contentItem: Text {
+                            text: parent.text
+                            color: "#f5f6f8"
+                            font.pixelSize: 12
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            elide: Text.ElideRight
+                        }
+
+                        onClicked: contractDialog.selectPunishment(modelData.value)
+                    }
+                }
+            }
+
+            Button {
+                id: customPunishmentButton
+                Layout.fillWidth: true
+                text: contractDialog.punishmentMode === "custom"
+                    ? "Custom punishment selected"
+                    : "Use custom punishment"
+                onClicked: {
+                    if (contractDialog.punishmentMode !== "custom"
+                            && contractDialog.isFixedPunishment(contractDialog.punishmentValue)) {
+                        contractDialog.punishmentValue = ""
+                    }
+                    contractDialog.punishmentMode = "custom"
+                    contractPunishmentField.forceActiveFocus()
+                }
+            }
+
             TextField {
                 id: contractPunishmentField
                 Layout.fillWidth: true
-                text: contractDialog.punishmentValue
-                placeholderText: "Punishment if missed (required)"
+                visible: contractDialog.punishmentMode === "custom"
+                text: contractDialog.punishmentMode === "custom" ? contractDialog.punishmentValue : ""
+                placeholderText: "Custom punishment if missed"
                 selectByMouse: true
                 color: "#f5f6f8"
                 background: Rectangle {
@@ -1263,9 +1367,20 @@ Item {
                     radius: 4
                     border.color: "#384458"
                 }
-                onTextChanged: contractDialog.punishmentValue = text
+                onTextChanged: {
+                    if (contractDialog.punishmentMode === "custom")
+                        contractDialog.punishmentValue = text
+                }
                 Keys.onReturnPressed: contractDialog.accept()
                 Keys.onEnterPressed: contractDialog.accept()
+            }
+
+            Label {
+                Layout.fillWidth: true
+                visible: contractDialog.punishmentMode === "fixed" && contractDialog.punishmentValue.trim().length > 0
+                text: "Selected punishment: " + contractDialog.punishmentDisplayText(contractDialog.punishmentValue)
+                color: "#f0c6c6"
+                wrapMode: Text.WordWrap
             }
 
             RowLayout {
@@ -1316,6 +1431,7 @@ Item {
             contractDialog.dateValue = ""
             contractDialog.timeValue = ""
             contractDialog.punishmentValue = ""
+            contractDialog.punishmentMode = "fixed"
         }
     }
 
@@ -1332,7 +1448,7 @@ Item {
             var parts = contractDialog.parseDeadlineParts(contractContextMenu.deadlineAt)
             contractDialog.dateValue = parts.date
             contractDialog.timeValue = parts.time
-            contractDialog.punishmentValue = contractContextMenu.punishment
+            contractDialog.selectPunishment(contractContextMenu.punishment)
             contractDialog.open()
         }
 
