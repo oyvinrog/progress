@@ -63,6 +63,10 @@ Item {
         return Qt.formatDateTime(dateObj, "yyyy-MM-dd")
     }
 
+    function formatTimeValue(dateObj) {
+        return Qt.formatDateTime(dateObj, "HH:mm")
+    }
+
     function parseDateValue(dateValue) {
         var trimmed = dateValue ? dateValue.trim() : ""
         var match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed)
@@ -76,6 +80,38 @@ Item {
         }
         var now = new Date()
         return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0, 0)
+    }
+
+    function roundedCurrentTime() {
+        var now = new Date()
+        var roundedMinute = Math.ceil(now.getMinutes() / 5) * 5
+        if (roundedMinute >= 60) {
+            now.setHours(now.getHours() + 1)
+            roundedMinute = 0
+        }
+        return new Date(
+            now.getFullYear(),
+            now.getMonth(),
+            now.getDate(),
+            now.getHours(),
+            roundedMinute,
+            0,
+            0
+        )
+    }
+
+    function parseTimeValue(timeValue) {
+        var trimmed = timeValue ? timeValue.trim() : ""
+        var match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(trimmed)
+        if (match) {
+            var parsed = dialogHost.roundedCurrentTime()
+            parsed.setHours(parseInt(match[1], 10))
+            parsed.setMinutes(parseInt(match[2], 10))
+            parsed.setSeconds(0)
+            parsed.setMilliseconds(0)
+            return parsed
+        }
+        return dialogHost.roundedCurrentTime()
     }
 
     function daysInMonth(year, monthIndex) {
@@ -103,6 +139,16 @@ Item {
         datePickerPopup.displayMonth = currentDate.getMonth()
         datePickerPopup.selectedDay = currentDate.getDate()
         datePickerPopup.open()
+    }
+
+    function openTimePicker(targetDialog) {
+        if (!targetDialog)
+            return
+        timePickerPopup.targetDialog = targetDialog
+        var currentTime = dialogHost.parseTimeValue(targetDialog.timeValue)
+        timePickerPopup.selectedHour = currentTime.getHours()
+        timePickerPopup.selectedMinute = currentTime.getMinutes()
+        timePickerPopup.open()
     }
 
     Popup {
@@ -238,6 +284,159 @@ Item {
                 Layout.alignment: Qt.AlignRight
                 text: "Cancel"
                 onClicked: datePickerPopup.close()
+            }
+        }
+    }
+
+    Popup {
+        id: timePickerPopup
+        modal: true
+        focus: true
+        padding: 12
+        width: 280
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        anchors.centerIn: Overlay.overlay
+        property var targetDialog: null
+        property int selectedHour: 0
+        property int selectedMinute: 0
+
+        function applySelection() {
+            if (!targetDialog)
+                return
+            var selected = new Date(2000, 0, 1, selectedHour, selectedMinute, 0, 0)
+            targetDialog.timeValue = dialogHost.formatTimeValue(selected)
+            close()
+        }
+
+        onOpened: {
+            hourSpinBox.value = selectedHour
+            minuteSpinBox.value = selectedMinute
+        }
+
+        onSelectedHourChanged: {
+            if (hourSpinBox.value !== selectedHour)
+                hourSpinBox.value = selectedHour
+        }
+
+        onSelectedMinuteChanged: {
+            if (minuteSpinBox.value !== selectedMinute)
+                minuteSpinBox.value = selectedMinute
+        }
+
+        background: Rectangle {
+            radius: 8
+            color: "#1b2028"
+            border.color: "#384458"
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 12
+
+            Label {
+                Layout.fillWidth: true
+                text: "Select time"
+                color: "#f5f6f8"
+                font.bold: true
+                horizontalAlignment: Text.AlignHCenter
+            }
+
+            RowLayout {
+                Layout.alignment: Qt.AlignHCenter
+                spacing: 12
+
+                SpinBox {
+                    id: hourSpinBox
+                    from: 0
+                    to: 23
+                    editable: true
+
+                    validator: IntValidator {
+                        bottom: 0
+                        top: 23
+                    }
+
+                    textFromValue: function(value) {
+                        return value < 10 ? "0" + value : String(value)
+                    }
+
+                    valueFromText: function(text) {
+                        var parsed = parseInt(text, 10)
+                        return isNaN(parsed) ? value : parsed
+                    }
+
+                    onValueModified: timePickerPopup.selectedHour = value
+                }
+
+                Label {
+                    text: ":"
+                    color: "#f5f6f8"
+                    font.pixelSize: 18
+                }
+
+                SpinBox {
+                    id: minuteSpinBox
+                    from: 0
+                    to: 59
+                    editable: true
+                    stepSize: 5
+
+                    validator: IntValidator {
+                        bottom: 0
+                        top: 59
+                    }
+
+                    textFromValue: function(value) {
+                        return value < 10 ? "0" + value : String(value)
+                    }
+
+                    valueFromText: function(text) {
+                        var parsed = parseInt(text, 10)
+                        return isNaN(parsed) ? value : parsed
+                    }
+
+                    onValueModified: timePickerPopup.selectedMinute = value
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                Button {
+                    Layout.fillWidth: true
+                    text: "Now"
+                    onClicked: {
+                        var now = dialogHost.roundedCurrentTime()
+                        timePickerPopup.selectedHour = now.getHours()
+                        timePickerPopup.selectedMinute = now.getMinutes()
+                    }
+                }
+
+                Button {
+                    Layout.fillWidth: true
+                    text: "+15m"
+                    onClicked: {
+                        var base = new Date(2000, 0, 1, timePickerPopup.selectedHour, timePickerPopup.selectedMinute, 0, 0)
+                        base.setMinutes(base.getMinutes() + 15)
+                        timePickerPopup.selectedHour = base.getHours()
+                        timePickerPopup.selectedMinute = base.getMinutes()
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.alignment: Qt.AlignRight
+                spacing: 8
+
+                Button {
+                    text: "Cancel"
+                    onClicked: timePickerPopup.close()
+                }
+
+                Button {
+                    text: "Apply"
+                    onClicked: timePickerPopup.applySelection()
+                }
             }
         }
     }
@@ -1077,21 +1276,42 @@ Item {
                 onClicked: dialogHost.openDatePicker(reminderDialog)
             }
 
-            TextField {
-                id: reminderTimeField
+            RowLayout {
                 Layout.fillWidth: true
-                text: reminderDialog.timeValue
-                placeholderText: "HH:MM"
-                selectByMouse: true
-                color: "#f5f6f8"
-                background: Rectangle {
-                    color: "#1b2028"
-                    radius: 4
-                    border.color: "#384458"
+
+                Button {
+                    id: reminderTimeButton
+                    text: reminderDialog.timeValue.trim().length > 0 ? reminderDialog.timeValue : "Select time"
+                    contentItem: Text {
+                        text: parent.text
+                        color: "#f5f6f8"
+                        verticalAlignment: Text.AlignVCenter
+                        horizontalAlignment: Text.AlignHCenter
+                    }
+                    background: Rectangle {
+                        color: "#1b2028"
+                        radius: 4
+                        border.color: "#384458"
+                    }
+                    onClicked: dialogHost.openTimePicker(reminderDialog)
                 }
-                onTextChanged: reminderDialog.timeValue = text
-                Keys.onReturnPressed: reminderDialog.accept()
-                Keys.onEnterPressed: reminderDialog.accept()
+
+                TextField {
+                    id: reminderTimeField
+                    Layout.fillWidth: true
+                    text: reminderDialog.timeValue
+                    placeholderText: "HH:MM"
+                    selectByMouse: true
+                    color: "#f5f6f8"
+                    background: Rectangle {
+                        color: "#1b2028"
+                        radius: 4
+                        border.color: "#384458"
+                    }
+                    onTextChanged: reminderDialog.timeValue = text
+                    Keys.onReturnPressed: reminderDialog.accept()
+                    Keys.onEnterPressed: reminderDialog.accept()
+                }
             }
 
             RowLayout {
@@ -1282,19 +1502,40 @@ Item {
                 onClicked: dialogHost.openDatePicker(contractDialog)
             }
 
-            TextField {
-                id: contractTimeField
+            RowLayout {
                 Layout.fillWidth: true
-                text: contractDialog.timeValue
-                placeholderText: "HH:MM"
-                selectByMouse: true
-                color: "#f5f6f8"
-                background: Rectangle {
-                    color: "#1b2028"
-                    radius: 4
-                    border.color: "#384458"
+
+                Button {
+                    id: contractTimeButton
+                    text: contractDialog.timeValue.trim().length > 0 ? contractDialog.timeValue : "Select time"
+                    contentItem: Text {
+                        text: parent.text
+                        color: "#f5f6f8"
+                        verticalAlignment: Text.AlignVCenter
+                        horizontalAlignment: Text.AlignHCenter
+                    }
+                    background: Rectangle {
+                        color: "#1b2028"
+                        radius: 4
+                        border.color: "#384458"
+                    }
+                    onClicked: dialogHost.openTimePicker(contractDialog)
                 }
-                onTextChanged: contractDialog.timeValue = text
+
+                TextField {
+                    id: contractTimeField
+                    Layout.fillWidth: true
+                    text: contractDialog.timeValue
+                    placeholderText: "HH:MM"
+                    selectByMouse: true
+                    color: "#f5f6f8"
+                    background: Rectangle {
+                        color: "#1b2028"
+                        radius: 4
+                        border.color: "#384458"
+                    }
+                    onTextChanged: contractDialog.timeValue = text
+                }
             }
 
             GridLayout {
