@@ -2137,6 +2137,99 @@ class TestMultiTabSupport:
         index = task_model.index(0, 0)
         assert task_model.data(index, task_model.TitleRole) == "Tab 1 Task"
 
+    def test_remove_active_tab_reloads_surviving_diagram(self, app):
+        """Deleting the current tab must not leak its diagram into the next tab."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        diagram_model.addBox(10.0, 10.0, "Tab 0 Box")
+
+        tab_model.addTab("Tab 1")
+        project_manager.switchTab(1)
+        diagram_model.addBox(20.0, 10.0, "Tab 1 Box")
+
+        tab_model.addTab("Tab 2")
+        project_manager.switchTab(2)
+        diagram_model.addBox(30.0, 10.0, "Tab 2 Box")
+
+        project_manager.switchTab(1)
+        project_manager.removeTab(1)
+
+        assert tab_model.tabCount == 2
+        assert tab_model.currentTabIndex == 1
+        assert diagram_model.count == 1
+        index = diagram_model.index(0, 0)
+        assert diagram_model.data(index, diagram_model.TextRole) == "Tab 2 Box"
+
+    def test_remove_active_tab_reloads_surviving_tasks(self, app):
+        """Deleting the current tab must not leak its task list into the next tab."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        task_model.addTask("Tab 0 Task", -1)
+
+        tab_model.addTab("Tab 1")
+        project_manager.switchTab(1)
+        task_model.addTask("Tab 1 Task", -1)
+
+        tab_model.addTab("Tab 2")
+        project_manager.switchTab(2)
+        task_model.addTask("Tab 2 Task", -1)
+
+        project_manager.switchTab(1)
+        project_manager.removeTab(1)
+
+        assert tab_model.tabCount == 2
+        assert tab_model.currentTabIndex == 1
+        assert task_model.rowCount() == 1
+        index = task_model.index(0, 0)
+        assert task_model.data(index, task_model.TitleRole) == "Tab 2 Task"
+
+    def test_remove_non_current_tab_preserves_current_live_state(self, app):
+        """Deleting another tab must not disturb the current tab or future saves."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        diagram_model.addBox(10.0, 10.0, "Main Box")
+
+        tab_model.addTab("Tab 1")
+        project_manager.switchTab(1)
+        diagram_model.addBox(20.0, 10.0, "Tab 1 Box")
+
+        tab_model.addTab("Tab 2")
+        project_manager.switchTab(2)
+        diagram_model.addBox(30.0, 10.0, "Tab 2 Box")
+
+        project_manager.switchTab(2)
+        project_manager.removeTab(0)
+
+        assert tab_model.currentTabIndex == 1
+        assert diagram_model.count == 1
+        index = diagram_model.index(0, 0)
+        assert diagram_model.data(index, diagram_model.TextRole) == "Tab 2 Box"
+
+        diagram_model.addBox(35.0, 10.0, "Tab 2 New Box")
+        project_manager.switchTab(0)
+        project_manager.switchTab(1)
+
+        texts = [
+            diagram_model.data(diagram_model.index(row, 0), diagram_model.TextRole)
+            for row in range(diagram_model.count)
+        ]
+        assert texts == ["Tab 2 Box", "Tab 2 New Box"]
+
     def test_project_manager_drill_to_task_sets_current(self, app):
         from task_model import TaskModel, ProjectManager, TabModel
 
@@ -3843,6 +3936,27 @@ class TestTabModelMoveTab:
 
         model.moveTab(0, 2)
         assert model.currentTabIndex == 2
+
+    def test_remove_current_tab_emits_current_tab_signals(self, app):
+        """Removing the active tab emits current-tab notifications for the replacement tab."""
+        from task_model import TabModel
+
+        model = TabModel()
+        model.addTab("Tab 2")
+        model.addTab("Tab 3")
+        model.setCurrentTab(1)
+
+        changed_names = []
+        changed_indices = []
+        model.currentTabChanged.connect(lambda: changed_names.append(model.currentTabName))
+        model.currentTabIndexChanged.connect(lambda: changed_indices.append(model.currentTabIndex))
+
+        model.removeTab(1)
+
+        assert model.currentTabIndex == 1
+        assert model.currentTabName == "Tab 3"
+        assert changed_indices[-1] == 1
+        assert changed_names[-1] == "Tab 3"
 
 
 class TestTabModelUpdateCurrentTabTasks:

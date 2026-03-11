@@ -560,12 +560,8 @@ Rectangle {
             text: "Delete"
             enabled: tabModel ? tabModel.tabCount > 1 : false
             onTriggered: {
-                if (tabModel && tabModel.tabCount > 1) {
-                    var wasCurrentTab = (tabContextMenu.tabIndex === tabModel.currentTabIndex)
-                    tabModel.removeTab(tabContextMenu.tabIndex)
-                    if (wasCurrentTab && projectManager)
-                        projectManager.reloadCurrentTab()
-                }
+                if (projectManager && tabModel && tabModel.tabCount > 1)
+                    projectManager.removeTab(tabContextMenu.tabIndex)
             }
         }
     }

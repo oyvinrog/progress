@@ -1598,6 +1598,7 @@ class TabModel(QAbstractListModel):
         if index < 0 or index >= len(self._tabs):
             return
 
+        previous_current_index = self._current_tab_index
         self.beginRemoveRows(QModelIndex(), index, index)
         self._tabs.pop(index)
         self.endRemoveRows()
@@ -1606,10 +1607,15 @@ class TabModel(QAbstractListModel):
         if self._current_tab_index >= len(self._tabs):
             self._current_tab_index = len(self._tabs) - 1
             self.currentTabIndexChanged.emit()
-            self.currentTabChanged.emit()
         elif self._current_tab_index > index:
             self._current_tab_index -= 1
             self.currentTabIndexChanged.emit()
+        elif self._current_tab_index == index:
+            self._current_tab_index = min(index, len(self._tabs) - 1)
+            self.currentTabIndexChanged.emit()
+
+        if self._current_tab_index != previous_current_index or index == previous_current_index:
+            self.currentTabChanged.emit()
 
         self.tabsChanged.emit()
 
@@ -3025,6 +3031,29 @@ class ProjectManager(QObject):
         self._diagram_model.from_dict(tab_data.diagram)
 
         self.tabSwitched.emit()
+
+    @Slot(int)
+    def removeTab(self, index: int) -> None:
+        """Remove a tab while keeping live models aligned with the surviving tab."""
+        if self._tab_model is None:
+            return
+        if self._tab_model.tabCount <= 1:
+            return
+        if index < 0 or index >= self._tab_model.tabCount:
+            return
+
+        current_index = self._tab_model.currentTabIndex
+        removing_current_tab = index == current_index
+
+        if not removing_current_tab:
+            self._saveCurrentTabState()
+
+        self._tab_model.removeTab(index)
+
+        if removing_current_tab:
+            self.reloadCurrentTab()
+        else:
+            self.tabSwitched.emit()
 
     @Slot()
     def reloadCurrentTab(self) -> None:
