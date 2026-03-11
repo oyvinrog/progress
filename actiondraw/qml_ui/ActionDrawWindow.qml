@@ -115,7 +115,10 @@ ApplicationWindow {
             console.log("Failed to load PriorityPlotWindow:", component.errorString())
             return
         }
-        var win = component.createObject(root, { "tabModel": tabModelRef })
+        var win = component.createObject(root, {
+            "tabModel": tabModelRef,
+            "projectManager": projectManagerRef
+        })
         if (!win) {
             console.log("Failed to instantiate PriorityPlotWindow")
             return
