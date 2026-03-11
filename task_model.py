@@ -285,6 +285,7 @@ class Tab:
     include_in_priority_plot: bool = True
     icon: str = ""
     color: str = ""
+    pinned: bool = False
 
 
 @dataclass
@@ -1318,15 +1319,18 @@ class TabModel(QAbstractListModel):
     IncludeInPriorityPlotRole = Qt.UserRole + 9
     IconRole = Qt.UserRole + 10
     ColorRole = Qt.UserRole + 11
+    PinnedRole = Qt.UserRole + 12
 
     tabsChanged = Signal()
     currentTabChanged = Signal()
     currentTabIndexChanged = Signal()
+    recentTabsChanged = Signal()
 
     def __init__(self):
         super().__init__()
         self._tabs: List[Tab] = [Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})]
         self._current_tab_index: int = 0
+        self._recent_tab_indices: List[int] = []
 
     def rowCount(self, parent: Optional[QModelIndex] = QModelIndex()) -> int:  # type: ignore[override]
         return len(self._tabs)
@@ -1358,6 +1362,8 @@ class TabModel(QAbstractListModel):
             return tab.icon
         if role == self.ColorRole:
             return tab.color
+        if role == self.PinnedRole:
+            return tab.pinned
         return None
 
     def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
@@ -1373,6 +1379,7 @@ class TabModel(QAbstractListModel):
             self.IncludeInPriorityPlotRole: b"includeInPriorityPlot",
             self.IconRole: b"icon",
             self.ColorRole: b"color",
+            self.PinnedRole: b"pinned",
         }
 
     @Property(int, notify=currentTabIndexChanged)
@@ -1388,6 +1395,39 @@ class TabModel(QAbstractListModel):
     @Property(int, notify=tabsChanged)
     def tabCount(self) -> int:
         return len(self._tabs)
+
+    @Property("QVariantList", notify=recentTabsChanged)
+    def recentTabIndices(self) -> List[int]:
+        return list(self._recent_tab_indices)
+
+    def _emitRecentTabsChanged(self) -> None:
+        self.recentTabsChanged.emit()
+
+    def _setRecentTabIndices(self, indices: List[int]) -> None:
+        normalized: List[int] = []
+        for index in indices:
+            if not isinstance(index, int):
+                continue
+            if index < 0 or index >= len(self._tabs):
+                continue
+            if index == self._current_tab_index or index in normalized:
+                continue
+            normalized.append(index)
+            if len(normalized) >= 5:
+                break
+        if normalized == self._recent_tab_indices:
+            return
+        self._recent_tab_indices = normalized
+        self._emitRecentTabsChanged()
+
+    def _recordRecentTab(self, index: int) -> None:
+        if index < 0 or index >= len(self._tabs):
+            return
+        merged = [index]
+        for recent_index in self._recent_tab_indices:
+            if recent_index != index:
+                merged.append(recent_index)
+        self._setRecentTabIndices(merged)
 
     def _calculateTabCompletion(self, tab: Tab) -> float:
         tasks = tab.tasks.get("tasks", []) if tab.tasks else []
@@ -1444,6 +1484,29 @@ class TabModel(QAbstractListModel):
                 }
             )
         return links
+
+    @Slot(result="QVariantList")
+    def getPinnedTabIndices(self) -> List[int]:
+        """Return pinned tab indices in their current manual order."""
+        return [index for index, tab in enumerate(self._tabs) if bool(getattr(tab, "pinned", False))]
+
+    @Slot(int, result="QVariantMap")
+    def getTabSummary(self, index: int) -> Dict[str, Any]:
+        """Return a QML-friendly summary for one tab."""
+        if index < 0 or index >= len(self._tabs):
+            return {}
+        tab = self._tabs[index]
+        return {
+            "tabIndex": index,
+            "name": tab.name,
+            "completionPercent": self._calculateTabCompletion(tab),
+            "activeTaskTitle": self._getActiveTaskTitle(tab),
+            "priorityScore": tab.priority_score,
+            "includeInPriorityPlot": tab.include_in_priority_plot,
+            "icon": tab.icon,
+            "color": tab.color,
+            "pinned": tab.pinned,
+        }
 
     def _tab_name_to_index_map(self) -> Dict[str, int]:
         name_to_index: Dict[str, int] = {}
@@ -1589,6 +1652,7 @@ class TabModel(QAbstractListModel):
         self._tabs.append(new_tab)
         self.endInsertRows()
         self.tabsChanged.emit()
+        self._emitRecentTabsChanged()
 
     @Slot(int)
     def removeTab(self, index: int) -> None:
@@ -1598,6 +1662,7 @@ class TabModel(QAbstractListModel):
         if index < 0 or index >= len(self._tabs):
             return
 
+        previous_current_index = self._current_tab_index
         self.beginRemoveRows(QModelIndex(), index, index)
         self._tabs.pop(index)
         self.endRemoveRows()
@@ -1606,12 +1671,26 @@ class TabModel(QAbstractListModel):
         if self._current_tab_index >= len(self._tabs):
             self._current_tab_index = len(self._tabs) - 1
             self.currentTabIndexChanged.emit()
-            self.currentTabChanged.emit()
         elif self._current_tab_index > index:
             self._current_tab_index -= 1
             self.currentTabIndexChanged.emit()
+        elif self._current_tab_index == index:
+            self._current_tab_index = min(index, len(self._tabs) - 1)
+            self.currentTabIndexChanged.emit()
+
+        if self._current_tab_index != previous_current_index or index == previous_current_index:
+            self.currentTabChanged.emit()
 
         self.tabsChanged.emit()
+        updated_recent_indices: List[int] = []
+        for recent_index in self._recent_tab_indices:
+            if recent_index == index:
+                continue
+            if recent_index > index:
+                updated_recent_indices.append(recent_index - 1)
+            else:
+                updated_recent_indices.append(recent_index)
+        self._setRecentTabIndices(updated_recent_indices)
 
     @Slot(int, str)
     def renameTab(self, index: int, name: str) -> None:
@@ -1672,6 +1751,18 @@ class TabModel(QAbstractListModel):
         model_index = self.index(index, 0)
         self.dataChanged.emit(model_index, model_index, [self.ColorRole])
 
+    @Slot(int, bool)
+    def setTabPinned(self, index: int, pinned: bool) -> None:
+        """Persist whether a tab should appear in the pinned quick-access section."""
+        if index < 0 or index >= len(self._tabs):
+            return
+        normalized = bool(pinned)
+        if self._tabs[index].pinned == normalized:
+            return
+        self._tabs[index].pinned = normalized
+        model_index = self.index(index, 0)
+        self.dataChanged.emit(model_index, model_index, [self.PinnedRole])
+
     def _computePriorityScore(self, value: float, time_hours: float) -> float:
         return compute_priority_score(value, time_hours)
 
@@ -1707,6 +1798,11 @@ class TabModel(QAbstractListModel):
             return
 
         current_tab = self._tabs[self._current_tab_index]
+        recent_tabs = [
+            self._tabs[index]
+            for index in self._recent_tab_indices
+            if 0 <= index < len(self._tabs)
+        ]
         for tab in self._tabs:
             if tab.include_in_priority_plot:
                 tab.priority_score = self._computePriorityScore(
@@ -1745,6 +1841,11 @@ class TabModel(QAbstractListModel):
         self.endResetModel()
 
         self._current_tab_index = self._tabs.index(current_tab)
+        self._setRecentTabIndices([
+            self._tabs.index(tab)
+            for tab in recent_tabs
+            if tab in self._tabs
+        ])
         self.tabsChanged.emit()
         self.currentTabIndexChanged.emit()
         self.currentTabChanged.emit()
@@ -1757,9 +1858,11 @@ class TabModel(QAbstractListModel):
         if index == self._current_tab_index:
             return
 
+        previous_index = self._current_tab_index
         self._current_tab_index = index
         self.currentTabIndexChanged.emit()
         self.currentTabChanged.emit()
+        self._recordRecentTab(previous_index)
 
     def getCurrentTabData(self) -> Tab:
         """Get the current tab's data."""
@@ -1809,16 +1912,19 @@ class TabModel(QAbstractListModel):
                 tab.priority_score = 0.0
             tab.icon = str(getattr(tab, "icon", "") or "").strip()
             tab.color = self._normalizeTabColor(getattr(tab, "color", ""))
+            tab.pinned = bool(getattr(tab, "pinned", False))
         self.endResetModel()
 
         # Validate and set active tab index
         if active_tab < 0 or active_tab >= len(self._tabs):
             active_tab = 0
         self._current_tab_index = active_tab
+        self._recent_tab_indices = []
 
         self.tabsChanged.emit()
         self.currentTabIndexChanged.emit()
         self.currentTabChanged.emit()
+        self._emitRecentTabsChanged()
 
     def clear(self) -> None:
         """Reset to a single empty tab."""
@@ -1848,6 +1954,18 @@ class TabModel(QAbstractListModel):
         elif to_index <= self._current_tab_index < from_index:
             self._current_tab_index += 1
             self.currentTabIndexChanged.emit()
+
+        updated_recent_indices: List[int] = []
+        for recent_index in self._recent_tab_indices:
+            if recent_index == from_index:
+                updated_recent_indices.append(to_index)
+            elif from_index < recent_index <= to_index:
+                updated_recent_indices.append(recent_index - 1)
+            elif to_index <= recent_index < from_index:
+                updated_recent_indices.append(recent_index + 1)
+            else:
+                updated_recent_indices.append(recent_index)
+        self._setRecentTabIndices(updated_recent_indices)
 
 
 class ProjectManager(QObject):
@@ -2388,6 +2506,7 @@ class ProjectManager(QObject):
                     "include_in_priority_plot": tab.include_in_priority_plot,
                     "icon": tab.icon,
                     "color": tab.color,
+                    "pinned": tab.pinned,
                 })
 
             return {
@@ -2850,6 +2969,7 @@ class ProjectManager(QObject):
                         include_in_priority_plot=tab_data.get("include_in_priority_plot", True),
                         icon=tab_data.get("icon", ""),
                         color=tab_data.get("color", ""),
+                        pinned=tab_data.get("pinned", False),
                     ))
                 active_tab = project_data.get("active_tab", 0)
 
@@ -3025,6 +3145,29 @@ class ProjectManager(QObject):
         self._diagram_model.from_dict(tab_data.diagram)
 
         self.tabSwitched.emit()
+
+    @Slot(int)
+    def removeTab(self, index: int) -> None:
+        """Remove a tab while keeping live models aligned with the surviving tab."""
+        if self._tab_model is None:
+            return
+        if self._tab_model.tabCount <= 1:
+            return
+        if index < 0 or index >= self._tab_model.tabCount:
+            return
+
+        current_index = self._tab_model.currentTabIndex
+        removing_current_tab = index == current_index
+
+        if not removing_current_tab:
+            self._saveCurrentTabState()
+
+        self._tab_model.removeTab(index)
+
+        if removing_current_tab:
+            self.reloadCurrentTab()
+        else:
+            self.tabSwitched.emit()
 
     @Slot()
     def reloadCurrentTab(self) -> None:

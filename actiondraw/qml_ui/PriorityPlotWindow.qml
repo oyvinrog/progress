@@ -14,6 +14,8 @@ Window {
 
     property var tabModel: null
     property var tabModelRef: tabModel
+    property var projectManager: null
+    property var projectManagerRef: projectManager
     property int selectedTabIndex: -1
 
     function modelCount() {
@@ -24,6 +26,23 @@ Window {
         if (tabModelRef.count !== undefined)
             return Number(tabModelRef.count)
         return 0
+    }
+
+    function drillToTab(tabIndex) {
+        if (tabIndex < 0 || tabIndex >= root.modelCount())
+            return
+
+        root.selectedTabIndex = tabIndex
+
+        if (root.projectManagerRef && root.projectManagerRef.switchTab) {
+            root.projectManagerRef.switchTab(tabIndex)
+        } else if (root.tabModelRef && root.tabModelRef.setCurrentTab) {
+            root.tabModelRef.setCurrentTab(tabIndex)
+        } else {
+            return
+        }
+
+        root.close()
     }
 
     onSelectedTabIndexChanged: {
@@ -90,12 +109,7 @@ Window {
                     root.selectedTabIndex = tabIndex
                 }
                 onPointDoubleClicked: function(tabIndex) {
-                    root.selectedTabIndex = tabIndex
-                    if (!root.tabModelRef || !root.tabModelRef.setCurrentTab)
-                        return
-                    if (tabIndex < 0 || tabIndex >= root.modelCount())
-                        return
-                    root.tabModelRef.setCurrentTab(tabIndex)
+                    root.drillToTab(tabIndex)
                 }
             }
 
@@ -135,7 +149,7 @@ Window {
 
                         delegate: Rectangle {
                             width: tabScoreList.width
-                            height: 66
+                            height: 92
                             radius: 8
                             property bool isSelected: index === root.selectedTabIndex
                             color: isSelected ? "#244e67" : "#173245"
@@ -167,27 +181,52 @@ Window {
                                     width: parent.width
                                 }
 
-                                Button {
-                                    width: 118
-                                    height: 22
-                                    text: (model.includeInPriorityPlot !== false) ? "Included in Plot" : "Excluded from Plot"
-                                    onClicked: {
-                                        if (root.tabModelRef && root.tabModelRef.setIncludeInPriorityPlot)
-                                            root.tabModelRef.setIncludeInPriorityPlot(index, !(model.includeInPriorityPlot !== false))
+                                Row {
+                                    spacing: 8
+
+                                    Button {
+                                        width: 118
+                                        height: 22
+                                        text: (model.includeInPriorityPlot !== false) ? "Included in Plot" : "Excluded from Plot"
+                                        onClicked: {
+                                            if (root.tabModelRef && root.tabModelRef.setIncludeInPriorityPlot)
+                                                root.tabModelRef.setIncludeInPriorityPlot(index, !(model.includeInPriorityPlot !== false))
+                                        }
+                                        background: Rectangle {
+                                            radius: 6
+                                            color: (model.includeInPriorityPlot !== false) ? "#1d5f6d" : "#4a2f40"
+                                            border.color: (model.includeInPriorityPlot !== false) ? "#7fe0ef" : "#d9a3bf"
+                                            border.width: 1
+                                        }
+                                        contentItem: Text {
+                                            text: parent.text
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            color: "#eff9ff"
+                                            font.pixelSize: 10
+                                            font.bold: true
+                                        }
                                     }
-                                    background: Rectangle {
-                                        radius: 6
-                                        color: (model.includeInPriorityPlot !== false) ? "#1d5f6d" : "#4a2f40"
-                                        border.color: (model.includeInPriorityPlot !== false) ? "#7fe0ef" : "#d9a3bf"
-                                        border.width: 1
-                                    }
-                                    contentItem: Text {
-                                        text: parent.text
-                                        horizontalAlignment: Text.AlignHCenter
-                                        verticalAlignment: Text.AlignVCenter
-                                        color: "#eff9ff"
-                                        font.pixelSize: 10
-                                        font.bold: true
+
+                                    Button {
+                                        width: 72
+                                        height: 22
+                                        text: "Drill To"
+                                        onClicked: root.drillToTab(index)
+                                        background: Rectangle {
+                                            radius: 6
+                                            color: "#2d6a46"
+                                            border.color: "#8be0a8"
+                                            border.width: 1
+                                        }
+                                        contentItem: Text {
+                                            text: parent.text
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            color: "#eff9ff"
+                                            font.pixelSize: 10
+                                            font.bold: true
+                                        }
                                     }
                                 }
                             }

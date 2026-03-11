@@ -115,7 +115,10 @@ ApplicationWindow {
             console.log("Failed to load PriorityPlotWindow:", component.errorString())
             return
         }
-        var win = component.createObject(root, { "tabModel": tabModelRef })
+        var win = component.createObject(root, {
+            "tabModel": tabModelRef,
+            "projectManager": projectManagerRef
+        })
         if (!win) {
             console.log("Failed to instantiate PriorityPlotWindow")
             return
@@ -549,6 +552,19 @@ ApplicationWindow {
         sequence: "Ctrl+N"
         enabled: diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen)
         onActivated: root.addConnectedNote()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+K"
+        enabled: tabModelRef !== null
+            && (!dialogs || !dialogs.anyDialogVisible)
+            && !reminderPopup.visible
+            && !contractPopup.visible
+            && (!markdownNoteManager || !markdownNoteManager.editorOpen)
+        onActivated: {
+            if (sidebarTabs && sidebarTabs.focusSearchField)
+                sidebarTabs.focusSearchField()
+        }
     }
 
     Shortcut {
@@ -1091,6 +1107,7 @@ ApplicationWindow {
         spacing: 14
 
         SidebarTabs {
+            id: sidebarTabs
             tabModel: tabModelRef
             projectManager: projectManagerRef
             onTabDragMoved: root.updateTabDragHover
@@ -3709,6 +3726,7 @@ ApplicationWindow {
                     model: [
                         "Ctrl+Enter  New Task",
                         "Ctrl+N  Connected Note",
+                        "Ctrl+K  Find Tab",
                         "Ctrl+-  Backward Chain",
                         "Delete  Remove Node",
                         "Arrows  Connected Task",

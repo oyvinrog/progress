@@ -13,6 +13,11 @@ Item {
     property var tabModel: null
     property var diagramLayer: null
     property var edgeCanvas: null
+    property var monthNames: [
+        "January", "February", "March", "April", "May", "June",
+        "July", "August", "September", "October", "November", "December"
+    ]
+    property var weekdayNames: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
     property alias addDialog: addDialog
     property alias boxDialog: boxDialog
@@ -53,6 +58,388 @@ Item {
     )
 
     anchors.fill: parent
+
+    function formatDateValue(dateObj) {
+        return Qt.formatDateTime(dateObj, "yyyy-MM-dd")
+    }
+
+    function formatTimeValue(dateObj) {
+        return Qt.formatDateTime(dateObj, "HH:mm")
+    }
+
+    function parseDateValue(dateValue) {
+        var trimmed = dateValue ? dateValue.trim() : ""
+        var match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed)
+        if (match) {
+            var year = parseInt(match[1], 10)
+            var monthIndex = parseInt(match[2], 10) - 1
+            var day = parseInt(match[3], 10)
+            var parsed = new Date(year, monthIndex, day, 12, 0, 0, 0)
+            if (!isNaN(parsed.getTime()) && parsed.getFullYear() === year && parsed.getMonth() === monthIndex && parsed.getDate() === day)
+                return parsed
+        }
+        var now = new Date()
+        return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0, 0)
+    }
+
+    function roundedCurrentTime() {
+        var now = new Date()
+        var roundedMinute = Math.ceil(now.getMinutes() / 5) * 5
+        if (roundedMinute >= 60) {
+            now.setHours(now.getHours() + 1)
+            roundedMinute = 0
+        }
+        return new Date(
+            now.getFullYear(),
+            now.getMonth(),
+            now.getDate(),
+            now.getHours(),
+            roundedMinute,
+            0,
+            0
+        )
+    }
+
+    function parseTimeValue(timeValue) {
+        var trimmed = timeValue ? timeValue.trim() : ""
+        var match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(trimmed)
+        if (match) {
+            var parsed = dialogHost.roundedCurrentTime()
+            parsed.setHours(parseInt(match[1], 10))
+            parsed.setMinutes(parseInt(match[2], 10))
+            parsed.setSeconds(0)
+            parsed.setMilliseconds(0)
+            return parsed
+        }
+        return dialogHost.roundedCurrentTime()
+    }
+
+    function daysInMonth(year, monthIndex) {
+        return new Date(year, monthIndex + 1, 0).getDate()
+    }
+
+    function firstDayOffset(year, monthIndex) {
+        return (new Date(year, monthIndex, 1).getDay() + 6) % 7
+    }
+
+    function calendarCellDay(cellIndex, year, monthIndex) {
+        var offset = dialogHost.firstDayOffset(year, monthIndex)
+        var dayNumber = cellIndex - offset + 1
+        if (dayNumber < 1 || dayNumber > dialogHost.daysInMonth(year, monthIndex))
+            return 0
+        return dayNumber
+    }
+
+    function openDatePicker(targetDialog) {
+        if (!targetDialog)
+            return
+        datePickerPopup.targetDialog = targetDialog
+        var currentDate = dialogHost.parseDateValue(targetDialog.dateValue)
+        datePickerPopup.displayYear = currentDate.getFullYear()
+        datePickerPopup.displayMonth = currentDate.getMonth()
+        datePickerPopup.selectedDay = currentDate.getDate()
+        datePickerPopup.open()
+    }
+
+    function openTimePicker(targetDialog) {
+        if (!targetDialog)
+            return
+        timePickerPopup.targetDialog = targetDialog
+        var currentTime = dialogHost.parseTimeValue(targetDialog.timeValue)
+        timePickerPopup.selectedHour = currentTime.getHours()
+        timePickerPopup.selectedMinute = currentTime.getMinutes()
+        timePickerPopup.open()
+    }
+
+    Popup {
+        id: datePickerPopup
+        modal: true
+        focus: true
+        padding: 12
+        width: 320
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        anchors.centerIn: Overlay.overlay
+        property var targetDialog: null
+        property int displayYear: 0
+        property int displayMonth: 0
+        property int selectedDay: 0
+
+        function applySelection(day) {
+            if (!targetDialog || day <= 0)
+                return
+            targetDialog.dateValue = dialogHost.formatDateValue(new Date(displayYear, displayMonth, day, 12, 0, 0, 0))
+            selectedDay = day
+            close()
+        }
+
+        background: Rectangle {
+            radius: 8
+            color: "#1b2028"
+            border.color: "#384458"
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 10
+
+            RowLayout {
+                Layout.fillWidth: true
+
+                Button {
+                    text: "<"
+                    onClicked: {
+                        if (datePickerPopup.displayMonth === 0) {
+                            datePickerPopup.displayMonth = 11
+                            datePickerPopup.displayYear -= 1
+                        } else {
+                            datePickerPopup.displayMonth -= 1
+                        }
+                    }
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    horizontalAlignment: Text.AlignHCenter
+                    text: dialogHost.monthNames[datePickerPopup.displayMonth] + " " + datePickerPopup.displayYear
+                    color: "#f5f6f8"
+                    font.bold: true
+                }
+
+                Button {
+                    text: ">"
+                    onClicked: {
+                        if (datePickerPopup.displayMonth === 11) {
+                            datePickerPopup.displayMonth = 0
+                            datePickerPopup.displayYear += 1
+                        } else {
+                            datePickerPopup.displayMonth += 1
+                        }
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 6
+
+                Repeater {
+                    model: dialogHost.weekdayNames
+
+                    delegate: Label {
+                        required property string modelData
+                        Layout.fillWidth: true
+                        horizontalAlignment: Text.AlignHCenter
+                        text: modelData
+                        color: "#8a93a5"
+                        font.pixelSize: 11
+                    }
+                }
+            }
+
+            GridLayout {
+                Layout.fillWidth: true
+                columns: 7
+                columnSpacing: 6
+                rowSpacing: 6
+
+                Repeater {
+                    model: 42
+
+                    delegate: Button {
+                        id: dayButton
+                        required property int index
+                        readonly property int dayNumber: dialogHost.calendarCellDay(index, datePickerPopup.displayYear, datePickerPopup.displayMonth)
+                        readonly property bool isSelected: {
+                            if (!datePickerPopup.targetDialog || dayNumber <= 0)
+                                return false
+                            var selectedDate = dialogHost.parseDateValue(datePickerPopup.targetDialog.dateValue)
+                            return selectedDate.getFullYear() === datePickerPopup.displayYear
+                                && selectedDate.getMonth() === datePickerPopup.displayMonth
+                                && selectedDate.getDate() === dayNumber
+                        }
+
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 32
+                        enabled: dayNumber > 0
+                        text: dayNumber > 0 ? String(dayNumber) : ""
+
+                        background: Rectangle {
+                            radius: 4
+                            color: dayButton.isSelected ? "#e67e22" : "#1a2230"
+                            border.color: dayButton.enabled ? (dayButton.isSelected ? "#d35400" : "#4b5b72") : "#222a36"
+                        }
+
+                        contentItem: Text {
+                            text: dayButton.text
+                            color: dayButton.enabled ? "#f5f6f8" : "#4b5b72"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+
+                        onClicked: datePickerPopup.applySelection(dayNumber)
+                    }
+                }
+            }
+
+            Button {
+                Layout.alignment: Qt.AlignRight
+                text: "Cancel"
+                onClicked: datePickerPopup.close()
+            }
+        }
+    }
+
+    Popup {
+        id: timePickerPopup
+        modal: true
+        focus: true
+        padding: 12
+        width: 280
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        anchors.centerIn: Overlay.overlay
+        property var targetDialog: null
+        property int selectedHour: 0
+        property int selectedMinute: 0
+
+        function applySelection() {
+            if (!targetDialog)
+                return
+            var selected = new Date(2000, 0, 1, selectedHour, selectedMinute, 0, 0)
+            targetDialog.timeValue = dialogHost.formatTimeValue(selected)
+            close()
+        }
+
+        onOpened: {
+            hourSpinBox.value = selectedHour
+            minuteSpinBox.value = selectedMinute
+        }
+
+        onSelectedHourChanged: {
+            if (hourSpinBox.value !== selectedHour)
+                hourSpinBox.value = selectedHour
+        }
+
+        onSelectedMinuteChanged: {
+            if (minuteSpinBox.value !== selectedMinute)
+                minuteSpinBox.value = selectedMinute
+        }
+
+        background: Rectangle {
+            radius: 8
+            color: "#1b2028"
+            border.color: "#384458"
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 12
+
+            Label {
+                Layout.fillWidth: true
+                text: "Select time"
+                color: "#f5f6f8"
+                font.bold: true
+                horizontalAlignment: Text.AlignHCenter
+            }
+
+            RowLayout {
+                Layout.alignment: Qt.AlignHCenter
+                spacing: 12
+
+                SpinBox {
+                    id: hourSpinBox
+                    from: 0
+                    to: 23
+                    editable: true
+
+                    validator: IntValidator {
+                        bottom: 0
+                        top: 23
+                    }
+
+                    textFromValue: function(value) {
+                        return value < 10 ? "0" + value : String(value)
+                    }
+
+                    valueFromText: function(text) {
+                        var parsed = parseInt(text, 10)
+                        return isNaN(parsed) ? value : parsed
+                    }
+
+                    onValueModified: timePickerPopup.selectedHour = value
+                }
+
+                Label {
+                    text: ":"
+                    color: "#f5f6f8"
+                    font.pixelSize: 18
+                }
+
+                SpinBox {
+                    id: minuteSpinBox
+                    from: 0
+                    to: 59
+                    editable: true
+                    stepSize: 5
+
+                    validator: IntValidator {
+                        bottom: 0
+                        top: 59
+                    }
+
+                    textFromValue: function(value) {
+                        return value < 10 ? "0" + value : String(value)
+                    }
+
+                    valueFromText: function(text) {
+                        var parsed = parseInt(text, 10)
+                        return isNaN(parsed) ? value : parsed
+                    }
+
+                    onValueModified: timePickerPopup.selectedMinute = value
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                Button {
+                    Layout.fillWidth: true
+                    text: "Now"
+                    onClicked: {
+                        var now = dialogHost.roundedCurrentTime()
+                        timePickerPopup.selectedHour = now.getHours()
+                        timePickerPopup.selectedMinute = now.getMinutes()
+                    }
+                }
+
+                Button {
+                    Layout.fillWidth: true
+                    text: "+15m"
+                    onClicked: {
+                        var base = new Date(2000, 0, 1, timePickerPopup.selectedHour, timePickerPopup.selectedMinute, 0, 0)
+                        base.setMinutes(base.getMinutes() + 15)
+                        timePickerPopup.selectedHour = base.getHours()
+                        timePickerPopup.selectedMinute = base.getMinutes()
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.alignment: Qt.AlignRight
+                spacing: 8
+
+                Button {
+                    text: "Cancel"
+                    onClicked: timePickerPopup.close()
+                }
+
+                Button {
+                    text: "Apply"
+                    onClicked: timePickerPopup.applySelection()
+                }
+            }
+        }
+    }
 
     Dialog {
         id: addDialog
@@ -858,7 +1245,7 @@ Item {
             if (reminderDialog.dateValue.trim().length === 0 || reminderDialog.timeValue.trim().length === 0) {
                 setToOffsetMinutes(60)
             }
-            reminderDateField.forceActiveFocus()
+            reminderDateButton.forceActiveFocus()
         }
 
         contentItem: ColumnLayout {
@@ -872,36 +1259,59 @@ Item {
                 Layout.fillWidth: true
             }
 
-            TextField {
-                id: reminderDateField
+            Button {
+                id: reminderDateButton
                 Layout.fillWidth: true
-                text: reminderDialog.dateValue
-                placeholderText: "YYYY-MM-DD"
-                selectByMouse: true
-                color: "#f5f6f8"
+                text: reminderDialog.dateValue.trim().length > 0 ? reminderDialog.dateValue : "Select date"
+                contentItem: Text {
+                    text: parent.text
+                    color: "#f5f6f8"
+                    verticalAlignment: Text.AlignVCenter
+                }
                 background: Rectangle {
                     color: "#1b2028"
                     radius: 4
                     border.color: "#384458"
                 }
-                onTextChanged: reminderDialog.dateValue = text
+                onClicked: dialogHost.openDatePicker(reminderDialog)
             }
 
-            TextField {
-                id: reminderTimeField
+            RowLayout {
                 Layout.fillWidth: true
-                text: reminderDialog.timeValue
-                placeholderText: "HH:MM"
-                selectByMouse: true
-                color: "#f5f6f8"
-                background: Rectangle {
-                    color: "#1b2028"
-                    radius: 4
-                    border.color: "#384458"
+
+                Button {
+                    id: reminderTimeButton
+                    text: reminderDialog.timeValue.trim().length > 0 ? reminderDialog.timeValue : "Select time"
+                    contentItem: Text {
+                        text: parent.text
+                        color: "#f5f6f8"
+                        verticalAlignment: Text.AlignVCenter
+                        horizontalAlignment: Text.AlignHCenter
+                    }
+                    background: Rectangle {
+                        color: "#1b2028"
+                        radius: 4
+                        border.color: "#384458"
+                    }
+                    onClicked: dialogHost.openTimePicker(reminderDialog)
                 }
-                onTextChanged: reminderDialog.timeValue = text
-                Keys.onReturnPressed: reminderDialog.accept()
-                Keys.onEnterPressed: reminderDialog.accept()
+
+                TextField {
+                    id: reminderTimeField
+                    Layout.fillWidth: true
+                    text: reminderDialog.timeValue
+                    placeholderText: "HH:MM"
+                    selectByMouse: true
+                    color: "#f5f6f8"
+                    background: Rectangle {
+                        color: "#1b2028"
+                        radius: 4
+                        border.color: "#384458"
+                    }
+                    onTextChanged: reminderDialog.timeValue = text
+                    Keys.onReturnPressed: reminderDialog.accept()
+                    Keys.onEnterPressed: reminderDialog.accept()
+                }
             }
 
             RowLayout {
@@ -989,6 +1399,45 @@ Item {
         property string dateValue: ""
         property string timeValue: ""
         property string punishmentValue: ""
+        property string punishmentMode: "fixed"
+        property var fixedPunishmentOptions: [
+            { value: "coffee", label: "Coffee", icon: "\u2615" },
+            { value: "tv", label: "TV", icon: "\ud83d\udcfa" },
+            { value: "cacao", label: "Cacao", icon: "\ud83c\udf6b" },
+            { value: "chocolate", label: "Chocolate", icon: "\ud83c\udf6c" },
+            { value: "soda", label: "Soda", icon: "\ud83e\udd64" },
+            { value: "cigar/snus", label: "Cigar / Snus", icon: "\ud83d\udebc" }
+        ]
+        property var fixedPunishmentIcons: ({
+            "coffee": "\u2615",
+            "tv": "\ud83d\udcfa",
+            "cacao": "\ud83c\udf6b",
+            "chocolate": "\ud83c\udf6c",
+            "soda": "\ud83e\udd64",
+            "cigar/snus": "\ud83d\udebc"
+        })
+
+        function normalizedPunishmentValue(value) {
+            return value ? value.trim().toLowerCase() : ""
+        }
+
+        function isFixedPunishment(value) {
+            return fixedPunishmentIcons[normalizedPunishmentValue(value)] !== undefined
+        }
+
+        function punishmentDisplayText(value) {
+            var trimmed = value ? value.trim() : ""
+            if (!trimmed.length)
+                return ""
+            var icon = fixedPunishmentIcons[normalizedPunishmentValue(trimmed)]
+            return icon ? icon + " " + trimmed : trimmed
+        }
+
+        function selectPunishment(value) {
+            var trimmed = value ? value.trim() : ""
+            punishmentValue = trimmed
+            punishmentMode = isFixedPunishment(trimmed) ? "fixed" : "custom"
+        }
 
         function parseDeadlineParts(value) {
             var trimmed = value ? value.trim() : ""
@@ -1015,7 +1464,7 @@ Item {
             if (contractDialog.dateValue.trim().length === 0 || contractDialog.timeValue.trim().length === 0) {
                 setToOffsetMinutes(60)
             }
-            contractDateField.forceActiveFocus()
+            contractDateButton.forceActiveFocus()
         }
 
         contentItem: ColumnLayout {
@@ -1029,41 +1478,129 @@ Item {
                 Layout.fillWidth: true
             }
 
-            TextField {
-                id: contractDateField
+            Label {
+                text: "Choose a fixed punishment or enter your own."
+                color: "#8a93a5"
+                font.pixelSize: 11
                 Layout.fillWidth: true
-                text: contractDialog.dateValue
-                placeholderText: "YYYY-MM-DD"
-                selectByMouse: true
-                color: "#f5f6f8"
-                background: Rectangle {
-                    color: "#1b2028"
-                    radius: 4
-                    border.color: "#384458"
-                }
-                onTextChanged: contractDialog.dateValue = text
             }
 
-            TextField {
-                id: contractTimeField
+            Button {
+                id: contractDateButton
                 Layout.fillWidth: true
-                text: contractDialog.timeValue
-                placeholderText: "HH:MM"
-                selectByMouse: true
-                color: "#f5f6f8"
+                text: contractDialog.dateValue.trim().length > 0 ? contractDialog.dateValue : "Select date"
+                contentItem: Text {
+                    text: parent.text
+                    color: "#f5f6f8"
+                    verticalAlignment: Text.AlignVCenter
+                }
                 background: Rectangle {
                     color: "#1b2028"
                     radius: 4
                     border.color: "#384458"
                 }
-                onTextChanged: contractDialog.timeValue = text
+                onClicked: dialogHost.openDatePicker(contractDialog)
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+
+                Button {
+                    id: contractTimeButton
+                    text: contractDialog.timeValue.trim().length > 0 ? contractDialog.timeValue : "Select time"
+                    contentItem: Text {
+                        text: parent.text
+                        color: "#f5f6f8"
+                        verticalAlignment: Text.AlignVCenter
+                        horizontalAlignment: Text.AlignHCenter
+                    }
+                    background: Rectangle {
+                        color: "#1b2028"
+                        radius: 4
+                        border.color: "#384458"
+                    }
+                    onClicked: dialogHost.openTimePicker(contractDialog)
+                }
+
+                TextField {
+                    id: contractTimeField
+                    Layout.fillWidth: true
+                    text: contractDialog.timeValue
+                    placeholderText: "HH:MM"
+                    selectByMouse: true
+                    color: "#f5f6f8"
+                    background: Rectangle {
+                        color: "#1b2028"
+                        radius: 4
+                        border.color: "#384458"
+                    }
+                    onTextChanged: contractDialog.timeValue = text
+                }
+            }
+
+            GridLayout {
+                Layout.fillWidth: true
+                columns: 2
+                columnSpacing: 8
+                rowSpacing: 8
+
+                Repeater {
+                    model: contractDialog.fixedPunishmentOptions
+
+                    delegate: Button {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        text: modelData.icon + "  " + modelData.label
+
+                        background: Rectangle {
+                            radius: 6
+                            color: contractDialog.normalizedPunishmentValue(contractDialog.punishmentValue) === modelData.value
+                                && contractDialog.punishmentMode === "fixed"
+                                ? "#3c4b63"
+                                : "#1b2028"
+                            border.width: 1
+                            border.color: contractDialog.normalizedPunishmentValue(contractDialog.punishmentValue) === modelData.value
+                                && contractDialog.punishmentMode === "fixed"
+                                ? "#9eb8e8"
+                                : "#384458"
+                        }
+
+                        contentItem: Text {
+                            text: parent.text
+                            color: "#f5f6f8"
+                            font.pixelSize: 12
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            elide: Text.ElideRight
+                        }
+
+                        onClicked: contractDialog.selectPunishment(modelData.value)
+                    }
+                }
+            }
+
+            Button {
+                id: customPunishmentButton
+                Layout.fillWidth: true
+                text: contractDialog.punishmentMode === "custom"
+                    ? "Custom punishment selected"
+                    : "Use custom punishment"
+                onClicked: {
+                    if (contractDialog.punishmentMode !== "custom"
+                            && contractDialog.isFixedPunishment(contractDialog.punishmentValue)) {
+                        contractDialog.punishmentValue = ""
+                    }
+                    contractDialog.punishmentMode = "custom"
+                    contractPunishmentField.forceActiveFocus()
+                }
             }
 
             TextField {
                 id: contractPunishmentField
                 Layout.fillWidth: true
-                text: contractDialog.punishmentValue
-                placeholderText: "Punishment if missed (required)"
+                visible: contractDialog.punishmentMode === "custom"
+                text: contractDialog.punishmentMode === "custom" ? contractDialog.punishmentValue : ""
+                placeholderText: "Custom punishment if missed"
                 selectByMouse: true
                 color: "#f5f6f8"
                 background: Rectangle {
@@ -1071,9 +1608,20 @@ Item {
                     radius: 4
                     border.color: "#384458"
                 }
-                onTextChanged: contractDialog.punishmentValue = text
+                onTextChanged: {
+                    if (contractDialog.punishmentMode === "custom")
+                        contractDialog.punishmentValue = text
+                }
                 Keys.onReturnPressed: contractDialog.accept()
                 Keys.onEnterPressed: contractDialog.accept()
+            }
+
+            Label {
+                Layout.fillWidth: true
+                visible: contractDialog.punishmentMode === "fixed" && contractDialog.punishmentValue.trim().length > 0
+                text: "Selected punishment: " + contractDialog.punishmentDisplayText(contractDialog.punishmentValue)
+                color: "#f0c6c6"
+                wrapMode: Text.WordWrap
             }
 
             RowLayout {
@@ -1124,6 +1672,7 @@ Item {
             contractDialog.dateValue = ""
             contractDialog.timeValue = ""
             contractDialog.punishmentValue = ""
+            contractDialog.punishmentMode = "fixed"
         }
     }
 
@@ -1140,7 +1689,7 @@ Item {
             var parts = contractDialog.parseDeadlineParts(contractContextMenu.deadlineAt)
             contractDialog.dateValue = parts.date
             contractDialog.timeValue = parts.time
-            contractDialog.punishmentValue = contractContextMenu.punishment
+            contractDialog.selectPunishment(contractContextMenu.punishment)
             contractDialog.open()
         }
 
