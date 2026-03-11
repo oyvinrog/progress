@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
@@ -28,6 +29,60 @@ Rectangle {
     )
     readonly property bool persistedExpanded: projectManager ? projectManager.sidebarExpanded : true
     readonly property bool isExpanded: persistedExpanded || keepExpanded
+    property string searchText: ""
+    property var pinnedTabIndices: []
+    property var recentTabIndices: []
+
+    function refreshQuickAccess() {
+        if (!tabModel) {
+            pinnedTabIndices = []
+            recentTabIndices = []
+            return
+        }
+        pinnedTabIndices = tabModel.getPinnedTabIndices ? tabModel.getPinnedTabIndices() : []
+        recentTabIndices = tabModel.recentTabIndices !== undefined ? tabModel.recentTabIndices : []
+    }
+
+    function focusSearchField() {
+        if (!sidebar.isExpanded) {
+            if (projectManager && projectManager.setSidebarExpanded)
+                projectManager.setSidebarExpanded(true)
+        }
+        if (!searchField)
+            return
+        searchField.forceActiveFocus()
+        searchField.selectAll()
+    }
+
+    function normalizeSearch(text) {
+        return String(text || "").trim().toLowerCase()
+    }
+
+    function matchesSearch(name, activeTaskTitle) {
+        var needle = normalizeSearch(searchText)
+        if (needle.length === 0)
+            return true
+        var haystack = (String(name || "") + "\n" + String(activeTaskTitle || "")).toLowerCase()
+        return haystack.indexOf(needle) >= 0
+    }
+
+    function filteredTabCount() {
+        if (!tabModel || !tabModel.getTabSummary)
+            return 0
+        var count = 0
+        for (var i = 0; i < tabModel.tabCount; ++i) {
+            var summary = tabModel.getTabSummary(i)
+            if (matchesSearch(summary.name, summary.activeTaskTitle) || i === tabModel.currentTabIndex)
+                count += 1
+        }
+        return count
+    }
+
+    function tabSummary(tabIndex) {
+        if (!tabModel || !tabModel.getTabSummary)
+            return null
+        return tabModel.getTabSummary(tabIndex)
+    }
 
     function toggleSidebarExpanded() {
         if (!projectManager || !projectManager.setSidebarExpanded)
@@ -53,6 +108,22 @@ Rectangle {
         tabColorDialog.currentColor = tabColor || ""
         tabColorDialog.currentName = tabName || ""
         tabColorDialog.open()
+    }
+
+    Component.onCompleted: refreshQuickAccess()
+
+    Connections {
+        target: sidebar.tabModel
+        enabled: sidebar.tabModel !== null
+
+        function onTabsChanged() { sidebar.refreshQuickAccess() }
+        function onCurrentTabIndexChanged() { sidebar.refreshQuickAccess() }
+        function onRecentTabsChanged() { sidebar.refreshQuickAccess() }
+        function onDataChanged() { sidebar.refreshQuickAccess() }
+        function onModelReset() { sidebar.refreshQuickAccess() }
+        function onRowsInserted() { sidebar.refreshQuickAccess() }
+        function onRowsRemoved() { sidebar.refreshQuickAccess() }
+        function onRowsMoved() { sidebar.refreshQuickAccess() }
     }
 
     Layout.fillHeight: true
@@ -127,7 +198,7 @@ Rectangle {
 
                     Text {
                         anchors.centerIn: parent
-                        text: tabModel ? tabModel.tabCount : 0
+                        text: sidebar.tabModel ? sidebar.tabModel.tabCount : 0
                         color: "#8dd4ff"
                         font.pixelSize: 11
                         font.bold: true
@@ -156,6 +227,47 @@ Rectangle {
             }
         }
 
+        Rectangle {
+            visible: sidebar.isExpanded
+            Layout.fillWidth: true
+            height: 34
+            radius: 8
+            color: "#112230"
+            border.color: searchField.activeFocus ? "#74cfff" : "#2f4e64"
+            border.width: 1
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 10
+                anchors.rightMargin: 8
+                spacing: 6
+
+                Text {
+                    text: "Find"
+                    color: "#8eb4cd"
+                    font.pixelSize: 10
+                    font.bold: true
+                }
+
+                TextField {
+                    id: searchField
+                    Layout.fillWidth: true
+                    placeholderText: "Search tabs or active task"
+                    placeholderTextColor: "#6f8798"
+                    color: "#e8f2fb"
+                    selectByMouse: true
+                    background: Item {}
+                    onTextChanged: sidebar.searchText = text
+                }
+
+                Button {
+                    visible: searchField.text.length > 0
+                    text: "Clear"
+                    onClicked: searchField.clear()
+                }
+            }
+        }
+
         Flickable {
             id: tabFlickable
             Layout.fillWidth: true
@@ -167,224 +279,474 @@ Rectangle {
             Column {
                 id: tabColumnContent
                 width: tabFlickable.width
-                spacing: 4
+                spacing: 8
 
-                Repeater {
-                    model: tabModel
+                Column {
+                    width: parent.width
+                    spacing: 4
+                    visible: sidebar.isExpanded
 
-                    delegate: Rectangle {
-                        id: tabButton
-                        property bool isActive: tabModel ? index === tabModel.currentTabIndex : false
-                        property string activeTaskTitle: model.activeTaskTitle || ""
-                        property real tabPriorityScore: model.priorityScore || 0
-                        property int dragTabIndex: index
-                        property string dragTabName: model.name || ""
-                        property string tabIcon: model.icon || ""
-                        property string tabColor: model.color || ""
-                        property color tabAccentColor: tabColor !== ""
-                            ? tabColor
-                            : (isActive ? "#64c1ff" : "#2a4358")
-                        property color idleTabColor: Qt.darker(tabAccentColor, 4.2)
-                        property color hoverTabColor: Qt.darker(tabAccentColor, 3.6)
-                        property color activeTabColor: Qt.darker(tabAccentColor, 2.9)
-                        property bool suppressClick: false
-                        property bool dragging: tabDragHandler.active
-                        width: tabColumnContent.width
-                        height: tabButton.activeTaskTitle !== "" && sidebar.isExpanded ? 54 : 40
-                        radius: 9
-                        scale: dragging ? 1.03 : 1.0
-                        opacity: dragging ? 0.9 : 1.0
-                        color: isActive ? activeTabColor : (tabMouseArea.containsMouse ? hoverTabColor : idleTabColor)
-                        border.color: dragging ? "#8fe2ff" : tabAccentColor
-                        border.width: dragging ? 2 : 1
+                    Text {
+                        visible: sidebar.tabModel && sidebar.tabModel.currentTabIndex >= 0
+                        text: "Current"
+                        color: "#81b9d7"
+                        font.pixelSize: 10
+                        font.bold: true
+                    }
 
-                        Behavior on color {
-                            ColorAnimation { duration: 110 }
-                        }
-                        Behavior on scale {
-                            NumberAnimation { duration: 90; easing.type: Easing.OutCubic }
-                        }
-                        Behavior on opacity {
-                            NumberAnimation { duration: 90; easing.type: Easing.OutCubic }
-                        }
+                    Rectangle {
+                        visible: sidebar.tabModel && sidebar.tabModel.currentTabIndex >= 0
+                        width: parent.width
+                        height: 34
+                        radius: 8
+                        color: "#20435b"
+                        border.color: "#78d2ff"
+                        border.width: 1
 
-                        Drag.active: tabDragHandler.active
-                        Drag.keys: ["progress-tab"]
-                        Drag.supportedActions: Qt.CopyAction
-                        Drag.mimeData: ({ "text/plain": tabButton.dragTabName })
-                        Drag.hotSpot.x: width / 2
-                        Drag.hotSpot.y: height / 2
+                        id: currentTabCard
+                        property var summary: sidebar.tabModel ? sidebar.tabSummary(sidebar.tabModel.currentTabIndex) : null
 
-                        DragHandler {
-                            id: tabDragHandler
-                            target: null
-                            acceptedButtons: Qt.LeftButton
-                            dragThreshold: 4
-                            onActiveChanged: {
-                                var scenePos = tabButton.mapToItem(
-                                    null,
-                                    tabDragHandler.centroid.position.x,
-                                    tabDragHandler.centroid.position.y
-                                )
-                                if (active) {
-                                    tabButton.suppressClick = true
-                                    if (typeof sidebar.onTabDragMoved === "function")
-                                        sidebar.onTabDragMoved(tabButton.dragTabIndex, tabButton.dragTabName, scenePos.x, scenePos.y, true)
-                                } else {
-                                    if (typeof sidebar.onTabDragMoved === "function")
-                                        sidebar.onTabDragMoved(tabButton.dragTabIndex, tabButton.dragTabName, scenePos.x, scenePos.y, false)
-                                    if (tabButton.suppressClick && typeof sidebar.onTabDragReleased === "function") {
-                                        sidebar.onTabDragReleased(tabButton.dragTabIndex, scenePos.x, scenePos.y)
-                                    }
-                                }
-                            }
-                            onTranslationChanged: {
-                                if (!tabDragHandler.active || typeof sidebar.onTabDragMoved !== "function")
-                                    return
-                                var scenePos = tabButton.mapToItem(
-                                    null,
-                                    tabDragHandler.centroid.position.x,
-                                    tabDragHandler.centroid.position.y
-                                )
-                                sidebar.onTabDragMoved(tabButton.dragTabIndex, tabButton.dragTabName, scenePos.x, scenePos.y, true)
-                            }
-                        }
-
-                        ColumnLayout {
+                        RowLayout {
                             anchors.fill: parent
                             anchors.leftMargin: 10
                             anchors.rightMargin: 10
-                            anchors.topMargin: 6
-                            anchors.bottomMargin: 6
-                            spacing: 2
+                            spacing: 6
+
+                            Text {
+                                text: (currentTabCard.summary && currentTabCard.summary.icon) ? currentTabCard.summary.icon : "•"
+                                color: "#f4fbff"
+                                font.pixelSize: 11
+                                font.bold: true
+                            }
+
+                            Text {
+                                text: currentTabCard.summary ? currentTabCard.summary.name : ""
+                                color: "#ffffff"
+                                font.pixelSize: 11
+                                font.bold: true
+                                elide: Text.ElideRight
+                                Layout.fillWidth: true
+                            }
+
+                            Text {
+                                text: currentTabCard.summary ? Math.round(currentTabCard.summary.completionPercent) + "%" : ""
+                                color: "#8fe1ff"
+                                font.pixelSize: 10
+                                font.bold: true
+                            }
+                        }
+                    }
+                }
+
+                Column {
+                    width: parent.width
+                    spacing: 4
+                    visible: sidebar.isExpanded && sidebar.recentTabIndices.length > 0
+
+                    Text {
+                        text: "Recent"
+                        color: "#81b9d7"
+                        font.pixelSize: 10
+                        font.bold: true
+                    }
+
+                    Repeater {
+                        model: sidebar.recentTabIndices
+
+                        delegate: Rectangle {
+                            id: recentTabRow
+                            required property var modelData
+                            property int tabIndex: Number(modelData)
+                            property var summary: sidebar.tabSummary(tabIndex)
+                            visible: summary !== null && sidebar.matchesSearch(summary.name, summary.activeTaskTitle)
+                            width: tabColumnContent.width
+                            height: 30
+                            radius: 8
+                            color: recentMouse.containsMouse ? "#1a3143" : "#132635"
+                            border.color: "#2d4f66"
+                            border.width: 1
 
                             RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 10
+                                anchors.rightMargin: 10
                                 spacing: 6
 
-                                Rectangle {
-                                    id: tabAccentSwatch
-                                    width: 12
-                                    height: 12
-                                    radius: 6
-                                    color: tabButton.tabAccentColor
-                                    border.color: isActive ? "#d9efff" : "#aac2d8"
-                                    border.width: 1
-                                    visible: sidebar.isExpanded
+                                Text {
+                                    text: recentTabRow.summary && recentTabRow.summary.icon ? recentTabRow.summary.icon : "•"
+                                    color: "#dceaf8"
+                                    font.pixelSize: 10
                                 }
 
                                 Text {
-                                    id: tabIconText
-                                    text: tabButton.tabIcon
-                                    visible: sidebar.isExpanded && tabButton.tabIcon.length > 0
-                                    color: isActive ? "#ffffff" : "#d9e8f6"
-                                    font.pixelSize: 12
-                                    font.bold: true
+                                    text: recentTabRow.summary ? recentTabRow.summary.name : ""
+                                    color: "#d7e7f6"
+                                    font.pixelSize: 10
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
                                 }
 
-                                Rectangle {
-                                    id: priorityBadge
-                                    visible: tabButton.tabPriorityScore > 0
-                                    width: 36
-                                    height: 16
-                                    radius: 4
-                                    color: "#1b4d67"
-                                    border.color: "#68c8f2"
-                                    border.width: 1
+                                Text {
+                                    text: recentTabRow.summary && recentTabRow.summary.pinned ? "PIN" : ""
+                                    color: "#9be4bc"
+                                    font.pixelSize: 9
+                                    font.bold: true
+                                }
+                            }
+
+                            MouseArea {
+                                id: recentMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (sidebar.projectManager)
+                                        sidebar.projectManager.switchTab(tabIndex)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Column {
+                    width: parent.width
+                    spacing: 4
+                    visible: sidebar.isExpanded && sidebar.pinnedTabIndices.length > 0
+
+                    Text {
+                        text: "Pinned"
+                        color: "#81b9d7"
+                        font.pixelSize: 10
+                        font.bold: true
+                    }
+
+                    Repeater {
+                        model: sidebar.pinnedTabIndices
+
+                        delegate: Rectangle {
+                            id: pinnedTabRow
+                            required property var modelData
+                            property int tabIndex: Number(modelData)
+                            property var summary: sidebar.tabSummary(tabIndex)
+                            visible: summary !== null
+                                && tabIndex !== (tabModel ? tabModel.currentTabIndex : -1)
+                                && sidebar.matchesSearch(summary.name, summary.activeTaskTitle)
+                            width: tabColumnContent.width
+                            height: summary && summary.activeTaskTitle ? 38 : 30
+                            radius: 8
+                            color: pinnedMouse.containsMouse ? "#203445" : "#182938"
+                            border.color: summary && summary.color ? summary.color : "#3f6b88"
+                            border.width: 1
+
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 10
+                                anchors.rightMargin: 10
+                                anchors.topMargin: 5
+                                anchors.bottomMargin: 5
+                                spacing: 1
+
+                                RowLayout {
+                                    spacing: 6
 
                                     Text {
-                                        anchors.centerIn: parent
-                                        text: tabButton.tabPriorityScore.toFixed(2)
-                                        color: "#ffffff"
-                                        font.pixelSize: 9
+                                        text: pinnedTabRow.summary && pinnedTabRow.summary.icon ? pinnedTabRow.summary.icon : "PIN"
+                                        color: "#fff4c7"
+                                        font.pixelSize: 10
                                         font.bold: true
+                                    }
+
+                                    Text {
+                                        text: pinnedTabRow.summary ? pinnedTabRow.summary.name : ""
+                                        color: "#f1f7ff"
+                                        font.pixelSize: 10
+                                        font.bold: true
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
                                     }
                                 }
 
                                 Text {
-                                    id: tabName
-                                    text: model.name
-                                    color: isActive ? "#ffffff" : "#b0c2d4"
-                                    font.pixelSize: 11
-                                    font.bold: isActive
+                                    visible: !!(pinnedTabRow.summary && pinnedTabRow.summary.activeTaskTitle)
+                                    text: pinnedTabRow.summary ? pinnedTabRow.summary.activeTaskTitle : ""
+                                    color: "#8db5ca"
+                                    font.pixelSize: 9
                                     elide: Text.ElideRight
                                     Layout.fillWidth: true
-                                    visible: sidebar.isExpanded
-                                }
-
-                                Text {
-                                    text: tabButton.tabIcon.length > 0
-                                        ? tabButton.tabIcon
-                                        : (model.name.length > 0 ? model.name.charAt(0).toUpperCase() : "T")
-                                    visible: !sidebar.isExpanded
-                                    color: isActive ? "#ffffff" : "#b0c2d4"
-                                    font.pixelSize: 12
-                                    font.bold: true
-                                    horizontalAlignment: Text.AlignHCenter
-                                    Layout.fillWidth: true
-                                }
-
-                                Text {
-                                    id: tabPercent
-                                    text: Math.round(model.completionPercent) + "%"
-                                    color: isActive ? "#88d5ff" : "#8ca5ba"
-                                    font.pixelSize: 10
-                                    font.bold: true
-                                    visible: sidebar.isExpanded
                                 }
                             }
 
-                            Text {
-                                id: tabActiveTask
-                                visible: sidebar.isExpanded && tabButton.activeTaskTitle !== ""
-                                text: tabButton.activeTaskTitle
-                                color: isActive ? "#9be4bc" : "#7ea98f"
-                                font.pixelSize: 9
-                                elide: Text.ElideRight
-                                Layout.fillWidth: true
+                            MouseArea {
+                                id: pinnedMouse
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (sidebar.projectManager)
+                                        sidebar.projectManager.switchTab(tabIndex)
+                                }
                             }
                         }
+                    }
+                }
 
-                        ToolTip {
-                            visible: tabMouseArea.containsMouse
-                            text: {
-                                var priorityText = tabButton.tabPriorityScore > 0
-                                    ? "[Score " + tabButton.tabPriorityScore.toFixed(2) + "] "
-                                    : ""
-                                var baseText = priorityText + model.name + " (" + Math.round(model.completionPercent) + "%)"
-                                if (tabButton.activeTaskTitle)
-                                    baseText += "\n" + tabButton.activeTaskTitle
-                                return baseText + "\nDrag to drawing to create a drill task"
-                            }
-                            delay: 500
-                        }
+                Column {
+                    width: parent.width
+                    spacing: 4
 
-                        MouseArea {
-                            id: tabMouseArea
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            acceptedButtons: Qt.LeftButton | Qt.RightButton
-                            cursorShape: tabDragHandler.active ? Qt.ClosedHandCursor : Qt.PointingHandCursor
-                            onClicked: function(mouse) {
-                                if (tabButton.suppressClick && mouse.button === Qt.LeftButton) {
-                                    tabButton.suppressClick = false
-                                    return
+                    Text {
+                        visible: sidebar.isExpanded
+                        text: sidebar.searchText.length > 0 ? "All Matching Tabs" : "All Tabs"
+                        color: "#81b9d7"
+                        font.pixelSize: 10
+                        font.bold: true
+                    }
+
+                    Text {
+                        visible: sidebar.isExpanded && sidebar.searchText.length > 0 && sidebar.filteredTabCount() === 1
+                        width: parent.width
+                        text: "No extra matches. Current tab stays visible."
+                        color: "#7696aa"
+                        font.pixelSize: 9
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Repeater {
+                        model: sidebar.tabModel
+
+                        delegate: Item {
+                            id: tabButton
+                            required property int index
+                            required property string name
+                            required property real completionPercent
+                            required property string activeTaskTitle
+                            required property real priorityScore
+                            required property bool includeInPriorityPlot
+                            required property string icon
+                            required property string color
+                            required property bool pinned
+                            property bool isActive: sidebar.tabModel ? index === sidebar.tabModel.currentTabIndex : false
+                            property string tabActiveTaskTitle: activeTaskTitle || ""
+                            property real tabPriorityScore: priorityScore || 0
+                            property int dragTabIndex: index
+                            property string dragTabName: name || ""
+                            property string tabIcon: icon || ""
+                            property string tabColor: color || ""
+                            property color tabAccentColor: tabColor !== ""
+                                ? tabColor
+                                : (isActive ? "#64c1ff" : "#2a4358")
+                            property color idleTabColor: Qt.darker(tabAccentColor, 4.2)
+                            property color hoverTabColor: Qt.darker(tabAccentColor, 3.6)
+                            property color activeTabColor: Qt.darker(tabAccentColor, 2.9)
+                            property bool suppressClick: false
+                            property bool dragging: tabDragHandler.active
+                            property bool matchesFilter: sidebar.matchesSearch(name, tabActiveTaskTitle)
+                            width: tabColumnContent.width
+                            height: visible ? (tabButton.tabActiveTaskTitle !== "" && sidebar.isExpanded ? 54 : 40) : 0
+                            visible: matchesFilter || isActive
+                            scale: dragging ? 1.03 : 1.0
+                            opacity: dragging ? 0.9 : 1.0
+
+                            Behavior on scale {
+                                NumberAnimation { duration: 90; easing.type: Easing.OutCubic }
+                            }
+                            Behavior on opacity {
+                                NumberAnimation { duration: 90; easing.type: Easing.OutCubic }
+                            }
+
+                            Drag.active: tabDragHandler.active
+                            Drag.keys: ["progress-tab"]
+                            Drag.supportedActions: Qt.CopyAction
+                            Drag.mimeData: ({ "text/plain": tabButton.dragTabName })
+                            Drag.hotSpot.x: width / 2
+                            Drag.hotSpot.y: height / 2
+
+                            DragHandler {
+                                id: tabDragHandler
+                                target: null
+                                acceptedButtons: Qt.LeftButton
+                                dragThreshold: 4
+                                onActiveChanged: {
+                                    var scenePos = tabButton.mapToItem(
+                                        null,
+                                        tabDragHandler.centroid.position.x,
+                                        tabDragHandler.centroid.position.y
+                                    )
+                                    if (active) {
+                                        tabButton.suppressClick = true
+                                        if (typeof sidebar.onTabDragMoved === "function")
+                                            sidebar.onTabDragMoved(tabButton.dragTabIndex, tabButton.dragTabName, scenePos.x, scenePos.y, true)
+                                    } else {
+                                        if (typeof sidebar.onTabDragMoved === "function")
+                                            sidebar.onTabDragMoved(tabButton.dragTabIndex, tabButton.dragTabName, scenePos.x, scenePos.y, false)
+                                        if (tabButton.suppressClick && typeof sidebar.onTabDragReleased === "function")
+                                            sidebar.onTabDragReleased(tabButton.dragTabIndex, scenePos.x, scenePos.y)
+                                    }
                                 }
-                                if (mouse.button === Qt.RightButton) {
-                                    tabContextMenu.tabIndex = index
-                                    tabContextMenu.tabName = model.name
-                                    tabContextMenu.tabIcon = model.icon || ""
-                                    tabContextMenu.tabColor = model.color || ""
-                                    tabContextMenu.includeInPlot = model.includeInPriorityPlot !== false
-                                    tabContextMenu.popup()
-                                } else {
-                                    if (projectManager)
-                                        projectManager.switchTab(index)
+                                onTranslationChanged: {
+                                    if (!tabDragHandler.active || typeof sidebar.onTabDragMoved !== "function")
+                                        return
+                                    var scenePos = tabButton.mapToItem(
+                                        null,
+                                        tabDragHandler.centroid.position.x,
+                                        tabDragHandler.centroid.position.y
+                                    )
+                                    sidebar.onTabDragMoved(tabButton.dragTabIndex, tabButton.dragTabName, scenePos.x, scenePos.y, true)
                                 }
                             }
-                            onDoubleClicked: function(mouse) {
-                                if (mouse.button !== Qt.LeftButton)
-                                    return
-                                sidebar.openTabRenameDialog(index, model.name)
+
+                            Rectangle {
+                                id: tabButtonSurface
+                                anchors.fill: parent
+                                radius: 9
+                                color: isActive ? activeTabColor : (tabMouseArea.containsMouse ? hoverTabColor : idleTabColor)
+                                border.color: dragging ? "#8fe2ff" : tabAccentColor
+                                border.width: dragging ? 2 : 1
+
+                                Behavior on color {
+                                    ColorAnimation { duration: 110 }
+                                }
+
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 10
+                                    anchors.rightMargin: 10
+                                    anchors.topMargin: 6
+                                    anchors.bottomMargin: 6
+                                    spacing: 2
+
+                                    RowLayout {
+                                        spacing: 6
+
+                                        Rectangle {
+                                            width: 12
+                                            height: 12
+                                            radius: 6
+                                            color: tabButton.tabAccentColor
+                                            border.color: isActive ? "#d9efff" : "#aac2d8"
+                                            border.width: 1
+                                            visible: sidebar.isExpanded
+                                        }
+
+                                        Text {
+                                            text: tabButton.tabIcon
+                                            visible: sidebar.isExpanded && tabButton.tabIcon.length > 0
+                                            color: isActive ? "#ffffff" : "#d9e8f6"
+                                            font.pixelSize: 12
+                                            font.bold: true
+                                        }
+
+                                        Text {
+                                            text: pinned ? "PIN" : ""
+                                            visible: sidebar.isExpanded && pinned
+                                            color: "#ffd36d"
+                                            font.pixelSize: 9
+                                            font.bold: true
+                                        }
+
+                                        Rectangle {
+                                            visible: tabButton.tabPriorityScore > 0
+                                            width: 36
+                                            height: 16
+                                            radius: 4
+                                            color: "#1b4d67"
+                                            border.color: "#68c8f2"
+                                            border.width: 1
+
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: tabButton.tabPriorityScore.toFixed(2)
+                                                color: "#ffffff"
+                                                font.pixelSize: 9
+                                                font.bold: true
+                                            }
+                                        }
+
+                                        Text {
+                                            text: name
+                                            color: isActive ? "#ffffff" : "#b0c2d4"
+                                            font.pixelSize: 11
+                                            font.bold: isActive
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                            visible: sidebar.isExpanded
+                                        }
+
+                                        Text {
+                                            text: tabButton.tabIcon.length > 0
+                                                ? tabButton.tabIcon
+                                                : (name.length > 0 ? name.charAt(0).toUpperCase() : "T")
+                                            visible: !sidebar.isExpanded
+                                            color: isActive ? "#ffffff" : "#b0c2d4"
+                                            font.pixelSize: 12
+                                            font.bold: true
+                                            horizontalAlignment: Text.AlignHCenter
+                                            Layout.fillWidth: true
+                                        }
+
+                                        Text {
+                                            text: Math.round(completionPercent) + "%"
+                                            color: isActive ? "#88d5ff" : "#8ca5ba"
+                                            font.pixelSize: 10
+                                            font.bold: true
+                                            visible: sidebar.isExpanded
+                                        }
+                                    }
+
+                                    Text {
+                                        visible: sidebar.isExpanded && tabButton.tabActiveTaskTitle !== ""
+                                        text: tabButton.tabActiveTaskTitle
+                                        color: isActive ? "#9be4bc" : "#7ea98f"
+                                        font.pixelSize: 9
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
+                                    }
+                                }
+                            }
+
+                            ToolTip {
+                                visible: tabMouseArea.containsMouse
+                                text: {
+                                    var priorityText = tabButton.tabPriorityScore > 0
+                                        ? "[Score " + tabButton.tabPriorityScore.toFixed(2) + "] "
+                                        : ""
+                                    var baseText = priorityText + name + " (" + Math.round(completionPercent) + "%)"
+                                    if (tabButton.tabActiveTaskTitle)
+                                        baseText += "\n" + tabButton.tabActiveTaskTitle
+                                    return baseText + "\nDrag to drawing to create a drill task"
+                                }
+                                delay: 500
+                            }
+
+                            MouseArea {
+                                id: tabMouseArea
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                cursorShape: tabDragHandler.active ? Qt.ClosedHandCursor : Qt.PointingHandCursor
+                                onClicked: function(mouse) {
+                                    if (tabButton.suppressClick && mouse.button === Qt.LeftButton) {
+                                        tabButton.suppressClick = false
+                                        return
+                                    }
+                                    if (mouse.button === Qt.RightButton) {
+                                        tabContextMenu.tabIndex = index
+                                        tabContextMenu.tabName = name
+                                        tabContextMenu.tabIcon = icon || ""
+                                        tabContextMenu.tabColor = color || ""
+                                        tabContextMenu.includeInPlot = includeInPriorityPlot !== false
+                                        tabContextMenu.pinned = pinned === true
+                                        tabContextMenu.popup()
+                                    } else {
+                                        if (sidebar.projectManager)
+                                            sidebar.projectManager.switchTab(index)
+                                    }
+                                }
+                                onDoubleClicked: function(mouse) {
+                                    if (mouse.button !== Qt.LeftButton)
+                                        return
+                                    sidebar.openTabRenameDialog(index, name)
+                                }
                             }
                         }
                     }
@@ -442,6 +804,7 @@ Rectangle {
         property string tabIcon: ""
         property string tabColor: ""
         property bool includeInPlot: true
+        property bool pinned: false
 
         Menu {
             title: "Set Priority"
@@ -488,6 +851,16 @@ Rectangle {
                     tabModel.setIncludeInPriorityPlot(tabContextMenu.tabIndex, !tabContextMenu.includeInPlot)
                     tabContextMenu.includeInPlot = !tabContextMenu.includeInPlot
                 }
+            }
+        }
+
+        MenuSeparator {}
+
+        MenuItem {
+            text: tabContextMenu.pinned ? "Unpin Tab" : "Pin Tab"
+            onTriggered: {
+                if (tabModel && tabModel.setTabPinned)
+                    tabModel.setTabPinned(tabContextMenu.tabIndex, !tabContextMenu.pinned)
             }
         }
 

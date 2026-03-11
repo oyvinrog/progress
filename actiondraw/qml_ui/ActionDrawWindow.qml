@@ -555,6 +555,19 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Ctrl+K"
+        enabled: tabModelRef !== null
+            && (!dialogs || !dialogs.anyDialogVisible)
+            && !reminderPopup.visible
+            && !contractPopup.visible
+            && (!markdownNoteManager || !markdownNoteManager.editorOpen)
+        onActivated: {
+            if (sidebarTabs && sidebarTabs.focusSearchField)
+                sidebarTabs.focusSearchField()
+        }
+    }
+
+    Shortcut {
         sequence: "Delete"
         enabled: diagramModel !== null
             && root.selectedItemId.length > 0
@@ -1094,6 +1107,7 @@ ApplicationWindow {
         spacing: 14
 
         SidebarTabs {
+            id: sidebarTabs
             tabModel: tabModelRef
             projectManager: projectManagerRef
             onTabDragMoved: root.updateTabDragHover
@@ -3712,6 +3726,7 @@ ApplicationWindow {
                     model: [
                         "Ctrl+Enter  New Task",
                         "Ctrl+N  Connected Note",
+                        "Ctrl+K  Find Tab",
                         "Ctrl+-  Backward Chain",
                         "Delete  Remove Node",
                         "Arrows  Connected Task",

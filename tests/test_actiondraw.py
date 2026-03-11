@@ -3814,6 +3814,7 @@ class TestTabModelCompletion:
         assert b"includeInPriorityPlot" in role_names.values()
         assert b"icon" in role_names.values()
         assert b"color" in role_names.values()
+        assert b"pinned" in role_names.values()
 
     def test_set_tab_icon_and_color(self, app):
         """Tab icon and color setters update model roles."""
@@ -3828,6 +3829,17 @@ class TestTabModelCompletion:
         # Invalid colors are normalized to empty.
         model.setTabColor(0, "not-a-color")
         assert model.data(model.index(0, 0), model.ColorRole) == ""
+
+    def test_set_tab_pinned(self, app):
+        """Pinned tabs expose their role and summary state."""
+        from task_model import TabModel
+
+        model = TabModel()
+        model.setTabPinned(0, True)
+
+        assert model.data(model.index(0, 0), model.PinnedRole) is True
+        assert model.getPinnedTabIndices() == [0]
+        assert model.getTabSummary(0)["pinned"] is True
 
     def test_priority_plot_score_and_sort(self, app):
         """Setting plot coordinates recomputes score and reorders tabs."""
@@ -3936,6 +3948,27 @@ class TestTabModelMoveTab:
 
         model.moveTab(0, 2)
         assert model.currentTabIndex == 2
+
+    def test_recent_tab_indices_follow_switch_move_and_remove(self, app):
+        """Recent tabs stay stable across switching, moves, and removals."""
+        from task_model import TabModel
+
+        model = TabModel()
+        model.addTab("Tab 2")
+        model.addTab("Tab 3")
+
+        model.setCurrentTab(1)
+        assert model.recentTabIndices == [0]
+
+        model.setCurrentTab(2)
+        assert model.recentTabIndices == [1, 0]
+
+        model.moveTab(0, 2)
+        assert model.currentTabName == "Tab 3"
+        assert model.recentTabIndices == [0, 2]
+
+        model.removeTab(0)
+        assert model.recentTabIndices == [1]
 
     def test_remove_current_tab_emits_current_tab_signals(self, app):
         """Removing the active tab emits current-tab notifications for the replacement tab."""
@@ -4085,8 +4118,8 @@ class TestPriorityPlotPersistence:
         assert loaded["Included"].include_in_priority_plot is True
         assert loaded["Excluded"].include_in_priority_plot is False
 
-    def test_tab_icon_and_color_roundtrip(self, app, tmp_path):
-        """Tab icon and color are persisted."""
+    def test_tab_icon_color_and_pinned_roundtrip(self, app, tmp_path):
+        """Tab icon, color, and pinned state are persisted."""
         from task_model import ProjectManager, Tab, TabModel, TaskModel
 
         project_file = tmp_path / "tab_icon_color.progress"
@@ -4101,6 +4134,7 @@ class TestPriorityPlotPersistence:
                     diagram={"items": [], "edges": [], "strokes": []},
                     icon="!",
                     color="#2277aa",
+                    pinned=True,
                 ),
                 Tab(
                     name="Plain",
@@ -4123,8 +4157,10 @@ class TestPriorityPlotPersistence:
         loaded = {tab.name: tab for tab in tab_model2.getAllTabs()}
         assert loaded["Styled"].icon == "!"
         assert loaded["Styled"].color == "#2277aa"
+        assert loaded["Styled"].pinned is True
         assert loaded["Plain"].icon == ""
         assert loaded["Plain"].color == ""
+        assert loaded["Plain"].pinned is False
 
 
 class TestPriorityPlotStandalone:
