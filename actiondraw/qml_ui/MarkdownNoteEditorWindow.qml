@@ -21,6 +21,7 @@ ApplicationWindow {
     property real targetX: 0
     property real targetY: 0
     property bool fullWindowMode: false
+    property bool saveConfirmationVisible: false
 
     signal saveRequested(string noteId, string text)
     signal cancelRequested()
@@ -28,6 +29,11 @@ ApplicationWindow {
     function setFullWindowMode(enabled) {
         fullWindowMode = enabled
         visibility = enabled ? Window.Maximized : Window.Windowed
+    }
+
+    function showSaveConfirmation() {
+        saveConfirmationVisible = true
+        saveConfirmationTimer.restart()
     }
 
     ColumnLayout {
@@ -47,6 +53,25 @@ ApplicationWindow {
 
             Item {
                 Layout.fillWidth: true
+            }
+
+            Rectangle {
+                visible: editorRoot.saveConfirmationVisible
+                radius: 6
+                color: "#0f766e"
+                border.color: "#14b8a6"
+                border.width: 1
+                implicitWidth: saveConfirmationLabel.implicitWidth + 18
+                implicitHeight: saveConfirmationLabel.implicitHeight + 10
+
+                Label {
+                    id: saveConfirmationLabel
+                    anchors.centerIn: parent
+                    text: "Saved"
+                    color: "#f0fdfa"
+                    font.pixelSize: 13
+                    font.bold: true
+                }
             }
 
             Button {
@@ -154,6 +179,13 @@ ApplicationWindow {
             )
             markdownNoteManager.requestProjectSave()
         }
+    }
+
+    Timer {
+        id: saveConfirmationTimer
+        interval: 1400
+        repeat: false
+        onTriggered: editorRoot.saveConfirmationVisible = false
     }
 
     Shortcut {

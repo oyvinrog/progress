@@ -1006,6 +1006,46 @@ class TestDiagramModelSerialization:
         new_model.from_dict(data)
         assert new_model.getItemMarkdown(item_id) == "# Title\nBody"
 
+    def test_obstacle_markdown_roundtrip(self, empty_diagram_model):
+        item_id = empty_diagram_model.addBox(10.0, 20.0, "Task")
+        empty_diagram_model.setItemObstacleMarkdown(item_id, "Blocked by dependency")
+
+        data = empty_diagram_model.to_dict()
+        assert data["items"][0]["obstacle_markdown"] == "Blocked by dependency"
+
+        new_model = DiagramModel()
+        new_model.from_dict(data)
+        assert new_model.getItemObstacleMarkdown(item_id) == "Blocked by dependency"
+
+    def test_empty_obstacle_markdown_not_serialized(self, empty_diagram_model):
+        item_id = empty_diagram_model.addBox(10.0, 20.0, "Task")
+        empty_diagram_model.setItemObstacleMarkdown(item_id, "Blocked")
+        empty_diagram_model.setItemObstacleMarkdown(item_id, "")
+
+        data = empty_diagram_model.to_dict()
+        assert "obstacle_markdown" not in data["items"][0]
+
+    def test_from_dict_defaults_missing_obstacle_markdown(self, empty_diagram_model):
+        empty_diagram_model.from_dict({
+            "items": [
+                {
+                    "id": "box_0",
+                    "item_type": "box",
+                    "x": 10.0,
+                    "y": 20.0,
+                    "width": 120.0,
+                    "height": 60.0,
+                    "text": "Legacy",
+                    "task_index": -1,
+                    "color": "#4a9eff",
+                    "text_color": "#f5f6f8",
+                }
+            ],
+            "edges": [],
+        })
+
+        assert empty_diagram_model.getItemObstacleMarkdown("box_0") == ""
+
     def test_from_dict_migrates_legacy_note_markdown_to_text(self, empty_diagram_model):
         empty_diagram_model.from_dict({
             "items": [
@@ -4866,7 +4906,7 @@ class TestMarkdownNoteManager:
 
         assert events == ["save"]
 
-    def test_save_freetext_closes_editor(self, empty_diagram_model, monkeypatch):
+    def test_save_freetext_keeps_editor_open_and_confirms_save(self, empty_diagram_model, monkeypatch):
         class _DummySignal:
             def connect(self, _callback):
                 return None
@@ -4876,13 +4916,13 @@ class TestMarkdownNoteManager:
                 self.noteSaved = _DummySignal()
                 self.noteCanceled = _DummySignal()
                 self.note_id = ""
-                self.close_calls = 0
+                self.save_confirmation_calls = 0
 
             def set_note_id(self, note_id):
                 self.note_id = note_id
 
-            def close(self):
-                self.close_calls += 1
+            def show_save_confirmation(self):
+                self.save_confirmation_calls += 1
 
         monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
         manager = MarkdownNoteManager(empty_diagram_model)
@@ -4890,16 +4930,16 @@ class TestMarkdownNoteManager:
 
         manager._save_note("", "Draft text")
 
-        assert manager.editorOpen is False
-        assert manager.activeEditorType == ""
-        assert manager.activeItemId == ""
-        assert manager._editor.close_calls == 1
+        assert manager.editorOpen is True
+        assert manager.activeEditorType == "freetext"
+        assert manager.activeItemId == manager._editor.note_id
+        assert manager._editor.save_confirmation_calls == 1
         assert manager._editor.note_id.startswith("freetext_")
         item = empty_diagram_model.getItem(manager._editor.note_id)
         assert item is not None
         assert item.text == "Draft text"
 
-    def test_save_note_closes_editor(self, empty_diagram_model, monkeypatch):
+    def test_save_note_keeps_editor_open_and_confirms_save(self, empty_diagram_model, monkeypatch):
         class _DummySignal:
             def connect(self, _callback):
                 return None
@@ -4908,10 +4948,10 @@ class TestMarkdownNoteManager:
             def __init__(self, *_args, **_kwargs):
                 self.noteSaved = _DummySignal()
                 self.noteCanceled = _DummySignal()
-                self.close_calls = 0
+                self.save_confirmation_calls = 0
 
-            def close(self):
-                self.close_calls += 1
+            def show_save_confirmation(self):
+                self.save_confirmation_calls += 1
 
         item_id = empty_diagram_model.addBox(40.0, 30.0, "Task")
         monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
@@ -4920,11 +4960,69 @@ class TestMarkdownNoteManager:
 
         manager._save_note(item_id, "Updated markdown")
 
-        assert manager.editorOpen is False
-        assert manager.activeEditorType == ""
-        assert manager.activeItemId == ""
-        assert manager._editor.close_calls == 1
+        assert manager.editorOpen is True
+        assert manager.activeEditorType == "note"
+        assert manager.activeItemId == item_id
+        assert manager._editor.save_confirmation_calls == 1
         assert empty_diagram_model.getItemMarkdown(item_id) == "Updated markdown"
+
+    def test_open_obstacle_uses_obstacle_editor_type(self, empty_diagram_model, monkeypatch):
+        class _DummySignal:
+            def connect(self, _callback):
+                return None
+
+        class _DummyEditor:
+            def __init__(self, *_args, **_kwargs):
+                self.noteSaved = _DummySignal()
+                self.noteCanceled = _DummySignal()
+                self.open_calls = []
+
+            def open(self, *args, **kwargs):
+                self.open_calls.append((args, kwargs))
+
+        item_id = empty_diagram_model.addBox(40.0, 30.0, "Task")
+        empty_diagram_model.setItemObstacleMarkdown(item_id, "Blocked")
+        monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
+        manager = MarkdownNoteManager(empty_diagram_model)
+
+        manager.openObstacle(item_id)
+
+        assert manager.activeEditorType == "obstacle"
+        assert manager.activeItemId == item_id
+        args, kwargs = manager._editor.open_calls[0]
+        assert args[0] == item_id
+        assert args[1] == "Blocked"
+        assert args[2] == "Task Obstacle"
+        assert kwargs["editor_type"] == "obstacle"
+
+    def test_save_obstacle_keeps_editor_open_and_confirms_save(self, empty_diagram_model, monkeypatch):
+        class _DummySignal:
+            def connect(self, _callback):
+                return None
+
+        class _DummyEditor:
+            def __init__(self, *_args, **_kwargs):
+                self.noteSaved = _DummySignal()
+                self.noteCanceled = _DummySignal()
+                self.save_confirmation_calls = 0
+
+            def show_save_confirmation(self):
+                self.save_confirmation_calls += 1
+
+        item_id = empty_diagram_model.addBox(40.0, 30.0, "Task")
+        empty_diagram_model.setItemMarkdown(item_id, "Existing note")
+        monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
+        manager = MarkdownNoteManager(empty_diagram_model)
+        manager._set_editor_state("obstacle", item_id, 40.0, 30.0, True)
+
+        manager._save_note(item_id, "Blocked by vendor")
+
+        assert manager.editorOpen is True
+        assert manager.activeEditorType == "obstacle"
+        assert manager.activeItemId == item_id
+        assert manager._editor.save_confirmation_calls == 1
+        assert empty_diagram_model.getItemObstacleMarkdown(item_id) == "Blocked by vendor"
+        assert empty_diagram_model.getItemMarkdown(item_id) == "Existing note"
 
 
 if __name__ == "__main__":

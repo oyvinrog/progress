@@ -66,6 +66,9 @@ class MarkdownNoteEditor(QObject):
     def close(self) -> None:
         self._root.hide()
 
+    def show_save_confirmation(self) -> None:
+        self._root.showSaveConfirmation()
+
     def _handle_save(self, note_id: str, note_text: str) -> None:
         self.noteSaved.emit(note_id, note_text)
 
