@@ -776,6 +776,21 @@ ApplicationWindow {
             markdownNoteManager.openNote(root.selectedItemId)
     }
 
+    function openObstacleForItem(itemId) {
+        if (!diagramModel || !markdownNoteManager)
+            return
+        if (!itemId || itemId.length === 0)
+            return
+        var item = diagramModel.getItemSnapshot(itemId)
+        if (!item || !item.type || item.type === "image")
+            return
+        markdownNoteManager.openObstacle(itemId)
+    }
+
+    function openObstacleForSelection() {
+        openObstacleForItem(root.selectedItemId)
+    }
+
     function addConnectedNote() {
         if (!diagramModel)
             return
@@ -1790,6 +1805,28 @@ ApplicationWindow {
                                 root.openMarkdownNoteForSelection()
                             }
                         }
+                        MenuItem {
+                            text: {
+                                if (!diagramModel || !diagramLayer.contextMenuItemId)
+                                    return "Add Obstacle..."
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                if (item && item.obstacleMarkdown && String(item.obstacleMarkdown).trim().length > 0)
+                                    return "Edit Obstacle..."
+                                return "Add Obstacle..."
+                            }
+                            icon.name: "dialog-warning"
+                            visible: {
+                                if (!diagramModel || !diagramLayer.contextMenuItemId)
+                                    return false
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                return item && item.type !== "image"
+                            }
+                            height: visible ? implicitHeight : 0
+                            onTriggered: {
+                                root.selectedItemId = diagramLayer.contextMenuItemId
+                                root.openObstacleForSelection()
+                            }
+                        }
                         MenuSeparator {}
                         Menu {
                             title: "Convert to..."
@@ -2522,6 +2559,36 @@ ApplicationWindow {
                                     color: "#1b2028"
                                     font.pixelSize: 11
                                     font.bold: true
+                                }
+                            }
+
+                            Rectangle {
+                                id: obstacleBadge
+                                visible: itemRect.itemType !== "image" && model.obstacleMarkdown && model.obstacleMarkdown.trim().length > 0
+                                width: 18
+                                height: 18
+                                radius: 9
+                                anchors.left: noteBadge.visible ? noteBadge.right : (itemRect.isTask ? contractButton.right : parent.left)
+                                anchors.leftMargin: noteBadge.visible || itemRect.isTask ? 6 : 8
+                                anchors.top: parent.top
+                                anchors.topMargin: 8
+                                color: "#ff9368"
+                                border.color: "#d66d48"
+                                border.width: 1
+                                z: 22
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "!"
+                                    color: "#1b2028"
+                                    font.pixelSize: 12
+                                    font.bold: true
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: root.openObstacleForItem(itemRect.itemId)
                                 }
                             }
 

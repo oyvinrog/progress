@@ -55,6 +55,23 @@ class MarkdownNoteManager(QObject):
             target_y=float(item.y),
         )
 
+    @Slot(str)
+    def openObstacle(self, item_id: str) -> None:
+        item = self._diagram_model.getItem(item_id)
+        if not item:
+            return
+        title_text = item.text.strip()
+        title = f"{title_text} Obstacle" if title_text else "Obstacle"
+        self._set_editor_state("obstacle", item_id, float(item.x), float(item.y), True)
+        self._editor.open(
+            item_id,
+            self._diagram_model.getItemObstacleMarkdown(item_id),
+            title,
+            editor_type="obstacle",
+            target_x=float(item.x),
+            target_y=float(item.y),
+        )
+
     @Slot(str, float, float, str)
     def openFreeText(self, item_id: str, x: float, y: float, initial_text: str) -> None:
         source_item_id = item_id or ""
@@ -103,6 +120,9 @@ class MarkdownNoteManager(QObject):
                         True,
                     )
                     self._editor.set_note_id(saved_item_id)
+        elif self._active_editor_type == "obstacle":
+            self._diagram_model.setItemObstacleMarkdown(item_id, note_text)
+            saved_item_id = item_id
         else:
             self._diagram_model.setItemMarkdown(item_id, note_text)
             saved_item_id = item_id

@@ -54,21 +54,22 @@ class DiagramModel(
     ImageDataRole = Qt.UserRole + 12
     TaskCurrentRole = Qt.UserRole + 13
     NoteMarkdownRole = Qt.UserRole + 14
-    TaskCountdownRemainingRole = Qt.UserRole + 15
-    TaskCountdownProgressRole = Qt.UserRole + 16
-    TaskCountdownExpiredRole = Qt.UserRole + 17
-    TaskCountdownActiveRole = Qt.UserRole + 18
-    FolderPathRole = Qt.UserRole + 19
-    LinkedSubtabCompletionRole = Qt.UserRole + 20
-    LinkedSubtabActiveActionRole = Qt.UserRole + 21
-    HasLinkedSubtabRole = Qt.UserRole + 22
-    TaskReminderActiveRole = Qt.UserRole + 23
-    TaskReminderAtRole = Qt.UserRole + 24
-    TaskContractActiveRole = Qt.UserRole + 25
-    TaskContractDeadlineRole = Qt.UserRole + 26
-    TaskContractRemainingRole = Qt.UserRole + 27
-    TaskContractBreachedRole = Qt.UserRole + 28
-    TaskContractPunishmentRole = Qt.UserRole + 29
+    ObstacleMarkdownRole = Qt.UserRole + 15
+    TaskCountdownRemainingRole = Qt.UserRole + 16
+    TaskCountdownProgressRole = Qt.UserRole + 17
+    TaskCountdownExpiredRole = Qt.UserRole + 18
+    TaskCountdownActiveRole = Qt.UserRole + 19
+    FolderPathRole = Qt.UserRole + 20
+    LinkedSubtabCompletionRole = Qt.UserRole + 21
+    LinkedSubtabActiveActionRole = Qt.UserRole + 22
+    HasLinkedSubtabRole = Qt.UserRole + 23
+    TaskReminderActiveRole = Qt.UserRole + 24
+    TaskReminderAtRole = Qt.UserRole + 25
+    TaskContractActiveRole = Qt.UserRole + 26
+    TaskContractDeadlineRole = Qt.UserRole + 27
+    TaskContractRemainingRole = Qt.UserRole + 28
+    TaskContractBreachedRole = Qt.UserRole + 29
+    TaskContractPunishmentRole = Qt.UserRole + 30
 
     itemsChanged = Signal()
     edgesChanged = Signal()
@@ -232,6 +233,8 @@ class DiagramModel(
             return item.task_index >= 0 and item.task_index == self._current_task_index
         if role == self.NoteMarkdownRole:
             return item.note_markdown
+        if role == self.ObstacleMarkdownRole:
+            return item.obstacle_markdown
         if role == self.TaskCountdownRemainingRole:
             return self._getTaskCountdownRemaining(item.task_index)
         if role == self.TaskCountdownProgressRole:
@@ -280,6 +283,7 @@ class DiagramModel(
             self.ImageDataRole: b"imageData",
             self.TaskCurrentRole: b"taskCurrent",
             self.NoteMarkdownRole: b"noteMarkdown",
+            self.ObstacleMarkdownRole: b"obstacleMarkdown",
             self.TaskCountdownRemainingRole: b"taskCountdownRemaining",
             self.TaskCountdownProgressRole: b"taskCountdownProgress",
             self.TaskCountdownExpiredRole: b"taskCountdownExpired",
@@ -627,6 +631,26 @@ class DiagramModel(
                 if item.item_type == DiagramItemType.NOTE:
                     return item.text
                 return item.note_markdown
+        return ""
+
+    @Slot(str, str)
+    def setItemObstacleMarkdown(self, item_id: str, markdown: str) -> None:
+        for row, item in enumerate(self._items):
+            if item.id == item_id:
+                normalized = markdown or ""
+                if item.obstacle_markdown == normalized:
+                    return
+                item.obstacle_markdown = normalized
+                index = self.index(row, 0)
+                self.dataChanged.emit(index, index, [self.ObstacleMarkdownRole])
+                self.itemsChanged.emit()
+                return
+
+    @Slot(str, result=str)
+    def getItemObstacleMarkdown(self, item_id: str) -> str:
+        for item in self._items:
+            if item.id == item_id:
+                return item.obstacle_markdown
         return ""
 
     @Slot(str, result=bool)
@@ -1572,6 +1596,8 @@ class DiagramModel(
             "height": item.height,
             "text": item.text,
             "taskIndex": item.task_index,
+            "noteMarkdown": item.note_markdown,
+            "obstacleMarkdown": item.obstacle_markdown,
             "folderPath": item.folder_path,
             "linkedSubtabCompletion": self._getLinkedSubtabCompletion(item.task_index),
             "linkedSubtabActiveAction": self._getLinkedSubtabActiveAction(item.task_index),
@@ -1727,6 +1753,8 @@ class DiagramModel(
                 item_dict["image_data"] = item.image_data
             if item.note_markdown and item.item_type != DiagramItemType.NOTE:
                 item_dict["note_markdown"] = item.note_markdown
+            if item.obstacle_markdown:
+                item_dict["obstacle_markdown"] = item.obstacle_markdown
             if item.folder_path:
                 item_dict["folder_path"] = item.folder_path
             items_data.append(item_dict)
@@ -1817,6 +1845,7 @@ class DiagramModel(
                     text_color=item_data.get("text_color", "#f5f6f8"),
                     image_data=item_data.get("image_data", ""),
                     note_markdown=note_markdown_value,
+                    obstacle_markdown=str(item_data.get("obstacle_markdown", "")),
                     folder_path=item_data.get("folder_path", ""),
                 )
                 new_items.append(item)

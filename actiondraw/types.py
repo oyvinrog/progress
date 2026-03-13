@@ -43,6 +43,7 @@ class DiagramItem:
     text_color: str = "#f5f6f8"
     image_data: str = ""  # Base64-encoded PNG data for IMAGE type
     note_markdown: str = ""  # Markdown note content for note-like items
+    obstacle_markdown: str = ""  # Markdown obstacle content attached to any node
     folder_path: str = ""  # Path to linked folder
 
 
