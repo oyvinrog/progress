@@ -422,22 +422,43 @@ ApplicationWindow {
             root.resetView()
             return
         }
+        var padding = 30
         // If there's a current task, center on it
         var taskPos = diagramModel.getCurrentTaskPosition()
         if (taskPos) {
             var centerX = taskPos.x + taskPos.width / 2
             var centerY = taskPos.y + taskPos.height / 2
-            centerOnPoint(centerX, centerY)
+            focusPointWithinDiagramBounds(centerX, centerY, padding)
             return
         }
         // Otherwise scroll to show content with some padding
         var minX = diagramModel.minItemX
         var minY = diagramModel.minItemY
-        var padding = 50
         var targetX = Math.max(0, (minX - padding + root.originOffsetX) * root.zoomLevel)
         var targetY = Math.max(0, (minY - padding + root.originOffsetY) * root.zoomLevel)
         viewport.contentX = targetX
         viewport.contentY = targetY
+    }
+
+    function applyDefaultView() {
+        if (!viewport || viewport.width <= 0 || viewport.height <= 0) {
+            Qt.callLater(root.applyDefaultView)
+            return
+        }
+
+        root.zoomLevel = clampZoom(0.95)
+
+        if (gridCanvas)
+            gridCanvas.requestPaint()
+        if (edgeCanvas)
+            edgeCanvas.requestPaint()
+
+        if (!diagramModel || diagramModel.count === 0) {
+            centerOnPoint((root.boardWidth / 2) - root.originOffsetX, (root.boardHeight / 2) - root.originOffsetY)
+            return
+        }
+
+        scrollToContent()
     }
 
     property bool showGrid: true
@@ -1084,9 +1105,37 @@ ApplicationWindow {
         viewport.contentY = Math.min(Math.max(targetY, 0), maxY)
     }
 
+    function focusPointWithinDiagramBounds(x, y, padding) {
+        var visibleWidth = viewport.width / root.zoomLevel
+        var visibleHeight = viewport.height / root.zoomLevel
+        var minLeft = diagramModel.minItemX - padding
+        var minTop = diagramModel.minItemY - padding
+        var maxLeft = (diagramModel.maxItemX + padding) - visibleWidth
+        var maxTop = (diagramModel.maxItemY + padding) - visibleHeight
+
+        var targetLeft = x - visibleWidth / 2
+        var targetTop = y - visibleHeight / 2
+
+        if (maxLeft < minLeft)
+            targetLeft = minLeft
+        else
+            targetLeft = Math.min(Math.max(targetLeft, minLeft), maxLeft)
+
+        if (maxTop < minTop)
+            targetTop = minTop
+        else
+            targetTop = Math.min(Math.max(targetTop, minTop), maxTop)
+
+        var targetX = (targetLeft + root.originOffsetX) * root.zoomLevel
+        var targetY = (targetTop + root.originOffsetY) * root.zoomLevel
+        var maxX = Math.max(0, viewport.contentWidth - viewport.width)
+        var maxY = Math.max(0, viewport.contentHeight - viewport.height)
+        viewport.contentX = Math.min(Math.max(targetX, 0), maxX)
+        viewport.contentY = Math.min(Math.max(targetY, 0), maxY)
+    }
+
     function resetView() {
-        setZoomInternal(1.0)
-        centerOnPoint((root.boardWidth / 2) - root.originOffsetX, (root.boardHeight / 2) - root.originOffsetY)
+        applyDefaultView()
     }
 
     ActionDialogs {
@@ -4029,13 +4078,13 @@ ApplicationWindow {
             root.updateBoardBounds()
             root.refreshLinkingTabsPanel()
             root.refreshOverviewData()
-            Qt.callLater(root.scrollToContent)
+            Qt.callLater(root.applyDefaultView)
         }
         function onTabSwitched() {
             root.updateBoardBounds()
             root.refreshLinkingTabsPanel()
             root.refreshOverviewData()
-            Qt.callLater(root.scrollToContent)
+            Qt.callLater(root.applyDefaultView)
         }
         function onTaskDrillRequested(taskIndex) {
             root.showWindow()
@@ -4131,7 +4180,7 @@ ApplicationWindow {
         updateBoardBounds()
         refreshLinkingTabsPanel()
         refreshOverviewData()
-        Qt.callLater(resetView)
+        Qt.callLater(applyDefaultView)
     }
 
     onClosing: function(close) {
