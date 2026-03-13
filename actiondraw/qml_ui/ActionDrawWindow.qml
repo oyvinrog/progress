@@ -2560,6 +2560,15 @@ ApplicationWindow {
                                     font.pixelSize: 11
                                     font.bold: true
                                 }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        root.selectedItemId = itemRect.itemId
+                                        root.openMarkdownNoteForSelection()
+                                    }
+                                }
                             }
 
                             Rectangle {
