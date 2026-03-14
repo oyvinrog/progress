@@ -1,149 +1,48 @@
 # ActionDraw
 
-A diagramming module built with PySide6 and QML for creating system diagrams, flowcharts, and visual documentation.
+### Your whole plan. One canvas.
 
-![Screenshot](assets/screenshot.png)
+<p align="center">
+  <img src="assets/img1.png" alt="ActionDraw — visual planning canvas" width="700">
+</p>
 
-## Features
-
-- Preset shapes for boxes, databases, servers, clouds, notes, obstacles, and wishes
-- Snap-to-grid toggle with optional grid overlay for tidy layouts
-- Smooth zoom controls via toolbar, mouse wheel (Ctrl+Scroll), or touchpad pinch
-- Drag-and-drop connections with live previews and arrowheads
-- Quick resizing gestures (pinch) that respect to grid spacing
-- Inline editing for labels
-- Task integration with task management capabilities
-- Free drawing mode for sketches and annotations
-- Image paste functionality for adding external graphics
-
-## Installation
-
-Install from the latest release:
+Diagrams, tasks, notes, reminders, priorities, and encrypted storage — in a single desktop app you install with one command.
 
 ```bash
-pip install git+https://github.com/oyvinrog/progress.git
+pip install actiondraw
 ```
 
-Or install from the repo:
+<p align="center">
+  <img src="assets/img2.png" alt="ActionDraw — encrypted storage" width="700">
+</p>
+
+## What you get
+
+- **Visual task diagrams** — drag boxes, databases, servers, clouds, and sticky notes onto an infinite canvas
+- **Live connections** — draw arrows between nodes with drag-and-drop; arrowheads and previews update in real time
+- **Markdown notes** — click any node to open a rich markdown editor
+- **Time tracking & reminders** — built-in scheduling so nothing slips
+- **Priority scoring** — rank tasks by impact and effort with an integrated priority plot
+- **Obstacle & wish planning** — dedicated shapes for blockers and goals
+- **Free drawing** — sketch and annotate directly on the canvas
+- **Paste images** — drop external graphics right onto the diagram
+- **Encrypted storage** — your data is protected with Argon2id key derivation, with optional YubiKey challenge-response
+
+## Quick start
 
 ```bash
-pip install .
-```
-
-## Usage
-
-After installation, run from anywhere:
-
-```bash
-actiondraw       # Diagramming canvas
-priorityplot     # Standalone priority plot
-```
-
-For local development (from the repo directory):
-
-```bash
-python -m actiondraw
-```
-
-Key capabilities:
-
-- Preset shapes for boxes, databases, servers, clouds, and sticky notes
-- Snap-to-grid toggle with optional grid overlay for tidy layouts
-- Smooth zoom controls via toolbar, mouse wheel (Ctrl+Scroll), or touchpad pinch
-- Drag-and-drop connections with live previews and arrowheads
-- Quick resizing gestures (pinch) that respect the grid spacing
-- Inline editing for labels plus task integration with the main progress list
-
-## Installation
-
-
-Latest:
-
-```bash
-pip install git+https://github.com/oyvinrog/progress.git
-```
-
-Latest stable release:
-
-```bash
-pip install progress-list
-```
-
-Or install from the repo:
-
-```bash
-pip install .
-```
-
-## Usage
-
-After installation, run from anywhere:
-
-```bash
-actiondraw       # Standalone diagramming canvas
-priorityplot     # Standalone priority plot
-```
-
-For local development (from the repo directory):
-
-```bash
-python -m actiondraw
+pip install actiondraw    # Install
+actiondraw                # Launch the canvas
+priorityplot              # Launch standalone priority plot
 ```
 
 ## Requirements
 
 - Python 3.8+
 - PySide6 >= 6.6
-- cryptography >= 42.0.0
-- argon2-cffi >= 23.1.0
 
-### Optional: YubiKey Support
+## Links
 
-YubiKey-based encryption mode is optional and not required for normal save/load.
-The app prefers Yubico Python APIs (`yubikit`, from `yubikey-manager`) for
-challenge-response, and falls back to the `ykman` CLI when available.
-
-The app detects YubiKey capability at runtime and shows in-app setup guidance
-if YubiKey mode is selected while support is unavailable.
-If no YubiKey API/CLI support is available, you can still use passphrase-only mode.
-
-Install Python API support (works well for local user installs):
-
-```bash
-pip install --user yubikey-manager
-```
-
-Linux setup:
-
-```bash
-sudo apt update
-sudo apt install -y yubikey-manager pcscd
-```
-
-Windows CLI fallback (no admin-friendly option):
-- Use a portable `ykman.exe` and set `YKMAN_PATH` to that file path before starting the app.
-- If `ykman` is on PATH already, no extra env var is required.
-
-Example:
-
-```bash
-set YKMAN_PATH=C:\tools\ykman\ykman.exe
-```
-
-## Development
-
-### Install development dependencies
-
-```bash
-pip install -r requirements-dev.txt
-```
-
-### Run tests
-
-```bash
-pytest
-```
-
-## License
-
-MIT License - see LICENSE file for details.
+- [Source on GitHub](https://github.com/oyvinrog/progress)
+- [Report issues](https://github.com/oyvinrog/progress/issues)
+- MIT License
