@@ -39,6 +39,8 @@ def test_debian_icon_assets_exist():
 
 def test_build_deb_workflow_installs_icons():
     workflow = Path(".github/workflows/build-deb.yml").read_text(encoding="utf-8")
+    assert "permissions:" in workflow
+    assert "contents: write" in workflow
     assert "run: ./tools/build_deb.sh" in workflow
 
 
