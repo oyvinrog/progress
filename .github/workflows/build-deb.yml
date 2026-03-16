@@ -34,7 +34,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build .deb
-        run: bash tools/build_deb.sh
+        run: ./tools/build_deb.sh
 
       - name: Upload .deb as artifact
         uses: actions/upload-artifact@v4
