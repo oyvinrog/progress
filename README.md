@@ -3,7 +3,7 @@
 ### Your whole plan. One canvas.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/oyvinrog/progress/main/assets/img1.png" alt="ActionDraw — visual planning canvas" width="700">
+  <img src="https://github.com/oyvinrog/progress/blob/master/assets/img1.png?raw=1" alt="ActionDraw — visual planning canvas" width="700">
 </p>
 
 Diagrams, tasks, notes, reminders, priorities, and encrypted storage — in a single desktop app you install with one command.
@@ -13,7 +13,7 @@ pip install actiondraw
 ```
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/oyvinrog/progress/main/assets/img2.png" alt="ActionDraw — encrypted storage" width="700">
+  <img src="https://github.com/oyvinrog/progress/blob/master/assets/img2.png?raw=1" alt="ActionDraw — encrypted storage" width="700">
 </p>
 
 ## What you get
