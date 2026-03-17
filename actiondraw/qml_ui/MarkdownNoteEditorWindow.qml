@@ -197,87 +197,171 @@ ApplicationWindow {
             Layout.fillWidth: true
             spacing: 8
 
-            ScrollView {
+            Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 44
-                clip: true
+                Layout.preferredHeight: 54
+                radius: 14
+                color: "#0d1522"
+                border.color: "#243347"
+                border.width: 1
 
-                Row {
-                    spacing: 6
+                Rectangle {
+                    anchors.fill: parent
+                    anchors.margins: 1
+                    radius: 13
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: "#101a29" }
+                        GradientStop { position: 1.0; color: "#0b131f" }
+                    }
+                    opacity: 0.95
+                }
 
-                    Repeater {
-                        model: editorRoot.noteTabs
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 10
+                    anchors.rightMargin: 10
+                    anchors.topMargin: 7
+                    anchors.bottomMargin: 7
+                    spacing: 10
 
-                        delegate: Rectangle {
-                            required property int index
-                            required property var modelData
+                    ScrollView {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        clip: true
 
-                            radius: 8
-                            color: editorRoot.activeTabIndex === index ? "#1f3350" : "#17212f"
-                            border.color: editorRoot.activeTabIndex === index ? "#7bc6ff" : "#324255"
-                            border.width: 1
-                            height: 34
-                            width: Math.max(112, tabLabel.implicitWidth + closeButtonContainer.width + 30)
+                        Row {
+                            spacing: 8
 
-                            MouseArea {
-                                anchors.fill: parent
-                                onClicked: editorRoot.activateTab(index)
-                            }
+                            Repeater {
+                                model: editorRoot.noteTabs
 
-                            Row {
-                                anchors.fill: parent
-                                anchors.leftMargin: 12
-                                anchors.rightMargin: 8
-                                spacing: 10
+                                delegate: Rectangle {
+                                    required property int index
+                                    required property var modelData
 
-                                Label {
-                                    id: tabLabel
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: String(modelData.name || ("Tab " + (index + 1)))
-                                    color: "#e2e8f0"
-                                    font.pixelSize: 13
-                                    elide: Text.ElideRight
-                                }
+                                    property bool isActive: editorRoot.activeTabIndex === index
 
-                                Rectangle {
-                                    id: closeButtonContainer
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    visible: editorRoot.noteTabs.length > 1
-                                    width: 22
-                                    height: 22
-                                    radius: 6
-                                    color: closeButtonMouse.containsMouse ? "#24364a" : "#1a2533"
-                                    border.color: closeButtonMouse.containsMouse ? "#5f7388" : "#314356"
+                                    radius: 11
+                                    color: isActive ? "#1b3048" : "#14202f"
+                                    border.color: isActive ? "#88d0ff" : (tabMouse.containsMouse ? "#4a627a" : "#2d4054")
                                     border.width: 1
+                                    height: 38
+                                    width: Math.max(150, tabLabel.implicitWidth + closeButtonContainer.width + 58)
 
-                                    Label {
-                                        anchors.centerIn: parent
-                                        text: "x"
-                                        color: closeButtonMouse.containsMouse ? "#f8fafc" : "#9fb0c3"
-                                        font.pixelSize: 11
-                                        font.bold: true
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        anchors.margins: 1
+                                        radius: 10
+                                        gradient: Gradient {
+                                            GradientStop { position: 0.0; color: isActive ? "#223c59" : "#182535" }
+                                            GradientStop { position: 1.0; color: isActive ? "#16283d" : "#101926" }
+                                        }
+                                        opacity: 0.98
+                                    }
+
+                                    Rectangle {
+                                        visible: isActive
+                                        anchors.left: parent.left
+                                        anchors.right: parent.right
+                                        anchors.top: parent.top
+                                        anchors.margins: 7
+                                        height: 3
+                                        radius: 2
+                                        color: "#7bc6ff"
+                                        opacity: 0.95
                                     }
 
                                     MouseArea {
-                                        id: closeButtonMouse
+                                        id: tabMouse
                                         anchors.fill: parent
                                         hoverEnabled: true
-                                        propagateComposedEvents: false
-                                        onClicked: function(mouse) {
-                                            mouse.accepted = true
-                                            editorRoot.closeTab(index)
+                                        onClicked: editorRoot.activateTab(index)
+                                    }
+
+                                    Row {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 14
+                                        anchors.rightMargin: 8
+                                        spacing: 12
+
+                                        Rectangle {
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: 8
+                                            height: 8
+                                            radius: 4
+                                            color: isActive ? "#7bc6ff" : "#4a6278"
+                                        }
+
+                                        Label {
+                                            id: tabLabel
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            text: String(modelData.name || ("Tab " + (index + 1)))
+                                            color: isActive ? "#f3f8ff" : "#bfd0e3"
+                                            font.pixelSize: 13
+                                            font.bold: isActive
+                                            elide: Text.ElideRight
+                                        }
+
+                                        Rectangle {
+                                            id: closeButtonContainer
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            visible: editorRoot.noteTabs.length > 1
+                                            width: 22
+                                            height: 22
+                                            radius: 7
+                                            color: closeButtonMouse.containsMouse ? "#31475f" : "#182433"
+                                            border.color: closeButtonMouse.containsMouse ? "#7f9dbb" : "#26384a"
+                                            border.width: 1
+
+                                            Label {
+                                                anchors.centerIn: parent
+                                                text: "x"
+                                                color: closeButtonMouse.containsMouse ? "#ffffff" : "#90a5bc"
+                                                font.pixelSize: 10
+                                                font.bold: true
+                                            }
+
+                                            MouseArea {
+                                                id: closeButtonMouse
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                propagateComposedEvents: false
+                                                onClicked: function(mouse) {
+                                                    mouse.accepted = true
+                                                    editorRoot.closeTab(index)
+                                                }
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
                     }
-                }
-            }
 
-            Button {
-                text: "New Tab"
-                onClicked: editorRoot.addTab()
+                    Button {
+                        text: "New Tab"
+                        Layout.preferredHeight: 38
+                        Layout.preferredWidth: 92
+                        onClicked: editorRoot.addTab()
+                        background: Rectangle {
+                            radius: 11
+                            gradient: Gradient {
+                                GradientStop { position: 0.0; color: parent.down ? "#255277" : (parent.hovered ? "#2f628d" : "#274f73") }
+                                GradientStop { position: 1.0; color: parent.down ? "#1d3f5d" : "#1f4463" }
+                            }
+                            border.color: parent.hovered ? "#99dbff" : "#5e8eb5"
+                            border.width: 1
+                        }
+                        contentItem: Label {
+                            text: parent.text
+                            color: "#eff7ff"
+                            font.pixelSize: 13
+                            font.bold: true
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+                }
             }
         }
 
