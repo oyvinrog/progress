@@ -215,7 +215,7 @@ ApplicationWindow {
                             border.color: editorRoot.activeTabIndex === index ? "#7bc6ff" : "#324255"
                             border.width: 1
                             height: 34
-                            width: Math.max(96, tabLabel.implicitWidth + closeButton.width + 24)
+                            width: Math.max(112, tabLabel.implicitWidth + closeButtonContainer.width + 30)
 
                             MouseArea {
                                 anchors.fill: parent
@@ -224,9 +224,9 @@ ApplicationWindow {
 
                             Row {
                                 anchors.fill: parent
-                                anchors.leftMargin: 10
-                                anchors.rightMargin: 6
-                                spacing: 6
+                                anchors.leftMargin: 12
+                                anchors.rightMargin: 8
+                                spacing: 10
 
                                 Label {
                                     id: tabLabel
@@ -237,12 +237,35 @@ ApplicationWindow {
                                     elide: Text.ElideRight
                                 }
 
-                                ToolButton {
-                                    id: closeButton
+                                Rectangle {
+                                    id: closeButtonContainer
                                     anchors.verticalCenter: parent.verticalCenter
                                     visible: editorRoot.noteTabs.length > 1
-                                    text: "x"
-                                    onClicked: editorRoot.closeTab(index)
+                                    width: 22
+                                    height: 22
+                                    radius: 6
+                                    color: closeButtonMouse.containsMouse ? "#24364a" : "#1a2533"
+                                    border.color: closeButtonMouse.containsMouse ? "#5f7388" : "#314356"
+                                    border.width: 1
+
+                                    Label {
+                                        anchors.centerIn: parent
+                                        text: "x"
+                                        color: closeButtonMouse.containsMouse ? "#f8fafc" : "#9fb0c3"
+                                        font.pixelSize: 11
+                                        font.bold: true
+                                    }
+
+                                    MouseArea {
+                                        id: closeButtonMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        propagateComposedEvents: false
+                                        onClicked: function(mouse) {
+                                            mouse.accepted = true
+                                            editorRoot.closeTab(index)
+                                        }
+                                    }
                                 }
                             }
                         }
