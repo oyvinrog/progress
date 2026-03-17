@@ -29,6 +29,7 @@ from .clipboard import ClipboardMixin
 from .constants import ITEM_PRESETS
 from .drawing import DrawingMixin
 from .layout import LayoutMixin
+from .markdown_note_tabs import first_tab_text, normalize_editor_tabs
 from .types import DiagramEdge, DiagramItem, DiagramItemType, DrawingPoint, DrawingStroke
 
 
@@ -232,9 +233,9 @@ class DiagramModel(
         if role == self.TaskCurrentRole:
             return item.task_index >= 0 and item.task_index == self._current_task_index
         if role == self.NoteMarkdownRole:
-            return item.note_markdown
+            return self._get_display_note_markdown(item)
         if role == self.ObstacleMarkdownRole:
-            return item.obstacle_markdown
+            return self._get_display_obstacle_markdown(item)
         if role == self.TaskCountdownRemainingRole:
             return self._getTaskCountdownRemaining(item.task_index)
         if role == self.TaskCountdownProgressRole:
@@ -588,6 +589,9 @@ class DiagramModel(
                 if item.text == text:
                     return
                 item.text = text
+                if item.text_tabs:
+                    item.text_tabs = normalize_editor_tabs(item.text_tabs, fallback_text=text)
+                    item.text_tabs[0]["text"] = text
                 index = self.index(row, 0)
                 self.dataChanged.emit(
                     index,
@@ -612,6 +616,8 @@ class DiagramModel(
                     # Notes now store canonical content directly in text.
                     item.text = markdown
                     item.note_markdown = ""
+                    item.note_tabs = normalize_editor_tabs(item.note_tabs, fallback_text=markdown)
+                    item.note_tabs[0]["text"] = markdown
                     index = self.index(row, 0)
                     self.dataChanged.emit(index, index, [self.TextRole, self.NoteMarkdownRole])
                     self.itemsChanged.emit()
@@ -619,6 +625,8 @@ class DiagramModel(
                 if item.note_markdown == markdown:
                     return
                 item.note_markdown = markdown
+                item.note_tabs = normalize_editor_tabs(item.note_tabs, fallback_text=markdown)
+                item.note_tabs[0]["text"] = markdown
                 index = self.index(row, 0)
                 self.dataChanged.emit(index, index, [self.NoteMarkdownRole])
                 self.itemsChanged.emit()
@@ -641,6 +649,8 @@ class DiagramModel(
                 if item.obstacle_markdown == normalized:
                     return
                 item.obstacle_markdown = normalized
+                item.obstacle_tabs = normalize_editor_tabs(item.obstacle_tabs, fallback_text=normalized)
+                item.obstacle_tabs[0]["text"] = normalized
                 index = self.index(row, 0)
                 self.dataChanged.emit(index, index, [self.ObstacleMarkdownRole])
                 self.itemsChanged.emit()
@@ -652,6 +662,65 @@ class DiagramModel(
             if item.id == item_id:
                 return item.obstacle_markdown
         return ""
+
+    def _get_display_note_markdown(self, item: DiagramItem) -> str:
+        if item.item_type == DiagramItemType.NOTE:
+            return first_tab_text(item.note_tabs, fallback_text=item.text)
+        return first_tab_text(item.note_tabs, fallback_text=item.note_markdown)
+
+    def _get_display_obstacle_markdown(self, item: DiagramItem) -> str:
+        return first_tab_text(item.obstacle_tabs, fallback_text=item.obstacle_markdown)
+
+    def getEditorTabs(self, item_id: str, editor_type: str) -> List[Dict[str, str]]:
+        item = self.getItem(item_id)
+        if item is None:
+            return normalize_editor_tabs([], fallback_name="Tab 1")
+        editor_key = str(editor_type or "").strip().lower()
+        if editor_key == "obstacle":
+            return normalize_editor_tabs(item.obstacle_tabs, fallback_text=item.obstacle_markdown)
+        if editor_key == "freetext":
+            return normalize_editor_tabs(item.text_tabs, fallback_text=item.text)
+        fallback_text = item.text if item.item_type == DiagramItemType.NOTE else item.note_markdown
+        return normalize_editor_tabs(item.note_tabs, fallback_text=fallback_text)
+
+    def setEditorTabs(self, item_id: str, editor_type: str, tabs: List[Dict[str, str]]) -> None:
+        for row, item in enumerate(self._items):
+            if item.id != item_id:
+                continue
+
+            editor_key = str(editor_type or "").strip().lower()
+            roles: List[int] = []
+            if editor_key == "obstacle":
+                normalized = normalize_editor_tabs(tabs, fallback_text=item.obstacle_markdown)
+                item.obstacle_tabs = normalized
+                item.obstacle_markdown = normalized[0]["text"]
+                roles = [self.ObstacleMarkdownRole]
+            elif editor_key == "freetext":
+                normalized = normalize_editor_tabs(tabs, fallback_text=item.text)
+                item.text_tabs = normalized
+                item.text = normalized[0]["text"]
+                roles = [
+                    self.TextRole,
+                    self.LinkedSubtabCompletionRole,
+                    self.LinkedSubtabActiveActionRole,
+                    self.HasLinkedSubtabRole,
+                ]
+            else:
+                fallback_text = item.text if item.item_type == DiagramItemType.NOTE else item.note_markdown
+                normalized = normalize_editor_tabs(tabs, fallback_text=fallback_text)
+                item.note_tabs = normalized
+                if item.item_type == DiagramItemType.NOTE:
+                    item.text = normalized[0]["text"]
+                    item.note_markdown = ""
+                    roles = [self.TextRole, self.NoteMarkdownRole]
+                else:
+                    item.note_markdown = normalized[0]["text"]
+                    roles = [self.NoteMarkdownRole]
+
+            index = self.index(row, 0)
+            self.dataChanged.emit(index, index, roles)
+            self.itemsChanged.emit()
+            return
 
     @Slot(str, result=bool)
     def openChatGpt(self, item_id: str) -> bool:
@@ -1596,8 +1665,8 @@ class DiagramModel(
             "height": item.height,
             "text": item.text,
             "taskIndex": item.task_index,
-            "noteMarkdown": item.note_markdown,
-            "obstacleMarkdown": item.obstacle_markdown,
+            "noteMarkdown": self._get_display_note_markdown(item),
+            "obstacleMarkdown": self._get_display_obstacle_markdown(item),
             "folderPath": item.folder_path,
             "linkedSubtabCompletion": self._getLinkedSubtabCompletion(item.task_index),
             "linkedSubtabActiveAction": self._getLinkedSubtabActiveAction(item.task_index),
@@ -1755,6 +1824,15 @@ class DiagramModel(
                 item_dict["note_markdown"] = item.note_markdown
             if item.obstacle_markdown:
                 item_dict["obstacle_markdown"] = item.obstacle_markdown
+            if item.note_tabs:
+                item_dict["note_tabs"] = normalize_editor_tabs(
+                    item.note_tabs,
+                    fallback_text=item.text if item.item_type == DiagramItemType.NOTE else item.note_markdown,
+                )
+            if item.obstacle_tabs:
+                item_dict["obstacle_tabs"] = normalize_editor_tabs(item.obstacle_tabs, fallback_text=item.obstacle_markdown)
+            if item.text_tabs:
+                item_dict["text_tabs"] = normalize_editor_tabs(item.text_tabs, fallback_text=item.text)
             if item.folder_path:
                 item_dict["folder_path"] = item.folder_path
             items_data.append(item_dict)
@@ -1847,6 +1925,9 @@ class DiagramModel(
                     note_markdown=note_markdown_value,
                     obstacle_markdown=str(item_data.get("obstacle_markdown", "")),
                     folder_path=item_data.get("folder_path", ""),
+                    note_tabs=normalize_editor_tabs(item_data.get("note_tabs"), fallback_text=text_value if item_type == DiagramItemType.NOTE else note_markdown_value),
+                    obstacle_tabs=normalize_editor_tabs(item_data.get("obstacle_tabs"), fallback_text=str(item_data.get("obstacle_markdown", ""))),
+                    text_tabs=normalize_editor_tabs(item_data.get("text_tabs"), fallback_text=text_value),
                 )
                 new_items.append(item)
 

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from PySide6.QtCore import QObject, Signal, QUrl
-from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtQml import QJSValue, QQmlApplicationEngine
 
 from .markdown_image_paster import MarkdownImagePaster
+from .markdown_note_tabs import normalize_editor_tabs
 from .markdown_preview_formatter import MarkdownPreviewFormatter
 from .markdown_syntax_highlighter import MarkdownHighlighterBridge
 from .qml import MARKDOWN_NOTE_EDITOR_QML_PATH, QML_DIR
@@ -14,7 +15,7 @@ from .qml import MARKDOWN_NOTE_EDITOR_QML_PATH, QML_DIR
 class MarkdownNoteEditor(QObject):
     """Standalone window for editing markdown notes and free text."""
 
-    noteSaved = Signal(str, str)
+    noteSaved = Signal(str, str, list)
     noteCanceled = Signal(str)
 
     def __init__(self, diagram_model=None, markdown_note_manager=None) -> None:
@@ -47,15 +48,25 @@ class MarkdownNoteEditor(QObject):
         editor_type: str = "note",
         target_x: float = 0.0,
         target_y: float = 0.0,
+        tabs: list[dict[str, str]] | None = None,
     ) -> None:
+        normalized_tabs = normalize_editor_tabs(tabs, fallback_text=note_text or "")
         self._root.setProperty("editorType", editor_type or "note")
         self._root.setProperty("noteId", note_id)
         self._root.setProperty("noteTitle", note_title)
         self._root.setProperty("targetX", float(target_x))
         self._root.setProperty("targetY", float(target_y))
-        # Clear first to avoid stale editor state when reusing the same window instance.
+        self._root.setProperty("saveConfirmationVisible", False)
+        self._root.setProperty("restoringState", True)
+        self._root.setProperty("activeTabIndex", 0)
+        self._root.setProperty("noteTabs", [])
         self._root.setProperty("noteText", "")
-        self._root.setProperty("noteText", note_text or "")
+        if hasattr(self._root, "loadEditorState"):
+            self._root.loadEditorState(normalized_tabs, normalized_tabs[0]["text"])
+        else:
+            self._root.setProperty("noteTabs", normalized_tabs)
+            self._root.setProperty("noteText", normalized_tabs[0]["text"])
+            self._root.setProperty("restoringState", False)
         self._root.show()
         self._root.raise_()
         self._root.requestActivate()
@@ -69,8 +80,10 @@ class MarkdownNoteEditor(QObject):
     def show_save_confirmation(self) -> None:
         self._root.showSaveConfirmation()
 
-    def _handle_save(self, note_id: str, note_text: str) -> None:
-        self.noteSaved.emit(note_id, note_text)
+    def _handle_save(self, note_id: str, note_text: str, tabs: list) -> None:
+        if isinstance(tabs, QJSValue):
+            tabs = tabs.toVariant()
+        self.noteSaved.emit(note_id, note_text, list(tabs or []))
 
     def _handle_cancel(self) -> None:
         note_id = self._root.property("noteId")

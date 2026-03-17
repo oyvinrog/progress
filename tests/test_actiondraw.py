@@ -1006,6 +1006,28 @@ class TestDiagramModelSerialization:
         new_model.from_dict(data)
         assert new_model.getItemMarkdown(item_id) == "# Title\nBody"
 
+    def test_note_tabs_roundtrip_preserves_primary_text(self, empty_diagram_model):
+        item_id = empty_diagram_model.addPresetItem("note", 10.0, 20.0)
+        empty_diagram_model.setEditorTabs(
+            item_id,
+            "note",
+            [
+                {"name": "Overview", "text": "# Title\nBody"},
+                {"name": "Ideas", "text": "- one\n- two"},
+            ],
+        )
+
+        data = empty_diagram_model.to_dict()
+        assert data["items"][0]["text"] == "# Title\nBody"
+        assert data["items"][0]["note_tabs"][1]["name"] == "Ideas"
+
+        new_model = DiagramModel()
+        new_model.from_dict(data)
+        item = new_model.getItem(item_id)
+        assert item is not None
+        assert item.text == "# Title\nBody"
+        assert item.note_tabs[1]["text"] == "- one\n- two"
+
     def test_obstacle_markdown_roundtrip(self, empty_diagram_model):
         item_id = empty_diagram_model.addBox(10.0, 20.0, "Task")
         empty_diagram_model.setItemObstacleMarkdown(item_id, "Blocked by dependency")
@@ -1016,6 +1038,28 @@ class TestDiagramModelSerialization:
         new_model = DiagramModel()
         new_model.from_dict(data)
         assert new_model.getItemObstacleMarkdown(item_id) == "Blocked by dependency"
+
+    def test_freetext_tabs_roundtrip_preserves_canvas_text(self, empty_diagram_model):
+        item_id = empty_diagram_model.addPresetItemWithText("freetext", 10.0, 20.0, "Visible")
+        empty_diagram_model.setEditorTabs(
+            item_id,
+            "freetext",
+            [
+                {"name": "Visible", "text": "Visible"},
+                {"name": "Draft", "text": "Hidden draft"},
+            ],
+        )
+
+        data = empty_diagram_model.to_dict()
+        assert data["items"][0]["text"] == "Visible"
+        assert data["items"][0]["text_tabs"][1]["name"] == "Draft"
+
+        new_model = DiagramModel()
+        new_model.from_dict(data)
+        item = new_model.getItem(item_id)
+        assert item is not None
+        assert item.text == "Visible"
+        assert item.text_tabs[1]["text"] == "Hidden draft"
 
     def test_empty_obstacle_markdown_not_serialized(self, empty_diagram_model):
         item_id = empty_diagram_model.addBox(10.0, 20.0, "Task")
@@ -4982,6 +5026,14 @@ class TestMarkdownNoteManager:
 
         item_id = empty_diagram_model.addBox(40.0, 30.0, "Task")
         empty_diagram_model.setItemObstacleMarkdown(item_id, "Blocked")
+        empty_diagram_model.setEditorTabs(
+            item_id,
+            "obstacle",
+            [
+                {"name": "Main", "text": "Blocked"},
+                {"name": "Dependencies", "text": "Vendor wait"},
+            ],
+        )
         monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
         manager = MarkdownNoteManager(empty_diagram_model)
 
@@ -4994,6 +5046,7 @@ class TestMarkdownNoteManager:
         assert args[1] == "Blocked"
         assert args[2] == "Task Obstacle"
         assert kwargs["editor_type"] == "obstacle"
+        assert kwargs["tabs"][1]["name"] == "Dependencies"
 
     def test_save_obstacle_keeps_editor_open_and_confirms_save(self, empty_diagram_model, monkeypatch):
         class _DummySignal:
@@ -5015,7 +5068,14 @@ class TestMarkdownNoteManager:
         manager = MarkdownNoteManager(empty_diagram_model)
         manager._set_editor_state("obstacle", item_id, 40.0, 30.0, True)
 
-        manager._save_note(item_id, "Blocked by vendor")
+        manager._save_note(
+            item_id,
+            "Blocked by vendor",
+            [
+                {"name": "Main", "text": "Blocked by vendor"},
+                {"name": "Follow-up", "text": "Waiting on procurement"},
+            ],
+        )
 
         assert manager.editorOpen is True
         assert manager.activeEditorType == "obstacle"
@@ -5023,6 +5083,9 @@ class TestMarkdownNoteManager:
         assert manager._editor.save_confirmation_calls == 1
         assert empty_diagram_model.getItemObstacleMarkdown(item_id) == "Blocked by vendor"
         assert empty_diagram_model.getItemMarkdown(item_id) == "Existing note"
+        item = empty_diagram_model.getItem(item_id)
+        assert item is not None
+        assert item.obstacle_tabs[1]["name"] == "Follow-up"
 
 
 if __name__ == "__main__":

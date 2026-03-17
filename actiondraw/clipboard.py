@@ -15,6 +15,7 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QJSValue
 
 from .constants import CLIPBOARD_MIME_TYPE
+from .markdown_note_tabs import normalize_editor_tabs
 from .types import DiagramEdge, DiagramItem, DiagramItemType
 
 if TYPE_CHECKING:
@@ -56,7 +57,11 @@ class ClipboardMixin:
             "textColor": item.text_color,
             "imageData": item.image_data,
             "noteMarkdown": note_markdown,
+            "obstacleMarkdown": item.obstacle_markdown,
             "folderPath": item.folder_path,
+            "noteTabs": normalize_editor_tabs(item.note_tabs, fallback_text=note_markdown),
+            "obstacleTabs": normalize_editor_tabs(item.obstacle_tabs, fallback_text=item.obstacle_markdown),
+            "textTabs": normalize_editor_tabs(item.text_tabs, fallback_text=item.text),
         }
 
     def _build_opml_text(self, items: List[DiagramItem]) -> str:
@@ -454,6 +459,7 @@ class ClipboardMixin:
                 continue
             text_value = str(item_data.get("text", ""))
             note_markdown_value = str(item_data.get("noteMarkdown", ""))
+            obstacle_markdown_value = str(item_data.get("obstacleMarkdown", ""))
             if item_type == DiagramItemType.NOTE and note_markdown_value:
                 text_value = note_markdown_value
                 note_markdown_value = ""
@@ -471,7 +477,11 @@ class ClipboardMixin:
                 text_color=str(item_data.get("textColor", "#f5f6f8")),
                 image_data=str(item_data.get("imageData", "")),
                 note_markdown=note_markdown_value,
+                obstacle_markdown=obstacle_markdown_value,
                 folder_path=str(item_data.get("folderPath", "")),
+                note_tabs=normalize_editor_tabs(item_data.get("noteTabs"), fallback_text=text_value if item_type == DiagramItemType.NOTE else note_markdown_value),
+                obstacle_tabs=normalize_editor_tabs(item_data.get("obstacleTabs"), fallback_text=obstacle_markdown_value),
+                text_tabs=normalize_editor_tabs(item_data.get("textTabs"), fallback_text=text_value),
             )
             self._append_item(item)
             old_id = str(item_data.get("id", ""))
