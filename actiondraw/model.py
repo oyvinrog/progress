@@ -1046,11 +1046,19 @@ class DiagramModel(
             self._task_model.restartCountdownTimer(task_index)
 
     @Slot(int, str, result=bool)
-    def setTaskReminderAt(self, task_index: int, reminder_at_str: str) -> bool:
+    @Slot(int, str, bool, result=bool)
+    def setTaskReminderAt(self, task_index: int, reminder_at_str: str, send_notification: bool = False) -> bool:
         """Set a reminder datetime for a task from QML."""
         if self._task_model is not None:
-            return bool(self._task_model.setReminderAt(task_index, reminder_at_str))
+            return bool(self._task_model.setReminderAt(task_index, reminder_at_str, send_notification))
         return False
+
+    @Slot(int, result=bool)
+    def isTaskReminderNotificationEnabled(self, task_index: int) -> bool:
+        """Return whether a task reminder is configured to publish via ntfy."""
+        if self._task_model is None:
+            return False
+        return bool(self._task_model.isReminderNotificationEnabled(task_index))
 
     @Slot(int)
     def clearTaskReminderAt(self, task_index: int) -> None:

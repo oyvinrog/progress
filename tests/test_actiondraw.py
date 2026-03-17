@@ -2909,19 +2909,21 @@ class TestTaskReminders:
         reminder_at = task_model_with_reminder.data(index, task_model_with_reminder.ReminderAtRole)
         assert active == False
         assert reminder_at == ""
+        assert task_model_with_reminder.isReminderNotificationEnabled(0) is False
 
     def test_set_reminder_valid(self, task_model_with_reminder):
         from datetime import datetime, timedelta
 
         reminder_dt = datetime.now() + timedelta(hours=1)
         reminder_str = reminder_dt.strftime("%Y-%m-%d %H:%M")
-        assert task_model_with_reminder.setReminderAt(0, reminder_str) is True
+        assert task_model_with_reminder.setReminderAt(0, reminder_str, True) is True
 
         index = task_model_with_reminder.index(0, 0)
         active = task_model_with_reminder.data(index, task_model_with_reminder.ReminderActiveRole)
         reminder_at = task_model_with_reminder.data(index, task_model_with_reminder.ReminderAtRole)
         assert active == True
         assert reminder_at == reminder_str
+        assert task_model_with_reminder.isReminderNotificationEnabled(0) is True
 
     def test_set_reminder_invalid(self, task_model_with_reminder):
         assert task_model_with_reminder.setReminderAt(0, "not-a-date") is False
@@ -2933,7 +2935,7 @@ class TestTaskReminders:
         from datetime import datetime, timedelta
 
         reminder_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
-        assert task_model_with_reminder.setReminderAt(0, reminder_str) is True
+        assert task_model_with_reminder.setReminderAt(0, reminder_str, True) is True
         task_model_with_reminder.clearReminderAt(0)
 
         index = task_model_with_reminder.index(0, 0)
@@ -2941,6 +2943,7 @@ class TestTaskReminders:
         reminder_at = task_model_with_reminder.data(index, task_model_with_reminder.ReminderAtRole)
         assert active == False
         assert reminder_at == ""
+        assert task_model_with_reminder.isReminderNotificationEnabled(0) is False
 
     def test_due_reminder_emits_signal_and_clears(self, task_model_with_reminder):
         from datetime import datetime, timedelta
@@ -2961,10 +2964,11 @@ class TestTaskReminders:
         from datetime import datetime, timedelta
 
         reminder_str = (datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
-        assert task_model_with_reminder.setReminderAt(0, reminder_str) is True
+        assert task_model_with_reminder.setReminderAt(0, reminder_str, True) is True
         data = task_model_with_reminder.to_dict()
         task_data = data["tasks"][0]
         assert "reminder_at" in task_data
+        assert task_data["reminder_send_notification"] is True
 
     def test_reminder_deserialization(self, app):
         import time
@@ -2979,6 +2983,7 @@ class TestTaskReminders:
                 "indent_level": 0,
                 "custom_estimate": None,
                 "reminder_at": time.time() + 3600,
+                "reminder_send_notification": True,
             }]
         }
 
@@ -2989,6 +2994,7 @@ class TestTaskReminders:
         assert active == True
         assert isinstance(reminder_at, str)
         assert reminder_at != ""
+        assert model.isReminderNotificationEnabled(0) is True
 
     def test_diagram_reminder_roles_exist(self, diagram_model_with_reminder_task):
         model, _ = diagram_model_with_reminder_task
@@ -3027,12 +3033,40 @@ class TestTaskReminders:
         diagram_model, task_model = diagram_model_with_reminder_task
         reminder_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
 
-        assert diagram_model.setTaskReminderAt(0, reminder_str) is True
+        assert diagram_model.setTaskReminderAt(0, reminder_str, True) is True
         assert diagram_model.setTaskReminderAt(0, "invalid") is False
 
         index = task_model.index(0, 0)
         active = task_model.data(index, task_model.ReminderActiveRole)
         assert active == True
+        assert diagram_model.isTaskReminderNotificationEnabled(0) is True
+
+    def test_project_manager_sends_ntfy_for_current_tab_due_reminder(self, app, monkeypatch):
+        from datetime import datetime, timedelta
+        from task_model import TaskModel, ProjectManager, TabModel
+        import task_model as task_model_module
+
+        task_model = TaskModel()
+        task_model.addTask("Current Reminder", -1)
+        reminder_str = (datetime.now() - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M")
+        assert task_model.setReminderAt(0, reminder_str, True) is True
+
+        published = []
+        monkeypatch.setattr(
+            task_model_module,
+            "_publish_ntfy_message_async",
+            lambda title, message, server=None, topic=None, token=None: published.append((title, message, server, topic, token)),
+        )
+
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        project_manager.saveNtfySettings("https://example.ntfy", "alerts", "secret")
+
+        task_model._updateActiveTasks()
+
+        assert project_manager is not None
+        assert published == [("ActionDraw Reminder", "Reminder due: Current Reminder\nTab: Main", "https://example.ntfy", "alerts", "secret")]
 
     def test_project_manager_emits_current_tab_reminder_due(self, app):
         from datetime import datetime, timedelta
@@ -3046,6 +3080,7 @@ class TestTaskReminders:
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        project_manager.saveNtfySettings("https://ntfy.sh", "", "")
 
         due = []
         project_manager.taskReminderDue.connect(lambda tab_idx, task_idx, title: due.append((tab_idx, task_idx, title)))
@@ -3056,6 +3091,48 @@ class TestTaskReminders:
     def test_project_manager_emits_background_tab_reminder_due(self, app):
         import time
         from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        task_model.addTask("Tab 1 Task", -1)
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        project_manager.saveNtfySettings("https://ntfy.sh", "", "")
+
+        tab_model.addTab("Tab 2")
+        tab_model.setTabData(
+            1,
+            {
+                "tasks": [{
+                    "title": "Background Reminder",
+                    "completed": False,
+                    "time_spent": 0.0,
+                    "parent_index": -1,
+                    "indent_level": 0,
+                    "custom_estimate": None,
+                    "reminder_at": time.time() - 1,
+                    "reminder_send_notification": True,
+                }]
+            },
+            {"items": [], "edges": [], "strokes": [], "current_task_index": -1},
+        )
+
+        due = []
+        project_manager.taskReminderDue.connect(lambda tab_idx, task_idx, title: due.append((tab_idx, task_idx, title)))
+        project_manager._checkBackgroundTabReminders()
+
+        assert due == [(1, 0, "Background Reminder")]
+
+        # Reminder is cleared after firing
+        tabs = tab_model.getAllTabs()
+        task_data = tabs[1].tasks["tasks"][0]
+        assert "reminder_at" not in task_data
+        assert "reminder_send_notification" not in task_data
+
+    def test_project_manager_sends_ntfy_for_background_tab_due_reminder(self, app, monkeypatch):
+        import time
+        from task_model import TaskModel, ProjectManager, TabModel
+        import task_model as task_model_module
 
         task_model = TaskModel()
         task_model.addTask("Tab 1 Task", -1)
@@ -3075,21 +3152,37 @@ class TestTaskReminders:
                     "indent_level": 0,
                     "custom_estimate": None,
                     "reminder_at": time.time() - 1,
+                    "reminder_send_notification": True,
                 }]
             },
             {"items": [], "edges": [], "strokes": [], "current_task_index": -1},
         )
 
-        due = []
-        project_manager.taskReminderDue.connect(lambda tab_idx, task_idx, title: due.append((tab_idx, task_idx, title)))
+        published = []
+        monkeypatch.setattr(
+            task_model_module,
+            "_publish_ntfy_message_async",
+            lambda title, message, server=None, topic=None, token=None: published.append((title, message, server, topic, token)),
+        )
+        project_manager.saveNtfySettings("https://example.ntfy", "alerts", "secret")
+
         project_manager._checkBackgroundTabReminders()
 
-        assert due == [(1, 0, "Background Reminder")]
+        assert published == [("ActionDraw Reminder", "Reminder due: Background Reminder\nTab: Tab 2", "https://example.ntfy", "alerts", "secret")]
 
-        # Reminder is cleared after firing
-        tabs = tab_model.getAllTabs()
-        task_data = tabs[1].tasks["tasks"][0]
-        assert "reminder_at" not in task_data
+    def test_project_manager_persists_ntfy_settings(self, app):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        project_manager.saveNtfySettings("https://example.ntfy", "alerts", "secret")
+
+        assert project_manager.ntfyServer == "https://example.ntfy"
+        assert project_manager.ntfyTopic == "alerts"
+        assert project_manager.ntfyToken == "secret"
 
     def test_project_manager_get_active_reminders_returns_sorted_cross_tab_results(self, app):
         from datetime import datetime, timedelta

@@ -36,6 +36,8 @@ actiondraw                # Launch the canvas
 priorityplot              # Launch standalone priority plot
 ```
 
+Configure `ntfy` in the app under `Tools > Notification Settings...`. Environment variables `PROGRESS_NTFY_TOPIC`, `PROGRESS_NTFY_SERVER`, and `PROGRESS_NTFY_TOKEN` still work as a fallback.
+
 ## Requirements
 
 - Python 3.8+

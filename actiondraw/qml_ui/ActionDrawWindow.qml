@@ -41,6 +41,7 @@ ApplicationWindow {
         saveDialog: dialogs.saveDialog
         loadDialog: dialogs.loadDialog
         taskDialog: dialogs.taskDialog
+        notificationSettingsDialog: dialogs.notificationSettingsDialog
     }
 
     Rectangle {

@@ -31,6 +31,7 @@ Item {
     property alias timerContextMenu: timerContextMenu
     property alias reminderDialog: reminderDialog
     property alias reminderContextMenu: reminderContextMenu
+    property alias notificationSettingsDialog: notificationSettingsDialog
     property alias contractDialog: contractDialog
     property alias contractContextMenu: contractContextMenu
     property alias edgeDropMenu: edgeDropMenu
@@ -50,6 +51,7 @@ Item {
         || taskRenameDialog.visible
         || timerDialog.visible
         || reminderDialog.visible
+        || notificationSettingsDialog.visible
         || contractDialog.visible
         || edgeDropTaskDialog.visible
         || clipboardPasteDialog.visible
@@ -1213,12 +1215,116 @@ Item {
     }
 
     Dialog {
+        id: notificationSettingsDialog
+        modal: true
+        title: "Notification Settings"
+        property string serverValue: ""
+        property string topicValue: ""
+        property string tokenValue: ""
+
+        onOpened: {
+            serverValue = (projectManager && projectManager.ntfyServer) ? projectManager.ntfyServer : "https://ntfy.sh"
+            topicValue = (projectManager && projectManager.ntfyTopic) ? projectManager.ntfyTopic : ""
+            tokenValue = (projectManager && projectManager.ntfyToken) ? projectManager.ntfyToken : ""
+            ntfyServerField.forceActiveFocus()
+        }
+
+        contentItem: ColumnLayout {
+            width: 380
+            spacing: 12
+
+            Label {
+                text: "Configure where due reminders should be published when 'Send notification' is enabled."
+                color: "#8a93a5"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            Label {
+                text: "Server"
+                color: "#d7e0ea"
+            }
+
+            TextField {
+                id: ntfyServerField
+                Layout.fillWidth: true
+                text: notificationSettingsDialog.serverValue
+                placeholderText: "https://ntfy.sh"
+                selectByMouse: true
+                color: "#f5f6f8"
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#384458"
+                }
+                onTextChanged: notificationSettingsDialog.serverValue = text
+            }
+
+            Label {
+                text: "Topic"
+                color: "#d7e0ea"
+            }
+
+            TextField {
+                Layout.fillWidth: true
+                text: notificationSettingsDialog.topicValue
+                placeholderText: "my-topic"
+                selectByMouse: true
+                color: "#f5f6f8"
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#384458"
+                }
+                onTextChanged: notificationSettingsDialog.topicValue = text
+            }
+
+            Label {
+                text: "Bearer Token"
+                color: "#d7e0ea"
+            }
+
+            TextField {
+                Layout.fillWidth: true
+                text: notificationSettingsDialog.tokenValue
+                placeholderText: "Optional"
+                selectByMouse: true
+                echoMode: TextInput.Password
+                color: "#f5f6f8"
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#384458"
+                }
+                onTextChanged: notificationSettingsDialog.tokenValue = text
+            }
+        }
+
+        footer: DialogButtonBox {
+            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+        }
+
+        onAccepted: {
+            if (projectManager && projectManager.saveNtfySettings) {
+                projectManager.saveNtfySettings(
+                    notificationSettingsDialog.serverValue,
+                    notificationSettingsDialog.topicValue,
+                    notificationSettingsDialog.tokenValue
+                )
+            }
+            notificationSettingsDialog.close()
+        }
+        onRejected: notificationSettingsDialog.close()
+    }
+
+    Dialog {
         id: reminderDialog
         modal: true
         title: "Set Reminder"
         property int taskIndex: -1
         property string dateValue: ""
         property string timeValue: ""
+        property bool sendNotification: false
 
         function parseReminderParts(value) {
             var trimmed = value ? value.trim() : ""
@@ -1331,6 +1437,13 @@ Item {
                     onClicked: reminderDialog.setToOffsetMinutes(24 * 60)
                 }
             }
+
+            CheckBox {
+                Layout.fillWidth: true
+                text: "Send notification"
+                checked: reminderDialog.sendNotification
+                onToggled: reminderDialog.sendNotification = checked
+            }
         }
 
         footer: DialogButtonBox {
@@ -1341,7 +1454,11 @@ Item {
             if (diagramModel && reminderDialog.taskIndex >= 0) {
                 var reminderValue = reminderDialog.dateValue.trim() + " " + reminderDialog.timeValue.trim()
                 if (reminderDialog.dateValue.trim().length > 0 && reminderDialog.timeValue.trim().length > 0) {
-                    var saved = diagramModel.setTaskReminderAt(reminderDialog.taskIndex, reminderValue)
+                    var saved = diagramModel.setTaskReminderAt(
+                        reminderDialog.taskIndex,
+                        reminderValue,
+                        reminderDialog.sendNotification
+                    )
                     if (!saved) {
                         if (root && root.showSaveNotification)
                             root.showSaveNotification("Invalid reminder. Use YYYY-MM-DD and HH:MM")
@@ -1357,6 +1474,7 @@ Item {
             reminderDialog.taskIndex = -1
             reminderDialog.dateValue = ""
             reminderDialog.timeValue = ""
+            reminderDialog.sendNotification = false
         }
     }
 
@@ -1372,6 +1490,11 @@ Item {
             var parts = reminderDialog.parseReminderParts(reminderContextMenu.reminderAt)
             reminderDialog.dateValue = parts.date
             reminderDialog.timeValue = parts.time
+            reminderDialog.sendNotification = (
+                diagramModel
+                && diagramModel.isTaskReminderNotificationEnabled
+                && diagramModel.isTaskReminderNotificationEnabled(reminderContextMenu.taskIndex)
+            ) || false
             reminderDialog.open()
         }
 

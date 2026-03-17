@@ -13,6 +13,7 @@ MenuBar {
     property var saveDialog: null
     property var loadDialog: null
     property var taskDialog: null
+    property var notificationSettingsDialog: null
 
     function hasDiagramModel() {
         return diagramModel !== null && diagramModel !== undefined
@@ -329,6 +330,16 @@ MenuBar {
             checkable: true
             checked: !!(hasDiagramModel() && diagramModel.drawingMode)
             onTriggered: diagramModel && diagramModel.setDrawingMode(checked)
+        }
+    }
+
+    Menu {
+        title: "Tools"
+
+        MenuItem {
+            text: "Notification Settings..."
+            enabled: hasProjectManager() && notificationSettingsDialog
+            onTriggered: notificationSettingsDialog.open()
         }
     }
 }
