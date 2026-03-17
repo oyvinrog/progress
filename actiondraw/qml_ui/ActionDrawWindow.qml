@@ -4169,14 +4169,20 @@ ApplicationWindow {
         function onErrorOccurred(message) {
             root.showWindow()
             root.hideYubiKeyPrompt()
+            if (markdownNoteManager && markdownNoteManager.hideExternalPrompt)
+                markdownNoteManager.hideExternalPrompt()
             root.showErrorDialog(message)
         }
         function onYubiKeyInteractionStarted(message) {
             root.showWindow()
             root.showYubiKeyPrompt(message)
+            if (markdownNoteManager && markdownNoteManager.showExternalPrompt)
+                markdownNoteManager.showExternalPrompt(message)
         }
         function onYubiKeyInteractionFinished() {
             root.hideYubiKeyPrompt()
+            if (markdownNoteManager && markdownNoteManager.hideExternalPrompt)
+                markdownNoteManager.hideExternalPrompt()
         }
     }
 

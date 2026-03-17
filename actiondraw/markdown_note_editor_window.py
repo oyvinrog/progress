@@ -80,6 +80,16 @@ class MarkdownNoteEditor(QObject):
     def show_save_confirmation(self) -> None:
         self._root.showSaveConfirmation()
 
+    def show_external_prompt(self, message: str) -> None:
+        self._root.setProperty("externalPromptText", message or "Touch your YubiKey to continue.")
+        self._root.setProperty("externalPromptVisible", True)
+        self._root.show()
+        self._root.raise_()
+        self._root.requestActivate()
+
+    def hide_external_prompt(self) -> None:
+        self._root.setProperty("externalPromptVisible", False)
+
     def _handle_save(self, note_id: str, note_text: str, tabs: list) -> None:
         if isinstance(tabs, QJSValue):
             tabs = tabs.toVariant()

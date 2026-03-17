@@ -23,6 +23,8 @@ ApplicationWindow {
     property real targetX: 0
     property real targetY: 0
     property bool restoringState: false
+    property bool externalPromptVisible: false
+    property string externalPromptText: "Touch your YubiKey to continue."
     property bool fullWindowMode: false
     property bool saveConfirmationVisible: false
 
@@ -428,5 +430,72 @@ ApplicationWindow {
         editorRoot.fullWindowMode = false
         editorRoot.visibility = Window.Windowed
         editorRoot.cancelRequested()
+    }
+
+    Dialog {
+        id: externalPromptDialog
+        modal: true
+        focus: true
+        closePolicy: Popup.NoAutoClose
+        x: Math.round((editorRoot.width - width) / 2)
+        y: Math.round((editorRoot.height - height) / 2)
+        width: Math.min(editorRoot.width * 0.7, 520)
+        visible: editorRoot.externalPromptVisible
+
+        background: Rectangle {
+            radius: 14
+            color: "#152132"
+            border.color: "#7bc6ff"
+            border.width: 2
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 14
+
+            Label {
+                text: "YubiKey Verification Required"
+                font.pixelSize: 18
+                font.bold: true
+                color: "#eef6ff"
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+            }
+
+            Label {
+                text: editorRoot.externalPromptText
+                color: "#d6e4f3"
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                radius: 10
+                color: "#0f1927"
+                border.color: "#2f4761"
+                border.width: 1
+                implicitHeight: promptRow.implicitHeight + 18
+
+                RowLayout {
+                    id: promptRow
+                    anchors.fill: parent
+                    anchors.margins: 12
+                    spacing: 12
+
+                    BusyIndicator {
+                        running: editorRoot.externalPromptVisible
+                        Layout.preferredWidth: 30
+                        Layout.preferredHeight: 30
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: "Complete the YubiKey step in this save flow. This dialog stays on top until the prompt finishes."
+                        color: "#b8cae0"
+                        wrapMode: Text.WordWrap
+                    }
+                }
+            }
+        }
     }
 }

@@ -214,3 +214,13 @@ class MarkdownNoteManager(QObject):
     @Slot()
     def requestProjectSave(self) -> None:
         self.projectSaveRequested.emit()
+
+    @Slot(str)
+    def showExternalPrompt(self, message: str) -> None:
+        if not self._editor_open:
+            return
+        self._editor.show_external_prompt(message)
+
+    @Slot()
+    def hideExternalPrompt(self) -> None:
+        self._editor.hide_external_prompt()
