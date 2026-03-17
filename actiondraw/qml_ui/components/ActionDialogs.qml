@@ -1425,7 +1425,7 @@ Item {
             Rectangle {
                 id: reminderNotificationWarning
                 Layout.fillWidth: true
-                visible: projectManager && !projectManager.ntfyConfigured
+                visible: reminderDialog.sendNotification && projectManager && !projectManager.ntfyConfigured
                 implicitHeight: warningContent.implicitHeight + 24
                 radius: 8
                 color: reminderDialog.sendNotification ? "#5a2418" : "#3f281c"
