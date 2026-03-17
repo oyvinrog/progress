@@ -61,11 +61,13 @@ ApplicationWindow {
             : rawText
     }
 
-    function commitEditorText() {
+    function commitActiveTabState() {
         if (!editorRoot.noteTabs || editorRoot.noteTabs.length === 0)
             editorRoot.noteTabs = normalizedTabs([], editorRoot.noteText)
         var nextTabs = cloneTabs(editorRoot.noteTabs)
         var index = Math.max(0, Math.min(editorRoot.activeTabIndex, nextTabs.length - 1))
+        var currentName = String(tabNameField.text || "").trim()
+        nextTabs[index].name = currentName.length > 0 ? currentName : "Tab " + (index + 1)
         nextTabs[index].text = markdownEditor.textValue
         editorRoot.activeTabIndex = index
         editorRoot.noteTabs = nextTabs
@@ -73,7 +75,7 @@ ApplicationWindow {
     }
 
     function activateTab(index) {
-        commitEditorText()
+        commitActiveTabState()
         if (!editorRoot.noteTabs || index < 0 || index >= editorRoot.noteTabs.length)
             return
         editorRoot.activeTabIndex = index
@@ -83,7 +85,7 @@ ApplicationWindow {
     }
 
     function addTab() {
-        commitEditorText()
+        commitActiveTabState()
         var nextTabs = cloneTabs(editorRoot.noteTabs)
         nextTabs.push({
             name: "Tab " + (nextTabs.length + 1),
@@ -96,7 +98,7 @@ ApplicationWindow {
     function closeTab(index) {
         if (!editorRoot.noteTabs || editorRoot.noteTabs.length <= 1 || index < 0 || index >= editorRoot.noteTabs.length)
             return
-        commitEditorText()
+        commitActiveTabState()
         var nextTabs = cloneTabs(editorRoot.noteTabs)
         nextTabs.splice(index, 1)
         editorRoot.noteTabs = nextTabs
@@ -113,7 +115,7 @@ ApplicationWindow {
     }
 
     function saveAllTabs() {
-        commitEditorText()
+        commitActiveTabState()
         var sourceTabs = cloneTabs(editorRoot.noteTabs)
         var tabs = []
         for (var i = 0; i < sourceTabs.length; ++i) {
