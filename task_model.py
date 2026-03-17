@@ -2507,6 +2507,11 @@ class ProjectManager(QObject):
         """Return the configured ntfy bearer token."""
         return self._string_setting("notifications/ntfy_token", "")
 
+    @Property(bool, notify=ntfySettingsChanged)
+    def ntfyConfigured(self) -> bool:
+        """Return whether reminder notifications are configured."""
+        return bool(self.ntfyTopic.strip())
+
     @Slot(str, str, str)
     def saveNtfySettings(self, server: str, topic: str, token: str) -> None:
         """Persist ntfy settings used for reminder notifications."""

@@ -3183,6 +3183,11 @@ class TestTaskReminders:
         assert project_manager.ntfyServer == "https://example.ntfy"
         assert project_manager.ntfyTopic == "alerts"
         assert project_manager.ntfyToken == "secret"
+        assert project_manager.ntfyConfigured is True
+
+        project_manager.saveNtfySettings("https://example.ntfy", "", "")
+
+        assert project_manager.ntfyConfigured is False
 
     def test_project_manager_get_active_reminders_returns_sorted_cross_tab_results(self, app):
         from datetime import datetime, timedelta

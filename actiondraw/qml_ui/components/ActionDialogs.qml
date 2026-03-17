@@ -1221,6 +1221,7 @@ Item {
         property string serverValue: ""
         property string topicValue: ""
         property string tokenValue: ""
+        readonly property bool topicConfigured: topicValue.trim().length > 0
 
         onOpened: {
             serverValue = (projectManager && projectManager.ntfyServer) ? projectManager.ntfyServer : "https://ntfy.sh"
@@ -1238,6 +1239,42 @@ Item {
                 color: "#8a93a5"
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
+            }
+
+            Rectangle {
+                id: ntfyHelpBox
+                Layout.fillWidth: true
+                implicitHeight: ntfyHelpContent.implicitHeight + 24
+                radius: 8
+                color: "#1a2633"
+                border.color: "#3f5870"
+
+                ColumnLayout {
+                    id: ntfyHelpContent
+                    anchors.fill: parent
+                    anchors.margins: 12
+                    spacing: 6
+
+                    Label {
+                        text: "What is ntfy?"
+                        color: "#f5f6f8"
+                        font.bold: true
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: "ntfy is a simple push notification service. ActionDraw sends a message to your ntfy topic when a reminder is due."
+                        color: "#c9d7e6"
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: "Set a topic name here, subscribe to the same topic in the ntfy app or web client, and you will receive reminder notifications there."
+                        color: "#9fb3c8"
+                        wrapMode: Text.WordWrap
+                    }
+                }
             }
 
             Label {
@@ -1279,6 +1316,22 @@ Item {
                 onTextChanged: notificationSettingsDialog.topicValue = text
             }
 
+            Rectangle {
+                Layout.fillWidth: true
+                visible: !notificationSettingsDialog.topicConfigured
+                radius: 6
+                color: "#3a2418"
+                border.color: "#b16a3c"
+
+                Label {
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    text: "Notifications are not configured until you set an ntfy topic."
+                    color: "#ffd9bf"
+                    wrapMode: Text.WordWrap
+                }
+            }
+
             Label {
                 text: "Bearer Token"
                 color: "#d7e0ea"
@@ -1312,6 +1365,9 @@ Item {
                     notificationSettingsDialog.tokenValue
                 )
             }
+            if (!notificationSettingsDialog.topicConfigured && root && root.showSaveNotification) {
+                root.showSaveNotification("Notifications are not configured until you set an ntfy topic")
+            }
             notificationSettingsDialog.close()
         }
         onRejected: notificationSettingsDialog.close()
@@ -1321,6 +1377,7 @@ Item {
         id: reminderDialog
         modal: true
         title: "Set Reminder"
+        width: 420
         property int taskIndex: -1
         property string dateValue: ""
         property string timeValue: ""
@@ -1355,7 +1412,7 @@ Item {
         }
 
         contentItem: ColumnLayout {
-            width: 300
+            width: 340
             spacing: 12
 
             Label {
@@ -1363,6 +1420,48 @@ Item {
                 color: "#8a93a5"
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
+            }
+
+            Rectangle {
+                id: reminderNotificationWarning
+                Layout.fillWidth: true
+                visible: projectManager && !projectManager.ntfyConfigured
+                implicitHeight: warningContent.implicitHeight + 24
+                radius: 8
+                color: reminderDialog.sendNotification ? "#5a2418" : "#3f281c"
+                border.color: reminderDialog.sendNotification ? "#ff8a5b" : "#d08a52"
+                border.width: 2
+
+                ColumnLayout {
+                    id: warningContent
+                    anchors.fill: parent
+                    anchors.margins: 12
+                    spacing: 8
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: reminderDialog.sendNotification ? "Notification Setup Required" : "Notifications Not Configured"
+                        color: "#fff1e8"
+                        font.bold: true
+                    }
+
+                    Label {
+                        Layout.fillWidth: true
+                        text: reminderDialog.sendNotification
+                            ? "This reminder cannot send notifications until you configure Notification Settings."
+                            : "Reminder notifications are currently disabled because no ntfy topic is configured."
+                        color: "#ffe0cf"
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Button {
+                        text: "Open Notification Settings"
+                        onClicked: {
+                            reminderDialog.close()
+                            notificationSettingsDialog.open()
+                        }
+                    }
+                }
             }
 
             Button {
@@ -1442,6 +1541,8 @@ Item {
                 Layout.fillWidth: true
                 text: "Send notification"
                 checked: reminderDialog.sendNotification
+                palette.text: "#f5f6f8"
+                font.bold: checked || (projectManager && !projectManager.ntfyConfigured)
                 onToggled: reminderDialog.sendNotification = checked
             }
         }
@@ -1452,6 +1553,11 @@ Item {
 
         onAccepted: {
             if (diagramModel && reminderDialog.taskIndex >= 0) {
+                if (reminderDialog.sendNotification && projectManager && !projectManager.ntfyConfigured) {
+                    if (root && root.showSaveNotification)
+                        root.showSaveNotification("Go to Notification Settings to configure notifications")
+                    return
+                }
                 var reminderValue = reminderDialog.dateValue.trim() + " " + reminderDialog.timeValue.trim()
                 if (reminderDialog.dateValue.trim().length > 0 && reminderDialog.timeValue.trim().length > 0) {
                     var saved = diagramModel.setTaskReminderAt(
