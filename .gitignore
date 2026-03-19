@@ -25,7 +25,7 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
-
+eff_large_wordlist.txt
 # PyInstaller
 *.manifest
 *.spec

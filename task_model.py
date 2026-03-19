@@ -2899,13 +2899,17 @@ class ProjectManager(QObject):
             QDialog,
             QDialogButtonBox,
             QFormLayout,
+            QHBoxLayout,
             QLabel,
             QLineEdit,
             QPlainTextEdit,
+            QPushButton,
             QSizePolicy,
+            QSpinBox,
             QVBoxLayout,
         )
         from PySide6.QtGui import QGuiApplication
+        from eff_diceware import generate_passphrase
 
         dialog = QDialog()
         dialog.setWindowTitle(title)
@@ -2934,6 +2938,30 @@ class ProjectManager(QObject):
         form.addRow("Passphrase:", passphrase_edit)
         form.addRow("Confirm passphrase:", confirm_edit)
         layout.addLayout(form)
+
+        gen_row = QHBoxLayout()
+        gen_button = QPushButton("Suggest passphrase (EFF diceware)")
+        gen_button.setObjectName("generatePassphraseButton")
+        word_count_spin = QSpinBox()
+        word_count_spin.setObjectName("wordCountSpinBox")
+        word_count_spin.setRange(4, 12)
+        word_count_spin.setValue(6)
+        word_count_spin.setPrefix("Words: ")
+        gen_row.addWidget(gen_button)
+        gen_row.addWidget(word_count_spin)
+        gen_row.addStretch()
+        layout.addLayout(gen_row)
+
+        def _generate_and_fill() -> None:
+            passphrase, _bits = generate_passphrase(
+                num_words=word_count_spin.value(), separator="-"
+            )
+            passphrase_edit.setText(passphrase)
+            confirm_edit.setText(passphrase)
+            passphrase_edit.setEchoMode(QLineEdit.Normal)
+            confirm_edit.setEchoMode(QLineEdit.Normal)
+
+        gen_button.clicked.connect(_generate_and_fill)
 
         status_label = QLabel("Passphrase cannot be empty.")
         status_label.setObjectName("passphraseStatusLabel")
