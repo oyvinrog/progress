@@ -163,6 +163,28 @@ def _estimate_bruteforce_guesses(passphrase: str) -> int:
     return charset ** len(passphrase)
 
 
+def _detect_diceware(passphrase: str) -> Tuple[bool, int, int]:
+    """Detect if passphrase looks like diceware (wordlist-based).
+
+    Checks common separators (hyphen, space, dot, underscore) and whether
+    every token is a plausible dictionary word (all-alpha, 3-9 chars).
+
+    Returns (is_diceware, num_words, wordlist_size).
+    """
+    for sep in ("-", " ", ".", "_"):
+        if sep not in passphrase:
+            continue
+        tokens = passphrase.split(sep)
+        if len(tokens) < 3:
+            continue
+        if all(t.isalpha() and 3 <= len(t) <= 9 for t in tokens):
+            # Assume EFF large wordlist (7776) as the most common source.
+            # Even if the user typed this by hand, an attacker would try
+            # a wordlist attack first, so this is the honest estimate.
+            return True, len(tokens), 7776
+    return False, 0, 0
+
+
 def _has_sequence_run(text: str) -> bool:
     if len(text) < 3:
         return False
@@ -288,20 +310,38 @@ def _build_passphrase_crack_time_report(passphrase: str, *, include_yubikey_note
         CRACK_MODEL_ARGON2_GUESSES_PER_SECOND,
     )
 
+    is_diceware, num_words, wordlist_size = _detect_diceware(passphrase)
+
     lines = [
         f"Model: {CRACK_MODEL_PROFILE_NAME}, {CRACK_MODEL_KDF_PARAMS_TEXT}.",
         "Assumes offline attack against Argon2id-derived key material.",
-        (
+    ]
+
+    if is_diceware:
+        diceware_guesses = float(wordlist_size ** num_words)
+        diceware_bits = num_words * math.log2(wordlist_size)
+        dw_expected, dw_worst = _estimate_crack_seconds(
+            diceware_guesses,
+            CRACK_MODEL_ARGON2_GUESSES_PER_SECOND,
+        )
+        lines.append(
+            f"Wordlist attack ({num_words} words from {wordlist_size:,}-word list, "
+            f"~{diceware_bits:.1f} bits): "
+            f"Expected {_format_duration_human(dw_expected)}; "
+            f"Worst-case {_format_duration_human(dw_worst)}."
+        )
+    else:
+        lines.append(
             "Brute-force (charset^length): "
             f"Expected {_format_duration_human(brute_expected)}; "
             f"Worst-case {_format_duration_human(brute_worst)}."
-        ),
-        (
+        )
+        lines.append(
             "Human-pattern adjusted: "
             f"Expected {_format_duration_human(human_expected)}; "
             f"Worst-case {_format_duration_human(human_worst)}."
-        ),
-    ]
+        )
+
     if include_yubikey_note:
         lines.append("Note: Passphrase+YubiKey mode also requires YubiKey-derived secret material.")
     return "\n".join(lines)
