@@ -87,4 +87,5 @@ def main() -> int:
         if os.path.exists(file_path):
             project_manager.loadProject(file_path)
 
+    app.aboutToQuit.connect(project_manager.scrubProjectData)
     return app.exec()

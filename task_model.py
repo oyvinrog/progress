@@ -2132,6 +2132,35 @@ class ProjectManager(QObject):
         self._cached_encryption_file_path: str = ""
         self._last_saved_snapshot = self._serialize_project_payload(self._build_project_data())
 
+    def scrubProjectData(self) -> None:
+        """Best-effort scrub of plaintext project data from memory.
+
+        Zeros the derived key in-place (bytearray), drops all references
+        to plaintext task/diagram/tab data, and forces garbage collection.
+        """
+        import gc
+
+        # Zero the derived key — this is the one thing we can reliably scrub.
+        if self._cached_key_material is not None:
+            self._cached_key_material.scrub()
+            self._cached_key_material = None
+        self._cached_encryption_file_path = ""
+
+        # Drop the last-saved snapshot (contains full serialized plaintext).
+        self._last_saved_snapshot = ""
+
+        # Clear live models (drops references to Task/DiagramItem objects).
+        self._task_model.clear()
+        self._diagram_model.from_dict({"items": [], "edges": [], "strokes": []})
+        if self._tab_model is not None:
+            self._tab_model.clear()
+
+        # Clear navigation history.
+        self._navigation_back_stack.clear()
+
+        # Force GC to reclaim the now-unreferenced objects promptly.
+        gc.collect()
+
     @Property(bool, notify=canGoBackChanged)
     def canGoBack(self) -> bool:
         """Return whether drill-navigation history is available."""
@@ -3081,6 +3110,9 @@ class ProjectManager(QObject):
         if not os.path.exists(file_path):
             self.errorOccurred.emit(f"File not found: {file_path}")
             return
+
+        # Scrub previous project's plaintext data before loading new data.
+        self.scrubProjectData()
 
         try:
             with open(file_path, "r", encoding="utf-8") as f:

@@ -58,13 +58,19 @@ class DerivedKeyMaterial:
     does not remain in process memory.
     """
 
-    key: bytes  # 32-byte derived AES key
+    key: bytearray  # 32-byte derived AES key (bytearray so it can be zeroed)
     salt: bytes  # 16-byte salt used during derivation
     kdf_params: Dict[str, int]
     auth_mode: str
     yubikey_enabled: bool
     yubikey_slot: str
     yubikey_challenge_b64: str
+
+    def scrub(self) -> None:
+        """Zero the derived key in-place so it cannot be recovered from memory."""
+        if isinstance(self.key, (bytearray, memoryview)):
+            for i in range(len(self.key)):
+                self.key[i] = 0
 
 
 class YubiKeyProvider(Protocol):
@@ -339,7 +345,7 @@ def derive_key_material(
     key = _derive_key_argon2id(secret_material, salt, normalized_kdf)
 
     return DerivedKeyMaterial(
-        key=key,
+        key=bytearray(key),
         salt=salt,
         kdf_params=normalized_kdf,
         auth_mode=auth_mode,
@@ -402,7 +408,7 @@ def decrypt_and_derive_key_material(
     )
     yk_meta = encryption.get("yubikey", {})
     key_material = DerivedKeyMaterial(
-        key=key,
+        key=bytearray(key),
         salt=salt,
         kdf_params=kdf_params,
         auth_mode=str(encryption.get("auth_mode", "")),
