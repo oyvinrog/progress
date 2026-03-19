@@ -36,9 +36,13 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QColor
 from progress_crypto import (
     CryptoError,
+    DerivedKeyMaterial,
     EncryptionCredentials,
+    decrypt_and_derive_key_material,
     decrypt_project_data,
+    derive_key_material,
     encrypt_project_data,
+    encrypt_with_derived_key,
     has_yubikey_cli,
     is_encrypted_envelope,
     yubikey_support_guidance,
@@ -2124,7 +2128,7 @@ class ProjectManager(QObject):
             # Connect diagram model's currentTaskChanged to update tab sidebar
             if hasattr(self._diagram_model, 'currentTaskChanged'):
                 self._diagram_model.currentTaskChanged.connect(self._refreshCurrentTabDiagram)
-        self._cached_encryption_credentials: Optional[EncryptionCredentials] = None
+        self._cached_key_material: Optional[DerivedKeyMaterial] = None
         self._cached_encryption_file_path: str = ""
         self._last_saved_snapshot = self._serialize_project_payload(self._build_project_data())
 
@@ -2999,41 +3003,35 @@ class ProjectManager(QObject):
             project_data = dict(payload_data)
             project_data["saved_at"] = datetime.now().isoformat()
 
-            credentials = None
             if (
                 not force_prompt
-                and self._cached_encryption_credentials is not None
+                and self._cached_key_material is not None
                 and self._cached_encryption_file_path == file_path
             ):
-                credentials = EncryptionCredentials(
-                    passphrase=self._cached_encryption_credentials.passphrase,
-                    use_yubikey=self._cached_encryption_credentials.use_yubikey,
-                    yubikey_slot=self._cached_encryption_credentials.yubikey_slot,
-                )
+                encrypted_payload = encrypt_with_derived_key(project_data, self._cached_key_material)
+                encrypted_payload["version"] = self.ENCRYPTED_PROJECT_VERSION
             else:
                 credentials = self._prompt_encryption_credentials("save", file_path)
-            if credentials is None:
-                return False
+                if credentials is None:
+                    return False
 
-            if credentials.use_yubikey:
-                self._begin_yubikey_interaction("save")
-            try:
-                encrypted_payload = encrypt_project_data(project_data, credentials)
-                encrypted_payload["version"] = self.ENCRYPTED_PROJECT_VERSION
-            finally:
                 if credentials.use_yubikey:
-                    self._end_yubikey_interaction()
+                    self._begin_yubikey_interaction("save")
+                try:
+                    key_material = derive_key_material(credentials)
+                    encrypted_payload = encrypt_with_derived_key(project_data, key_material)
+                    encrypted_payload["version"] = self.ENCRYPTED_PROJECT_VERSION
+                finally:
+                    if credentials.use_yubikey:
+                        self._end_yubikey_interaction()
+
+                self._cached_key_material = key_material
+                self._cached_encryption_file_path = file_path
 
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(encrypted_payload, f, ensure_ascii=False, separators=(",", ":"))
 
             self._current_file_path = file_path
-            self._cached_encryption_file_path = file_path
-            self._cached_encryption_credentials = EncryptionCredentials(
-                passphrase=credentials.passphrase,
-                use_yubikey=credentials.use_yubikey,
-                yubikey_slot=credentials.yubikey_slot,
-            )
             self.currentFilePathChanged.emit()
             self._add_to_recent(file_path)
             self._last_saved_snapshot = self._serialize_project_payload(payload_data)
@@ -3095,16 +3093,14 @@ class ProjectManager(QObject):
                 if credentials.use_yubikey:
                     self._begin_yubikey_interaction("load")
                 try:
-                    project_data = decrypt_project_data(project_data, credentials)
+                    project_data, key_material = decrypt_and_derive_key_material(
+                        project_data, credentials,
+                    )
                 finally:
                     if credentials.use_yubikey:
                         self._end_yubikey_interaction()
                 self._cached_encryption_file_path = file_path
-                self._cached_encryption_credentials = EncryptionCredentials(
-                    passphrase=credentials.passphrase,
-                    use_yubikey=credentials.use_yubikey,
-                    yubikey_slot=credentials.yubikey_slot,
-                )
+                self._cached_key_material = key_material
 
             version = project_data.get("version", "1.0")
             active_tab = 0

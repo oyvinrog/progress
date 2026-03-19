@@ -50,6 +50,23 @@ class EncryptionCredentials:
     yubikey_slot: str = "2"
 
 
+@dataclass
+class DerivedKeyMaterial:
+    """Cached derived key for the derive-then-forget pattern.
+
+    Cache this instead of EncryptionCredentials so the original passphrase
+    does not remain in process memory.
+    """
+
+    key: bytes  # 32-byte derived AES key
+    salt: bytes  # 16-byte salt used during derivation
+    kdf_params: Dict[str, int]
+    auth_mode: str
+    yubikey_enabled: bool
+    yubikey_slot: str
+    yubikey_challenge_b64: str
+
+
 class YubiKeyProvider(Protocol):
     """Interface for obtaining deterministic challenge-response bytes from YubiKey."""
 
@@ -225,6 +242,19 @@ def decrypt_project_data(
     yubikey_provider: Optional[YubiKeyProvider] = None,
 ) -> Dict[str, Any]:
     """Decrypt an encrypted v1.2 envelope into plain project JSON payload."""
+    payload, _key, _salt, _kdf_params, _encryption = _decrypt_core(
+        envelope, credentials, yubikey_provider=yubikey_provider,
+    )
+    return payload
+
+
+def _decrypt_core(
+    envelope: Dict[str, Any],
+    credentials: EncryptionCredentials,
+    *,
+    yubikey_provider: Optional[YubiKeyProvider] = None,
+) -> tuple[Dict[str, Any], bytes, bytes, Dict[str, int], Dict[str, Any]]:
+    """Shared decryption logic. Returns (payload, key, salt, kdf_params, encryption)."""
     _require_crypto_dependencies()
 
     if envelope.get("version") != "1.2":
@@ -284,7 +314,103 @@ def decrypt_project_data(
     if not isinstance(payload, dict):
         raise CryptoError("Decrypted payload must be a JSON object")
 
-    return payload
+    return payload, key, salt, kdf_params, encryption
+
+
+def derive_key_material(
+    credentials: EncryptionCredentials,
+    *,
+    kdf_params: Optional[Dict[str, int]] = None,
+    yubikey_provider: Optional[YubiKeyProvider] = None,
+) -> DerivedKeyMaterial:
+    """Derive key material from credentials.
+
+    Cache the returned object instead of the credentials so the original
+    passphrase does not linger in process memory.
+    """
+    _require_crypto_dependencies()
+    normalized_kdf = _normalize_kdf_params(kdf_params)
+    auth_mode, challenge = _resolve_auth_mode_for_save(credentials)
+    secret_material = _build_secret_material(
+        credentials, challenge=challenge, yubikey_provider=yubikey_provider,
+    )
+
+    salt = os.urandom(16)
+    key = _derive_key_argon2id(secret_material, salt, normalized_kdf)
+
+    return DerivedKeyMaterial(
+        key=key,
+        salt=salt,
+        kdf_params=normalized_kdf,
+        auth_mode=auth_mode,
+        yubikey_enabled=credentials.use_yubikey,
+        yubikey_slot=credentials.yubikey_slot,
+        yubikey_challenge_b64=_b64encode(challenge) if challenge is not None else "",
+    )
+
+
+def encrypt_with_derived_key(
+    project_data: Dict[str, Any],
+    key_material: DerivedKeyMaterial,
+) -> Dict[str, Any]:
+    """Encrypt using pre-derived key material. Generates a fresh nonce."""
+    _require_crypto_dependencies()
+
+    nonce = os.urandom(12)
+
+    metadata: Dict[str, Any] = {
+        "cipher": "AES-256-GCM",
+        "kdf": "Argon2id",
+        "kdf_params": key_material.kdf_params,
+        "salt_b64": _b64encode(key_material.salt),
+        "nonce_b64": _b64encode(nonce),
+        "auth_mode": key_material.auth_mode,
+        "yubikey": {
+            "enabled": key_material.yubikey_enabled,
+            "slot": key_material.yubikey_slot,
+            "challenge_b64": key_material.yubikey_challenge_b64,
+        },
+    }
+
+    aad = _build_aad("1.2", metadata)
+    metadata["aad_b64"] = _b64encode(aad)
+
+    plaintext = json.dumps(project_data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ciphertext = AESGCM(key_material.key).encrypt(nonce, plaintext, aad)
+
+    return {
+        "version": "1.2",
+        "saved_at": project_data.get("saved_at"),
+        "encryption": metadata,
+        "ciphertext": _b64encode(ciphertext),
+    }
+
+
+def decrypt_and_derive_key_material(
+    envelope: Dict[str, Any],
+    credentials: EncryptionCredentials,
+    *,
+    yubikey_provider: Optional[YubiKeyProvider] = None,
+) -> tuple[Dict[str, Any], DerivedKeyMaterial]:
+    """Decrypt an encrypted envelope and return both payload and derived key material.
+
+    The returned DerivedKeyMaterial can be cached for subsequent saves so
+    the original passphrase does not need to stay in memory.
+    """
+    payload, key, salt, kdf_params, encryption = _decrypt_core(
+        envelope, credentials, yubikey_provider=yubikey_provider,
+    )
+    yk_meta = encryption.get("yubikey", {})
+    key_material = DerivedKeyMaterial(
+        key=key,
+        salt=salt,
+        kdf_params=kdf_params,
+        auth_mode=str(encryption.get("auth_mode", "")),
+        yubikey_enabled=bool(yk_meta.get("enabled", False)),
+        yubikey_slot=str(yk_meta.get("slot", "2")),
+        yubikey_challenge_b64=str(yk_meta.get("challenge_b64", "")),
+    )
+    return payload, key_material
 
 
 def is_encrypted_envelope(project_data: Dict[str, Any]) -> bool:
