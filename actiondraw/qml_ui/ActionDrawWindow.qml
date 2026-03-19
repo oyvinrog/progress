@@ -1642,14 +1642,6 @@ ApplicationWindow {
                             }
                         }
                         MenuItem {
-                            text: "Note"
-                            icon.name: "document-edit"
-                            onTriggered: {
-                                var snapped = root.snapPoint({x: diagramLayer.contextMenuX, y: diagramLayer.contextMenuY})
-                                root.openPresetDialog("note", snapped, "", undefined)
-                            }
-                        }
-                        MenuItem {
                             text: "New Task"
                             icon.name: "list-add"
                             onTriggered: {
