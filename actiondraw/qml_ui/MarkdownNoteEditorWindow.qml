@@ -68,8 +68,9 @@ ApplicationWindow {
             editorRoot.noteTabs = normalizedTabs([], editorRoot.noteText)
         var nextTabs = cloneTabs(editorRoot.noteTabs)
         var index = Math.max(0, Math.min(editorRoot.activeTabIndex, nextTabs.length - 1))
-        var currentName = String(tabNameField.text || "").trim()
-        nextTabs[index].name = currentName.length > 0 ? currentName : "Tab " + (index + 1)
+        var currentName = String(nextTabs[index].name || "").trim()
+        if (currentName.length === 0)
+            nextTabs[index].name = "Tab " + (index + 1)
         nextTabs[index].text = markdownEditor.textValue
         editorRoot.activeTabIndex = index
         editorRoot.noteTabs = nextTabs
@@ -246,7 +247,7 @@ ApplicationWindow {
                                     border.color: isActive ? "#88d0ff" : (tabMouse.containsMouse ? "#4a627a" : "#2d4054")
                                     border.width: 1
                                     height: 38
-                                    width: Math.max(150, tabLabel.implicitWidth + closeButtonContainer.width + 58)
+                                    width: Math.max(150, tabInlineEditor.implicitWidth + closeButtonContainer.width + 58)
 
                                     Rectangle {
                                         anchors.fill: parent
@@ -275,7 +276,15 @@ ApplicationWindow {
                                         id: tabMouse
                                         anchors.fill: parent
                                         hoverEnabled: true
-                                        onClicked: editorRoot.activateTab(index)
+                                        onClicked: {
+                                            if (isActive) {
+                                                tabInlineEditor.readOnly = false
+                                                tabInlineEditor.forceActiveFocus()
+                                                tabInlineEditor.selectAll()
+                                            } else {
+                                                editorRoot.activateTab(index)
+                                            }
+                                        }
                                     }
 
                                     Row {
@@ -292,14 +301,37 @@ ApplicationWindow {
                                             color: isActive ? "#7bc6ff" : "#4a6278"
                                         }
 
-                                        Label {
-                                            id: tabLabel
+                                        TextField {
+                                            id: tabInlineEditor
                                             anchors.verticalCenter: parent.verticalCenter
                                             text: String(modelData.name || ("Tab " + (index + 1)))
                                             color: isActive ? "#f3f8ff" : "#bfd0e3"
                                             font.pixelSize: 13
                                             font.bold: isActive
-                                            elide: Text.ElideRight
+                                            readOnly: true
+                                            background: Rectangle {
+                                                color: tabInlineEditor.readOnly ? "transparent" : "#0d1520"
+                                                border.color: tabInlineEditor.readOnly ? "transparent" : "#88d0ff"
+                                                border.width: tabInlineEditor.readOnly ? 0 : 1
+                                                radius: 4
+                                            }
+                                            padding: 2
+                                            leftPadding: tabInlineEditor.readOnly ? 0 : 4
+                                            rightPadding: tabInlineEditor.readOnly ? 0 : 4
+                                            onEditingFinished: {
+                                                editorRoot.setActiveTabName(text)
+                                                readOnly = true
+                                            }
+                                            onActiveFocusChanged: {
+                                                if (!activeFocus && !readOnly) {
+                                                    editorRoot.setActiveTabName(text)
+                                                    readOnly = true
+                                                }
+                                            }
+                                            Keys.onEscapePressed: {
+                                                text = String(modelData.name || ("Tab " + (index + 1)))
+                                                readOnly = true
+                                            }
                                         }
 
                                         Rectangle {
@@ -364,16 +396,6 @@ ApplicationWindow {
                     }
                 }
             }
-        }
-
-        TextField {
-            id: tabNameField
-            Layout.fillWidth: true
-            placeholderText: "Tab name"
-            text: (editorRoot.noteTabs && editorRoot.noteTabs.length > 0)
-                ? String(editorRoot.noteTabs[editorRoot.activeTabIndex].name || "")
-                : ""
-            onEditingFinished: editorRoot.setActiveTabName(text)
         }
 
         MarkdownEditorPane {
@@ -455,11 +477,6 @@ ApplicationWindow {
         if (restoringState) {
             if (activeTabIndex < 0 || activeTabIndex >= noteTabs.length)
                 activeTabIndex = 0
-            if (noteTabs.length > 0) {
-                var restoringName = String(noteTabs[activeTabIndex].name || "")
-                if (tabNameField.text !== restoringName)
-                    tabNameField.text = restoringName
-            }
             return
         }
         var normalized = normalizedTabs(noteTabs, noteText)
@@ -472,9 +489,6 @@ ApplicationWindow {
         var currentText = String(noteTabs[activeTabIndex].text || "")
         if (noteText !== currentText)
             noteText = currentText
-        var currentName = String(noteTabs[activeTabIndex].name || "")
-        if (tabNameField.text !== currentName)
-            tabNameField.text = currentName
     }
 
     Shortcut {
