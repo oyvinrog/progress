@@ -2612,6 +2612,8 @@ class TestActionDrawQmlTaskInteractions:
         assert 'id: noteBadge' in qml
         assert 'visible: itemRect.itemType !== "note" && itemRect.itemType !== "image"' in qml
         assert 'visible: itemRect.itemType !== "note" && model.noteMarkdown && model.noteMarkdown.trim().length > 0' not in qml
+        assert 'color: model.noteMarkdown && model.noteMarkdown.trim().length > 0 ? "#6fd3ff" : "#f5d96b"' in qml
+        assert 'border.color: model.noteMarkdown && model.noteMarkdown.trim().length > 0 ? "#3298c7" : "#d9b84f"' in qml
 
 
 class TestCountdownTimer:

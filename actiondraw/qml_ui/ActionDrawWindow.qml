@@ -2541,8 +2541,8 @@ ApplicationWindow {
                                 anchors.leftMargin: itemRect.isTask ? 6 : 8
                                 anchors.top: parent.top
                                 anchors.topMargin: 8
-                                color: "#f5d96b"
-                                border.color: "#d9b84f"
+                                color: model.noteMarkdown && model.noteMarkdown.trim().length > 0 ? "#6fd3ff" : "#f5d96b"
+                                border.color: model.noteMarkdown && model.noteMarkdown.trim().length > 0 ? "#3298c7" : "#d9b84f"
                                 border.width: 1
                                 z: 22
 
