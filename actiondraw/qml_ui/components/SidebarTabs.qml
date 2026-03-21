@@ -33,8 +33,10 @@ Rectangle {
     property string searchText: ""
     property var pinnedTabIndices: []
     property var recentTabIndices: []
+    property int quickAccessRevision: 0
 
     function refreshQuickAccess() {
+        quickAccessRevision += 1
         if (!tabModel) {
             pinnedTabIndices = []
             recentTabIndices = []
@@ -314,7 +316,10 @@ Rectangle {
                         border.width: 1
 
                         id: currentTabCard
-                        property var summary: sidebar.tabModel ? sidebar.tabSummary(sidebar.tabModel.currentTabIndex) : null
+                        property var summary: {
+                            var _revision = sidebar.quickAccessRevision
+                            return sidebar.tabModel ? sidebar.tabSummary(sidebar.tabModel.currentTabIndex) : null
+                        }
 
                         RowLayout {
                             anchors.fill: parent
@@ -367,7 +372,10 @@ Rectangle {
                             id: recentTabRow
                             required property var modelData
                             property int tabIndex: Number(modelData)
-                            property var summary: sidebar.tabSummary(tabIndex)
+                            property var summary: {
+                                var _revision = sidebar.quickAccessRevision
+                                return sidebar.tabSummary(tabIndex)
+                            }
                             visible: summary !== null && sidebar.matchesSearch(summary.name, summary.activeTaskTitle)
                             width: tabColumnContent.width
                             height: 30
@@ -437,7 +445,10 @@ Rectangle {
                             id: pinnedTabRow
                             required property var modelData
                             property int tabIndex: Number(modelData)
-                            property var summary: sidebar.tabSummary(tabIndex)
+                            property var summary: {
+                                var _revision = sidebar.quickAccessRevision
+                                return sidebar.tabSummary(tabIndex)
+                            }
                             visible: summary !== null
                                 && tabIndex !== (tabModel ? tabModel.currentTabIndex : -1)
                                 && sidebar.matchesSearch(summary.name, summary.activeTaskTitle)
