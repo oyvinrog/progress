@@ -29,6 +29,7 @@ Rectangle {
     )
     readonly property bool persistedExpanded: projectManager ? projectManager.sidebarExpanded : true
     readonly property bool isExpanded: persistedExpanded || keepExpanded
+    readonly property bool hasSingleTab: tabModel && tabModel.tabCount === 1
     property string searchText: ""
     property var pinnedTabIndices: []
     property var recentTabIndices: []
@@ -293,7 +294,7 @@ Rectangle {
                 Column {
                     width: parent.width
                     spacing: 4
-                    visible: sidebar.isExpanded
+                    visible: sidebar.isExpanded && !sidebar.hasSingleTab
 
                     Text {
                         visible: sidebar.tabModel && sidebar.tabModel.currentTabIndex >= 0
@@ -350,7 +351,7 @@ Rectangle {
                 Column {
                     width: parent.width
                     spacing: 4
-                    visible: sidebar.isExpanded && sidebar.recentTabIndices.length > 0
+                    visible: sidebar.isExpanded && !sidebar.hasSingleTab && sidebar.recentTabIndices.length > 0
 
                     Text {
                         text: "Recent"
@@ -420,7 +421,7 @@ Rectangle {
                 Column {
                     width: parent.width
                     spacing: 4
-                    visible: sidebar.isExpanded && sidebar.pinnedTabIndices.length > 0
+                    visible: sidebar.isExpanded && !sidebar.hasSingleTab && sidebar.pinnedTabIndices.length > 0
 
                     Text {
                         text: "Pinned"
@@ -504,7 +505,7 @@ Rectangle {
                     spacing: 4
 
                     Text {
-                        visible: sidebar.isExpanded
+                        visible: sidebar.isExpanded && !sidebar.hasSingleTab
                         text: sidebar.searchText.length > 0 ? "All Matching Tabs" : "All Tabs"
                         color: "#81b9d7"
                         font.pixelSize: 10
