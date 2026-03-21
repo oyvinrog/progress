@@ -779,6 +779,10 @@ ApplicationWindow {
             root.openPresetDialog("note", Qt.point(item.x, item.y), item.id, item.text)
             return
         }
+        if (item.type === "freetext") {
+            root.openFreeTextDialog(Qt.point(item.x, item.y), item.id, item.text)
+            return
+        }
         if (markdownNoteManager)
             markdownNoteManager.openNote(root.selectedItemId)
     }
@@ -2539,7 +2543,7 @@ ApplicationWindow {
 
                             Rectangle {
                                 id: noteBadge
-                                visible: itemRect.itemType !== "note" && itemRect.itemType !== "image"
+                                visible: itemRect.itemType !== "note" && itemRect.itemType !== "freetext" && itemRect.itemType !== "image"
                                 width: 18
                                 height: 18
                                 radius: 4
@@ -3581,7 +3585,7 @@ ApplicationWindow {
                                 ToolTip.visible: freeTextHover.containsMouse
                                 ToolTip.delay: 400
                                 ToolTip.timeout: 2000
-                                ToolTip.text: model.text + (model.noteMarkdown && model.noteMarkdown !== model.text ? "\n\n" + model.noteMarkdown : "")
+                                ToolTip.text: model.text
 
                                 MouseArea {
                                     id: freeTextHover

@@ -2618,14 +2618,23 @@ class TestActionDrawQmlTaskInteractions:
         assert 'function renameCurrentTab()' in sidebar_qml
         assert 'openTabRenameDialog(tabModel.currentTabIndex, summary.name || "")' in sidebar_qml
 
-    def test_note_badge_is_always_visible_for_non_note_non_image_items(self):
+    def test_note_badge_excludes_freetext_items(self):
         qml = load_actiondraw_qml()
 
         assert 'id: noteBadge' in qml
-        assert 'visible: itemRect.itemType !== "note" && itemRect.itemType !== "image"' in qml
+        assert 'visible: itemRect.itemType !== "note" && itemRect.itemType !== "freetext" && itemRect.itemType !== "image"' in qml
         assert 'visible: itemRect.itemType !== "note" && model.noteMarkdown && model.noteMarkdown.trim().length > 0' not in qml
         assert 'color: model.noteMarkdown && model.noteMarkdown.trim().length > 0 ? "#6fd3ff" : "#f5d96b"' in qml
         assert 'border.color: model.noteMarkdown && model.noteMarkdown.trim().length > 0 ? "#3298c7" : "#d9b84f"' in qml
+
+    def test_freetext_tooltip_and_selection_use_freetext_flow(self):
+        qml = load_actiondraw_qml()
+
+        assert 'if (item.type === "freetext") {' in qml
+        assert 'root.openFreeTextDialog(Qt.point(item.x, item.y), item.id, item.text)' in qml
+        assert 'ToolTip.text: model.text + (model.noteMarkdown && model.noteMarkdown !== model.text ? "\\n\\n" + model.noteMarkdown : "")' in qml
+        assert 'ToolTip.text: model.text + (model.noteMarkdown && model.noteMarkdown !== model.text ? "\\n\\n" + model.noteMarkdown : "")' not in qml[qml.index('id: freeTextLabel'):]
+        assert 'ToolTip.text: model.text' in qml[qml.index('id: freeTextLabel'):]
 
 
 class TestCountdownTimer:
