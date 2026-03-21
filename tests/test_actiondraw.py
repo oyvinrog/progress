@@ -2606,6 +2606,13 @@ class TestActionDrawQmlTaskInteractions:
         assert 'onActivated: projectManager.goBack()' in qml
         assert 'projectManager: projectManagerRef' in qml
 
+    def test_note_badge_is_always_visible_for_non_note_non_image_items(self):
+        qml = load_actiondraw_qml()
+
+        assert 'id: noteBadge' in qml
+        assert 'visible: itemRect.itemType !== "note" && itemRect.itemType !== "image"' in qml
+        assert 'visible: itemRect.itemType !== "note" && model.noteMarkdown && model.noteMarkdown.trim().length > 0' not in qml
+
 
 class TestCountdownTimer:
     """Tests for the countdown timer feature."""
@@ -5107,6 +5114,36 @@ class TestMarkdownNoteManager:
         assert manager.activeItemId == item_id
         assert manager._editor.save_confirmation_calls == 1
         assert empty_diagram_model.getItemMarkdown(item_id) == "Updated markdown"
+
+    def test_open_note_with_empty_markdown_uses_note_editor(self, empty_diagram_model, monkeypatch):
+        class _DummySignal:
+            def connect(self, _callback):
+                return None
+
+        class _DummyEditor:
+            def __init__(self, *_args, **_kwargs):
+                self.noteSaved = _DummySignal()
+                self.noteCanceled = _DummySignal()
+                self.open_calls = []
+
+            def open(self, *args, **kwargs):
+                self.open_calls.append((args, kwargs))
+
+        item_id = empty_diagram_model.addBox(40.0, 30.0, "Task")
+        monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
+        manager = MarkdownNoteManager(empty_diagram_model)
+
+        manager.openNote(item_id)
+
+        assert manager.editorOpen is True
+        assert manager.activeEditorType == "note"
+        assert manager.activeItemId == item_id
+        args, kwargs = manager._editor.open_calls[0]
+        assert args[0] == item_id
+        assert args[1] == ""
+        assert args[2] == "Task Note"
+        assert kwargs["editor_type"] == "note"
+        assert kwargs["tabs"][0]["text"] == ""
 
     def test_open_obstacle_uses_obstacle_editor_type(self, empty_diagram_model, monkeypatch):
         class _DummySignal:

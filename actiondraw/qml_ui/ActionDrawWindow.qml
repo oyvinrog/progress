@@ -2533,7 +2533,7 @@ ApplicationWindow {
 
                             Rectangle {
                                 id: noteBadge
-                                visible: itemRect.itemType !== "note" && model.noteMarkdown && model.noteMarkdown.trim().length > 0
+                                visible: itemRect.itemType !== "note" && itemRect.itemType !== "image"
                                 width: 18
                                 height: 18
                                 radius: 4
