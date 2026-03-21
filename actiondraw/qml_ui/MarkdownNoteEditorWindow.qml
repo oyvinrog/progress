@@ -339,6 +339,7 @@ ApplicationWindow {
                     }
 
                     Button {
+                        id: newTabButton
                         text: "New Tab"
                         Layout.preferredHeight: 38
                         Layout.preferredWidth: 92
@@ -346,10 +347,10 @@ ApplicationWindow {
                         background: Rectangle {
                             radius: 11
                             gradient: Gradient {
-                                GradientStop { position: 0.0; color: parent.down ? "#255277" : (parent.hovered ? "#2f628d" : "#274f73") }
-                                GradientStop { position: 1.0; color: parent.down ? "#1d3f5d" : "#1f4463" }
+                                GradientStop { position: 0.0; color: newTabButton.down ? "#255277" : (newTabButton.hovered ? "#2f628d" : "#274f73") }
+                                GradientStop { position: 1.0; color: newTabButton.down ? "#1d3f5d" : "#1f4463" }
                             }
-                            border.color: parent.hovered ? "#99dbff" : "#5e8eb5"
+                            border.color: newTabButton.hovered ? "#99dbff" : "#5e8eb5"
                             border.width: 1
                         }
                         contentItem: Label {
