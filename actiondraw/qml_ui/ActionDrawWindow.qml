@@ -542,8 +542,14 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "F2"
-        enabled: diagramModel !== null
-        onActivated: root.renameSelectedItem()
+        enabled: diagramModel !== null || tabModelRef !== null
+        onActivated: {
+            if (root.selectedItemId && root.selectedItemId.length > 0) {
+                root.renameSelectedItem()
+            } else if (sidebarTabs && sidebarTabs.renameCurrentTab) {
+                sidebarTabs.renameCurrentTab()
+            }
+        }
     }
 
     Shortcut {

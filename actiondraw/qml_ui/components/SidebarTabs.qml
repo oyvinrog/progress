@@ -96,6 +96,15 @@ Rectangle {
         renameTabDialog.open()
     }
 
+    function renameCurrentTab() {
+        if (!tabModel || tabModel.currentTabIndex === undefined || tabModel.currentTabIndex < 0 || !tabModel.getTabSummary)
+            return
+        var summary = tabModel.getTabSummary(tabModel.currentTabIndex)
+        if (!summary)
+            return
+        openTabRenameDialog(tabModel.currentTabIndex, summary.name || "")
+    }
+
     function openTabIconDialog(tabIndex, tabIcon, tabName) {
         tabIconDialog.tabIndex = tabIndex
         tabIconDialog.currentIcon = tabIcon || ""

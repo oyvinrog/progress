@@ -2606,6 +2606,18 @@ class TestActionDrawQmlTaskInteractions:
         assert 'onActivated: projectManager.goBack()' in qml
         assert 'projectManager: projectManagerRef' in qml
 
+    def test_f2_shortcut_renames_selected_item_or_current_tab(self):
+        qml = load_actiondraw_qml()
+        sidebar_qml = (QML_DIR / "components" / "SidebarTabs.qml").read_text(encoding="utf-8")
+
+        assert 'sequence: "F2"' in qml
+        assert 'if (root.selectedItemId && root.selectedItemId.length > 0)' in qml
+        assert 'root.renameSelectedItem()' in qml
+        assert 'else if (sidebarTabs && sidebarTabs.renameCurrentTab)' in qml
+        assert 'sidebarTabs.renameCurrentTab()' in qml
+        assert 'function renameCurrentTab()' in sidebar_qml
+        assert 'openTabRenameDialog(tabModel.currentTabIndex, summary.name || "")' in sidebar_qml
+
     def test_note_badge_is_always_visible_for_non_note_non_image_items(self):
         qml = load_actiondraw_qml()
 
