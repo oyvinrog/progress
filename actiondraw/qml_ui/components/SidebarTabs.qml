@@ -61,6 +61,10 @@ Rectangle {
         return String(text || "").trim().toLowerCase()
     }
 
+    function safeString(value) {
+        return value === undefined || value === null ? "" : String(value)
+    }
+
     function matchesSearch(name, activeTaskTitle) {
         var needle = normalizeSearch(searchText)
         if (needle.length === 0)
@@ -328,14 +332,14 @@ Rectangle {
                             spacing: 6
 
                             Text {
-                                text: (currentTabCard.summary && currentTabCard.summary.icon) ? currentTabCard.summary.icon : "•"
+                                text: (currentTabCard.summary && currentTabCard.summary.icon) ? safeString(currentTabCard.summary.icon) : "•"
                                 color: "#f4fbff"
                                 font.pixelSize: 11
                                 font.bold: true
                             }
 
                             Text {
-                                text: currentTabCard.summary ? currentTabCard.summary.name : ""
+                                text: currentTabCard.summary ? safeString(currentTabCard.summary.name) : ""
                                 color: "#ffffff"
                                 font.pixelSize: 11
                                 font.bold: true
@@ -391,13 +395,13 @@ Rectangle {
                                 spacing: 6
 
                                 Text {
-                                    text: recentTabRow.summary && recentTabRow.summary.icon ? recentTabRow.summary.icon : "•"
+                                    text: recentTabRow.summary && recentTabRow.summary.icon ? safeString(recentTabRow.summary.icon) : "•"
                                     color: "#dceaf8"
                                     font.pixelSize: 10
                                 }
 
                                 Text {
-                                    text: recentTabRow.summary ? recentTabRow.summary.name : ""
+                                    text: recentTabRow.summary ? safeString(recentTabRow.summary.name) : ""
                                     color: "#d7e7f6"
                                     font.pixelSize: 10
                                     elide: Text.ElideRight
@@ -471,14 +475,14 @@ Rectangle {
                                     spacing: 6
 
                                     Text {
-                                        text: pinnedTabRow.summary && pinnedTabRow.summary.icon ? pinnedTabRow.summary.icon : "PIN"
+                                        text: pinnedTabRow.summary && pinnedTabRow.summary.icon ? safeString(pinnedTabRow.summary.icon) : "PIN"
                                         color: "#fff4c7"
                                         font.pixelSize: 10
                                         font.bold: true
                                     }
 
                                     Text {
-                                        text: pinnedTabRow.summary ? pinnedTabRow.summary.name : ""
+                                        text: pinnedTabRow.summary ? safeString(pinnedTabRow.summary.name) : ""
                                         color: "#f1f7ff"
                                         font.pixelSize: 10
                                         font.bold: true
@@ -489,7 +493,7 @@ Rectangle {
 
                                 Text {
                                     visible: !!(pinnedTabRow.summary && pinnedTabRow.summary.activeTaskTitle)
-                                    text: pinnedTabRow.summary ? pinnedTabRow.summary.activeTaskTitle : ""
+                                    text: pinnedTabRow.summary ? safeString(pinnedTabRow.summary.activeTaskTitle) : ""
                                     color: "#8db5ca"
                                     font.pixelSize: 9
                                     elide: Text.ElideRight
