@@ -62,6 +62,7 @@ class ClipboardMixin:
             "noteTabs": normalize_editor_tabs(item.note_tabs, fallback_text=note_markdown),
             "obstacleTabs": normalize_editor_tabs(item.obstacle_tabs, fallback_text=item.obstacle_markdown),
             "textTabs": normalize_editor_tabs(item.text_tabs, fallback_text=item.text),
+            "textTabIndex": int(item.text_tab_index),
         }
 
     def _build_opml_text(self, items: List[DiagramItem]) -> str:
@@ -482,7 +483,12 @@ class ClipboardMixin:
                 note_tabs=normalize_editor_tabs(item_data.get("noteTabs"), fallback_text=text_value if item_type == DiagramItemType.NOTE else note_markdown_value),
                 obstacle_tabs=normalize_editor_tabs(item_data.get("obstacleTabs"), fallback_text=obstacle_markdown_value),
                 text_tabs=normalize_editor_tabs(item_data.get("textTabs"), fallback_text=text_value),
+                text_tab_index=max(0, int(item_data.get("textTabIndex", 0) or 0)),
             )
+            if item.text_tabs:
+                item.text_tab_index = max(0, min(item.text_tab_index, len(item.text_tabs) - 1))
+            else:
+                item.text_tab_index = 0
             self._append_item(item)
             old_id = str(item_data.get("id", ""))
             if old_id:

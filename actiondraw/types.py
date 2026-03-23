@@ -49,6 +49,7 @@ class DiagramItem:
     note_tabs: List[Dict[str, str]] = field(default_factory=list)
     obstacle_tabs: List[Dict[str, str]] = field(default_factory=list)
     text_tabs: List[Dict[str, str]] = field(default_factory=list)
+    text_tab_index: int = 0
 
 
 @dataclass

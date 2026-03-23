@@ -539,6 +539,8 @@ class TestQueries:
         assert roles[empty_diagram_model.LinkedSubtabCompletionRole] == b"linkedSubtabCompletion"
         assert roles[empty_diagram_model.LinkedSubtabActiveActionRole] == b"linkedSubtabActiveAction"
         assert roles[empty_diagram_model.HasLinkedSubtabRole] == b"hasLinkedSubtab"
+        assert roles[empty_diagram_model.TextTabsRole] == b"textTabs"
+        assert roles[empty_diagram_model.TextTabIndexRole] == b"textTabIndex"
 
     def test_data_invalid_index(self, empty_diagram_model):
         assert empty_diagram_model.data(empty_diagram_model.index(10, 0), empty_diagram_model.IdRole) is None
@@ -1060,6 +1062,102 @@ class TestDiagramModelSerialization:
         assert item is not None
         assert item.text == "Visible"
         assert item.text_tabs[1]["text"] == "Hidden draft"
+
+    def test_freetext_preview_tab_index_roundtrip(self, empty_diagram_model):
+        item_id = empty_diagram_model.addPresetItemWithText("freetext", 10.0, 20.0, "Visible")
+        empty_diagram_model.setEditorTabs(
+            item_id,
+            "freetext",
+            [
+                {"name": "Visible", "text": "Visible"},
+                {"name": "Draft", "text": "Hidden draft"},
+            ],
+        )
+        empty_diagram_model.setItemTextTabIndex(item_id, 1)
+
+        data = empty_diagram_model.to_dict()
+        assert data["items"][0]["text_tab_index"] == 1
+
+        new_model = DiagramModel()
+        new_model.from_dict(data)
+        item = new_model.getItem(item_id)
+        assert item is not None
+        assert item.text == "Visible"
+        assert item.text_tab_index == 1
+
+    def test_freetext_preview_tab_index_clamps_after_tab_replacement(self, empty_diagram_model):
+        item_id = empty_diagram_model.addPresetItemWithText("freetext", 10.0, 20.0, "Visible")
+        empty_diagram_model.setEditorTabs(
+            item_id,
+            "freetext",
+            [
+                {"name": "Visible", "text": "Visible"},
+                {"name": "Draft", "text": "Hidden draft"},
+            ],
+        )
+        empty_diagram_model.setItemTextTabIndex(item_id, 1)
+
+        empty_diagram_model.setEditorTabs(
+            item_id,
+            "freetext",
+            [{"name": "Visible", "text": "Visible"}],
+        )
+
+        item = empty_diagram_model.getItem(item_id)
+        index = empty_diagram_model.index(0, 0)
+        assert item is not None
+        assert item.text_tab_index == 0
+        assert empty_diagram_model.data(index, empty_diagram_model.TextTabIndexRole) == 0
+
+    def test_freetext_preview_tab_index_change_emits_model_roles(self, empty_diagram_model):
+        item_id = empty_diagram_model.addPresetItemWithText("freetext", 10.0, 20.0, "Visible")
+        empty_diagram_model.setEditorTabs(
+            item_id,
+            "freetext",
+            [
+                {"name": "Visible", "text": "Visible"},
+                {"name": "Draft", "text": "Hidden draft"},
+            ],
+        )
+
+        emitted_roles = []
+        empty_diagram_model.dataChanged.connect(lambda _top_left, _bottom_right, roles: emitted_roles.append(list(roles)))
+
+        empty_diagram_model.setItemTextTabIndex(item_id, 1)
+
+        index = empty_diagram_model.index(0, 0)
+        assert empty_diagram_model.data(index, empty_diagram_model.TextTabIndexRole) == 1
+        assert empty_diagram_model.data(index, empty_diagram_model.TextTabsRole)[1]["text"] == "Hidden draft"
+        assert any(empty_diagram_model.TextTabIndexRole in roles for roles in emitted_roles)
+
+    def test_freetext_preview_tab_index_clamps_on_load(self):
+        model = DiagramModel()
+        model.from_dict({
+            "items": [
+                {
+                    "id": "freetext_0",
+                    "item_type": "freetext",
+                    "x": 10,
+                    "y": 20,
+                    "width": 120,
+                    "height": 80,
+                    "text": "Visible",
+                    "text_tabs": [{"name": "Visible", "text": "Visible"}],
+                    "text_tab_index": 9,
+                    "task_index": -1,
+                    "color": "#4a9eff",
+                    "text_color": "#f5f6f8",
+                }
+            ],
+            "edges": [],
+            "strokes": [],
+        })
+
+        item = model.getItem("freetext_0")
+        index = model.index(0, 0)
+        assert item is not None
+        assert item.text_tab_index == 0
+        assert model.data(index, model.TextTabIndexRole) == 0
 
     def test_empty_obstacle_markdown_not_serialized(self, empty_diagram_model):
         item_id = empty_diagram_model.addBox(10.0, 20.0, "Task")
@@ -2634,7 +2732,17 @@ class TestActionDrawQmlTaskInteractions:
         assert 'root.openFreeTextDialog(Qt.point(item.x, item.y), item.id, item.text)' in qml
         assert 'ToolTip.text: model.text + (model.noteMarkdown && model.noteMarkdown !== model.text ? "\\n\\n" + model.noteMarkdown : "")' in qml
         assert 'ToolTip.text: model.text + (model.noteMarkdown && model.noteMarkdown !== model.text ? "\\n\\n" + model.noteMarkdown : "")' not in qml[qml.index('id: freeTextLabel'):]
-        assert 'ToolTip.text: model.text' in qml[qml.index('id: freeTextLabel'):]
+        assert 'ToolTip.text: itemRect.freeTextDisplayText' in qml[qml.index('id: freeTextLabel'):]
+
+    def test_freetext_canvas_preview_has_tab_switcher(self):
+        qml = load_actiondraw_qml()
+
+        assert 'property var freeTextTabs: model.textTabs || []' in qml
+        assert 'property int freeTextTabIndex: model.textTabIndex || 0' in qml
+        assert 'id: freeTextTabSwitcher' in qml
+        assert 'visible: itemRect.freeTextTabCount > 1' in qml
+        assert 'diagramModel.setItemTextTabIndex(itemRect.itemId, nextIndex)' in qml
+        assert 'text: itemRect.freeTextDisplayText' in qml[qml.index('id: freeTextLabel'):]
 
 
 class TestCountdownTimer:

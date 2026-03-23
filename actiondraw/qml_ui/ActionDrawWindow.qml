@@ -2270,6 +2270,39 @@ ApplicationWindow {
                             property real linkedSubtabCompletion: model.linkedSubtabCompletion
                             property string linkedSubtabActiveAction: model.linkedSubtabActiveAction
                             property bool hasLinkedSubtab: model.hasLinkedSubtab
+                            property var freeTextTabs: model.textTabs || []
+                            property int freeTextTabIndex: model.textTabIndex || 0
+                            property int freeTextTabCount: freeTextTabs && freeTextTabs.length !== undefined ? freeTextTabs.length : 0
+                            property var freeTextActiveTab: freeTextTabCount > 0
+                                ? freeTextTabs[Math.max(0, Math.min(freeTextTabIndex, freeTextTabCount - 1))]
+                                : null
+                            property string freeTextDisplayText: {
+                                if (itemRect.itemType !== "freetext")
+                                    return model.text
+                                if (freeTextActiveTab && freeTextActiveTab.text !== undefined)
+                                    return String(freeTextActiveTab.text || "")
+                                return model.text
+                            }
+                            property string freeTextActiveTabName: {
+                                if (itemRect.itemType !== "freetext")
+                                    return ""
+                                if (freeTextActiveTab && freeTextActiveTab.name !== undefined) {
+                                    var tabName = String(freeTextActiveTab.name || "").trim()
+                                    if (tabName.length > 0)
+                                        return tabName
+                                }
+                                return freeTextTabCount > 0 ? "Tab " + (Math.max(0, Math.min(freeTextTabIndex, freeTextTabCount - 1)) + 1) : ""
+                            }
+                            function cycleFreeTextTab(step) {
+                                if (!diagramModel || itemRect.itemType !== "freetext" || freeTextTabCount <= 1)
+                                    return
+                                var nextIndex = freeTextTabIndex + step
+                                if (nextIndex < 0)
+                                    nextIndex = freeTextTabCount - 1
+                                else if (nextIndex >= freeTextTabCount)
+                                    nextIndex = 0
+                                diagramModel.setItemTextTabIndex(itemRect.itemId, nextIndex)
+                            }
                             property real labelLeftInset: {
                                 var inset = 12
                                 if (itemRect.itemType === "chatgpt")
@@ -3071,6 +3104,88 @@ ApplicationWindow {
                                 }
 
                                 Rectangle {
+                                    id: freeTextTabSwitcher
+                                    visible: itemRect.freeTextTabCount > 1
+                                    anchors.top: parent.top
+                                    anchors.right: parent.right
+                                    anchors.topMargin: 10
+                                    anchors.rightMargin: 10
+                                    radius: 8
+                                    color: "#172331"
+                                    border.color: "#4f657d"
+                                    border.width: 1
+                                    width: Math.max(118, Math.min(Math.max(118, parent.width - 52), freeTextTabLabel.implicitWidth + 54))
+                                    height: 24
+                                    z: 90
+
+                                    Row {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 4
+                                        anchors.rightMargin: 4
+                                        spacing: 2
+
+                                        Rectangle {
+                                            width: 18
+                                            height: 18
+                                            radius: 5
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            color: freeTextPrevMouse.containsMouse ? "#31485f" : "transparent"
+
+                                            Label {
+                                                anchors.centerIn: parent
+                                                text: "<"
+                                                color: "#d8e5f2"
+                                                font.pixelSize: 11
+                                                font.bold: true
+                                            }
+
+                                            MouseArea {
+                                                id: freeTextPrevMouse
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                onClicked: itemRect.cycleFreeTextTab(-1)
+                                            }
+                                        }
+
+                                        Label {
+                                            id: freeTextTabLabel
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: freeTextTabSwitcher.width - 48
+                                            horizontalAlignment: Text.AlignHCenter
+                                            elide: Text.ElideRight
+                                            text: itemRect.freeTextActiveTabName
+                                                + " (" + (itemRect.freeTextTabIndex + 1) + "/" + itemRect.freeTextTabCount + ")"
+                                            color: "#eef6ff"
+                                            font.pixelSize: 11
+                                            font.bold: true
+                                        }
+
+                                        Rectangle {
+                                            width: 18
+                                            height: 18
+                                            radius: 5
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            color: freeTextNextMouse.containsMouse ? "#31485f" : "transparent"
+
+                                            Label {
+                                                anchors.centerIn: parent
+                                                text: ">"
+                                                color: "#d8e5f2"
+                                                font.pixelSize: 11
+                                                font.bold: true
+                                            }
+
+                                            MouseArea {
+                                                id: freeTextNextMouse
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                onClicked: itemRect.cycleFreeTextTab(1)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
                                     id: freetextResizeHandle
                                     anchors.bottom: parent.bottom
                                     anchors.right: parent.right
@@ -3556,7 +3671,7 @@ ApplicationWindow {
                                 id: freeTextLabel
                                 visible: itemRect.itemType === "freetext"
                                 anchors.fill: parent
-                                anchors.topMargin: 24
+                                anchors.topMargin: itemRect.freeTextTabCount > 1 ? 40 : 24
                                 anchors.leftMargin: 12
                                 anchors.rightMargin: 12
                                 anchors.bottomMargin: 8
@@ -3571,7 +3686,7 @@ ApplicationWindow {
                                         return itemRect.selected || itemRect.hovered
                                     return diagramModel.count <= 80 || itemRect.selected || itemRect.hovered
                                 }
-                                text: model.text
+                                text: itemRect.freeTextDisplayText
                                 color: model.textColor
                                 wrapMode: Text.Wrap
                                 horizontalAlignment: Text.AlignLeft
@@ -3585,7 +3700,7 @@ ApplicationWindow {
                                 ToolTip.visible: freeTextHover.containsMouse
                                 ToolTip.delay: 400
                                 ToolTip.timeout: 2000
-                                ToolTip.text: model.text
+                                ToolTip.text: itemRect.freeTextDisplayText
 
                                 MouseArea {
                                     id: freeTextHover
