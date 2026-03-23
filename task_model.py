@@ -2286,9 +2286,13 @@ class ProjectManager(QObject):
 
     def _onCurrentTabReminderDue(self, task_index: int, task_title: str) -> None:
         tab_index = self._tab_model.currentTabIndex if self._tab_model is not None else 0
+        sent_notification = False
         if self._task_model.isReminderNotificationEnabled(task_index):
             self._publishReminderNotification(tab_index, task_title)
+            sent_notification = True
         self.taskReminderDue.emit(tab_index, task_index, task_title)
+        if sent_notification:
+            self._save_after_reminder()
 
     def _onCurrentTabContractBreached(
         self,
@@ -2307,6 +2311,7 @@ class ProjectManager(QObject):
 
         now = time.time()
         active_tab = self._tab_model.currentTabIndex
+        sent_notification = False
 
         for tab_index, tab in enumerate(self._tab_model.getAllTabs()):
             if tab_index == active_tab:
@@ -2339,6 +2344,7 @@ class ProjectManager(QObject):
                     title = str(task.get("title", "")).strip() or "Task"
                     if send_notification:
                         self._publishReminderNotification(tab_index, title)
+                        sent_notification = True
                     self.taskReminderDue.emit(tab_index, task_index, title)
 
                 deadline_at = task.get("contract_deadline_at")
@@ -2375,6 +2381,14 @@ class ProjectManager(QObject):
                     model_index,
                     [self._tab_model.CompletionRole, self._tab_model.ActiveTaskTitleRole],
                 )
+
+        if sent_notification:
+            self._save_after_reminder()
+
+    def _save_after_reminder(self) -> None:
+        """Persist the project so the cleared notification flag survives a crash."""
+        if self._current_file_path:
+            self.saveCurrentProject()
 
     def _get_cross_tab_tasks(self, tab_index: int) -> Optional[List[Dict[str, Any]]]:
         """Return mutable task dictionaries for a tab, if available."""
