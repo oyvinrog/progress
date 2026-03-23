@@ -4,6 +4,19 @@ import re
 from pathlib import Path
 from typing import Set
 
+RUNTIME_ROOT_MODULES = {
+    "eff_diceware",
+    "markdown_note_editor",
+    "progress_crypto",
+    "task_model",
+}
+
+DEV_ROOT_MODULES = {
+    "bump_version",
+    "run_actiondraw",
+    "validate_actiondraw",
+}
+
 
 def _read_setuptools_py_modules() -> Set[str]:
     pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
@@ -12,11 +25,35 @@ def _read_setuptools_py_modules() -> Set[str]:
     return set(re.findall(r'"([^"]+)"', match.group(1)))
 
 
+def _repo_root_modules() -> Set[str]:
+    return {path.stem for path in Path(".").glob("*.py")}
+
+
+def test_all_root_modules_are_classified():
+    known_modules = RUNTIME_ROOT_MODULES | DEV_ROOT_MODULES
+    unclassified = _repo_root_modules() - known_modules
+    assert not unclassified, f"Unclassified repo-root modules: {sorted(unclassified)}"
+
+
 def test_runtime_top_level_modules_are_packaged():
     modules = _read_setuptools_py_modules()
-    required = {"task_model", "markdown_note_editor", "progress_crypto"}
-    missing = required - modules
-    assert not missing, f"Missing py-modules in pyproject.toml: {sorted(missing)}"
+    assert modules == RUNTIME_ROOT_MODULES, (
+        "tool.setuptools.py-modules does not match audited runtime modules. "
+        f"Expected {sorted(RUNTIME_ROOT_MODULES)}, got {sorted(modules)}"
+    )
+
+
+def test_packaged_root_modules_have_files_and_exclude_dev_scripts():
+    repo_modules = _repo_root_modules()
+    modules = _read_setuptools_py_modules()
+
+    missing_files = modules - repo_modules
+    assert not missing_files, f"Packaged modules missing files: {sorted(missing_files)}"
+
+    packaged_dev_modules = modules & DEV_ROOT_MODULES
+    assert not packaged_dev_modules, (
+        f"Development-only modules should not be packaged: {sorted(packaged_dev_modules)}"
+    )
 
 
 def test_priorityplot_script_is_declared():

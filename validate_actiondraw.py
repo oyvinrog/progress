@@ -17,6 +17,19 @@ import ast
 import subprocess
 from pathlib import Path
 
+RUNTIME_ROOT_MODULES = {
+    "eff_diceware",
+    "markdown_note_editor",
+    "progress_crypto",
+    "task_model",
+}
+
+DEV_ROOT_MODULES = {
+    "bump_version",
+    "run_actiondraw",
+    "validate_actiondraw",
+}
+
 
 def check_syntax(filename):
     """Check if a Python file has valid syntax."""
@@ -164,17 +177,52 @@ def _load_pyproject_modules():
     return modules
 
 
+def _repo_root_modules():
+    """Return all top-level Python modules in the repo root."""
+    return {p.stem for p in Path(".").glob("*.py")}
+
+
 def check_packaging_manifest():
-    """Ensure local imports are listed in pyproject.toml py-modules."""
+    """Ensure root modules are classified and packaged imports are declared."""
     modules = _load_pyproject_modules()
     if not modules:
         return True
 
     module_set = set(modules)
-    local_modules = {p.stem for p in Path(".").glob("*.py")}
+    repo_modules = _repo_root_modules()
+    expected_modules = set(RUNTIME_ROOT_MODULES)
+    ok = True
+
+    unclassified = repo_modules - expected_modules - DEV_ROOT_MODULES
+    if unclassified:
+        print(f"✗ Unclassified repo-root modules: {', '.join(sorted(unclassified))}")
+        print("  Add each module to either RUNTIME_ROOT_MODULES or DEV_ROOT_MODULES")
+        ok = False
+
+    stale_entries = module_set - repo_modules
+    if stale_entries:
+        print(f"✗ pyproject.toml lists missing modules: {', '.join(sorted(stale_entries))}")
+        ok = False
+
+    missing_runtime_entries = expected_modules - module_set
+    if missing_runtime_entries:
+        print(
+            "✗ pyproject.toml is missing runtime modules: "
+            f"{', '.join(sorted(missing_runtime_entries))}"
+        )
+        ok = False
+
+    unexpected_packaged = module_set - expected_modules
+    if unexpected_packaged:
+        print(
+            "✗ pyproject.toml packages non-runtime modules: "
+            f"{', '.join(sorted(unexpected_packaged))}"
+        )
+        ok = False
+
     missing = {}
 
-    for module_name in modules:
+    for module_name in sorted(expected_modules & module_set):
         module_path = Path(f"{module_name}.py")
         if not module_path.exists():
             continue
@@ -190,12 +238,12 @@ def check_packaging_manifest():
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     name = alias.name.split(".")[0]
-                    if name in local_modules and name not in module_set:
+                    if name in repo_modules and name not in module_set:
                         missing.setdefault(module_name, set()).add(name)
             elif isinstance(node, ast.ImportFrom):
                 if node.module:
                     name = node.module.split(".")[0]
-                    if name in local_modules and name not in module_set:
+                    if name in repo_modules and name not in module_set:
                         missing.setdefault(module_name, set()).add(name)
 
     if missing:
@@ -204,10 +252,11 @@ def check_packaging_manifest():
             deps = ", ".join(sorted(missing[module_name]))
             print(f"  {module_name}.py imports: {deps}")
         print("  Add them under [tool.setuptools].py-modules in pyproject.toml")
-        return False
+        ok = False
 
-    print("✓ Packaging manifest covers local imports")
-    return True
+    if ok:
+        print("✓ Packaging manifest covers audited runtime modules and local imports")
+    return ok
 
 
 def check_actiondraw_smoke():
