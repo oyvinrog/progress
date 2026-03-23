@@ -5175,6 +5175,7 @@ class TestMarkdownNoteManager:
         class _DummyEditor:
             def __init__(self, *_args, **_kwargs):
                 self.noteSaved = _DummySignal()
+                self.noteSavedAndClosed = _DummySignal()
                 self.noteCanceled = _DummySignal()
 
         monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
@@ -5194,6 +5195,7 @@ class TestMarkdownNoteManager:
         class _DummyEditor:
             def __init__(self, *_args, **_kwargs):
                 self.noteSaved = _DummySignal()
+                self.noteSavedAndClosed = _DummySignal()
                 self.noteCanceled = _DummySignal()
                 self.note_id = ""
                 self.save_confirmation_calls = 0
@@ -5227,6 +5229,7 @@ class TestMarkdownNoteManager:
         class _DummyEditor:
             def __init__(self, *_args, **_kwargs):
                 self.noteSaved = _DummySignal()
+                self.noteSavedAndClosed = _DummySignal()
                 self.noteCanceled = _DummySignal()
                 self.save_confirmation_calls = 0
 
@@ -5254,6 +5257,7 @@ class TestMarkdownNoteManager:
         class _DummyEditor:
             def __init__(self, *_args, **_kwargs):
                 self.noteSaved = _DummySignal()
+                self.noteSavedAndClosed = _DummySignal()
                 self.noteCanceled = _DummySignal()
                 self.open_calls = []
 
@@ -5284,6 +5288,7 @@ class TestMarkdownNoteManager:
         class _DummyEditor:
             def __init__(self, *_args, **_kwargs):
                 self.noteSaved = _DummySignal()
+                self.noteSavedAndClosed = _DummySignal()
                 self.noteCanceled = _DummySignal()
                 self.open_calls = []
 
@@ -5322,6 +5327,7 @@ class TestMarkdownNoteManager:
         class _DummyEditor:
             def __init__(self, *_args, **_kwargs):
                 self.noteSaved = _DummySignal()
+                self.noteSavedAndClosed = _DummySignal()
                 self.noteCanceled = _DummySignal()
                 self.save_confirmation_calls = 0
 
@@ -5352,6 +5358,34 @@ class TestMarkdownNoteManager:
         item = empty_diagram_model.getItem(item_id)
         assert item is not None
         assert item.obstacle_tabs[1]["name"] == "Follow-up"
+
+    def test_save_and_close_note_updates_model_and_closes_editor(self, empty_diagram_model, monkeypatch):
+        class _DummySignal:
+            def connect(self, _callback):
+                return None
+
+        class _DummyEditor:
+            def __init__(self, *_args, **_kwargs):
+                self.noteSaved = _DummySignal()
+                self.noteSavedAndClosed = _DummySignal()
+                self.noteCanceled = _DummySignal()
+                self.save_confirmation_calls = 0
+
+            def show_save_confirmation(self):
+                self.save_confirmation_calls += 1
+
+        item_id = empty_diagram_model.addBox(40.0, 30.0, "Task")
+        monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
+        manager = MarkdownNoteManager(empty_diagram_model)
+        manager._set_editor_state("note", item_id, 40.0, 30.0, True)
+
+        manager._save_and_close_note(item_id, "Updated markdown")
+
+        assert empty_diagram_model.getItemMarkdown(item_id) == "Updated markdown"
+        assert manager._editor.save_confirmation_calls == 1
+        assert manager.editorOpen is False
+        assert manager.activeEditorType == ""
+        assert manager.activeItemId == ""
 
 
 if __name__ == "__main__":

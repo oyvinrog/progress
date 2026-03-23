@@ -25,6 +25,7 @@ class MarkdownNoteManager(QObject):
         self._active_target_y = 0.0
         self._editor = MarkdownNoteEditor(diagram_model, self)
         self._editor.noteSaved.connect(self._save_note)
+        self._editor.noteSavedAndClosed.connect(self._save_and_close_note)
         self._editor.noteCanceled.connect(self._cancel_note)
 
     @Property(bool, notify=editorStateChanged)
@@ -147,6 +148,10 @@ class MarkdownNoteManager(QObject):
             self._editor.show_save_confirmation()
 
     def _cancel_note(self, _item_id: str) -> None:
+        self._set_editor_state("", "", 0.0, 0.0, False)
+
+    def _save_and_close_note(self, item_id: str, note_text: str, tabs: list | None = None) -> None:
+        self._save_note(item_id, note_text, tabs)
         self._set_editor_state("", "", 0.0, 0.0, False)
 
     def _set_editor_state(

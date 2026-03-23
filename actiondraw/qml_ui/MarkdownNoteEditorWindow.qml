@@ -30,6 +30,7 @@ ApplicationWindow {
     property int renamingTabIndex: -1
 
     signal saveRequested(string noteId, string text, var tabs)
+    signal saveAndCloseRequested(string noteId, string text, var tabs)
     signal cancelRequested()
 
     function normalizedTabs(sourceTabs, fallbackText) {
@@ -149,6 +150,14 @@ ApplicationWindow {
     }
 
     function saveAllTabs() {
+        saveTabs(false)
+    }
+
+    function saveAllTabsAndClose() {
+        saveTabs(true)
+    }
+
+    function saveTabs(closeAfterSave) {
         finishTabRename()
         commitActiveTabState()
         var sourceTabs = cloneTabs(editorRoot.noteTabs)
@@ -160,7 +169,10 @@ ApplicationWindow {
             })
         }
         var text = tabs.length > 0 ? String(tabs[editorRoot.activeTabIndex].text || "") : ""
-        editorRoot.saveRequested(editorRoot.noteId, text, tabs)
+        if (closeAfterSave)
+            editorRoot.saveAndCloseRequested(editorRoot.noteId, text, tabs)
+        else
+            editorRoot.saveRequested(editorRoot.noteId, text, tabs)
     }
 
     function loadEditorState(sourceTabs, initialText) {
@@ -518,8 +530,13 @@ ApplicationWindow {
             }
 
             Button {
-                text: "Save"
+                text: "Save (Ctrl+Enter/Ctrl+Return)"
                 onClicked: editorRoot.saveAllTabs()
+            }
+
+            Button {
+                text: "Save and Close (Ctrl+Shift+Enter/Ctrl+Shift+Return)"
+                onClicked: editorRoot.saveAllTabsAndClose()
             }
         }
     }
@@ -564,6 +581,12 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Ctrl+Enter"
+        enabled: editorRoot.visible
+        onActivated: editorRoot.saveAllTabs()
+    }
+
+    Shortcut {
         sequence: "Ctrl+S"
         enabled: editorRoot.visible && markdownNoteManager && markdownNoteManager.requestProjectSave
         onActivated: {
@@ -580,9 +603,15 @@ ApplicationWindow {
     }
 
     Shortcut {
-        sequence: "Ctrl+Enter"
+        sequence: "Ctrl+Shift+Return"
         enabled: editorRoot.visible
-        onActivated: editorRoot.saveAllTabs()
+        onActivated: editorRoot.saveAllTabsAndClose()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Shift+Enter"
+        enabled: editorRoot.visible
+        onActivated: editorRoot.saveAllTabsAndClose()
     }
 
     onClosing: function(close) {

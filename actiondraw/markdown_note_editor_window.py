@@ -16,6 +16,7 @@ class MarkdownNoteEditor(QObject):
     """Standalone window for editing markdown notes and free text."""
 
     noteSaved = Signal(str, str, list)
+    noteSavedAndClosed = Signal(str, str, list)
     noteCanceled = Signal(str)
 
     def __init__(self, diagram_model=None, markdown_note_manager=None) -> None:
@@ -38,6 +39,7 @@ class MarkdownNoteEditor(QObject):
             raise RuntimeError("Failed to load markdown note editor QML.")
         self._root = roots[0]
         self._root.saveRequested.connect(self._handle_save)
+        self._root.saveAndCloseRequested.connect(self._handle_save_and_close)
         self._root.cancelRequested.connect(self._handle_cancel)
 
     def open(
@@ -94,6 +96,12 @@ class MarkdownNoteEditor(QObject):
         if isinstance(tabs, QJSValue):
             tabs = tabs.toVariant()
         self.noteSaved.emit(note_id, note_text, list(tabs or []))
+
+    def _handle_save_and_close(self, note_id: str, note_text: str, tabs: list) -> None:
+        if isinstance(tabs, QJSValue):
+            tabs = tabs.toVariant()
+        self._root.hide()
+        self.noteSavedAndClosed.emit(note_id, note_text, list(tabs or []))
 
     def _handle_cancel(self) -> None:
         note_id = self._root.property("noteId")
