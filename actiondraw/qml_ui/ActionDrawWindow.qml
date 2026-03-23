@@ -1198,42 +1198,6 @@ ApplicationWindow {
 
             Rectangle {
                 Layout.fillWidth: true
-                height: 38
-                radius: 10
-                color: "#14202b"
-                border.color: "#2c3f53"
-                border.width: 1
-
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.leftMargin: 12
-                    anchors.rightMargin: 12
-                    spacing: 10
-
-                    Text {
-                        text: "Current Tab: " + root.activeTabDisplayName()
-                        color: "#dfefff"
-                        font.pixelSize: 13
-                        font.bold: true
-                        elide: Text.ElideRight
-                        Layout.fillWidth: true
-                    }
-
-                    Text {
-                        property string projectName: root.projectDisplayName()
-                        visible: projectName !== ""
-                        text: "Project: " + projectName
-                        color: "#8da6bc"
-                        font.pixelSize: 11
-                        elide: Text.ElideRight
-                        horizontalAlignment: Text.AlignRight
-                        Layout.maximumWidth: parent.width * 0.42
-                    }
-                }
-            }
-
-            Rectangle {
-                Layout.fillWidth: true
                 visible: (root.activeReminders && root.activeReminders.length > 0)
                     || (root.activeContracts && root.activeContracts.length > 0)
                 radius: 10
@@ -1465,10 +1429,55 @@ ApplicationWindow {
                 }
             }
 
-            ProgressStatsRow {
-                root: root
-                taskModel: taskModelRef
-                diagramModel: diagramModelRef
+            Rectangle {
+                Layout.fillWidth: true
+                implicitHeight: headerContent.implicitHeight + 16
+                radius: 10
+                color: "#14202b"
+                border.color: "#2c3f53"
+                border.width: 1
+
+                RowLayout {
+                    id: headerContent
+                    anchors.fill: parent
+                    anchors.leftMargin: 12
+                    anchors.rightMargin: 12
+                    anchors.topMargin: 8
+                    anchors.bottomMargin: 8
+                    spacing: 12
+
+                    ColumnLayout {
+                        spacing: 2
+                        Layout.fillWidth: true
+                        Layout.alignment: Qt.AlignVCenter
+
+                        Text {
+                            text: "Current Tab: " + root.activeTabDisplayName()
+                            color: "#dfefff"
+                            font.pixelSize: 13
+                            font.bold: true
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+
+                        Text {
+                            property string projectName: root.projectDisplayName()
+                            visible: projectName !== ""
+                            text: "Project: " + projectName
+                            color: "#8da6bc"
+                            font.pixelSize: 11
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+                    }
+
+                    ProgressStatsRow {
+                        root: root
+                        taskModel: taskModelRef
+                        diagramModel: diagramModelRef
+                        compact: true
+                    }
+                }
             }
 
             ToolbarRow {
