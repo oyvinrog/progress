@@ -27,6 +27,7 @@ ApplicationWindow {
     property string externalPromptText: "Touch your YubiKey to continue."
     property bool fullWindowMode: false
     property bool saveConfirmationVisible: false
+    property int renamingTabIndex: -1
 
     signal saveRequested(string noteId, string text, var tabs)
     signal cancelRequested()
@@ -78,6 +79,7 @@ ApplicationWindow {
     }
 
     function activateTab(index) {
+        finishTabRename()
         commitActiveTabState()
         if (!editorRoot.noteTabs || index < 0 || index >= editorRoot.noteTabs.length)
             return
@@ -88,6 +90,7 @@ ApplicationWindow {
     }
 
     function addTab() {
+        finishTabRename()
         commitActiveTabState()
         var nextTabs = cloneTabs(editorRoot.noteTabs)
         nextTabs.push({
@@ -101,6 +104,7 @@ ApplicationWindow {
     function closeTab(index) {
         if (!editorRoot.noteTabs || editorRoot.noteTabs.length <= 1 || index < 0 || index >= editorRoot.noteTabs.length)
             return
+        finishTabRename()
         commitActiveTabState()
         var nextTabs = cloneTabs(editorRoot.noteTabs)
         nextTabs.splice(index, 1)
@@ -115,9 +119,37 @@ ApplicationWindow {
         var trimmed = String(name || "").trim()
         nextTabs[editorRoot.activeTabIndex].name = trimmed.length > 0 ? trimmed : "Tab " + (editorRoot.activeTabIndex + 1)
         editorRoot.noteTabs = nextTabs
+        editorRoot.renamingTabIndex = -1
+    }
+
+    function beginTabRename(index, editor) {
+        if (!editorRoot.noteTabs || index < 0 || index >= editorRoot.noteTabs.length || !editor)
+            return
+        if (editorRoot.activeTabIndex !== index)
+            activateTab(index)
+        editorRoot.renamingTabIndex = index
+        editor.readOnly = false
+        editor.forceActiveFocus()
+        editor.selectAll()
+    }
+
+    function cancelTabRename(index, editor, originalName) {
+        if (editor)
+            editor.text = originalName
+        if (editor)
+            editor.readOnly = true
+        if (editorRoot.renamingTabIndex === index)
+            editorRoot.renamingTabIndex = -1
+        markdownEditor.focusEditor()
+    }
+
+    function finishTabRename() {
+        if (editorRoot.renamingTabIndex >= 0)
+            editorRoot.renamingTabIndex = -1
     }
 
     function saveAllTabs() {
+        finishTabRename()
         commitActiveTabState()
         var sourceTabs = cloneTabs(editorRoot.noteTabs)
         var tabs = []
@@ -134,6 +166,7 @@ ApplicationWindow {
     function loadEditorState(sourceTabs, initialText) {
         restoringState = true
         activeTabIndex = 0
+        renamingTabIndex = -1
         noteText = ""
         noteTabs = normalizedTabs(sourceTabs, initialText)
         noteText = String(noteTabs[0].text || "")
@@ -241,6 +274,8 @@ ApplicationWindow {
                                     required property var modelData
 
                                     property bool isActive: editorRoot.activeTabIndex === index
+                                    property bool isRenaming: editorRoot.renamingTabIndex === index
+                                    property string resolvedTabName: String(modelData.name || ("Tab " + (index + 1)))
 
                                     radius: 11
                                     color: isActive ? "#1b3048" : "#14202f"
@@ -277,73 +312,99 @@ ApplicationWindow {
                                         anchors.fill: parent
                                         hoverEnabled: true
                                         onClicked: {
-                                            if (isActive) {
-                                                tabInlineEditor.readOnly = false
-                                                tabInlineEditor.forceActiveFocus()
-                                                tabInlineEditor.selectAll()
-                                            } else {
+                                            if (!isActive)
                                                 editorRoot.activateTab(index)
-                                            }
+                                        }
+                                        onDoubleClicked: function(mouse) {
+                                            if (mouse.button !== Qt.LeftButton)
+                                                return
+                                            editorRoot.beginTabRename(index, tabInlineEditor)
                                         }
                                     }
 
-                                    Row {
+                                    RowLayout {
                                         anchors.fill: parent
                                         anchors.leftMargin: 14
                                         anchors.rightMargin: 8
                                         spacing: 12
 
                                         Rectangle {
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            width: 8
-                                            height: 8
+                                            implicitWidth: 8
+                                            implicitHeight: 8
                                             radius: 4
                                             color: isActive ? "#7bc6ff" : "#4a6278"
+                                            Layout.alignment: Qt.AlignVCenter
                                         }
 
-                                        TextField {
-                                            id: tabInlineEditor
-                                            anchors.verticalCenter: parent.verticalCenter
-                                            text: String(modelData.name || ("Tab " + (index + 1)))
-                                            color: isActive ? "#f3f8ff" : "#bfd0e3"
-                                            font.pixelSize: 13
-                                            font.bold: isActive
-                                            readOnly: true
-                                            background: Rectangle {
-                                                color: tabInlineEditor.readOnly ? "transparent" : "#0d1520"
-                                                border.color: tabInlineEditor.readOnly ? "transparent" : "#88d0ff"
-                                                border.width: tabInlineEditor.readOnly ? 0 : 1
-                                                radius: 4
-                                            }
-                                            padding: 2
-                                            leftPadding: tabInlineEditor.readOnly ? 0 : 4
-                                            rightPadding: tabInlineEditor.readOnly ? 0 : 4
-                                            onEditingFinished: {
-                                                editorRoot.setActiveTabName(text)
-                                                readOnly = true
-                                            }
-                                            onActiveFocusChanged: {
-                                                if (!activeFocus && !readOnly) {
+                                        Item {
+                                            Layout.fillWidth: true
+                                            Layout.alignment: Qt.AlignVCenter
+                                            implicitHeight: tabInlineEditor.implicitHeight
+
+                                            TextField {
+                                                id: tabInlineEditor
+                                                anchors.left: parent.left
+                                                anchors.right: parent.right
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                text: resolvedTabName
+                                                color: isActive ? "#f3f8ff" : "#bfd0e3"
+                                                font.pixelSize: 13
+                                                font.bold: isActive
+                                                readOnly: !isRenaming
+                                                background: Rectangle {
+                                                    color: tabInlineEditor.readOnly ? "transparent" : "#0d1520"
+                                                    border.color: tabInlineEditor.readOnly ? "transparent" : "#88d0ff"
+                                                    border.width: tabInlineEditor.readOnly ? 0 : 1
+                                                    radius: 4
+                                                }
+                                                padding: 2
+                                                leftPadding: tabInlineEditor.readOnly ? 0 : 4
+                                                rightPadding: tabInlineEditor.readOnly ? 0 : 4
+                                                onEditingFinished: {
+                                                    if (readOnly)
+                                                        return
                                                     editorRoot.setActiveTabName(text)
                                                     readOnly = true
                                                 }
+                                                onActiveFocusChanged: {
+                                                    if (!activeFocus && !readOnly) {
+                                                        editorRoot.setActiveTabName(text)
+                                                        readOnly = true
+                                                    }
+                                                }
+                                                Keys.onEscapePressed: {
+                                                    editorRoot.cancelTabRename(index, tabInlineEditor, resolvedTabName)
+                                                }
                                             }
-                                            Keys.onEscapePressed: {
-                                                text = String(modelData.name || ("Tab " + (index + 1)))
-                                                readOnly = true
+
+                                            MouseArea {
+                                                anchors.fill: tabInlineEditor
+                                                visible: tabInlineEditor.readOnly
+                                                enabled: visible
+                                                hoverEnabled: true
+                                                acceptedButtons: Qt.LeftButton
+                                                onClicked: {
+                                                    if (!isActive)
+                                                        editorRoot.activateTab(index)
+                                                }
+                                                onDoubleClicked: function(mouse) {
+                                                    if (mouse.button !== Qt.LeftButton)
+                                                        return
+                                                    editorRoot.beginTabRename(index, tabInlineEditor)
+                                                }
                                             }
                                         }
 
                                         Rectangle {
                                             id: closeButtonContainer
-                                            anchors.verticalCenter: parent.verticalCenter
                                             visible: editorRoot.noteTabs.length > 1
-                                            width: 22
-                                            height: 22
+                                            implicitWidth: 22
+                                            implicitHeight: 22
                                             radius: 7
                                             color: closeButtonMouse.containsMouse ? "#31475f" : "#182433"
                                             border.color: closeButtonMouse.containsMouse ? "#7f9dbb" : "#26384a"
                                             border.width: 1
+                                            Layout.alignment: Qt.AlignVCenter
 
                                             Label {
                                                 anchors.centerIn: parent
