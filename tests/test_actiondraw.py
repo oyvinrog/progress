@@ -2160,8 +2160,17 @@ class TestMultiTabSupport:
             yubikey_slot="2",
         )
 
-        def _fake_encrypt(project_data, credentials):
+        class _FakeKeyMaterial:
+            def scrub(self):
+                pass
+
+        def _fake_derive_key_material(credentials):
             assert credentials.use_yubikey is True
+            assert credentials.yubikey_slot == "2"
+            return _FakeKeyMaterial()
+
+        def _fake_encrypt_with_derived_key(project_data, key_material):
+            assert isinstance(key_material, _FakeKeyMaterial)
             return {
                 "version": "1.2",
                 "saved_at": project_data.get("saved_at"),
@@ -2178,7 +2187,8 @@ class TestMultiTabSupport:
                 "ciphertext": "ZmFrZWNpcGhlcnRleHQ=",
             }
 
-        monkeypatch.setattr("task_model.encrypt_project_data", _fake_encrypt)
+        monkeypatch.setattr("task_model.derive_key_material", _fake_derive_key_material)
+        monkeypatch.setattr("task_model.encrypt_with_derived_key", _fake_encrypt_with_derived_key)
 
         started = []
         finished = []

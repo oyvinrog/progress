@@ -6,6 +6,24 @@ import eff_diceware
 from eff_diceware import _load_wordlist, generate_passphrase
 
 
+def _fake_eff_wordlist_text() -> str:
+    return "".join(f"{index:05d}\tword{index}\n" for index in range(1, 7777))
+
+
+class _FakeResponse:
+    def __init__(self, payload: str):
+        self._payload = payload.encode("utf-8")
+
+    def read(self) -> bytes:
+        return self._payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
+
 def test_wordlist_loads_7776_words():
     words = _load_wordlist()
     assert len(words) == 7776
@@ -50,6 +68,11 @@ def test_downloads_when_cache_missing(tmp_path, monkeypatch):
     cache_file = tmp_path / "eff_large_wordlist.txt"
     monkeypatch.setattr(eff_diceware, "_CACHE_PATH", str(cache_file))
     monkeypatch.setattr(eff_diceware, "_WORDLIST", [])
+    monkeypatch.setattr(
+        eff_diceware.urllib.request,
+        "urlopen",
+        lambda url, timeout=15: _FakeResponse(_fake_eff_wordlist_text()),
+    )
 
     words = _load_wordlist()
     assert len(words) == 7776
@@ -64,6 +87,11 @@ def test_redownloads_when_cache_corrupted(tmp_path, monkeypatch):
     cache_file.write_text("bad\ndata\n")
     monkeypatch.setattr(eff_diceware, "_CACHE_PATH", str(cache_file))
     monkeypatch.setattr(eff_diceware, "_WORDLIST", [])
+    monkeypatch.setattr(
+        eff_diceware.urllib.request,
+        "urlopen",
+        lambda url, timeout=15: _FakeResponse(_fake_eff_wordlist_text()),
+    )
 
     words = _load_wordlist()
     assert len(words) == 7776

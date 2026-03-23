@@ -2168,6 +2168,7 @@ class ProjectManager(QObject):
             # Connect diagram model's currentTaskChanged to update tab sidebar
             if hasattr(self._diagram_model, 'currentTaskChanged'):
                 self._diagram_model.currentTaskChanged.connect(self._refreshCurrentTabDiagram)
+        self._cached_encryption_credentials: Optional[EncryptionCredentials] = None
         self._cached_key_material: Optional[DerivedKeyMaterial] = None
         self._cached_encryption_file_path: str = ""
         self._last_saved_snapshot = self._serialize_project_payload(self._build_project_data())
@@ -2184,6 +2185,7 @@ class ProjectManager(QObject):
         if self._cached_key_material is not None:
             self._cached_key_material.scrub()
             self._cached_key_material = None
+        self._cached_encryption_credentials = None
         self._cached_encryption_file_path = ""
 
         # Drop the last-saved snapshot (contains full serialized plaintext).
@@ -3122,7 +3124,19 @@ class ProjectManager(QObject):
                 encrypted_payload = encrypt_with_derived_key(project_data, self._cached_key_material)
                 encrypted_payload["version"] = self.ENCRYPTED_PROJECT_VERSION
             else:
-                credentials = self._prompt_encryption_credentials("save", file_path)
+                credentials: Optional[EncryptionCredentials]
+                if (
+                    not force_prompt
+                    and self._cached_encryption_credentials is not None
+                    and self._cached_encryption_file_path == file_path
+                ):
+                    credentials = EncryptionCredentials(
+                        passphrase=self._cached_encryption_credentials.passphrase,
+                        use_yubikey=self._cached_encryption_credentials.use_yubikey,
+                        yubikey_slot=self._cached_encryption_credentials.yubikey_slot,
+                    )
+                else:
+                    credentials = self._prompt_encryption_credentials("save", file_path)
                 if credentials is None:
                     return False
 
@@ -3137,6 +3151,11 @@ class ProjectManager(QObject):
                         self._end_yubikey_interaction()
 
                 self._cached_key_material = key_material
+                self._cached_encryption_credentials = EncryptionCredentials(
+                    passphrase=credentials.passphrase,
+                    use_yubikey=credentials.use_yubikey,
+                    yubikey_slot=credentials.yubikey_slot,
+                )
                 self._cached_encryption_file_path = file_path
 
             with open(file_path, "w", encoding="utf-8") as f:
@@ -3215,6 +3234,11 @@ class ProjectManager(QObject):
                         self._end_yubikey_interaction()
                 self._cached_encryption_file_path = file_path
                 self._cached_key_material = key_material
+                self._cached_encryption_credentials = EncryptionCredentials(
+                    passphrase=credentials.passphrase,
+                    use_yubikey=credentials.use_yubikey,
+                    yubikey_slot=credentials.yubikey_slot,
+                )
 
             version = project_data.get("version", "1.0")
             active_tab = 0
