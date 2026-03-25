@@ -116,6 +116,49 @@ Item {
         return dialogHost.roundedCurrentTime()
     }
 
+    function reminderPresetDateForTomorrow(hour, minute, nowValue) {
+        var now = nowValue || new Date()
+        return new Date(
+            now.getFullYear(),
+            now.getMonth(),
+            now.getDate() + 1,
+            hour,
+            minute,
+            0,
+            0
+        )
+    }
+
+    function reminderPresetNextOccurrence(hour, minute, nowValue) {
+        var now = nowValue || new Date()
+        var target = new Date(
+            now.getFullYear(),
+            now.getMonth(),
+            now.getDate(),
+            hour,
+            minute,
+            0,
+            0
+        )
+        if (target.getTime() <= now.getTime())
+            target.setDate(target.getDate() + 1)
+        return target
+    }
+
+    function reminderPresetPeriodLabel(name, hour, minute, nowValue) {
+        var now = nowValue || new Date()
+        var target = new Date(
+            now.getFullYear(),
+            now.getMonth(),
+            now.getDate(),
+            hour,
+            minute,
+            0,
+            0
+        )
+        return (target.getTime() > now.getTime() ? "This " : "Next ") + name + " (" + Qt.formatTime(target, "HH:mm") + ")"
+    }
+
     function daysInMonth(year, monthIndex) {
         return new Date(year, monthIndex + 1, 0).getDate()
     }
@@ -1440,6 +1483,23 @@ Item {
             reminderDialog.timeValue = Qt.formatDateTime(dt, "HH:mm")
         }
 
+        function setToDateTime(dt) {
+            reminderDialog.dateValue = dialogHost.formatDateValue(dt)
+            reminderDialog.timeValue = dialogHost.formatTimeValue(dt)
+        }
+
+        function setToTomorrowMorning() {
+            reminderDialog.setToDateTime(dialogHost.reminderPresetDateForTomorrow(8, 0))
+        }
+
+        function setToAfternoon() {
+            reminderDialog.setToDateTime(dialogHost.reminderPresetNextOccurrence(16, 0))
+        }
+
+        function setToEvening() {
+            reminderDialog.setToDateTime(dialogHost.reminderPresetNextOccurrence(20, 0))
+        }
+
         onOpened: {
             if (reminderDialog.dateValue.trim().length === 0 || reminderDialog.timeValue.trim().length === 0) {
                 setToOffsetMinutes(60)
@@ -1570,6 +1630,34 @@ Item {
                 Button {
                     text: "+1d"
                     onClicked: reminderDialog.setToOffsetMinutes(24 * 60)
+                }
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                Button {
+                    Layout.fillWidth: true
+                    text: "Tomorrow morning (08:00)"
+                    onClicked: reminderDialog.setToTomorrowMorning()
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+
+                    Button {
+                        Layout.fillWidth: true
+                        text: dialogHost.reminderPresetPeriodLabel("afternoon", 16, 0)
+                        onClicked: reminderDialog.setToAfternoon()
+                    }
+
+                    Button {
+                        Layout.fillWidth: true
+                        text: dialogHost.reminderPresetPeriodLabel("evening", 20, 0)
+                        onClicked: reminderDialog.setToEvening()
+                    }
                 }
             }
 

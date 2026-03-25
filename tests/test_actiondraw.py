@@ -1,10 +1,11 @@
 """Tests for the rewritten actiondraw module."""
 
+import os
 import time
 
 import pytest
-from PySide6.QtCore import QModelIndex
-from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtCore import QModelIndex, QObject, QDateTime, Qt, QUrl, Slot
+from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, QQmlEngine
 
 from actiondraw import (
     DiagramEdge,
@@ -2753,6 +2754,81 @@ class TestActionDrawQmlTaskInteractions:
         assert 'visible: itemRect.freeTextTabCount > 1' in qml
         assert 'diagramModel.setItemTextTabIndex(itemRect.itemId, nextIndex)' in qml
         assert 'text: itemRect.freeTextDisplayText' in qml[qml.index('id: freeTextLabel'):]
+
+
+class _DummyRoot(QObject):
+    @Slot(str, result=str)
+    def presetTitle(self, name):
+        return name
+
+
+class TestReminderDialogPresets:
+    @pytest.fixture
+    def action_dialogs_component(self, app):
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        engine = QQmlEngine()
+        engine.rootContext().setContextProperty("markdownHighlighterBridge", QObject())
+        component = QQmlComponent(engine, QUrl.fromLocalFile(str(QML_DIR / "components" / "ActionDialogs.qml")))
+        instance = component.createWithInitialProperties({"root": _DummyRoot()})
+        errors = [err.toString() for err in component.errors()]
+        assert instance is not None, errors
+        assert not component.isError(), errors
+        try:
+            yield instance
+        finally:
+            instance.deleteLater()
+            engine.deleteLater()
+
+    def test_reminder_dialog_exposes_named_preset_buttons(self):
+        qml = (QML_DIR / "components" / "ActionDialogs.qml").read_text(encoding="utf-8")
+
+        assert 'text: "+15m"' in qml
+        assert 'text: "+1h"' in qml
+        assert 'text: "+1d"' in qml
+        assert 'onClicked: reminderDialog.setToOffsetMinutes(15)' in qml
+        assert 'onClicked: reminderDialog.setToOffsetMinutes(60)' in qml
+        assert 'onClicked: reminderDialog.setToOffsetMinutes(24 * 60)' in qml
+        assert 'text: "Tomorrow morning (08:00)"' in qml
+        assert 'text: dialogHost.reminderPresetPeriodLabel("afternoon", 16, 0)' in qml
+        assert 'text: dialogHost.reminderPresetPeriodLabel("evening", 20, 0)' in qml
+        assert 'onClicked: reminderDialog.setToTomorrowMorning()' in qml
+        assert 'onClicked: reminderDialog.setToAfternoon()' in qml
+        assert 'onClicked: reminderDialog.setToEvening()' in qml
+
+    def test_tomorrow_morning_preset_targets_next_day(self, action_dialogs_component):
+        now = QDateTime.fromString("2026-03-25T14:30:00", Qt.ISODate)
+
+        target = action_dialogs_component.reminderPresetDateForTomorrow(8, 0, now)
+
+        assert action_dialogs_component.formatDateValue(target) == "2026-03-26"
+        assert action_dialogs_component.formatTimeValue(target) == "08:00"
+
+    def test_afternoon_preset_uses_today_before_4pm(self, action_dialogs_component):
+        now = QDateTime.fromString("2026-03-25T15:10:00", Qt.ISODate)
+
+        target = action_dialogs_component.reminderPresetNextOccurrence(16, 0, now)
+
+        assert action_dialogs_component.formatDateValue(target) == "2026-03-25"
+        assert action_dialogs_component.formatTimeValue(target) == "16:00"
+        assert action_dialogs_component.reminderPresetPeriodLabel("afternoon", 16, 0, now) == "This afternoon (16:00)"
+
+    def test_afternoon_preset_rolls_to_tomorrow_after_4pm(self, action_dialogs_component):
+        now = QDateTime.fromString("2026-03-25T17:00:00", Qt.ISODate)
+
+        target = action_dialogs_component.reminderPresetNextOccurrence(16, 0, now)
+
+        assert action_dialogs_component.formatDateValue(target) == "2026-03-26"
+        assert action_dialogs_component.formatTimeValue(target) == "16:00"
+        assert action_dialogs_component.reminderPresetPeriodLabel("afternoon", 16, 0, now) == "Next afternoon (16:00)"
+
+    def test_evening_preset_rolls_to_tomorrow_after_8pm(self, action_dialogs_component):
+        now = QDateTime.fromString("2026-03-25T20:15:00", Qt.ISODate)
+
+        target = action_dialogs_component.reminderPresetNextOccurrence(20, 0, now)
+
+        assert action_dialogs_component.formatDateValue(target) == "2026-03-26"
+        assert action_dialogs_component.formatTimeValue(target) == "20:00"
+        assert action_dialogs_component.reminderPresetPeriodLabel("evening", 20, 0, now) == "Next evening (20:00)"
 
 
 class TestCountdownTimer:
