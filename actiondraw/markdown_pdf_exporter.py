@@ -284,17 +284,24 @@ def _insert_markdown_fragment(cursor: QTextCursor, markdown: str) -> None:
     cursor.insertFragment(QTextDocumentFragment.fromMarkdown(markdown))
 
 
+def _insert_normal_block(cursor: QTextCursor) -> None:
+    block_format = QTextBlockFormat()
+    block_format.setPageBreakPolicy(QTextFormat.PageBreak_Auto)
+    cursor.insertBlock(block_format)
+
+
 def _insert_page_break(cursor: QTextCursor) -> None:
     block_format = QTextBlockFormat()
     block_format.setPageBreakPolicy(QTextFormat.PageBreak_AlwaysBefore)
     cursor.insertBlock(block_format)
+    _insert_normal_block(cursor)
 
 
 def _insert_heading(cursor: QTextCursor, level: int, text: str) -> None:
     safe_text = html.escape((text or "").strip() or "Untitled")
     level = max(1, min(6, level))
     cursor.insertHtml(f"<h{level}>{safe_text}</h{level}>")
-    cursor.insertBlock()
+    _insert_normal_block(cursor)
 
 
 def _tab_anchor_name(index: int) -> str:
@@ -306,13 +313,13 @@ def _insert_anchor_heading(cursor: QTextCursor, level: int, text: str, anchor_na
     safe_anchor = html.escape(anchor_name or "")
     level = max(1, min(6, level))
     cursor.insertHtml(f"<h{level}><a name=\"{safe_anchor}\"></a>{safe_text}</h{level}>")
-    cursor.insertBlock()
+    _insert_normal_block(cursor)
 
 
 def _insert_fallback_alt(cursor: QTextCursor, alt: str) -> None:
     fallback = f"[Image: {alt}]" if alt else "[Image]"
     cursor.insertText(fallback)
-    cursor.insertBlock()
+    _insert_normal_block(cursor)
 
 
 def _insert_image_block(
@@ -342,26 +349,25 @@ def _insert_image_block(
     if image_node.alt:
         image_format.setProperty(QTextFormat.ImageAltText, image_node.alt)
     cursor.insertImage(image_format)
-    cursor.insertBlock()
+    _insert_normal_block(cursor)
 
 
 def _insert_tab_index(cursor: QTextCursor, title: str, tabs: list[dict[str, str]]) -> None:
     safe_title = html.escape((title or "Markdown Export").strip() or "Markdown Export")
-    cursor.insertHtml(
-        f"<div style=\"text-align:center; margin-bottom:24px;\">"
-        f"<h1 style=\"margin-bottom:6px;\">{safe_title}</h1>"
-        f"<div style=\"color:#64748b; font-size:10pt;\">Exported tabs</div>"
-        f"</div>"
-    )
-    cursor.insertHtml("<h2>Contents</h2>")
     list_items = "".join(
         f"<li><a href=\"#{_tab_anchor_name(index)}\">"
         f"{html.escape(str(tab.get('name') or f'Tab {index + 1}'))}"
         f"</a></li>"
         for index, tab in enumerate(tabs)
     )
-    cursor.insertHtml(f"<ol>{list_items}</ol>")
-    cursor.insertBlock()
+    cursor.insertHtml(
+        f"<div style=\"text-align:center; margin-bottom:24px;\">"
+        f"<h1 style=\"margin-bottom:6px;\">{safe_title}</h1>"
+        f"<div style=\"color:#64748b; font-size:10pt; margin-bottom:20px;\">Exported tabs</div>"
+        f"</div>"
+        f"<h2>Contents</h2>"
+        f"<ol>{list_items}</ol>"
+    )
 
 
 def build_document_from_markdown(markdown: str, document: QTextDocument, cursor: QTextCursor, max_width: float) -> None:

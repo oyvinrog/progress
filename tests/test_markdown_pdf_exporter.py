@@ -100,6 +100,19 @@ def test_build_pdf_document_adds_index_before_tab_content():
     assert plain_text.index("Overview") < plain_text.index("Details")
 
 
+def test_build_pdf_document_uses_one_page_per_short_section_plus_toc(app):
+    document = build_pdf_document(
+        "Compact Tabs",
+        [
+            {"name": "Tab 1", "text": "Short body"},
+            {"name": "Tab 2", "text": "Another short body"},
+        ],
+        page_size=QSizeF(640.0, 900.0),
+    )
+
+    assert document.pageCount() == 3
+
+
 def test_build_pdf_document_renders_toc_links_and_tab_anchors():
     document = build_pdf_document(
         "Linked Tabs",
