@@ -15,6 +15,7 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QJSValue
 
 from .constants import CLIPBOARD_MIME_TYPE
+from .markdown_note_tabs import normalize_editor_tabs
 from .types import DiagramEdge, DiagramItem, DiagramItemType
 
 if TYPE_CHECKING:
@@ -56,7 +57,12 @@ class ClipboardMixin:
             "textColor": item.text_color,
             "imageData": item.image_data,
             "noteMarkdown": note_markdown,
+            "obstacleMarkdown": item.obstacle_markdown,
             "folderPath": item.folder_path,
+            "noteTabs": normalize_editor_tabs(item.note_tabs, fallback_text=note_markdown),
+            "obstacleTabs": normalize_editor_tabs(item.obstacle_tabs, fallback_text=item.obstacle_markdown),
+            "textTabs": normalize_editor_tabs(item.text_tabs, fallback_text=item.text),
+            "textTabIndex": int(item.text_tab_index),
         }
 
     def _build_opml_text(self, items: List[DiagramItem]) -> str:
@@ -454,6 +460,7 @@ class ClipboardMixin:
                 continue
             text_value = str(item_data.get("text", ""))
             note_markdown_value = str(item_data.get("noteMarkdown", ""))
+            obstacle_markdown_value = str(item_data.get("obstacleMarkdown", ""))
             if item_type == DiagramItemType.NOTE and note_markdown_value:
                 text_value = note_markdown_value
                 note_markdown_value = ""
@@ -471,8 +478,17 @@ class ClipboardMixin:
                 text_color=str(item_data.get("textColor", "#f5f6f8")),
                 image_data=str(item_data.get("imageData", "")),
                 note_markdown=note_markdown_value,
+                obstacle_markdown=obstacle_markdown_value,
                 folder_path=str(item_data.get("folderPath", "")),
+                note_tabs=normalize_editor_tabs(item_data.get("noteTabs"), fallback_text=text_value if item_type == DiagramItemType.NOTE else note_markdown_value),
+                obstacle_tabs=normalize_editor_tabs(item_data.get("obstacleTabs"), fallback_text=obstacle_markdown_value),
+                text_tabs=normalize_editor_tabs(item_data.get("textTabs"), fallback_text=text_value),
+                text_tab_index=max(0, int(item_data.get("textTabIndex", 0) or 0)),
             )
+            if item.text_tabs:
+                item.text_tab_index = max(0, min(item.text_tab_index, len(item.text_tabs) - 1))
+            else:
+                item.text_tab_index = 0
             self._append_item(item)
             old_id = str(item_data.get("id", ""))
             if old_id:

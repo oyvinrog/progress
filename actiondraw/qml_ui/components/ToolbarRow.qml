@@ -10,8 +10,8 @@ Rectangle {
     property var viewport: null
 
     Layout.fillWidth: true
-    implicitHeight: 64
-    radius: 12
+    implicitHeight: 48
+    radius: 10
     color: "#14202a"
     border.color: "#2b3f52"
     border.width: 1
@@ -25,40 +25,15 @@ Rectangle {
 
     RowLayout {
         anchors.fill: parent
-        anchors.margins: 12
-        spacing: 12
-
-        ColumnLayout {
-            spacing: 1
-            Layout.alignment: Qt.AlignVCenter
-
-            Label {
-                text: "ActionDraw"
-                color: "#f4f8fc"
-                font.pixelSize: 19
-                font.bold: true
-            }
-
-            Label {
-                text: "Map work visually"
-                color: "#7f95aa"
-                font.pixelSize: 10
-            }
-        }
-
-        Rectangle {
-            width: 1
-            height: 34
-            color: "#33485d"
-            Layout.alignment: Qt.AlignVCenter
-        }
+        anchors.margins: 8
+        spacing: 10
 
         Button {
             id: backButton
             text: "\u2190 Back"
             enabled: !!(projectManager && projectManager.canGoBack)
             flat: true
-            padding: 10
+            padding: 8
             contentItem: Text {
                 text: backButton.text
                 color: backButton.enabled ? "#d6e2ee" : "#728699"
@@ -86,7 +61,7 @@ Rectangle {
             text: diagramModel && diagramModel.drawingMode ? "\u270f Drawing On" : "\u270f Draw"
             highlighted: !!(diagramModel && diagramModel.drawingMode)
             flat: true
-            padding: 10
+            padding: 8
             contentItem: Text {
                 text: drawModeButton.text
                 color: drawModeButton.highlighted ? "#f0fbff" : "#d6e2ee"
@@ -111,8 +86,8 @@ Rectangle {
             id: colorPickerButton
             text: ""
             enabled: diagramModel ? true : false
-            implicitWidth: 34
-            implicitHeight: 34
+            implicitWidth: 32
+            implicitHeight: 32
             background: Rectangle {
                 radius: 8
                 color: "#112131"
@@ -196,7 +171,7 @@ Rectangle {
 
             Slider {
                 id: brushSizeSlider
-                Layout.preferredWidth: 96
+                Layout.preferredWidth: 88
                 from: 1
                 to: 20
                 stepSize: 1
@@ -213,7 +188,7 @@ Rectangle {
                 border.color: "#395268"
                 border.width: 1
                 implicitWidth: 30
-                implicitHeight: 22
+                implicitHeight: 20
 
                 Label {
                     anchors.centerIn: parent
@@ -236,7 +211,7 @@ Rectangle {
 
             RowLayout {
                 anchors.fill: parent
-                anchors.margins: 8
+                anchors.margins: 6
                 spacing: 6
 
                 Label {
@@ -248,13 +223,13 @@ Rectangle {
                 Button {
                     text: "-"
                     flat: true
-                    padding: 6
+                    padding: 4
                     onClicked: root.applyZoomFactor(0.9, viewport.width / 2, viewport.height / 2)
                 }
 
                 Slider {
                     id: zoomSlider
-                    Layout.preferredWidth: 160
+                    Layout.preferredWidth: 130
                     from: root.minZoom
                     to: root.maxZoom
                     stepSize: 0.01
@@ -269,14 +244,14 @@ Rectangle {
                 Button {
                     text: "+"
                     flat: true
-                    padding: 6
+                    padding: 4
                     onClicked: root.applyZoomFactor(1.1, viewport.width / 2, viewport.height / 2)
                 }
 
                 Button {
                     text: "Reset"
                     flat: true
-                    padding: 8
+                    padding: 6
                     onClicked: root.resetView()
                 }
             }

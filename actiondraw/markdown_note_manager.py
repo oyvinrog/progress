@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import QObject, Property, Signal, Slot
 
 from .markdown_note_editor_window import MarkdownNoteEditor
+from .markdown_note_tabs import normalize_editor_tabs
 
 
 class MarkdownNoteManager(QObject):
@@ -24,6 +25,7 @@ class MarkdownNoteManager(QObject):
         self._active_target_y = 0.0
         self._editor = MarkdownNoteEditor(diagram_model, self)
         self._editor.noteSaved.connect(self._save_note)
+        self._editor.noteSavedAndClosed.connect(self._save_and_close_note)
         self._editor.noteCanceled.connect(self._cancel_note)
 
     @Property(bool, notify=editorStateChanged)
@@ -53,6 +55,7 @@ class MarkdownNoteManager(QObject):
             editor_type="note",
             target_x=float(item.x),
             target_y=float(item.y),
+            tabs=self._diagram_model.getEditorTabs(item_id, "note"),
         )
 
     @Slot(str)
@@ -70,6 +73,7 @@ class MarkdownNoteManager(QObject):
             editor_type="obstacle",
             target_x=float(item.x),
             target_y=float(item.y),
+            tabs=self._diagram_model.getEditorTabs(item_id, "obstacle"),
         )
 
     @Slot(str, float, float, str)
@@ -96,22 +100,26 @@ class MarkdownNoteManager(QObject):
             editor_type="freetext",
             target_x=target_x,
             target_y=target_y,
+            tabs=self._diagram_model.getEditorTabs(source_item_id, "freetext") if source_item_id else normalize_editor_tabs([], fallback_text=text_value),
         )
 
-    def _save_note(self, item_id: str, note_text: str) -> None:
+    def _save_note(self, item_id: str, note_text: str, tabs: list | None = None) -> None:
+        normalized_tabs = normalize_editor_tabs(tabs, fallback_text=note_text or "")
+        canonical_text = normalized_tabs[0]["text"]
         saved_item_id = ""
         if self._active_editor_type == "freetext":
             if self._active_item_id:
-                self._diagram_model.setItemText(self._active_item_id, note_text)
+                self._diagram_model.setEditorTabs(self._active_item_id, "freetext", normalized_tabs)
                 saved_item_id = self._active_item_id
             else:
                 saved_item_id = self._diagram_model.addPresetItemWithText(
                     "freetext",
                     self._active_target_x,
                     self._active_target_y,
-                    note_text,
+                    canonical_text,
                 )
                 if saved_item_id:
+                    self._diagram_model.setEditorTabs(saved_item_id, "freetext", normalized_tabs)
                     self._set_editor_state(
                         "freetext",
                         saved_item_id,
@@ -121,10 +129,10 @@ class MarkdownNoteManager(QObject):
                     )
                     self._editor.set_note_id(saved_item_id)
         elif self._active_editor_type == "obstacle":
-            self._diagram_model.setItemObstacleMarkdown(item_id, note_text)
+            self._diagram_model.setEditorTabs(item_id, "obstacle", normalized_tabs)
             saved_item_id = item_id
         else:
-            self._diagram_model.setItemMarkdown(item_id, note_text)
+            self._diagram_model.setEditorTabs(item_id, "note", normalized_tabs)
             saved_item_id = item_id
 
         if saved_item_id:
@@ -140,6 +148,10 @@ class MarkdownNoteManager(QObject):
             self._editor.show_save_confirmation()
 
     def _cancel_note(self, _item_id: str) -> None:
+        self._set_editor_state("", "", 0.0, 0.0, False)
+
+    def _save_and_close_note(self, item_id: str, note_text: str, tabs: list | None = None) -> None:
+        self._save_note(item_id, note_text, tabs)
         self._set_editor_state("", "", 0.0, 0.0, False)
 
     def _set_editor_state(
@@ -207,3 +219,13 @@ class MarkdownNoteManager(QObject):
     @Slot()
     def requestProjectSave(self) -> None:
         self.projectSaveRequested.emit()
+
+    @Slot(str)
+    def showExternalPrompt(self, message: str) -> None:
+        if not self._editor_open:
+            return
+        self._editor.show_external_prompt(message)
+
+    @Slot()
+    def hideExternalPrompt(self) -> None:
+        self._editor.hide_external_prompt()

@@ -11,7 +11,11 @@ import math
 import os
 import subprocess
 import sys
+import threading
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Set, Tuple
@@ -32,9 +36,13 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QColor
 from progress_crypto import (
     CryptoError,
+    DerivedKeyMaterial,
     EncryptionCredentials,
+    decrypt_and_derive_key_material,
     decrypt_project_data,
+    derive_key_material,
     encrypt_project_data,
+    encrypt_with_derived_key,
     has_yubikey_cli,
     is_encrypted_envelope,
     yubikey_support_guidance,
@@ -62,6 +70,63 @@ CRACK_MODEL_COMMON_WORDS = (
     "progress",
 )
 CRACK_MODEL_KDF_PARAMS_TEXT = "Argon2id t=3, m=65536, p=1"
+DEFAULT_NTFY_SERVER = "https://ntfy.sh"
+
+
+def _coalesce_ntfy_settings(
+    server: Optional[str] = None,
+    topic: Optional[str] = None,
+    token: Optional[str] = None,
+) -> Tuple[str, str, str]:
+    """Resolve ntfy settings from explicit values with environment fallback."""
+    resolved_server = (server if server is not None else os.getenv("PROGRESS_NTFY_SERVER", DEFAULT_NTFY_SERVER)).strip()
+    resolved_topic = (topic if topic is not None else os.getenv("PROGRESS_NTFY_TOPIC", "")).strip()
+    resolved_token = (token if token is not None else os.getenv("PROGRESS_NTFY_TOKEN", "")).strip()
+    if not resolved_server:
+        resolved_server = DEFAULT_NTFY_SERVER
+    return resolved_server, resolved_topic, resolved_token
+
+
+def _send_ntfy_message(server: str, topic: str, title: str, message: str, token: str = "") -> None:
+    """Send a single ntfy message using the HTTP publish API."""
+    normalized_server = (server or DEFAULT_NTFY_SERVER).strip().rstrip("/")
+    normalized_topic = (topic or "").strip().strip("/")
+    if not normalized_topic:
+        return
+
+    url = f"{normalized_server}/{urllib.parse.quote(normalized_topic, safe='')}"
+    data = message.encode("utf-8")
+    headers = {
+        "Title": title,
+        "Tags": "alarm_clock",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+
+    request = urllib.request.Request(url, data=data, headers=headers, method="POST")
+    with urllib.request.urlopen(request, timeout=10):
+        pass
+
+
+def _publish_ntfy_message_async(
+    title: str,
+    message: str,
+    server: Optional[str] = None,
+    topic: Optional[str] = None,
+    token: Optional[str] = None,
+) -> None:
+    """Publish an ntfy message in a background thread when configured."""
+    resolved_server, resolved_topic, resolved_token = _coalesce_ntfy_settings(server, topic, token)
+    if not resolved_topic:
+        return
+
+    def _worker() -> None:
+        try:
+            _send_ntfy_message(resolved_server, resolved_topic, title, message, resolved_token)
+        except (OSError, urllib.error.URLError, ValueError) as exc:
+            print(f"Failed to publish ntfy reminder: {exc}", file=sys.stderr)
+
+    threading.Thread(target=_worker, name="ntfy-reminder", daemon=True).start()
 
 
 def _infer_charset_size(passphrase: str) -> int:
@@ -96,6 +161,28 @@ def _estimate_bruteforce_guesses(passphrase: str) -> int:
         return 0
     charset = _infer_charset_size(passphrase)
     return charset ** len(passphrase)
+
+
+def _detect_diceware(passphrase: str) -> Tuple[bool, int, int]:
+    """Detect if passphrase looks like diceware (wordlist-based).
+
+    Checks common separators (hyphen, space, dot, underscore) and whether
+    every token is a plausible dictionary word (all-alpha, 3-9 chars).
+
+    Returns (is_diceware, num_words, wordlist_size).
+    """
+    for sep in ("-", " ", ".", "_"):
+        if sep not in passphrase:
+            continue
+        tokens = passphrase.split(sep)
+        if len(tokens) < 3:
+            continue
+        if all(t.isalpha() and 3 <= len(t) <= 9 for t in tokens):
+            # Assume EFF large wordlist (7776) as the most common source.
+            # Even if the user typed this by hand, an attacker would try
+            # a wordlist attack first, so this is the honest estimate.
+            return True, len(tokens), 7776
+    return False, 0, 0
 
 
 def _has_sequence_run(text: str) -> bool:
@@ -223,20 +310,38 @@ def _build_passphrase_crack_time_report(passphrase: str, *, include_yubikey_note
         CRACK_MODEL_ARGON2_GUESSES_PER_SECOND,
     )
 
+    is_diceware, num_words, wordlist_size = _detect_diceware(passphrase)
+
     lines = [
         f"Model: {CRACK_MODEL_PROFILE_NAME}, {CRACK_MODEL_KDF_PARAMS_TEXT}.",
         "Assumes offline attack against Argon2id-derived key material.",
-        (
+    ]
+
+    if is_diceware:
+        diceware_guesses = float(wordlist_size ** num_words)
+        diceware_bits = num_words * math.log2(wordlist_size)
+        dw_expected, dw_worst = _estimate_crack_seconds(
+            diceware_guesses,
+            CRACK_MODEL_ARGON2_GUESSES_PER_SECOND,
+        )
+        lines.append(
+            f"Wordlist attack ({num_words} words from {wordlist_size:,}-word list, "
+            f"~{diceware_bits:.1f} bits): "
+            f"Expected {_format_duration_human(dw_expected)}; "
+            f"Worst-case {_format_duration_human(dw_worst)}."
+        )
+    else:
+        lines.append(
             "Brute-force (charset^length): "
             f"Expected {_format_duration_human(brute_expected)}; "
             f"Worst-case {_format_duration_human(brute_worst)}."
-        ),
-        (
+        )
+        lines.append(
             "Human-pattern adjusted: "
             f"Expected {_format_duration_human(human_expected)}; "
             f"Worst-case {_format_duration_human(human_worst)}."
-        ),
-    ]
+        )
+
     if include_yubikey_note:
         lines.append("Note: Passphrase+YubiKey mode also requires YubiKey-derived secret material.")
     return "\n".join(lines)
@@ -266,6 +371,7 @@ class Task:
     countdown_duration: Optional[float] = None  # countdown duration in seconds
     countdown_start: Optional[float] = None  # timestamp when countdown started
     reminder_at: Optional[float] = None  # local timestamp when reminder should fire
+    reminder_send_notification: bool = False  # whether to publish to ntfy when due
     contract_deadline_at: Optional[float] = None  # local timestamp when contract deadline is due
     contract_punishment: str = ""  # user-defined punishment text
     contract_breached: bool = False  # whether deadline has passed before completion
@@ -587,6 +693,10 @@ class TaskModel(QAbstractListModel):
             return ""
         return datetime.fromtimestamp(task.reminder_at).strftime("%Y-%m-%d %H:%M")
 
+    def _getReminderNotificationEnabled(self, task: Task) -> bool:
+        """Return whether the reminder should send an ntfy notification when due."""
+        return bool(task.reminder_send_notification)
+
     def _isContractActive(self, task: Task) -> bool:
         """Return True when a task has an active contract."""
         return (
@@ -694,7 +804,8 @@ class TaskModel(QAbstractListModel):
             return
 
     @Slot(int, str, result=bool)
-    def setReminderAt(self, row: int, reminder_at_str: str) -> bool:
+    @Slot(int, str, bool, result=bool)
+    def setReminderAt(self, row: int, reminder_at_str: str, send_notification: bool = False) -> bool:
         """Set a local date/time reminder for a task.
 
         Accepted formats include:
@@ -712,6 +823,7 @@ class TaskModel(QAbstractListModel):
 
         task = self._tasks[row]
         task.reminder_at = reminder_at
+        task.reminder_send_notification = bool(send_notification)
 
         idx = self.index(row, 0)
         self.dataChanged.emit(idx, idx, [self.ReminderActiveRole, self.ReminderAtRole])
@@ -762,13 +874,20 @@ class TaskModel(QAbstractListModel):
             return
 
         task = self._tasks[row]
-        if task.reminder_at is None:
+        if task.reminder_at is None and not task.reminder_send_notification:
             return
         task.reminder_at = None
+        task.reminder_send_notification = False
 
         idx = self.index(row, 0)
         self.dataChanged.emit(idx, idx, [self.ReminderActiveRole, self.ReminderAtRole])
         self.taskReminderChanged.emit(row)
+
+    def isReminderNotificationEnabled(self, row: int) -> bool:
+        """Return whether the given task reminder should publish to ntfy."""
+        if row < 0 or row >= len(self._tasks):
+            return False
+        return self._getReminderNotificationEnabled(self._tasks[row])
 
     @Slot(int)
     def clearContract(self, row: int) -> None:
@@ -924,6 +1043,7 @@ class TaskModel(QAbstractListModel):
             self.dataChanged.emit(idx, idx, [self.ReminderActiveRole, self.ReminderAtRole])
             self.taskReminderChanged.emit(i)
             self.taskReminderDue.emit(i, task_title)
+            task.reminder_send_notification = False
 
         for i, task_title, punishment, deadline_text in due_contracts:
             task = self._tasks[i]
@@ -1178,6 +1298,8 @@ class TaskModel(QAbstractListModel):
             task_dict["countdown_start"] = task.countdown_start
         if task.reminder_at is not None:
             task_dict["reminder_at"] = task.reminder_at
+            if task.reminder_send_notification:
+                task_dict["reminder_send_notification"] = True
         if task.contract_deadline_at is not None:
             task_dict["contract_deadline_at"] = task.contract_deadline_at
             task_dict["contract_punishment"] = task.contract_punishment
@@ -1280,6 +1402,7 @@ class TaskModel(QAbstractListModel):
                         countdown_duration=task_data.get("countdown_duration"),
                         countdown_start=task_data.get("countdown_start"),
                         reminder_at=task_data.get("reminder_at"),
+                        reminder_send_notification=task_data.get("reminder_send_notification", False),
                         contract_deadline_at=task_data.get("contract_deadline_at"),
                         contract_punishment=task_data.get("contract_punishment", ""),
                         contract_breached=task_data.get("contract_breached", False),
@@ -1986,6 +2109,7 @@ class ProjectManager(QObject):
     recentProjectsChanged = Signal()  # Emitted when recent projects list changes
     currentFilePathChanged = Signal()  # Emitted when current file path changes
     sidebarExpandedChanged = Signal()
+    ntfySettingsChanged = Signal()
     canGoBackChanged = Signal()
     tabSwitched = Signal()  # Emitted when switching to a different tab
     taskDrillRequested = Signal(int, arguments=["taskIndex"])
@@ -2045,8 +2169,39 @@ class ProjectManager(QObject):
             if hasattr(self._diagram_model, 'currentTaskChanged'):
                 self._diagram_model.currentTaskChanged.connect(self._refreshCurrentTabDiagram)
         self._cached_encryption_credentials: Optional[EncryptionCredentials] = None
+        self._cached_key_material: Optional[DerivedKeyMaterial] = None
         self._cached_encryption_file_path: str = ""
         self._last_saved_snapshot = self._serialize_project_payload(self._build_project_data())
+
+    def scrubProjectData(self) -> None:
+        """Best-effort scrub of plaintext project data from memory.
+
+        Zeros the derived key in-place (bytearray), drops all references
+        to plaintext task/diagram/tab data, and forces garbage collection.
+        """
+        import gc
+
+        # Zero the derived key — this is the one thing we can reliably scrub.
+        if self._cached_key_material is not None:
+            self._cached_key_material.scrub()
+            self._cached_key_material = None
+        self._cached_encryption_credentials = None
+        self._cached_encryption_file_path = ""
+
+        # Drop the last-saved snapshot (contains full serialized plaintext).
+        self._last_saved_snapshot = ""
+
+        # Clear live models (drops references to Task/DiagramItem objects).
+        self._task_model.clear()
+        self._diagram_model.from_dict({"items": [], "edges": [], "strokes": []})
+        if self._tab_model is not None:
+            self._tab_model.clear()
+
+        # Clear navigation history.
+        self._navigation_back_stack.clear()
+
+        # Force GC to reclaim the now-unreferenced objects promptly.
+        gc.collect()
 
     @Property(bool, notify=canGoBackChanged)
     def canGoBack(self) -> bool:
@@ -2105,9 +2260,41 @@ class ProjectManager(QObject):
         ):
             focus_task(snapshot.task_index)
 
+    def _tabDisplayName(self, tab_index: int) -> str:
+        """Return a stable human-readable name for a tab index."""
+        if self._tab_model is None:
+            return "Main"
+        tabs = self._tab_model.getAllTabs()
+        if 0 <= tab_index < len(tabs):
+            name = str(getattr(tabs[tab_index], "name", "")).strip()
+            if name:
+                return name
+        return "Main" if tab_index == 0 else f"Tab {tab_index + 1}"
+
+    def _publishReminderNotification(self, tab_index: int, task_title: str) -> None:
+        """Send an ntfy notification for a due reminder when configured."""
+        title = task_title.strip() or "Task"
+        tab_name = self._tabDisplayName(tab_index)
+        message = f"Reminder due: {title}"
+        if tab_name:
+            message += f"\nTab: {tab_name}"
+        _publish_ntfy_message_async(
+            "ActionDraw Reminder",
+            message,
+            self.ntfyServer,
+            self.ntfyTopic,
+            self.ntfyToken,
+        )
+
     def _onCurrentTabReminderDue(self, task_index: int, task_title: str) -> None:
         tab_index = self._tab_model.currentTabIndex if self._tab_model is not None else 0
+        sent_notification = False
+        if self._task_model.isReminderNotificationEnabled(task_index):
+            self._publishReminderNotification(tab_index, task_title)
+            sent_notification = True
         self.taskReminderDue.emit(tab_index, task_index, task_title)
+        if sent_notification:
+            self._save_after_reminder()
 
     def _onCurrentTabContractBreached(
         self,
@@ -2126,6 +2313,7 @@ class ProjectManager(QObject):
 
         now = time.time()
         active_tab = self._tab_model.currentTabIndex
+        sent_notification = False
 
         for tab_index, tab in enumerate(self._tab_model.getAllTabs()):
             if tab_index == active_tab:
@@ -2153,8 +2341,12 @@ class ProjectManager(QObject):
 
                 if reminder_ts is not None and reminder_ts <= now:
                     task.pop("reminder_at", None)
+                    send_notification = bool(task.pop("reminder_send_notification", False))
                     tab_changed = True
                     title = str(task.get("title", "")).strip() or "Task"
+                    if send_notification:
+                        self._publishReminderNotification(tab_index, title)
+                        sent_notification = True
                     self.taskReminderDue.emit(tab_index, task_index, title)
 
                 deadline_at = task.get("contract_deadline_at")
@@ -2191,6 +2383,14 @@ class ProjectManager(QObject):
                     model_index,
                     [self._tab_model.CompletionRole, self._tab_model.ActiveTaskTitleRole],
                 )
+
+        if sent_notification:
+            self._save_after_reminder()
+
+    def _save_after_reminder(self) -> None:
+        """Persist the project so the cleared notification flag survives a crash."""
+        if self._current_file_path:
+            self.saveCurrentProject()
 
     def _get_cross_tab_tasks(self, tab_index: int) -> Optional[List[Dict[str, Any]]]:
         """Return mutable task dictionaries for a tab, if available."""
@@ -2370,7 +2570,57 @@ class ProjectManager(QObject):
             return
 
         task.pop("reminder_at", None)
+        task.pop("reminder_send_notification", None)
         self._emit_tab_summary_changed(tab_index)
+
+    def _string_setting(self, key: str, default: str = "") -> str:
+        """Read a string setting from QSettings."""
+        value = self._settings.value(key, default)
+        if value is None:
+            return default
+        return str(value)
+
+    @Property(str, notify=ntfySettingsChanged)
+    def ntfyServer(self) -> str:
+        """Return the configured ntfy server, or the default server."""
+        stored = self._string_setting("notifications/ntfy_server", "").strip()
+        return stored or DEFAULT_NTFY_SERVER
+
+    @Property(str, notify=ntfySettingsChanged)
+    def ntfyTopic(self) -> str:
+        """Return the configured ntfy topic."""
+        return self._string_setting("notifications/ntfy_topic", "").strip()
+
+    @Property(str, notify=ntfySettingsChanged)
+    def ntfyToken(self) -> str:
+        """Return the configured ntfy bearer token."""
+        return self._string_setting("notifications/ntfy_token", "")
+
+    @Property(bool, notify=ntfySettingsChanged)
+    def ntfyConfigured(self) -> bool:
+        """Return whether reminder notifications are configured."""
+        return bool(self.ntfyTopic.strip())
+
+    @Slot(str, str, str)
+    def saveNtfySettings(self, server: str, topic: str, token: str) -> None:
+        """Persist ntfy settings used for reminder notifications."""
+        normalized_server = (server or "").strip() or DEFAULT_NTFY_SERVER
+        normalized_topic = (topic or "").strip()
+        normalized_token = token or ""
+
+        changed = (
+            normalized_server != self.ntfyServer
+            or normalized_topic != self.ntfyTopic
+            or normalized_token != self.ntfyToken
+        )
+        if not changed:
+            return
+
+        self._settings.setValue("notifications/ntfy_server", normalized_server)
+        self._settings.setValue("notifications/ntfy_topic", normalized_topic)
+        self._settings.setValue("notifications/ntfy_token", normalized_token)
+        self._settings.sync()
+        self.ntfySettingsChanged.emit()
 
     def _load_recent_projects(self) -> List[str]:
         """Load recent projects list from settings."""
@@ -2705,13 +2955,17 @@ class ProjectManager(QObject):
             QDialog,
             QDialogButtonBox,
             QFormLayout,
+            QHBoxLayout,
             QLabel,
             QLineEdit,
             QPlainTextEdit,
+            QPushButton,
             QSizePolicy,
+            QSpinBox,
             QVBoxLayout,
         )
         from PySide6.QtGui import QGuiApplication
+        from eff_diceware import generate_passphrase
 
         dialog = QDialog()
         dialog.setWindowTitle(title)
@@ -2740,6 +2994,30 @@ class ProjectManager(QObject):
         form.addRow("Passphrase:", passphrase_edit)
         form.addRow("Confirm passphrase:", confirm_edit)
         layout.addLayout(form)
+
+        gen_row = QHBoxLayout()
+        gen_button = QPushButton("Suggest passphrase (EFF diceware)")
+        gen_button.setObjectName("generatePassphraseButton")
+        word_count_spin = QSpinBox()
+        word_count_spin.setObjectName("wordCountSpinBox")
+        word_count_spin.setRange(4, 12)
+        word_count_spin.setValue(6)
+        word_count_spin.setPrefix("Words: ")
+        gen_row.addWidget(gen_button)
+        gen_row.addWidget(word_count_spin)
+        gen_row.addStretch()
+        layout.addLayout(gen_row)
+
+        def _generate_and_fill() -> None:
+            passphrase, _bits = generate_passphrase(
+                num_words=word_count_spin.value(), separator="-"
+            )
+            passphrase_edit.setText(passphrase)
+            confirm_edit.setText(passphrase)
+            passphrase_edit.setEchoMode(QLineEdit.Normal)
+            confirm_edit.setEchoMode(QLineEdit.Normal)
+
+        gen_button.clicked.connect(_generate_and_fill)
 
         status_label = QLabel("Passphrase cannot be empty.")
         status_label.setObjectName("passphraseStatusLabel")
@@ -2838,41 +3116,52 @@ class ProjectManager(QObject):
             project_data = dict(payload_data)
             project_data["saved_at"] = datetime.now().isoformat()
 
-            credentials = None
             if (
                 not force_prompt
-                and self._cached_encryption_credentials is not None
+                and self._cached_key_material is not None
                 and self._cached_encryption_file_path == file_path
             ):
-                credentials = EncryptionCredentials(
-                    passphrase=self._cached_encryption_credentials.passphrase,
-                    use_yubikey=self._cached_encryption_credentials.use_yubikey,
-                    yubikey_slot=self._cached_encryption_credentials.yubikey_slot,
-                )
-            else:
-                credentials = self._prompt_encryption_credentials("save", file_path)
-            if credentials is None:
-                return False
-
-            if credentials.use_yubikey:
-                self._begin_yubikey_interaction("save")
-            try:
-                encrypted_payload = encrypt_project_data(project_data, credentials)
+                encrypted_payload = encrypt_with_derived_key(project_data, self._cached_key_material)
                 encrypted_payload["version"] = self.ENCRYPTED_PROJECT_VERSION
-            finally:
+            else:
+                credentials: Optional[EncryptionCredentials]
+                if (
+                    not force_prompt
+                    and self._cached_encryption_credentials is not None
+                    and self._cached_encryption_file_path == file_path
+                ):
+                    credentials = EncryptionCredentials(
+                        passphrase=self._cached_encryption_credentials.passphrase,
+                        use_yubikey=self._cached_encryption_credentials.use_yubikey,
+                        yubikey_slot=self._cached_encryption_credentials.yubikey_slot,
+                    )
+                else:
+                    credentials = self._prompt_encryption_credentials("save", file_path)
+                if credentials is None:
+                    return False
+
                 if credentials.use_yubikey:
-                    self._end_yubikey_interaction()
+                    self._begin_yubikey_interaction("save")
+                try:
+                    key_material = derive_key_material(credentials)
+                    encrypted_payload = encrypt_with_derived_key(project_data, key_material)
+                    encrypted_payload["version"] = self.ENCRYPTED_PROJECT_VERSION
+                finally:
+                    if credentials.use_yubikey:
+                        self._end_yubikey_interaction()
+
+                self._cached_key_material = key_material
+                self._cached_encryption_credentials = EncryptionCredentials(
+                    passphrase=credentials.passphrase,
+                    use_yubikey=credentials.use_yubikey,
+                    yubikey_slot=credentials.yubikey_slot,
+                )
+                self._cached_encryption_file_path = file_path
 
             with open(file_path, "w", encoding="utf-8") as f:
                 json.dump(encrypted_payload, f, ensure_ascii=False, separators=(",", ":"))
 
             self._current_file_path = file_path
-            self._cached_encryption_file_path = file_path
-            self._cached_encryption_credentials = EncryptionCredentials(
-                passphrase=credentials.passphrase,
-                use_yubikey=credentials.use_yubikey,
-                yubikey_slot=credentials.yubikey_slot,
-            )
             self.currentFilePathChanged.emit()
             self._add_to_recent(file_path)
             self._last_saved_snapshot = self._serialize_project_payload(payload_data)
@@ -2923,6 +3212,9 @@ class ProjectManager(QObject):
             self.errorOccurred.emit(f"File not found: {file_path}")
             return
 
+        # Scrub previous project's plaintext data before loading new data.
+        self.scrubProjectData()
+
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 project_data = json.load(f)
@@ -2934,11 +3226,14 @@ class ProjectManager(QObject):
                 if credentials.use_yubikey:
                     self._begin_yubikey_interaction("load")
                 try:
-                    project_data = decrypt_project_data(project_data, credentials)
+                    project_data, key_material = decrypt_and_derive_key_material(
+                        project_data, credentials,
+                    )
                 finally:
                     if credentials.use_yubikey:
                         self._end_yubikey_interaction()
                 self._cached_encryption_file_path = file_path
+                self._cached_key_material = key_material
                 self._cached_encryption_credentials = EncryptionCredentials(
                     passphrase=credentials.passphrase,
                     use_yubikey=credentials.use_yubikey,

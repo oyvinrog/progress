@@ -7,17 +7,21 @@ RowLayout {
     property var root
     property var taskModel
     property var diagramModel
+    property bool compact: false
 
-    spacing: 12
-    Layout.fillWidth: true
+    spacing: compact ? 8 : 12
     visible: taskModel !== null
+    Layout.fillWidth: !compact
+    Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
 
     Rectangle {
         visible: taskModel !== null
-        Layout.minimumWidth: progressStatsRow.implicitWidth + 28
-        Layout.maximumWidth: 480
-        height: 44
-        radius: 10
+        Layout.minimumWidth: compact ? 0 : progressStatsRow.implicitWidth + 28
+        Layout.maximumWidth: compact ? 360 : 480
+        Layout.preferredWidth: compact ? Math.min(progressStatsRow.implicitWidth + 20, 360) : -1
+        Layout.fillWidth: compact
+        height: compact ? 34 : 44
+        radius: compact ? 8 : 10
         color: "#14202b"
         border.color: "#2c3f53"
         border.width: 1
@@ -25,12 +29,12 @@ RowLayout {
         RowLayout {
             id: progressStatsRow
             anchors.centerIn: parent
-            spacing: 10
+            spacing: compact ? 8 : 10
 
             Label {
                 property real percentage: taskModel ? taskModel.percentageComplete : 0
                 text: percentage.toFixed(0) + "%"
-                font.pixelSize: 16
+                font.pixelSize: compact ? 14 : 16
                 font.bold: true
                 color: "#67b8ff"
             }
@@ -38,7 +42,7 @@ RowLayout {
             Label {
                 text: "complete"
                 color: "#86a0b6"
-                font.pixelSize: 11
+                font.pixelSize: compact ? 10 : 11
             }
 
             Label {
@@ -46,38 +50,39 @@ RowLayout {
                 property string activeTask: (activeIdx >= 0 && taskModel) ? taskModel.getTaskTitle(activeIdx) : ""
                 visible: activeTask !== ""
                 text: "\u00b7 " + activeTask
-                font.pixelSize: 12
+                font.pixelSize: compact ? 11 : 12
                 color: "#8fd8b1"
                 elide: Text.ElideRight
-                Layout.maximumWidth: 250
+                Layout.maximumWidth: compact ? 120 : 250
+                Layout.fillWidth: compact
             }
         }
     }
 
     Rectangle {
         visible: taskModel !== null
-        width: 120
-        height: 44
-        radius: 10
+        width: compact ? 106 : 120
+        height: compact ? 34 : 44
+        radius: compact ? 8 : 10
         color: "#14202b"
         border.color: "#2c3f53"
         border.width: 1
 
         RowLayout {
             anchors.centerIn: parent
-            spacing: 6
+            spacing: compact ? 5 : 6
 
             Label {
                 property real totalTime: taskModel ? taskModel.totalEstimatedTime : 0
                 text: root.formatTime(totalTime)
-                font.pixelSize: 13
+                font.pixelSize: compact ? 12 : 13
                 font.bold: true
                 color: "#ffbf72"
             }
 
             Label {
                 text: "left"
-                font.pixelSize: 11
+                font.pixelSize: compact ? 10 : 11
                 color: "#8da6bc"
             }
         }
@@ -85,32 +90,35 @@ RowLayout {
 
     Rectangle {
         visible: taskModel !== null
-        width: 138
-        height: 44
-        radius: 10
+        width: compact ? 122 : 138
+        height: compact ? 34 : 44
+        radius: compact ? 8 : 10
         color: "#14202b"
         border.color: "#2c3f53"
         border.width: 1
 
         RowLayout {
             anchors.centerIn: parent
-            spacing: 6
+            spacing: compact ? 5 : 6
 
             Label {
                 text: "ETA"
-                font.pixelSize: 11
+                font.pixelSize: compact ? 10 : 11
                 color: "#8da6bc"
             }
 
             Label {
                 property string completionTime: taskModel ? taskModel.estimatedCompletionTimeOfDay : ""
                 text: completionTime !== "" ? completionTime : "N/A"
-                font.pixelSize: 13
+                font.pixelSize: compact ? 12 : 13
                 font.bold: true
                 color: "#8fd8b1"
             }
         }
     }
 
-    Item { Layout.fillWidth: true }
+    Item {
+        visible: !compact
+        Layout.fillWidth: true
+    }
 }

@@ -29,11 +29,14 @@ Rectangle {
     )
     readonly property bool persistedExpanded: projectManager ? projectManager.sidebarExpanded : true
     readonly property bool isExpanded: persistedExpanded || keepExpanded
+    readonly property bool hasSingleTab: tabModel && tabModel.tabCount === 1
     property string searchText: ""
     property var pinnedTabIndices: []
     property var recentTabIndices: []
+    property int quickAccessRevision: 0
 
     function refreshQuickAccess() {
+        quickAccessRevision += 1
         if (!tabModel) {
             pinnedTabIndices = []
             recentTabIndices = []
@@ -56,6 +59,10 @@ Rectangle {
 
     function normalizeSearch(text) {
         return String(text || "").trim().toLowerCase()
+    }
+
+    function safeString(value) {
+        return value === undefined || value === null ? "" : String(value)
     }
 
     function matchesSearch(name, activeTaskTitle) {
@@ -94,6 +101,15 @@ Rectangle {
         renameTabDialog.tabIndex = tabIndex
         renameTabDialog.currentName = tabName
         renameTabDialog.open()
+    }
+
+    function renameCurrentTab() {
+        if (!tabModel || tabModel.currentTabIndex === undefined || tabModel.currentTabIndex < 0 || !tabModel.getTabSummary)
+            return
+        var summary = tabModel.getTabSummary(tabModel.currentTabIndex)
+        if (!summary)
+            return
+        openTabRenameDialog(tabModel.currentTabIndex, summary.name || "")
     }
 
     function openTabIconDialog(tabIndex, tabIcon, tabName) {
@@ -284,7 +300,7 @@ Rectangle {
                 Column {
                     width: parent.width
                     spacing: 4
-                    visible: sidebar.isExpanded
+                    visible: sidebar.isExpanded && !sidebar.hasSingleTab
 
                     Text {
                         visible: sidebar.tabModel && sidebar.tabModel.currentTabIndex >= 0
@@ -304,7 +320,10 @@ Rectangle {
                         border.width: 1
 
                         id: currentTabCard
-                        property var summary: sidebar.tabModel ? sidebar.tabSummary(sidebar.tabModel.currentTabIndex) : null
+                        property var summary: {
+                            var _revision = sidebar.quickAccessRevision
+                            return sidebar.tabModel ? sidebar.tabSummary(sidebar.tabModel.currentTabIndex) : null
+                        }
 
                         RowLayout {
                             anchors.fill: parent
@@ -313,14 +332,14 @@ Rectangle {
                             spacing: 6
 
                             Text {
-                                text: (currentTabCard.summary && currentTabCard.summary.icon) ? currentTabCard.summary.icon : "•"
+                                text: (currentTabCard.summary && currentTabCard.summary.icon) ? safeString(currentTabCard.summary.icon) : "•"
                                 color: "#f4fbff"
                                 font.pixelSize: 11
                                 font.bold: true
                             }
 
                             Text {
-                                text: currentTabCard.summary ? currentTabCard.summary.name : ""
+                                text: currentTabCard.summary ? safeString(currentTabCard.summary.name) : ""
                                 color: "#ffffff"
                                 font.pixelSize: 11
                                 font.bold: true
@@ -341,7 +360,7 @@ Rectangle {
                 Column {
                     width: parent.width
                     spacing: 4
-                    visible: sidebar.isExpanded && sidebar.recentTabIndices.length > 0
+                    visible: sidebar.isExpanded && !sidebar.hasSingleTab && sidebar.recentTabIndices.length > 0
 
                     Text {
                         text: "Recent"
@@ -357,7 +376,10 @@ Rectangle {
                             id: recentTabRow
                             required property var modelData
                             property int tabIndex: Number(modelData)
-                            property var summary: sidebar.tabSummary(tabIndex)
+                            property var summary: {
+                                var _revision = sidebar.quickAccessRevision
+                                return sidebar.tabSummary(tabIndex)
+                            }
                             visible: summary !== null && sidebar.matchesSearch(summary.name, summary.activeTaskTitle)
                             width: tabColumnContent.width
                             height: 30
@@ -373,13 +395,13 @@ Rectangle {
                                 spacing: 6
 
                                 Text {
-                                    text: recentTabRow.summary && recentTabRow.summary.icon ? recentTabRow.summary.icon : "•"
+                                    text: recentTabRow.summary && recentTabRow.summary.icon ? safeString(recentTabRow.summary.icon) : "•"
                                     color: "#dceaf8"
                                     font.pixelSize: 10
                                 }
 
                                 Text {
-                                    text: recentTabRow.summary ? recentTabRow.summary.name : ""
+                                    text: recentTabRow.summary ? safeString(recentTabRow.summary.name) : ""
                                     color: "#d7e7f6"
                                     font.pixelSize: 10
                                     elide: Text.ElideRight
@@ -411,7 +433,7 @@ Rectangle {
                 Column {
                     width: parent.width
                     spacing: 4
-                    visible: sidebar.isExpanded && sidebar.pinnedTabIndices.length > 0
+                    visible: sidebar.isExpanded && !sidebar.hasSingleTab && sidebar.pinnedTabIndices.length > 0
 
                     Text {
                         text: "Pinned"
@@ -427,7 +449,10 @@ Rectangle {
                             id: pinnedTabRow
                             required property var modelData
                             property int tabIndex: Number(modelData)
-                            property var summary: sidebar.tabSummary(tabIndex)
+                            property var summary: {
+                                var _revision = sidebar.quickAccessRevision
+                                return sidebar.tabSummary(tabIndex)
+                            }
                             visible: summary !== null
                                 && tabIndex !== (tabModel ? tabModel.currentTabIndex : -1)
                                 && sidebar.matchesSearch(summary.name, summary.activeTaskTitle)
@@ -450,14 +475,14 @@ Rectangle {
                                     spacing: 6
 
                                     Text {
-                                        text: pinnedTabRow.summary && pinnedTabRow.summary.icon ? pinnedTabRow.summary.icon : "PIN"
+                                        text: pinnedTabRow.summary && pinnedTabRow.summary.icon ? safeString(pinnedTabRow.summary.icon) : "PIN"
                                         color: "#fff4c7"
                                         font.pixelSize: 10
                                         font.bold: true
                                     }
 
                                     Text {
-                                        text: pinnedTabRow.summary ? pinnedTabRow.summary.name : ""
+                                        text: pinnedTabRow.summary ? safeString(pinnedTabRow.summary.name) : ""
                                         color: "#f1f7ff"
                                         font.pixelSize: 10
                                         font.bold: true
@@ -468,7 +493,7 @@ Rectangle {
 
                                 Text {
                                     visible: !!(pinnedTabRow.summary && pinnedTabRow.summary.activeTaskTitle)
-                                    text: pinnedTabRow.summary ? pinnedTabRow.summary.activeTaskTitle : ""
+                                    text: pinnedTabRow.summary ? safeString(pinnedTabRow.summary.activeTaskTitle) : ""
                                     color: "#8db5ca"
                                     font.pixelSize: 9
                                     elide: Text.ElideRight
@@ -495,7 +520,7 @@ Rectangle {
                     spacing: 4
 
                     Text {
-                        visible: sidebar.isExpanded
+                        visible: sidebar.isExpanded && !sidebar.hasSingleTab
                         text: sidebar.searchText.length > 0 ? "All Matching Tabs" : "All Tabs"
                         color: "#81b9d7"
                         font.pixelSize: 10

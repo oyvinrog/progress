@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import List
+from dataclasses import field
+from typing import Dict, List
 
 
 class DiagramItemType(Enum):
@@ -45,6 +46,10 @@ class DiagramItem:
     note_markdown: str = ""  # Markdown note content for note-like items
     obstacle_markdown: str = ""  # Markdown obstacle content attached to any node
     folder_path: str = ""  # Path to linked folder
+    note_tabs: List[Dict[str, str]] = field(default_factory=list)
+    obstacle_tabs: List[Dict[str, str]] = field(default_factory=list)
+    text_tabs: List[Dict[str, str]] = field(default_factory=list)
+    text_tab_index: int = 0
 
 
 @dataclass

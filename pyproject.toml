@@ -52,7 +52,7 @@ priorityplot = "actiondraw.priorityplot.app:main"
 
 [tool.setuptools]
 packages = ["actiondraw", "actiondraw.priorityplot"]
-py-modules = ["task_model", "markdown_note_editor", "progress_crypto"]
+py-modules = ["task_model", "markdown_note_editor", "progress_crypto", "eff_diceware"]
 
 [tool.setuptools.package-data]
 actiondraw = ["qml_ui/**/*.qml"]

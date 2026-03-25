@@ -539,6 +539,8 @@ class TestQueries:
         assert roles[empty_diagram_model.LinkedSubtabCompletionRole] == b"linkedSubtabCompletion"
         assert roles[empty_diagram_model.LinkedSubtabActiveActionRole] == b"linkedSubtabActiveAction"
         assert roles[empty_diagram_model.HasLinkedSubtabRole] == b"hasLinkedSubtab"
+        assert roles[empty_diagram_model.TextTabsRole] == b"textTabs"
+        assert roles[empty_diagram_model.TextTabIndexRole] == b"textTabIndex"
 
     def test_data_invalid_index(self, empty_diagram_model):
         assert empty_diagram_model.data(empty_diagram_model.index(10, 0), empty_diagram_model.IdRole) is None
@@ -1006,6 +1008,28 @@ class TestDiagramModelSerialization:
         new_model.from_dict(data)
         assert new_model.getItemMarkdown(item_id) == "# Title\nBody"
 
+    def test_note_tabs_roundtrip_preserves_primary_text(self, empty_diagram_model):
+        item_id = empty_diagram_model.addPresetItem("note", 10.0, 20.0)
+        empty_diagram_model.setEditorTabs(
+            item_id,
+            "note",
+            [
+                {"name": "Overview", "text": "# Title\nBody"},
+                {"name": "Ideas", "text": "- one\n- two"},
+            ],
+        )
+
+        data = empty_diagram_model.to_dict()
+        assert data["items"][0]["text"] == "# Title\nBody"
+        assert data["items"][0]["note_tabs"][1]["name"] == "Ideas"
+
+        new_model = DiagramModel()
+        new_model.from_dict(data)
+        item = new_model.getItem(item_id)
+        assert item is not None
+        assert item.text == "# Title\nBody"
+        assert item.note_tabs[1]["text"] == "- one\n- two"
+
     def test_obstacle_markdown_roundtrip(self, empty_diagram_model):
         item_id = empty_diagram_model.addBox(10.0, 20.0, "Task")
         empty_diagram_model.setItemObstacleMarkdown(item_id, "Blocked by dependency")
@@ -1016,6 +1040,124 @@ class TestDiagramModelSerialization:
         new_model = DiagramModel()
         new_model.from_dict(data)
         assert new_model.getItemObstacleMarkdown(item_id) == "Blocked by dependency"
+
+    def test_freetext_tabs_roundtrip_preserves_canvas_text(self, empty_diagram_model):
+        item_id = empty_diagram_model.addPresetItemWithText("freetext", 10.0, 20.0, "Visible")
+        empty_diagram_model.setEditorTabs(
+            item_id,
+            "freetext",
+            [
+                {"name": "Visible", "text": "Visible"},
+                {"name": "Draft", "text": "Hidden draft"},
+            ],
+        )
+
+        data = empty_diagram_model.to_dict()
+        assert data["items"][0]["text"] == "Visible"
+        assert data["items"][0]["text_tabs"][1]["name"] == "Draft"
+
+        new_model = DiagramModel()
+        new_model.from_dict(data)
+        item = new_model.getItem(item_id)
+        assert item is not None
+        assert item.text == "Visible"
+        assert item.text_tabs[1]["text"] == "Hidden draft"
+
+    def test_freetext_preview_tab_index_roundtrip(self, empty_diagram_model):
+        item_id = empty_diagram_model.addPresetItemWithText("freetext", 10.0, 20.0, "Visible")
+        empty_diagram_model.setEditorTabs(
+            item_id,
+            "freetext",
+            [
+                {"name": "Visible", "text": "Visible"},
+                {"name": "Draft", "text": "Hidden draft"},
+            ],
+        )
+        empty_diagram_model.setItemTextTabIndex(item_id, 1)
+
+        data = empty_diagram_model.to_dict()
+        assert data["items"][0]["text_tab_index"] == 1
+
+        new_model = DiagramModel()
+        new_model.from_dict(data)
+        item = new_model.getItem(item_id)
+        assert item is not None
+        assert item.text == "Visible"
+        assert item.text_tab_index == 1
+
+    def test_freetext_preview_tab_index_clamps_after_tab_replacement(self, empty_diagram_model):
+        item_id = empty_diagram_model.addPresetItemWithText("freetext", 10.0, 20.0, "Visible")
+        empty_diagram_model.setEditorTabs(
+            item_id,
+            "freetext",
+            [
+                {"name": "Visible", "text": "Visible"},
+                {"name": "Draft", "text": "Hidden draft"},
+            ],
+        )
+        empty_diagram_model.setItemTextTabIndex(item_id, 1)
+
+        empty_diagram_model.setEditorTabs(
+            item_id,
+            "freetext",
+            [{"name": "Visible", "text": "Visible"}],
+        )
+
+        item = empty_diagram_model.getItem(item_id)
+        index = empty_diagram_model.index(0, 0)
+        assert item is not None
+        assert item.text_tab_index == 0
+        assert empty_diagram_model.data(index, empty_diagram_model.TextTabIndexRole) == 0
+
+    def test_freetext_preview_tab_index_change_emits_model_roles(self, empty_diagram_model):
+        item_id = empty_diagram_model.addPresetItemWithText("freetext", 10.0, 20.0, "Visible")
+        empty_diagram_model.setEditorTabs(
+            item_id,
+            "freetext",
+            [
+                {"name": "Visible", "text": "Visible"},
+                {"name": "Draft", "text": "Hidden draft"},
+            ],
+        )
+
+        emitted_roles = []
+        empty_diagram_model.dataChanged.connect(lambda _top_left, _bottom_right, roles: emitted_roles.append(list(roles)))
+
+        empty_diagram_model.setItemTextTabIndex(item_id, 1)
+
+        index = empty_diagram_model.index(0, 0)
+        assert empty_diagram_model.data(index, empty_diagram_model.TextTabIndexRole) == 1
+        assert empty_diagram_model.data(index, empty_diagram_model.TextTabsRole)[1]["text"] == "Hidden draft"
+        assert any(empty_diagram_model.TextTabIndexRole in roles for roles in emitted_roles)
+
+    def test_freetext_preview_tab_index_clamps_on_load(self):
+        model = DiagramModel()
+        model.from_dict({
+            "items": [
+                {
+                    "id": "freetext_0",
+                    "item_type": "freetext",
+                    "x": 10,
+                    "y": 20,
+                    "width": 120,
+                    "height": 80,
+                    "text": "Visible",
+                    "text_tabs": [{"name": "Visible", "text": "Visible"}],
+                    "text_tab_index": 9,
+                    "task_index": -1,
+                    "color": "#4a9eff",
+                    "text_color": "#f5f6f8",
+                }
+            ],
+            "edges": [],
+            "strokes": [],
+        })
+
+        item = model.getItem("freetext_0")
+        index = model.index(0, 0)
+        assert item is not None
+        assert item.text_tab_index == 0
+        assert model.data(index, model.TextTabIndexRole) == 0
 
     def test_empty_obstacle_markdown_not_serialized(self, empty_diagram_model):
         item_id = empty_diagram_model.addBox(10.0, 20.0, "Task")
@@ -2018,8 +2160,17 @@ class TestMultiTabSupport:
             yubikey_slot="2",
         )
 
-        def _fake_encrypt(project_data, credentials):
+        class _FakeKeyMaterial:
+            def scrub(self):
+                pass
+
+        def _fake_derive_key_material(credentials):
             assert credentials.use_yubikey is True
+            assert credentials.yubikey_slot == "2"
+            return _FakeKeyMaterial()
+
+        def _fake_encrypt_with_derived_key(project_data, key_material):
+            assert isinstance(key_material, _FakeKeyMaterial)
             return {
                 "version": "1.2",
                 "saved_at": project_data.get("saved_at"),
@@ -2036,7 +2187,8 @@ class TestMultiTabSupport:
                 "ciphertext": "ZmFrZWNpcGhlcnRleHQ=",
             }
 
-        monkeypatch.setattr("task_model.encrypt_project_data", _fake_encrypt)
+        monkeypatch.setattr("task_model.derive_key_material", _fake_derive_key_material)
+        monkeypatch.setattr("task_model.encrypt_with_derived_key", _fake_encrypt_with_derived_key)
 
         started = []
         finished = []
@@ -2562,6 +2714,46 @@ class TestActionDrawQmlTaskInteractions:
         assert 'onActivated: projectManager.goBack()' in qml
         assert 'projectManager: projectManagerRef' in qml
 
+    def test_f2_shortcut_renames_selected_item_or_current_tab(self):
+        qml = load_actiondraw_qml()
+        sidebar_qml = (QML_DIR / "components" / "SidebarTabs.qml").read_text(encoding="utf-8")
+
+        assert 'sequence: "F2"' in qml
+        assert 'if (root.selectedItemId && root.selectedItemId.length > 0)' in qml
+        assert 'root.renameSelectedItem()' in qml
+        assert 'else if (sidebarTabs && sidebarTabs.renameCurrentTab)' in qml
+        assert 'sidebarTabs.renameCurrentTab()' in qml
+        assert 'function renameCurrentTab()' in sidebar_qml
+        assert 'openTabRenameDialog(tabModel.currentTabIndex, summary.name || "")' in sidebar_qml
+
+    def test_note_badge_excludes_freetext_items(self):
+        qml = load_actiondraw_qml()
+
+        assert 'id: noteBadge' in qml
+        assert 'visible: itemRect.itemType !== "note" && itemRect.itemType !== "freetext" && itemRect.itemType !== "image"' in qml
+        assert 'visible: itemRect.itemType !== "note" && model.noteMarkdown && model.noteMarkdown.trim().length > 0' not in qml
+        assert 'color: model.noteMarkdown && model.noteMarkdown.trim().length > 0 ? "#6fd3ff" : "#f5d96b"' in qml
+        assert 'border.color: model.noteMarkdown && model.noteMarkdown.trim().length > 0 ? "#3298c7" : "#d9b84f"' in qml
+
+    def test_freetext_tooltip_and_selection_use_freetext_flow(self):
+        qml = load_actiondraw_qml()
+
+        assert 'if (item.type === "freetext") {' in qml
+        assert 'root.openFreeTextDialog(Qt.point(item.x, item.y), item.id, item.text)' in qml
+        assert 'ToolTip.text: model.text + (model.noteMarkdown && model.noteMarkdown !== model.text ? "\\n\\n" + model.noteMarkdown : "")' in qml
+        assert 'ToolTip.text: model.text + (model.noteMarkdown && model.noteMarkdown !== model.text ? "\\n\\n" + model.noteMarkdown : "")' not in qml[qml.index('id: freeTextLabel'):]
+        assert 'ToolTip.text: itemRect.freeTextDisplayText' in qml[qml.index('id: freeTextLabel'):]
+
+    def test_freetext_canvas_preview_has_tab_switcher(self):
+        qml = load_actiondraw_qml()
+
+        assert 'property var freeTextTabs: model.textTabs || []' in qml
+        assert 'property int freeTextTabIndex: model.textTabIndex || 0' in qml
+        assert 'id: freeTextTabSwitcher' in qml
+        assert 'visible: itemRect.freeTextTabCount > 1' in qml
+        assert 'diagramModel.setItemTextTabIndex(itemRect.itemId, nextIndex)' in qml
+        assert 'text: itemRect.freeTextDisplayText' in qml[qml.index('id: freeTextLabel'):]
+
 
 class TestCountdownTimer:
     """Tests for the countdown timer feature."""
@@ -2865,19 +3057,21 @@ class TestTaskReminders:
         reminder_at = task_model_with_reminder.data(index, task_model_with_reminder.ReminderAtRole)
         assert active == False
         assert reminder_at == ""
+        assert task_model_with_reminder.isReminderNotificationEnabled(0) is False
 
     def test_set_reminder_valid(self, task_model_with_reminder):
         from datetime import datetime, timedelta
 
         reminder_dt = datetime.now() + timedelta(hours=1)
         reminder_str = reminder_dt.strftime("%Y-%m-%d %H:%M")
-        assert task_model_with_reminder.setReminderAt(0, reminder_str) is True
+        assert task_model_with_reminder.setReminderAt(0, reminder_str, True) is True
 
         index = task_model_with_reminder.index(0, 0)
         active = task_model_with_reminder.data(index, task_model_with_reminder.ReminderActiveRole)
         reminder_at = task_model_with_reminder.data(index, task_model_with_reminder.ReminderAtRole)
         assert active == True
         assert reminder_at == reminder_str
+        assert task_model_with_reminder.isReminderNotificationEnabled(0) is True
 
     def test_set_reminder_invalid(self, task_model_with_reminder):
         assert task_model_with_reminder.setReminderAt(0, "not-a-date") is False
@@ -2889,7 +3083,7 @@ class TestTaskReminders:
         from datetime import datetime, timedelta
 
         reminder_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
-        assert task_model_with_reminder.setReminderAt(0, reminder_str) is True
+        assert task_model_with_reminder.setReminderAt(0, reminder_str, True) is True
         task_model_with_reminder.clearReminderAt(0)
 
         index = task_model_with_reminder.index(0, 0)
@@ -2897,6 +3091,7 @@ class TestTaskReminders:
         reminder_at = task_model_with_reminder.data(index, task_model_with_reminder.ReminderAtRole)
         assert active == False
         assert reminder_at == ""
+        assert task_model_with_reminder.isReminderNotificationEnabled(0) is False
 
     def test_due_reminder_emits_signal_and_clears(self, task_model_with_reminder):
         from datetime import datetime, timedelta
@@ -2917,10 +3112,11 @@ class TestTaskReminders:
         from datetime import datetime, timedelta
 
         reminder_str = (datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
-        assert task_model_with_reminder.setReminderAt(0, reminder_str) is True
+        assert task_model_with_reminder.setReminderAt(0, reminder_str, True) is True
         data = task_model_with_reminder.to_dict()
         task_data = data["tasks"][0]
         assert "reminder_at" in task_data
+        assert task_data["reminder_send_notification"] is True
 
     def test_reminder_deserialization(self, app):
         import time
@@ -2935,6 +3131,7 @@ class TestTaskReminders:
                 "indent_level": 0,
                 "custom_estimate": None,
                 "reminder_at": time.time() + 3600,
+                "reminder_send_notification": True,
             }]
         }
 
@@ -2945,6 +3142,7 @@ class TestTaskReminders:
         assert active == True
         assert isinstance(reminder_at, str)
         assert reminder_at != ""
+        assert model.isReminderNotificationEnabled(0) is True
 
     def test_diagram_reminder_roles_exist(self, diagram_model_with_reminder_task):
         model, _ = diagram_model_with_reminder_task
@@ -2983,12 +3181,40 @@ class TestTaskReminders:
         diagram_model, task_model = diagram_model_with_reminder_task
         reminder_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
 
-        assert diagram_model.setTaskReminderAt(0, reminder_str) is True
+        assert diagram_model.setTaskReminderAt(0, reminder_str, True) is True
         assert diagram_model.setTaskReminderAt(0, "invalid") is False
 
         index = task_model.index(0, 0)
         active = task_model.data(index, task_model.ReminderActiveRole)
         assert active == True
+        assert diagram_model.isTaskReminderNotificationEnabled(0) is True
+
+    def test_project_manager_sends_ntfy_for_current_tab_due_reminder(self, app, monkeypatch):
+        from datetime import datetime, timedelta
+        from task_model import TaskModel, ProjectManager, TabModel
+        import task_model as task_model_module
+
+        task_model = TaskModel()
+        task_model.addTask("Current Reminder", -1)
+        reminder_str = (datetime.now() - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M")
+        assert task_model.setReminderAt(0, reminder_str, True) is True
+
+        published = []
+        monkeypatch.setattr(
+            task_model_module,
+            "_publish_ntfy_message_async",
+            lambda title, message, server=None, topic=None, token=None: published.append((title, message, server, topic, token)),
+        )
+
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        project_manager.saveNtfySettings("https://example.ntfy", "alerts", "secret")
+
+        task_model._updateActiveTasks()
+
+        assert project_manager is not None
+        assert published == [("ActionDraw Reminder", "Reminder due: Current Reminder\nTab: Main", "https://example.ntfy", "alerts", "secret")]
 
     def test_project_manager_emits_current_tab_reminder_due(self, app):
         from datetime import datetime, timedelta
@@ -3002,6 +3228,7 @@ class TestTaskReminders:
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        project_manager.saveNtfySettings("https://ntfy.sh", "", "")
 
         due = []
         project_manager.taskReminderDue.connect(lambda tab_idx, task_idx, title: due.append((tab_idx, task_idx, title)))
@@ -3012,6 +3239,48 @@ class TestTaskReminders:
     def test_project_manager_emits_background_tab_reminder_due(self, app):
         import time
         from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        task_model.addTask("Tab 1 Task", -1)
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        project_manager.saveNtfySettings("https://ntfy.sh", "", "")
+
+        tab_model.addTab("Tab 2")
+        tab_model.setTabData(
+            1,
+            {
+                "tasks": [{
+                    "title": "Background Reminder",
+                    "completed": False,
+                    "time_spent": 0.0,
+                    "parent_index": -1,
+                    "indent_level": 0,
+                    "custom_estimate": None,
+                    "reminder_at": time.time() - 1,
+                    "reminder_send_notification": True,
+                }]
+            },
+            {"items": [], "edges": [], "strokes": [], "current_task_index": -1},
+        )
+
+        due = []
+        project_manager.taskReminderDue.connect(lambda tab_idx, task_idx, title: due.append((tab_idx, task_idx, title)))
+        project_manager._checkBackgroundTabReminders()
+
+        assert due == [(1, 0, "Background Reminder")]
+
+        # Reminder is cleared after firing
+        tabs = tab_model.getAllTabs()
+        task_data = tabs[1].tasks["tasks"][0]
+        assert "reminder_at" not in task_data
+        assert "reminder_send_notification" not in task_data
+
+    def test_project_manager_sends_ntfy_for_background_tab_due_reminder(self, app, monkeypatch):
+        import time
+        from task_model import TaskModel, ProjectManager, TabModel
+        import task_model as task_model_module
 
         task_model = TaskModel()
         task_model.addTask("Tab 1 Task", -1)
@@ -3031,21 +3300,42 @@ class TestTaskReminders:
                     "indent_level": 0,
                     "custom_estimate": None,
                     "reminder_at": time.time() - 1,
+                    "reminder_send_notification": True,
                 }]
             },
             {"items": [], "edges": [], "strokes": [], "current_task_index": -1},
         )
 
-        due = []
-        project_manager.taskReminderDue.connect(lambda tab_idx, task_idx, title: due.append((tab_idx, task_idx, title)))
+        published = []
+        monkeypatch.setattr(
+            task_model_module,
+            "_publish_ntfy_message_async",
+            lambda title, message, server=None, topic=None, token=None: published.append((title, message, server, topic, token)),
+        )
+        project_manager.saveNtfySettings("https://example.ntfy", "alerts", "secret")
+
         project_manager._checkBackgroundTabReminders()
 
-        assert due == [(1, 0, "Background Reminder")]
+        assert published == [("ActionDraw Reminder", "Reminder due: Background Reminder\nTab: Tab 2", "https://example.ntfy", "alerts", "secret")]
 
-        # Reminder is cleared after firing
-        tabs = tab_model.getAllTabs()
-        task_data = tabs[1].tasks["tasks"][0]
-        assert "reminder_at" not in task_data
+    def test_project_manager_persists_ntfy_settings(self, app):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        project_manager.saveNtfySettings("https://example.ntfy", "alerts", "secret")
+
+        assert project_manager.ntfyServer == "https://example.ntfy"
+        assert project_manager.ntfyTopic == "alerts"
+        assert project_manager.ntfyToken == "secret"
+        assert project_manager.ntfyConfigured is True
+
+        project_manager.saveNtfySettings("https://example.ntfy", "", "")
+
+        assert project_manager.ntfyConfigured is False
 
     def test_project_manager_get_active_reminders_returns_sorted_cross_tab_results(self, app):
         from datetime import datetime, timedelta
@@ -4895,6 +5185,7 @@ class TestMarkdownNoteManager:
         class _DummyEditor:
             def __init__(self, *_args, **_kwargs):
                 self.noteSaved = _DummySignal()
+                self.noteSavedAndClosed = _DummySignal()
                 self.noteCanceled = _DummySignal()
 
         monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
@@ -4914,6 +5205,7 @@ class TestMarkdownNoteManager:
         class _DummyEditor:
             def __init__(self, *_args, **_kwargs):
                 self.noteSaved = _DummySignal()
+                self.noteSavedAndClosed = _DummySignal()
                 self.noteCanceled = _DummySignal()
                 self.note_id = ""
                 self.save_confirmation_calls = 0
@@ -4947,6 +5239,7 @@ class TestMarkdownNoteManager:
         class _DummyEditor:
             def __init__(self, *_args, **_kwargs):
                 self.noteSaved = _DummySignal()
+                self.noteSavedAndClosed = _DummySignal()
                 self.noteCanceled = _DummySignal()
                 self.save_confirmation_calls = 0
 
@@ -4966,6 +5259,37 @@ class TestMarkdownNoteManager:
         assert manager._editor.save_confirmation_calls == 1
         assert empty_diagram_model.getItemMarkdown(item_id) == "Updated markdown"
 
+    def test_open_note_with_empty_markdown_uses_note_editor(self, empty_diagram_model, monkeypatch):
+        class _DummySignal:
+            def connect(self, _callback):
+                return None
+
+        class _DummyEditor:
+            def __init__(self, *_args, **_kwargs):
+                self.noteSaved = _DummySignal()
+                self.noteSavedAndClosed = _DummySignal()
+                self.noteCanceled = _DummySignal()
+                self.open_calls = []
+
+            def open(self, *args, **kwargs):
+                self.open_calls.append((args, kwargs))
+
+        item_id = empty_diagram_model.addBox(40.0, 30.0, "Task")
+        monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
+        manager = MarkdownNoteManager(empty_diagram_model)
+
+        manager.openNote(item_id)
+
+        assert manager.editorOpen is True
+        assert manager.activeEditorType == "note"
+        assert manager.activeItemId == item_id
+        args, kwargs = manager._editor.open_calls[0]
+        assert args[0] == item_id
+        assert args[1] == ""
+        assert args[2] == "Task Note"
+        assert kwargs["editor_type"] == "note"
+        assert kwargs["tabs"][0]["text"] == ""
+
     def test_open_obstacle_uses_obstacle_editor_type(self, empty_diagram_model, monkeypatch):
         class _DummySignal:
             def connect(self, _callback):
@@ -4974,6 +5298,7 @@ class TestMarkdownNoteManager:
         class _DummyEditor:
             def __init__(self, *_args, **_kwargs):
                 self.noteSaved = _DummySignal()
+                self.noteSavedAndClosed = _DummySignal()
                 self.noteCanceled = _DummySignal()
                 self.open_calls = []
 
@@ -4982,6 +5307,14 @@ class TestMarkdownNoteManager:
 
         item_id = empty_diagram_model.addBox(40.0, 30.0, "Task")
         empty_diagram_model.setItemObstacleMarkdown(item_id, "Blocked")
+        empty_diagram_model.setEditorTabs(
+            item_id,
+            "obstacle",
+            [
+                {"name": "Main", "text": "Blocked"},
+                {"name": "Dependencies", "text": "Vendor wait"},
+            ],
+        )
         monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
         manager = MarkdownNoteManager(empty_diagram_model)
 
@@ -4994,6 +5327,7 @@ class TestMarkdownNoteManager:
         assert args[1] == "Blocked"
         assert args[2] == "Task Obstacle"
         assert kwargs["editor_type"] == "obstacle"
+        assert kwargs["tabs"][1]["name"] == "Dependencies"
 
     def test_save_obstacle_keeps_editor_open_and_confirms_save(self, empty_diagram_model, monkeypatch):
         class _DummySignal:
@@ -5003,6 +5337,7 @@ class TestMarkdownNoteManager:
         class _DummyEditor:
             def __init__(self, *_args, **_kwargs):
                 self.noteSaved = _DummySignal()
+                self.noteSavedAndClosed = _DummySignal()
                 self.noteCanceled = _DummySignal()
                 self.save_confirmation_calls = 0
 
@@ -5015,7 +5350,14 @@ class TestMarkdownNoteManager:
         manager = MarkdownNoteManager(empty_diagram_model)
         manager._set_editor_state("obstacle", item_id, 40.0, 30.0, True)
 
-        manager._save_note(item_id, "Blocked by vendor")
+        manager._save_note(
+            item_id,
+            "Blocked by vendor",
+            [
+                {"name": "Main", "text": "Blocked by vendor"},
+                {"name": "Follow-up", "text": "Waiting on procurement"},
+            ],
+        )
 
         assert manager.editorOpen is True
         assert manager.activeEditorType == "obstacle"
@@ -5023,6 +5365,37 @@ class TestMarkdownNoteManager:
         assert manager._editor.save_confirmation_calls == 1
         assert empty_diagram_model.getItemObstacleMarkdown(item_id) == "Blocked by vendor"
         assert empty_diagram_model.getItemMarkdown(item_id) == "Existing note"
+        item = empty_diagram_model.getItem(item_id)
+        assert item is not None
+        assert item.obstacle_tabs[1]["name"] == "Follow-up"
+
+    def test_save_and_close_note_updates_model_and_closes_editor(self, empty_diagram_model, monkeypatch):
+        class _DummySignal:
+            def connect(self, _callback):
+                return None
+
+        class _DummyEditor:
+            def __init__(self, *_args, **_kwargs):
+                self.noteSaved = _DummySignal()
+                self.noteSavedAndClosed = _DummySignal()
+                self.noteCanceled = _DummySignal()
+                self.save_confirmation_calls = 0
+
+            def show_save_confirmation(self):
+                self.save_confirmation_calls += 1
+
+        item_id = empty_diagram_model.addBox(40.0, 30.0, "Task")
+        monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
+        manager = MarkdownNoteManager(empty_diagram_model)
+        manager._set_editor_state("note", item_id, 40.0, 30.0, True)
+
+        manager._save_and_close_note(item_id, "Updated markdown")
+
+        assert empty_diagram_model.getItemMarkdown(item_id) == "Updated markdown"
+        assert manager._editor.save_confirmation_calls == 1
+        assert manager.editorOpen is False
+        assert manager.activeEditorType == ""
+        assert manager.activeItemId == ""
 
 
 if __name__ == "__main__":
