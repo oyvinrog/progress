@@ -52,13 +52,12 @@ def test_split_markdown_segments_preserves_code_fences_and_standalone_images():
 
     segments = split_markdown_segments(markdown)
 
-    assert [segment.kind for segment in segments] == ["markdown", "image", "markdown", "markdown"]
+    assert [segment.kind for segment in segments] == ["markdown", "image", "markdown"]
     assert "```python" in segments[0].text
     assert segments[1].image is not None
     assert segments[1].image.width == 200
     assert segments[1].image.height == 100
-    assert segments[2].text == "\n"
-    assert segments[3].text == "After\n"
+    assert segments[2].text == "After\n"
 
 
 def test_build_pdf_document_expands_tokens_and_preserves_explicit_image_size():
@@ -80,7 +79,7 @@ def test_build_pdf_document_expands_tokens_and_preserves_explicit_image_size():
     assert len(image_formats) == 1
     assert image_formats[0].width() == 320.0
     assert image_formats[0].height() == 240.0
-    assert "Tabs" in plain_text
+    assert "Contents" in plain_text
     assert "Tab 1" in plain_text
 
 
@@ -96,9 +95,26 @@ def test_build_pdf_document_adds_index_before_tab_content():
 
     plain_text = document.toPlainText()
     assert "Multi Tab" in plain_text
-    assert "Tabs" in plain_text
-    assert plain_text.index("Tabs") < plain_text.index("Overview")
+    assert "Contents" in plain_text
+    assert plain_text.index("Contents") < plain_text.index("Overview")
     assert plain_text.index("Overview") < plain_text.index("Details")
+
+
+def test_build_pdf_document_renders_toc_links_and_tab_anchors():
+    document = build_pdf_document(
+        "Linked Tabs",
+        [
+            {"name": "Overview", "text": "First tab"},
+            {"name": "Details", "text": "Second tab"},
+        ],
+        page_size=QSizeF(640.0, 900.0),
+    )
+
+    html = document.toHtml()
+    assert 'href="#tab-1"' in html
+    assert 'href="#tab-2"' in html
+    assert 'name="tab-1"' in html
+    assert 'name="tab-2"' in html
 
 
 def test_repeated_builds_have_identical_layout_metrics(app):
@@ -136,6 +152,24 @@ def test_export_tabs_to_pdf_writes_non_empty_pdf_twice(app, tmp_path):
     assert output_two.exists()
     assert output_one.stat().st_size > 0
     assert output_two.stat().st_size > 0
+
+
+def test_exported_pdf_contains_internal_toc_annotations(app, tmp_path):
+    output_path = tmp_path / "linked-toc.pdf"
+
+    exported = export_tabs_to_pdf(
+        "Linked Export",
+        [
+            {"name": "Overview", "text": "First tab"},
+            {"name": "Details", "text": "Second tab"},
+        ],
+        str(output_path),
+    )
+
+    data = output_path.read_bytes()
+    assert exported is True
+    assert b"/Annots" in data
+    assert b"/Dests" in data
 
 
 def test_qml_exporter_slot_accepts_python_list(app, tmp_path):

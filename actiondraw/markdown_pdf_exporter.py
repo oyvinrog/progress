@@ -40,6 +40,56 @@ _HEIGHT_RE = re.compile(r"height\s*=\s*(\d+)", re.IGNORECASE)
 _PDF_RESOLUTION_DPI = 96
 _PDF_MARGIN_POINTS = 36.0
 _DEFAULT_PAGE_SIZE = QSizeF(794.0, 1123.0)
+_DEFAULT_STYLESHEET = """
+body {
+    font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+    font-size: 12pt;
+    line-height: 1.35;
+    color: #1f2937;
+}
+h1 {
+    margin-top: 0;
+    margin-bottom: 14px;
+    color: #0f172a;
+}
+h2 {
+    margin-top: 16px;
+    margin-bottom: 10px;
+    color: #1e293b;
+}
+p {
+    margin-top: 0;
+    margin-bottom: 10px;
+}
+ul, ol {
+    margin-top: 0;
+    margin-bottom: 12px;
+}
+li {
+    margin-bottom: 4px;
+}
+pre, code {
+    font-family: "Consolas", "Courier New", monospace;
+}
+pre {
+    background: #f8fafc;
+    border: 1px solid #dbe4ee;
+    padding: 10px;
+    margin-top: 6px;
+    margin-bottom: 12px;
+    white-space: pre-wrap;
+}
+blockquote {
+    color: #475569;
+    border-left: 3px solid #cbd5e1;
+    margin-left: 0;
+    padding-left: 10px;
+}
+a {
+    color: #2563eb;
+    text-decoration: none;
+}
+"""
 
 
 @dataclass(frozen=True)
@@ -142,8 +192,6 @@ def split_markdown_segments(markdown: str) -> list[MarkdownSegment]:
                     ),
                 )
             )
-            if line.endswith("\n"):
-                segments.append(MarkdownSegment(kind="markdown", text="\n"))
             continue
 
         markdown_lines.append(line)
@@ -249,6 +297,18 @@ def _insert_heading(cursor: QTextCursor, level: int, text: str) -> None:
     cursor.insertBlock()
 
 
+def _tab_anchor_name(index: int) -> str:
+    return f"tab-{index + 1}"
+
+
+def _insert_anchor_heading(cursor: QTextCursor, level: int, text: str, anchor_name: str) -> None:
+    safe_text = html.escape((text or "").strip() or "Untitled")
+    safe_anchor = html.escape(anchor_name or "")
+    level = max(1, min(6, level))
+    cursor.insertHtml(f"<h{level}><a name=\"{safe_anchor}\"></a>{safe_text}</h{level}>")
+    cursor.insertBlock()
+
+
 def _insert_fallback_alt(cursor: QTextCursor, alt: str) -> None:
     fallback = f"[Image: {alt}]" if alt else "[Image]"
     cursor.insertText(fallback)
@@ -286,10 +346,18 @@ def _insert_image_block(
 
 
 def _insert_tab_index(cursor: QTextCursor, title: str, tabs: list[dict[str, str]]) -> None:
-    _insert_heading(cursor, 1, title or "Markdown Export")
-    cursor.insertHtml("<h2>Tabs</h2>")
+    safe_title = html.escape((title or "Markdown Export").strip() or "Markdown Export")
+    cursor.insertHtml(
+        f"<div style=\"text-align:center; margin-bottom:24px;\">"
+        f"<h1 style=\"margin-bottom:6px;\">{safe_title}</h1>"
+        f"<div style=\"color:#64748b; font-size:10pt;\">Exported tabs</div>"
+        f"</div>"
+    )
+    cursor.insertHtml("<h2>Contents</h2>")
     list_items = "".join(
-        f"<li>{html.escape(str(tab.get('name') or f'Tab {index + 1}'))}</li>"
+        f"<li><a href=\"#{_tab_anchor_name(index)}\">"
+        f"{html.escape(str(tab.get('name') or f'Tab {index + 1}'))}"
+        f"</a></li>"
         for index, tab in enumerate(tabs)
     )
     cursor.insertHtml(f"<ol>{list_items}</ol>")
@@ -320,8 +388,10 @@ def build_pdf_document(
 
     document = QTextDocument()
     document.setDefaultFont(QFont("Trebuchet MS", 11))
+    document.setDefaultStyleSheet(_DEFAULT_STYLESHEET)
     document.setDocumentMargin(24.0)
     document.setPageSize(page_size or _DEFAULT_PAGE_SIZE)
+    document.setUseDesignMetrics(True)
 
     safe_title = (title or "").strip()
     if safe_title:
@@ -336,7 +406,7 @@ def build_pdf_document(
         _insert_page_break(cursor)
         tab_name = str(tab.get("name") or f"Tab {index + 1}")
         tab_text = image_paster.expandMarkdownImages(str(tab.get("text") or ""))
-        _insert_heading(cursor, 1, tab_name)
+        _insert_anchor_heading(cursor, 1, tab_name, _tab_anchor_name(index))
         build_document_from_markdown(tab_text, document, cursor, max_width=content_width)
 
     return document
