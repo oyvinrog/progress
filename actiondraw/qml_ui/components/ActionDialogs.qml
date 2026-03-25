@@ -55,6 +55,7 @@ Item {
         || contractDialog.visible
         || edgeDropTaskDialog.visible
         || clipboardPasteDialog.visible
+        || boxPdfDialog.visible
         || saveDialog.visible
         || loadDialog.visible
     )
@@ -194,6 +195,18 @@ Item {
         timePickerPopup.selectedHour = currentTime.getHours()
         timePickerPopup.selectedMinute = currentTime.getMinutes()
         timePickerPopup.open()
+    }
+
+    function exportBoxDialogPdf(selectedFile) {
+        if (!markdownPdfExporter || !markdownPdfExporter.exportTabsToPdf)
+            return false
+        var title = String(boxDialog.title || "").trim()
+        if (title.length === 0)
+            title = "Markdown Export"
+        return markdownPdfExporter.exportTabsToPdf(title, [{
+            name: title,
+            text: String(boxDialog.textValue || "")
+        }], selectedFile)
     }
 
     Popup {
@@ -671,14 +684,27 @@ Item {
             }
         }
 
-        footer: DialogButtonBox {
-            id: boxDialogButtonBox
-            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+        footer: RowLayout {
+            spacing: 8
 
-            Component.onCompleted: {
-                var okButton = boxDialogButtonBox.standardButton(DialogButtonBox.Ok)
-                if (okButton)
-                    okButton.text = "Save (Ctrl+Enter)"
+            Button {
+                text: "Save PDF..."
+                onClicked: boxPdfDialog.open()
+            }
+
+            Item {
+                Layout.fillWidth: true
+            }
+
+            DialogButtonBox {
+                id: boxDialogButtonBox
+                standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+
+                Component.onCompleted: {
+                    var okButton = boxDialogButtonBox.standardButton(DialogButtonBox.Ok)
+                    if (okButton)
+                        okButton.text = "Save (Ctrl+Enter)"
+                }
             }
         }
 
@@ -2336,6 +2362,15 @@ Item {
             edgeDropTaskDialog.sourceType = "task"
             edgeDropTaskDialog.reverseDirection = false
         }
+    }
+
+    FileDialog {
+        id: boxPdfDialog
+        title: "Save Markdown PDF"
+        fileMode: FileDialog.SaveFile
+        nameFilters: ["PDF files (*.pdf)", "All files (*)"]
+        defaultSuffix: "pdf"
+        onAccepted: dialogHost.exportBoxDialogPdf(selectedFile)
     }
 
     FileDialog {

@@ -942,6 +942,16 @@ class TestCreateActionDrawWindow:
         engine = create_actiondraw_window(diagram_model_with_task_model, diagram_model_with_task_model._task_model)
         assert isinstance(engine, QQmlApplicationEngine)
         assert engine.rootObjects()
+        assert getattr(engine, "_markdown_pdf_exporter", None) is not None
+
+    def test_markdown_pdf_actions_are_present_in_qml(self):
+        note_editor_qml = (QML_DIR / "MarkdownNoteEditorWindow.qml").read_text(encoding="utf-8")
+        dialogs_qml = (QML_DIR / "components" / "ActionDialogs.qml").read_text(encoding="utf-8")
+
+        assert 'text: "Save PDF..."' in note_editor_qml
+        assert 'title: "Save Note PDF"' in note_editor_qml
+        assert 'text: "Save PDF..."' in dialogs_qml
+        assert 'title: "Save Markdown PDF"' in dialogs_qml
 
 
 class TestDiagramModelSerialization:

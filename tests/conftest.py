@@ -1,6 +1,7 @@
 """Shared pytest fixtures for Qt application lifecycle."""
 
 import sys
+import os
 from pathlib import Path
 
 import pytest
@@ -16,6 +17,7 @@ if str(PROJECT_ROOT) not in sys.path:
 @pytest.fixture(scope="session")
 def app():
     """Provide a single QGuiApplication for all tests."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     instance = QGuiApplication.instance()
     if instance is None:
         instance = QGuiApplication(sys.argv)

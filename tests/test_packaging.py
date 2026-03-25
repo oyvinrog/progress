@@ -61,6 +61,18 @@ def test_priorityplot_script_is_declared():
     assert 'priorityplot = "actiondraw.priorityplot.app:main"' in pyproject
 
 
+def test_markdown_pdf_exporter_module_exists_in_package():
+    assert Path("actiondraw/markdown_pdf_exporter.py").is_file()
+
+
+def test_pdf_export_keeps_runtime_dependencies_qt_only():
+    pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
+    assert 'PySide6>=6.6,<7' in pyproject
+    assert "reportlab" not in pyproject
+    assert "weasyprint" not in pyproject
+    assert "pandoc" not in pyproject
+
+
 def test_desktop_entry_uses_packaged_icon_name():
     desktop_entry = Path("packaging/actiondraw.desktop").read_text(encoding="utf-8")
     assert "Icon=actiondraw" in desktop_entry
