@@ -1353,8 +1353,44 @@ Item {
             }
         }
 
-        footer: DialogButtonBox {
-            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+        footer: Frame {
+            padding: 12
+
+            contentItem: RowLayout {
+                spacing: 8
+
+                Button {
+                    text: "Test notification"
+                    enabled: !!projectManager && notificationSettingsDialog.topicConfigured
+                    onClicked: {
+                        if (!projectManager || !projectManager.sendTestNtfyNotification) {
+                            return
+                        }
+                        var started = projectManager.sendTestNtfyNotification(
+                            notificationSettingsDialog.serverValue,
+                            notificationSettingsDialog.topicValue,
+                            notificationSettingsDialog.tokenValue
+                        )
+                        if (started && root && root.showSaveNotification) {
+                            root.showSaveNotification("Sending test notification...")
+                        }
+                    }
+                }
+
+                Item {
+                    Layout.fillWidth: true
+                }
+
+                Button {
+                    text: "OK"
+                    onClicked: notificationSettingsDialog.accept()
+                }
+
+                Button {
+                    text: "Cancel"
+                    onClicked: notificationSettingsDialog.reject()
+                }
+            }
         }
 
         onAccepted: {

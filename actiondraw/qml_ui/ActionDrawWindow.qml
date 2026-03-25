@@ -4326,6 +4326,11 @@ ApplicationWindow {
             root.refreshOverviewData()
             root.showContractAlert(tabIndex, taskIndex, taskTitle, punishment, deadlineText)
         }
+        function onTestNotificationCompleted(success, message) {
+            root.showWindow()
+            if (message && message.length > 0)
+                root.showSaveNotification(message)
+        }
     }
 
     Connections {

@@ -18,7 +18,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 from PySide6.QtCore import (
     QAbstractListModel,
@@ -114,17 +114,24 @@ def _publish_ntfy_message_async(
     server: Optional[str] = None,
     topic: Optional[str] = None,
     token: Optional[str] = None,
+    callback: Optional[Callable[[bool, str], None]] = None,
 ) -> None:
     """Publish an ntfy message in a background thread when configured."""
     resolved_server, resolved_topic, resolved_token = _coalesce_ntfy_settings(server, topic, token)
     if not resolved_topic:
+        if callback is not None:
+            callback(False, "Notifications are not configured until you set an ntfy topic")
         return
 
     def _worker() -> None:
         try:
             _send_ntfy_message(resolved_server, resolved_topic, title, message, resolved_token)
+            if callback is not None:
+                callback(True, "")
         except (OSError, urllib.error.URLError, ValueError) as exc:
             print(f"Failed to publish ntfy reminder: {exc}", file=sys.stderr)
+            if callback is not None:
+                callback(False, str(exc))
 
     threading.Thread(target=_worker, name="ntfy-reminder", daemon=True).start()
 
@@ -2110,6 +2117,7 @@ class ProjectManager(QObject):
     currentFilePathChanged = Signal()  # Emitted when current file path changes
     sidebarExpandedChanged = Signal()
     ntfySettingsChanged = Signal()
+    testNotificationCompleted = Signal(bool, str, arguments=["success", "message"])
     canGoBackChanged = Signal()
     tabSwitched = Signal()  # Emitted when switching to a different tab
     taskDrillRequested = Signal(int, arguments=["taskIndex"])
@@ -2621,6 +2629,40 @@ class ProjectManager(QObject):
         self._settings.setValue("notifications/ntfy_token", normalized_token)
         self._settings.sync()
         self.ntfySettingsChanged.emit()
+
+    @Slot(str, str, str, result=bool)
+    def sendTestNtfyNotification(self, server: str, topic: str, token: str) -> bool:
+        """Publish a test ntfy notification using explicit dialog values."""
+        normalized_server = (server or "").strip() or DEFAULT_NTFY_SERVER
+        normalized_topic = (topic or "").strip()
+        normalized_token = token or ""
+
+        if not normalized_topic:
+            self.testNotificationCompleted.emit(
+                False,
+                "Notifications are not configured until you set an ntfy topic",
+            )
+            return False
+
+        def _report_result(success: bool, error_message: str) -> None:
+            if success:
+                self.testNotificationCompleted.emit(True, "Test notification sent")
+            else:
+                detail = error_message.strip()
+                message = "Failed to send test notification"
+                if detail:
+                    message += f": {detail}"
+                self.testNotificationCompleted.emit(False, message)
+
+        _publish_ntfy_message_async(
+            "ActionDraw Test Notification",
+            "This is a test notification from ActionDraw.",
+            normalized_server,
+            normalized_topic,
+            normalized_token,
+            callback=_report_result,
+        )
+        return True
 
     def _load_recent_projects(self) -> List[str]:
         """Load recent projects list from settings."""

@@ -3337,6 +3337,106 @@ class TestTaskReminders:
 
         assert project_manager.ntfyConfigured is False
 
+    def test_project_manager_sends_test_ntfy_notification(self, app, monkeypatch):
+        from task_model import TaskModel, ProjectManager, TabModel
+        import task_model as task_model_module
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        published = []
+        statuses = []
+        project_manager.testNotificationCompleted.connect(
+            lambda success, message: statuses.append((success, message))
+        )
+
+        def fake_publish(title, message, server=None, topic=None, token=None, callback=None):
+            published.append((title, message, server, topic, token))
+            if callback is not None:
+                callback(True, "")
+
+        monkeypatch.setattr(task_model_module, "_publish_ntfy_message_async", fake_publish)
+
+        started = project_manager.sendTestNtfyNotification(
+            "https://example.ntfy",
+            "alerts",
+            "secret",
+        )
+
+        assert started is True
+        assert published == [
+            (
+                "ActionDraw Test Notification",
+                "This is a test notification from ActionDraw.",
+                "https://example.ntfy",
+                "alerts",
+                "secret",
+            )
+        ]
+        assert statuses == [(True, "Test notification sent")]
+
+    def test_project_manager_does_not_send_test_ntfy_without_topic(self, app, monkeypatch):
+        from task_model import TaskModel, ProjectManager, TabModel
+        import task_model as task_model_module
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        published = []
+        statuses = []
+        project_manager.testNotificationCompleted.connect(
+            lambda success, message: statuses.append((success, message))
+        )
+
+        monkeypatch.setattr(
+            task_model_module,
+            "_publish_ntfy_message_async",
+            lambda *args, **kwargs: published.append((args, kwargs)),
+        )
+
+        started = project_manager.sendTestNtfyNotification(
+            "https://example.ntfy",
+            "",
+            "secret",
+        )
+
+        assert started is False
+        assert published == []
+        assert statuses == [(False, "Notifications are not configured until you set an ntfy topic")]
+
+    def test_project_manager_reports_test_ntfy_publish_failure(self, app, monkeypatch):
+        from task_model import TaskModel, ProjectManager, TabModel
+        import task_model as task_model_module
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        statuses = []
+        project_manager.testNotificationCompleted.connect(
+            lambda success, message: statuses.append((success, message))
+        )
+
+        def fake_publish(title, message, server=None, topic=None, token=None, callback=None):
+            if callback is not None:
+                callback(False, "boom")
+
+        monkeypatch.setattr(task_model_module, "_publish_ntfy_message_async", fake_publish)
+
+        started = project_manager.sendTestNtfyNotification(
+            "https://example.ntfy",
+            "alerts",
+            "secret",
+        )
+
+        assert started is True
+        assert statuses == [(False, "Failed to send test notification: boom")]
+
     def test_project_manager_get_active_reminders_returns_sorted_cross_tab_results(self, app):
         from datetime import datetime, timedelta
         from task_model import TaskModel, ProjectManager, TabModel
