@@ -373,6 +373,30 @@ class TestEdges:
         empty_diagram_model.cancelEdgeDrawing()
         assert empty_diagram_model.edgeHoverTargetId == ""
 
+    def test_dragged_task_insert_target_tracks_edge(self, diagram_model_with_task_model):
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(200.0, 0.0, "Target")
+        dragged_task = diagram_model_with_task_model.addTask(0, 80.0, 100.0)
+        diagram_model_with_task_model.addEdge(source, target)
+
+        edge_id = diagram_model_with_task_model.edges[0]["id"]
+        diagram_model_with_task_model.updateDraggedTaskInsertTarget(dragged_task, 160.0, 30.0)
+
+        assert diagram_model_with_task_model.dragInsertEdgeId == edge_id
+
+    def test_dragged_task_insert_target_clears(self, diagram_model_with_task_model):
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(200.0, 0.0, "Target")
+        dragged_task = diagram_model_with_task_model.addTask(0, 80.0, 100.0)
+        diagram_model_with_task_model.addEdge(source, target)
+
+        diagram_model_with_task_model.updateDraggedTaskInsertTarget(dragged_task, 160.0, 30.0)
+        assert diagram_model_with_task_model.dragInsertEdgeId != ""
+
+        diagram_model_with_task_model.clearDraggedTaskInsertTarget()
+
+        assert diagram_model_with_task_model.dragInsertEdgeId == ""
+
     def test_set_edge_description(self, empty_diagram_model):
         """Edge description can be set and retrieved."""
         a = empty_diagram_model.addBox(0.0, 0.0, "A")
@@ -776,6 +800,85 @@ class TestTaskIntegration:
 
         assert inserted == ""
         assert diagram_model_with_task_model._task_model.rowCount() == task_count_before
+        assert diagram_model_with_task_model.edges == edges_before
+
+    def test_insert_existing_item_on_edge(self, diagram_model_with_task_model):
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(200.0, 0.0, "Target")
+        inserted_task = diagram_model_with_task_model.addTask(0, 100.0, 80.0)
+        diagram_model_with_task_model.addEdge(source, target)
+
+        edge_id = diagram_model_with_task_model.edges[0]["id"]
+        inserted = diagram_model_with_task_model.insertExistingItemOnEdge(edge_id, inserted_task)
+
+        assert inserted is True
+        assert len(diagram_model_with_task_model.edges) == 2
+        assert diagram_model_with_task_model.edges[0]["fromId"] == source
+        assert diagram_model_with_task_model.edges[0]["toId"] == inserted_task
+        assert diagram_model_with_task_model.edges[1]["fromId"] == inserted_task
+        assert diagram_model_with_task_model.edges[1]["toId"] == target
+
+    def test_insert_existing_item_on_edge_replaces_existing_connections(self, diagram_model_with_task_model):
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(200.0, 0.0, "Target")
+        dragged_task = diagram_model_with_task_model.addTask(0, 100.0, 80.0)
+        other_source = diagram_model_with_task_model.addBox(0.0, 200.0, "Other Source")
+        other_target = diagram_model_with_task_model.addBox(200.0, 200.0, "Other Target")
+        diagram_model_with_task_model.addEdge(source, target)
+        diagram_model_with_task_model.addEdge(other_source, dragged_task)
+        diagram_model_with_task_model.addEdge(dragged_task, other_target)
+
+        edge_id = next(
+            edge["id"]
+            for edge in diagram_model_with_task_model.edges
+            if edge["fromId"] == source and edge["toId"] == target
+        )
+        inserted = diagram_model_with_task_model.insertExistingItemOnEdge(edge_id, dragged_task)
+
+        assert inserted is True
+        assert len(diagram_model_with_task_model.edges) == 2
+        assert diagram_model_with_task_model.edges[0]["fromId"] == source
+        assert diagram_model_with_task_model.edges[0]["toId"] == dragged_task
+        assert diagram_model_with_task_model.edges[1]["fromId"] == dragged_task
+        assert diagram_model_with_task_model.edges[1]["toId"] == target
+
+    def test_insert_existing_item_on_edge_preserves_description_upstream(self, diagram_model_with_task_model):
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(200.0, 0.0, "Target")
+        dragged_task = diagram_model_with_task_model.addTask(0, 100.0, 80.0)
+        diagram_model_with_task_model.addEdge(source, target)
+        edge_id = diagram_model_with_task_model.edges[0]["id"]
+        diagram_model_with_task_model.setEdgeDescription(edge_id, "depends on")
+
+        inserted = diagram_model_with_task_model.insertExistingItemOnEdge(edge_id, dragged_task)
+
+        assert inserted is True
+        assert diagram_model_with_task_model.edges[0]["description"] == "depends on"
+        assert diagram_model_with_task_model.edges[1]["description"] == ""
+
+    def test_insert_existing_item_on_edge_invalid_is_noop(self, diagram_model_with_task_model):
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(200.0, 0.0, "Target")
+        dragged_task = diagram_model_with_task_model.addTask(0, 100.0, 80.0)
+        diagram_model_with_task_model.addEdge(source, target)
+        edges_before = list(diagram_model_with_task_model.edges)
+
+        assert diagram_model_with_task_model.insertExistingItemOnEdge("missing_edge", dragged_task) is False
+        assert diagram_model_with_task_model.insertExistingItemOnEdge(edges_before[0]["id"], "missing_task") is False
+        assert diagram_model_with_task_model.insertExistingItemOnEdge(edges_before[0]["id"], source) is False
+
+        assert diagram_model_with_task_model.edges == edges_before
+
+    def test_insert_existing_item_on_own_edge_is_noop(self, diagram_model_with_task_model):
+        source_task = diagram_model_with_task_model.addTask(0, 0.0, 0.0)
+        target = diagram_model_with_task_model.addBox(200.0, 0.0, "Target")
+        diagram_model_with_task_model.addEdge(source_task, target)
+        edge_id = diagram_model_with_task_model.edges[0]["id"]
+        edges_before = list(diagram_model_with_task_model.edges)
+
+        inserted = diagram_model_with_task_model.insertExistingItemOnEdge(edge_id, source_task)
+
+        assert inserted is False
         assert diagram_model_with_task_model.edges == edges_before
 
     def test_add_task_uses_title(self, diagram_model_with_task_model):

@@ -1992,7 +1992,11 @@ ApplicationWindow {
 
                                 var isHovered = edgeCanvas.hoveredEdgeId === edge.id
                                 var isSelected = edgeCanvas.selectedEdgeId === edge.id
-                                if (isSelected) {
+                                var isInsertTarget = diagramModel.dragInsertEdgeId === edge.id
+                                if (isInsertTarget) {
+                                    ctx.strokeStyle = "#82c3a5"
+                                    ctx.lineWidth = 4
+                                } else if (isSelected) {
                                     ctx.strokeStyle = "#ff6b6b"
                                     ctx.lineWidth = 3
                                 } else if (isHovered) {
@@ -2023,7 +2027,9 @@ ApplicationWindow {
                                     toY - arrowSize * Math.sin(angle + arrowAngle)
                                 )
                                 ctx.closePath()
-                                if (isSelected) {
+                                if (isInsertTarget) {
+                                    ctx.fillStyle = "#82c3a5"
+                                } else if (isSelected) {
                                     ctx.fillStyle = "#ff6b6b"
                                 } else if (isHovered) {
                                     ctx.fillStyle = "#a8b8d8"
@@ -3731,6 +3737,14 @@ ApplicationWindow {
                                     if (active) {
                                         itemRect.dragStartX = model.x
                                         itemRect.dragStartY = model.y
+                                        if (itemRect.itemType === "task")
+                                            diagramModel.clearDraggedTaskInsertTarget()
+                                    } else if (itemRect.itemType === "task") {
+                                        var insertEdgeId = diagramModel.dragInsertEdgeId
+                                        if (insertEdgeId && insertEdgeId.length > 0)
+                                            diagramModel.insertExistingItemOnEdge(insertEdgeId, itemRect.itemId)
+                                        diagramModel.clearDraggedTaskInsertTarget()
+                                        edgeCanvas.requestPaint()
                                     }
                                 }
                                 onTranslationChanged: {
@@ -3741,6 +3755,18 @@ ApplicationWindow {
                                     newX = root.snapValue(newX)
                                     newY = root.snapValue(newY)
                                     diagramModel.moveItem(itemRect.itemId, newX, newY)
+                                    if (itemRect.itemType === "task") {
+                                        var pointerPos = itemRect.mapToItem(
+                                            diagramLayer,
+                                            itemDrag.centroid.position.x,
+                                            itemDrag.centroid.position.y
+                                        )
+                                        diagramModel.updateDraggedTaskInsertTarget(
+                                            itemRect.itemId,
+                                            pointerPos.x,
+                                            pointerPos.y
+                                        )
+                                    }
                                     edgeCanvas.requestPaint()
                                 }
                             }
