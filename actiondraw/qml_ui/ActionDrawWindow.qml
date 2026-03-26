@@ -1648,6 +1648,7 @@ ApplicationWindow {
                     property real contextMenuX: 0
                     property real contextMenuY: 0
                     property string contextMenuItemId: ""
+                    property string contextMenuEdgeId: ""
 
                     Menu {
                         id: canvasContextMenu
@@ -1928,6 +1929,41 @@ ApplicationWindow {
                         }
                     }
 
+                    Menu {
+                        id: edgeContextMenu
+
+                        MenuItem {
+                            text: "Add Task"
+                            icon.name: "list-add"
+                            onTriggered: {
+                                var edge = root.findEdgeById(diagramLayer.contextMenuEdgeId)
+                                if (edge)
+                                    root.openQuickTaskDialogForEdge(edge)
+                            }
+                        }
+                        MenuItem {
+                            text: "Edit Description..."
+                            icon.name: "document-edit"
+                            onTriggered: {
+                                if (diagramLayer.contextMenuEdgeId && diagramLayer.contextMenuEdgeId.length > 0)
+                                    dialogs.edgeDescriptionDialog.openWithEdge(diagramLayer.contextMenuEdgeId)
+                            }
+                        }
+                        MenuSeparator {}
+                        MenuItem {
+                            text: "Delete Connection"
+                            icon.name: "edit-delete"
+                            onTriggered: {
+                                if (diagramModel && diagramLayer.contextMenuEdgeId && diagramLayer.contextMenuEdgeId.length > 0) {
+                                    diagramModel.removeEdge(diagramLayer.contextMenuEdgeId)
+                                    edgeCanvas.selectedEdgeId = ""
+                                    edgeCanvas.hoveredEdgeId = ""
+                                    edgeCanvas.requestPaint()
+                                }
+                            }
+                        }
+                    }
+
                     Canvas {
                         id: edgeCanvas
                         anchors.fill: parent
@@ -2101,10 +2137,11 @@ ApplicationWindow {
                                     return
                                 }
                                 if (mouse.button === Qt.RightButton) {
-                                    // Right-click to delete immediately
-                                    diagramModel.removeEdge(edgeId)
-                                    edgeCanvas.selectedEdgeId = ""
-                                    edgeCanvas.hoveredEdgeId = ""
+                                    edgeCanvas.selectedEdgeId = edgeId
+                                    root.selectedItemId = ""
+                                    diagramLayer.contextMenuEdgeId = edgeId
+                                    edgeCanvas.requestPaint()
+                                    edgeContextMenu.popup()
                                 } else {
                                     // Left-click to select/deselect
                                     if (edgeCanvas.selectedEdgeId === edgeId) {

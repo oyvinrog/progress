@@ -2868,6 +2868,15 @@ class TestActionDrawQmlTaskInteractions:
         assert 'diagramModel.setItemTextTabIndex(itemRect.itemId, nextIndex)' in qml
         assert 'text: itemRect.freeTextDisplayText' in qml[qml.index('id: freeTextLabel'):]
 
+    def test_edge_context_menu_exposes_add_task_instead_of_immediate_delete(self):
+        qml = load_actiondraw_qml()
+
+        assert 'id: edgeContextMenu' in qml
+        assert 'text: "Add Task"' in qml
+        assert 'root.openQuickTaskDialogForEdge(edge)' in qml
+        assert 'text: "Delete Connection"' in qml
+        assert '// Right-click to delete immediately' not in qml
+
 
 class _DummyRoot(QObject):
     @Slot(str, result=str)
