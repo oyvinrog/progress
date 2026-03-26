@@ -1648,6 +1648,7 @@ ApplicationWindow {
                     property real contextMenuX: 0
                     property real contextMenuY: 0
                     property string contextMenuItemId: ""
+                    property string contextMenuEdgeId: ""
 
                     Menu {
                         id: canvasContextMenu
@@ -1928,6 +1929,41 @@ ApplicationWindow {
                         }
                     }
 
+                    Menu {
+                        id: edgeContextMenu
+
+                        MenuItem {
+                            text: "Add Task"
+                            icon.name: "list-add"
+                            onTriggered: {
+                                var edge = root.findEdgeById(diagramLayer.contextMenuEdgeId)
+                                if (edge)
+                                    root.openQuickTaskDialogForEdge(edge)
+                            }
+                        }
+                        MenuItem {
+                            text: "Edit Description..."
+                            icon.name: "document-edit"
+                            onTriggered: {
+                                if (diagramLayer.contextMenuEdgeId && diagramLayer.contextMenuEdgeId.length > 0)
+                                    dialogs.edgeDescriptionDialog.openWithEdge(diagramLayer.contextMenuEdgeId)
+                            }
+                        }
+                        MenuSeparator {}
+                        MenuItem {
+                            text: "Delete Connection"
+                            icon.name: "edit-delete"
+                            onTriggered: {
+                                if (diagramModel && diagramLayer.contextMenuEdgeId && diagramLayer.contextMenuEdgeId.length > 0) {
+                                    diagramModel.removeEdge(diagramLayer.contextMenuEdgeId)
+                                    edgeCanvas.selectedEdgeId = ""
+                                    edgeCanvas.hoveredEdgeId = ""
+                                    edgeCanvas.requestPaint()
+                                }
+                            }
+                        }
+                    }
+
                     Canvas {
                         id: edgeCanvas
                         anchors.fill: parent
@@ -1992,7 +2028,11 @@ ApplicationWindow {
 
                                 var isHovered = edgeCanvas.hoveredEdgeId === edge.id
                                 var isSelected = edgeCanvas.selectedEdgeId === edge.id
-                                if (isSelected) {
+                                var isInsertTarget = diagramModel.dragInsertEdgeId === edge.id
+                                if (isInsertTarget) {
+                                    ctx.strokeStyle = "#82c3a5"
+                                    ctx.lineWidth = 4
+                                } else if (isSelected) {
                                     ctx.strokeStyle = "#ff6b6b"
                                     ctx.lineWidth = 3
                                 } else if (isHovered) {
@@ -2023,7 +2063,9 @@ ApplicationWindow {
                                     toY - arrowSize * Math.sin(angle + arrowAngle)
                                 )
                                 ctx.closePath()
-                                if (isSelected) {
+                                if (isInsertTarget) {
+                                    ctx.fillStyle = "#82c3a5"
+                                } else if (isSelected) {
                                     ctx.fillStyle = "#ff6b6b"
                                 } else if (isHovered) {
                                     ctx.fillStyle = "#a8b8d8"
@@ -2095,10 +2137,11 @@ ApplicationWindow {
                                     return
                                 }
                                 if (mouse.button === Qt.RightButton) {
-                                    // Right-click to delete immediately
-                                    diagramModel.removeEdge(edgeId)
-                                    edgeCanvas.selectedEdgeId = ""
-                                    edgeCanvas.hoveredEdgeId = ""
+                                    edgeCanvas.selectedEdgeId = edgeId
+                                    root.selectedItemId = ""
+                                    diagramLayer.contextMenuEdgeId = edgeId
+                                    edgeCanvas.requestPaint()
+                                    edgeContextMenu.popup()
                                 } else {
                                     // Left-click to select/deselect
                                     if (edgeCanvas.selectedEdgeId === edgeId) {
@@ -3731,6 +3774,14 @@ ApplicationWindow {
                                     if (active) {
                                         itemRect.dragStartX = model.x
                                         itemRect.dragStartY = model.y
+                                        if (itemRect.itemType === "task")
+                                            diagramModel.clearDraggedTaskInsertTarget()
+                                    } else if (itemRect.itemType === "task") {
+                                        var insertEdgeId = diagramModel.dragInsertEdgeId
+                                        if (insertEdgeId && insertEdgeId.length > 0)
+                                            diagramModel.insertExistingItemOnEdge(insertEdgeId, itemRect.itemId)
+                                        diagramModel.clearDraggedTaskInsertTarget()
+                                        edgeCanvas.requestPaint()
                                     }
                                 }
                                 onTranslationChanged: {
@@ -3741,6 +3792,18 @@ ApplicationWindow {
                                     newX = root.snapValue(newX)
                                     newY = root.snapValue(newY)
                                     diagramModel.moveItem(itemRect.itemId, newX, newY)
+                                    if (itemRect.itemType === "task") {
+                                        var pointerPos = itemRect.mapToItem(
+                                            diagramLayer,
+                                            itemDrag.centroid.position.x,
+                                            itemDrag.centroid.position.y
+                                        )
+                                        diagramModel.updateDraggedTaskInsertTarget(
+                                            itemRect.itemId,
+                                            pointerPos.x,
+                                            pointerPos.y
+                                        )
+                                    }
                                     edgeCanvas.requestPaint()
                                 }
                             }
@@ -4325,6 +4388,11 @@ ApplicationWindow {
             root.showWindow()
             root.refreshOverviewData()
             root.showContractAlert(tabIndex, taskIndex, taskTitle, punishment, deadlineText)
+        }
+        function onTestNotificationCompleted(success, message) {
+            root.showWindow()
+            if (message && message.length > 0)
+                root.showSaveNotification(message)
         }
     }
 

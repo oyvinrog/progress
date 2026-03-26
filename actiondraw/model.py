@@ -88,6 +88,7 @@ class DiagramModel(
         self._edges: List[DiagramEdge] = []
         self._current_task_index: int = -1
         self._edge_hover_target_id: str = ""
+        self._drag_insert_edge_id: str = ""
         self._task_model = task_model
         self._tab_model = None
         self._id_source = count()
@@ -402,6 +403,10 @@ class DiagramModel(
     @Property(str, notify=itemsChanged)
     def edgeHoverTargetId(self) -> str:
         return self._edge_hover_target_id
+
+    @Property(str, notify=itemsChanged)
+    def dragInsertEdgeId(self) -> str:
+        return self._drag_insert_edge_id
 
     @Property(int, notify=itemsChanged)
     def count(self) -> int:
@@ -1335,6 +1340,45 @@ class DiagramModel(
             return edge.description
         return ""
 
+    def _distance_to_segment(
+        self,
+        px: float,
+        py: float,
+        x1: float,
+        y1: float,
+        x2: float,
+        y2: float,
+    ) -> float:
+        dx = x2 - x1
+        dy = y2 - y1
+        length_sq = dx * dx + dy * dy
+        if length_sq == 0.0:
+            return math.hypot(px - x1, py - y1)
+        t = max(0.0, min(1.0, ((px - x1) * dx + (py - y1) * dy) / length_sq))
+        proj_x = x1 + t * dx
+        proj_y = y1 + t * dy
+        return math.hypot(px - proj_x, py - proj_y)
+
+    def _find_edge_at_position(self, x: float, y: float, excluded_item_id: str = "", threshold: float = 8.0) -> str:
+        for edge in reversed(self._edges):
+            if excluded_item_id and (edge.from_id == excluded_item_id or edge.to_id == excluded_item_id):
+                continue
+            from_item = self.getItem(edge.from_id)
+            to_item = self.getItem(edge.to_id)
+            if from_item is None or to_item is None:
+                continue
+            from_x, from_y = self._item_center(from_item)
+            to_x, to_y = self._item_center(to_item)
+            if self._distance_to_segment(x, y, from_x, from_y, to_x, to_y) <= threshold:
+                return edge.id
+        return ""
+
+    def _set_drag_insert_edge_id(self, edge_id: str) -> None:
+        if self._drag_insert_edge_id == edge_id:
+            return
+        self._drag_insert_edge_id = edge_id
+        self.itemsChanged.emit()
+
     @Slot(str, str, float, float, result=str)
     def insertTaskOnEdge(self, edge_id: str, text: str, x: float, y: float) -> str:
         """Create a task on an existing edge and reconnect around it."""
@@ -1361,6 +1405,44 @@ class DiagramModel(
                 self.edgesChanged.emit()
 
         return new_id
+
+    @Slot(str, str, result=bool)
+    def insertExistingItemOnEdge(self, edge_id: str, item_id: str) -> bool:
+        """Reconnect an existing item so it becomes the middle node on an edge."""
+        edge = self._find_edge(edge_id)
+        item = self.getItem(item_id)
+        if edge is None or item is None:
+            return False
+        if item.item_type != DiagramItemType.TASK:
+            return False
+        from_id = edge.from_id
+        to_id = edge.to_id
+        if not from_id or not to_id or from_id == item_id or to_id == item_id:
+            return False
+
+        description = edge.description
+        self.removeEdge(edge_id)
+
+        filtered_edges = [
+            existing_edge
+            for existing_edge in self._edges
+            if existing_edge.from_id != item_id and existing_edge.to_id != item_id
+        ]
+        edges_removed = len(filtered_edges) != len(self._edges)
+        if edges_removed:
+            self._edges = filtered_edges
+            self.edgesChanged.emit()
+
+        self.addEdge(from_id, item_id)
+        self.addEdge(item_id, to_id)
+
+        if description:
+            upstream_edge = self._edges[-2] if len(self._edges) >= 2 else None
+            if upstream_edge is not None and upstream_edge.from_id == from_id and upstream_edge.to_id == item_id:
+                upstream_edge.description = description
+                self.edgesChanged.emit()
+
+        return True
 
     @Slot(str)
     def removeItem(self, item_id: str) -> None:
@@ -1423,6 +1505,19 @@ class DiagramModel(
             hover_id = ""
         self._edge_hover_target_id = hover_id
         self.itemsChanged.emit()
+
+    @Slot(str, float, float)
+    def updateDraggedTaskInsertTarget(self, item_id: str, x: float, y: float) -> None:
+        item = self.getItem(item_id)
+        if item is None or item.item_type != DiagramItemType.TASK:
+            self._set_drag_insert_edge_id("")
+            return
+        edge_id = self._find_edge_at_position(x, y, excluded_item_id=item_id, threshold=12.0)
+        self._set_drag_insert_edge_id(edge_id)
+
+    @Slot()
+    def clearDraggedTaskInsertTarget(self) -> None:
+        self._set_drag_insert_edge_id("")
 
     @Slot(str)
     def finishEdgeDrawing(self, target_id: str) -> None:
@@ -1846,12 +1941,17 @@ class DiagramModel(
             self.addEdge(ordered[idx].id, ordered[idx + 1].id)
 
     def _reset_edge_state(self) -> None:
-        changed = self._edge_source_id is not None or self._is_dragging_edge
+        changed = (
+            self._edge_source_id is not None
+            or self._is_dragging_edge
+            or bool(self._drag_insert_edge_id)
+        )
         self._edge_source_id = None
         self._edge_drag_x = 0.0
         self._edge_drag_y = 0.0
         self._is_dragging_edge = False
         self._edge_hover_target_id = ""
+        self._drag_insert_edge_id = ""
         if changed:
             self.itemsChanged.emit()
 

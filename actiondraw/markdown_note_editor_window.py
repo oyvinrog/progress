@@ -8,6 +8,7 @@ from PySide6.QtQml import QJSValue, QQmlApplicationEngine
 from .markdown_image_paster import MarkdownImagePaster
 from .markdown_note_tabs import normalize_editor_tabs
 from .markdown_preview_formatter import MarkdownPreviewFormatter
+from .markdown_pdf_exporter import MarkdownPdfExporter
 from .markdown_syntax_highlighter import MarkdownHighlighterBridge
 from .qml import MARKDOWN_NOTE_EDITOR_QML_PATH, QML_DIR
 
@@ -27,9 +28,11 @@ class MarkdownNoteEditor(QObject):
         self._markdown_note_manager = markdown_note_manager
         self._image_paster = MarkdownImagePaster()
         self._preview_formatter = MarkdownPreviewFormatter()
+        self._pdf_exporter = MarkdownPdfExporter(self._image_paster)
         self._highlighter_bridge = MarkdownHighlighterBridge()
         self._engine.rootContext().setContextProperty("markdownImagePaster", self._image_paster)
         self._engine.rootContext().setContextProperty("markdownPreviewFormatter", self._preview_formatter)
+        self._engine.rootContext().setContextProperty("markdownPdfExporter", self._pdf_exporter)
         self._engine.rootContext().setContextProperty("markdownHighlighterBridge", self._highlighter_bridge)
         self._engine.rootContext().setContextProperty("diagramModel", self._diagram_model)
         self._engine.rootContext().setContextProperty("markdownNoteManager", self._markdown_note_manager)

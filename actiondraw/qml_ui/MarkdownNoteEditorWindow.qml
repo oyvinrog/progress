@@ -1,5 +1,6 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Dialogs
 import QtQuick.Layouts 1.15
 import QtQuick.Window 2.15
 import "components"
@@ -175,6 +176,18 @@ ApplicationWindow {
             editorRoot.saveRequested(editorRoot.noteId, text, tabs)
     }
 
+    function exportTabsToPdf(selectedFile) {
+        finishTabRename()
+        commitActiveTabState()
+        if (!markdownPdfExporter || !markdownPdfExporter.exportTabsToPdf)
+            return false
+        var sourceTabs = cloneTabs(editorRoot.noteTabs)
+        var exportTitle = String(editorRoot.noteTitle || "").trim()
+        if (exportTitle.length === 0)
+            exportTitle = "Markdown Note"
+        return markdownPdfExporter.exportTabsToPdf(exportTitle, sourceTabs, selectedFile)
+    }
+
     function loadEditorState(sourceTabs, initialText) {
         restoringState = true
         activeTabIndex = 0
@@ -193,6 +206,15 @@ ApplicationWindow {
     function showSaveConfirmation() {
         saveConfirmationVisible = true
         saveConfirmationTimer.restart()
+    }
+
+    FileDialog {
+        id: savePdfDialog
+        title: "Save Note PDF"
+        fileMode: FileDialog.SaveFile
+        nameFilters: ["PDF files (*.pdf)", "All files (*)"]
+        defaultSuffix: "pdf"
+        onAccepted: editorRoot.exportTabsToPdf(selectedFile)
     }
 
     ColumnLayout {
@@ -231,6 +253,11 @@ ApplicationWindow {
                     font.pixelSize: 13
                     font.bold: true
                 }
+            }
+
+            Button {
+                text: "Save PDF..."
+                onClicked: savePdfDialog.open()
             }
 
             Button {

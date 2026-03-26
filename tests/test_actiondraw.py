@@ -1,10 +1,11 @@
 """Tests for the rewritten actiondraw module."""
 
+import os
 import time
 
 import pytest
-from PySide6.QtCore import QModelIndex
-from PySide6.QtQml import QQmlApplicationEngine
+from PySide6.QtCore import QModelIndex, QObject, QDateTime, Qt, QUrl, Slot
+from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, QQmlEngine
 
 from actiondraw import (
     DiagramEdge,
@@ -371,6 +372,30 @@ class TestEdges:
         assert empty_diagram_model.edgeHoverTargetId == b
         empty_diagram_model.cancelEdgeDrawing()
         assert empty_diagram_model.edgeHoverTargetId == ""
+
+    def test_dragged_task_insert_target_tracks_edge(self, diagram_model_with_task_model):
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(200.0, 0.0, "Target")
+        dragged_task = diagram_model_with_task_model.addTask(0, 80.0, 100.0)
+        diagram_model_with_task_model.addEdge(source, target)
+
+        edge_id = diagram_model_with_task_model.edges[0]["id"]
+        diagram_model_with_task_model.updateDraggedTaskInsertTarget(dragged_task, 160.0, 30.0)
+
+        assert diagram_model_with_task_model.dragInsertEdgeId == edge_id
+
+    def test_dragged_task_insert_target_clears(self, diagram_model_with_task_model):
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(200.0, 0.0, "Target")
+        dragged_task = diagram_model_with_task_model.addTask(0, 80.0, 100.0)
+        diagram_model_with_task_model.addEdge(source, target)
+
+        diagram_model_with_task_model.updateDraggedTaskInsertTarget(dragged_task, 160.0, 30.0)
+        assert diagram_model_with_task_model.dragInsertEdgeId != ""
+
+        diagram_model_with_task_model.clearDraggedTaskInsertTarget()
+
+        assert diagram_model_with_task_model.dragInsertEdgeId == ""
 
     def test_set_edge_description(self, empty_diagram_model):
         """Edge description can be set and retrieved."""
@@ -777,6 +802,85 @@ class TestTaskIntegration:
         assert diagram_model_with_task_model._task_model.rowCount() == task_count_before
         assert diagram_model_with_task_model.edges == edges_before
 
+    def test_insert_existing_item_on_edge(self, diagram_model_with_task_model):
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(200.0, 0.0, "Target")
+        inserted_task = diagram_model_with_task_model.addTask(0, 100.0, 80.0)
+        diagram_model_with_task_model.addEdge(source, target)
+
+        edge_id = diagram_model_with_task_model.edges[0]["id"]
+        inserted = diagram_model_with_task_model.insertExistingItemOnEdge(edge_id, inserted_task)
+
+        assert inserted is True
+        assert len(diagram_model_with_task_model.edges) == 2
+        assert diagram_model_with_task_model.edges[0]["fromId"] == source
+        assert diagram_model_with_task_model.edges[0]["toId"] == inserted_task
+        assert diagram_model_with_task_model.edges[1]["fromId"] == inserted_task
+        assert diagram_model_with_task_model.edges[1]["toId"] == target
+
+    def test_insert_existing_item_on_edge_replaces_existing_connections(self, diagram_model_with_task_model):
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(200.0, 0.0, "Target")
+        dragged_task = diagram_model_with_task_model.addTask(0, 100.0, 80.0)
+        other_source = diagram_model_with_task_model.addBox(0.0, 200.0, "Other Source")
+        other_target = diagram_model_with_task_model.addBox(200.0, 200.0, "Other Target")
+        diagram_model_with_task_model.addEdge(source, target)
+        diagram_model_with_task_model.addEdge(other_source, dragged_task)
+        diagram_model_with_task_model.addEdge(dragged_task, other_target)
+
+        edge_id = next(
+            edge["id"]
+            for edge in diagram_model_with_task_model.edges
+            if edge["fromId"] == source and edge["toId"] == target
+        )
+        inserted = diagram_model_with_task_model.insertExistingItemOnEdge(edge_id, dragged_task)
+
+        assert inserted is True
+        assert len(diagram_model_with_task_model.edges) == 2
+        assert diagram_model_with_task_model.edges[0]["fromId"] == source
+        assert diagram_model_with_task_model.edges[0]["toId"] == dragged_task
+        assert diagram_model_with_task_model.edges[1]["fromId"] == dragged_task
+        assert diagram_model_with_task_model.edges[1]["toId"] == target
+
+    def test_insert_existing_item_on_edge_preserves_description_upstream(self, diagram_model_with_task_model):
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(200.0, 0.0, "Target")
+        dragged_task = diagram_model_with_task_model.addTask(0, 100.0, 80.0)
+        diagram_model_with_task_model.addEdge(source, target)
+        edge_id = diagram_model_with_task_model.edges[0]["id"]
+        diagram_model_with_task_model.setEdgeDescription(edge_id, "depends on")
+
+        inserted = diagram_model_with_task_model.insertExistingItemOnEdge(edge_id, dragged_task)
+
+        assert inserted is True
+        assert diagram_model_with_task_model.edges[0]["description"] == "depends on"
+        assert diagram_model_with_task_model.edges[1]["description"] == ""
+
+    def test_insert_existing_item_on_edge_invalid_is_noop(self, diagram_model_with_task_model):
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(200.0, 0.0, "Target")
+        dragged_task = diagram_model_with_task_model.addTask(0, 100.0, 80.0)
+        diagram_model_with_task_model.addEdge(source, target)
+        edges_before = list(diagram_model_with_task_model.edges)
+
+        assert diagram_model_with_task_model.insertExistingItemOnEdge("missing_edge", dragged_task) is False
+        assert diagram_model_with_task_model.insertExistingItemOnEdge(edges_before[0]["id"], "missing_task") is False
+        assert diagram_model_with_task_model.insertExistingItemOnEdge(edges_before[0]["id"], source) is False
+
+        assert diagram_model_with_task_model.edges == edges_before
+
+    def test_insert_existing_item_on_own_edge_is_noop(self, diagram_model_with_task_model):
+        source_task = diagram_model_with_task_model.addTask(0, 0.0, 0.0)
+        target = diagram_model_with_task_model.addBox(200.0, 0.0, "Target")
+        diagram_model_with_task_model.addEdge(source_task, target)
+        edge_id = diagram_model_with_task_model.edges[0]["id"]
+        edges_before = list(diagram_model_with_task_model.edges)
+
+        inserted = diagram_model_with_task_model.insertExistingItemOnEdge(edge_id, source_task)
+
+        assert inserted is False
+        assert diagram_model_with_task_model.edges == edges_before
+
     def test_add_task_uses_title(self, diagram_model_with_task_model):
         item_id = diagram_model_with_task_model.addTask(1, 25.0, 35.0)
         index = diagram_model_with_task_model.index(0, 0)
@@ -941,6 +1045,16 @@ class TestCreateActionDrawWindow:
         engine = create_actiondraw_window(diagram_model_with_task_model, diagram_model_with_task_model._task_model)
         assert isinstance(engine, QQmlApplicationEngine)
         assert engine.rootObjects()
+        assert getattr(engine, "_markdown_pdf_exporter", None) is not None
+
+    def test_markdown_pdf_actions_are_present_in_qml(self):
+        note_editor_qml = (QML_DIR / "MarkdownNoteEditorWindow.qml").read_text(encoding="utf-8")
+        dialogs_qml = (QML_DIR / "components" / "ActionDialogs.qml").read_text(encoding="utf-8")
+
+        assert 'text: "Save PDF..."' in note_editor_qml
+        assert 'title: "Save Note PDF"' in note_editor_qml
+        assert 'text: "Save PDF..."' in dialogs_qml
+        assert 'title: "Save Markdown PDF"' in dialogs_qml
 
 
 class TestDiagramModelSerialization:
@@ -2754,6 +2868,90 @@ class TestActionDrawQmlTaskInteractions:
         assert 'diagramModel.setItemTextTabIndex(itemRect.itemId, nextIndex)' in qml
         assert 'text: itemRect.freeTextDisplayText' in qml[qml.index('id: freeTextLabel'):]
 
+    def test_edge_context_menu_exposes_add_task_instead_of_immediate_delete(self):
+        qml = load_actiondraw_qml()
+
+        assert 'id: edgeContextMenu' in qml
+        assert 'text: "Add Task"' in qml
+        assert 'root.openQuickTaskDialogForEdge(edge)' in qml
+        assert 'text: "Delete Connection"' in qml
+        assert '// Right-click to delete immediately' not in qml
+
+
+class _DummyRoot(QObject):
+    @Slot(str, result=str)
+    def presetTitle(self, name):
+        return name
+
+
+class TestReminderDialogPresets:
+    @pytest.fixture
+    def action_dialogs_component(self, app):
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        engine = QQmlEngine()
+        engine.rootContext().setContextProperty("markdownHighlighterBridge", QObject())
+        component = QQmlComponent(engine, QUrl.fromLocalFile(str(QML_DIR / "components" / "ActionDialogs.qml")))
+        instance = component.createWithInitialProperties({"root": _DummyRoot()})
+        errors = [err.toString() for err in component.errors()]
+        assert instance is not None, errors
+        assert not component.isError(), errors
+        try:
+            yield instance
+        finally:
+            instance.deleteLater()
+            engine.deleteLater()
+
+    def test_reminder_dialog_exposes_named_preset_buttons(self):
+        qml = (QML_DIR / "components" / "ActionDialogs.qml").read_text(encoding="utf-8")
+
+        assert 'text: "+15m"' in qml
+        assert 'text: "+1h"' in qml
+        assert 'text: "+1d"' in qml
+        assert 'onClicked: reminderDialog.setToOffsetMinutes(15)' in qml
+        assert 'onClicked: reminderDialog.setToOffsetMinutes(60)' in qml
+        assert 'onClicked: reminderDialog.setToOffsetMinutes(24 * 60)' in qml
+        assert 'text: "Tomorrow morning (08:00)"' in qml
+        assert 'text: dialogHost.reminderPresetPeriodLabel("afternoon", 16, 0)' in qml
+        assert 'text: dialogHost.reminderPresetPeriodLabel("evening", 20, 0)' in qml
+        assert 'onClicked: reminderDialog.setToTomorrowMorning()' in qml
+        assert 'onClicked: reminderDialog.setToAfternoon()' in qml
+        assert 'onClicked: reminderDialog.setToEvening()' in qml
+
+    def test_tomorrow_morning_preset_targets_next_day(self, action_dialogs_component):
+        now = QDateTime.fromString("2026-03-25T14:30:00", Qt.ISODate)
+
+        target = action_dialogs_component.reminderPresetDateForTomorrow(8, 0, now)
+
+        assert action_dialogs_component.formatDateValue(target) == "2026-03-26"
+        assert action_dialogs_component.formatTimeValue(target) == "08:00"
+
+    def test_afternoon_preset_uses_today_before_4pm(self, action_dialogs_component):
+        now = QDateTime.fromString("2026-03-25T15:10:00", Qt.ISODate)
+
+        target = action_dialogs_component.reminderPresetNextOccurrence(16, 0, now)
+
+        assert action_dialogs_component.formatDateValue(target) == "2026-03-25"
+        assert action_dialogs_component.formatTimeValue(target) == "16:00"
+        assert action_dialogs_component.reminderPresetPeriodLabel("afternoon", 16, 0, now) == "This afternoon (16:00)"
+
+    def test_afternoon_preset_rolls_to_tomorrow_after_4pm(self, action_dialogs_component):
+        now = QDateTime.fromString("2026-03-25T17:00:00", Qt.ISODate)
+
+        target = action_dialogs_component.reminderPresetNextOccurrence(16, 0, now)
+
+        assert action_dialogs_component.formatDateValue(target) == "2026-03-26"
+        assert action_dialogs_component.formatTimeValue(target) == "16:00"
+        assert action_dialogs_component.reminderPresetPeriodLabel("afternoon", 16, 0, now) == "Next afternoon (16:00)"
+
+    def test_evening_preset_rolls_to_tomorrow_after_8pm(self, action_dialogs_component):
+        now = QDateTime.fromString("2026-03-25T20:15:00", Qt.ISODate)
+
+        target = action_dialogs_component.reminderPresetNextOccurrence(20, 0, now)
+
+        assert action_dialogs_component.formatDateValue(target) == "2026-03-26"
+        assert action_dialogs_component.formatTimeValue(target) == "20:00"
+        assert action_dialogs_component.reminderPresetPeriodLabel("evening", 20, 0, now) == "Next evening (20:00)"
+
 
 class TestCountdownTimer:
     """Tests for the countdown timer feature."""
@@ -3336,6 +3534,106 @@ class TestTaskReminders:
         project_manager.saveNtfySettings("https://example.ntfy", "", "")
 
         assert project_manager.ntfyConfigured is False
+
+    def test_project_manager_sends_test_ntfy_notification(self, app, monkeypatch):
+        from task_model import TaskModel, ProjectManager, TabModel
+        import task_model as task_model_module
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        published = []
+        statuses = []
+        project_manager.testNotificationCompleted.connect(
+            lambda success, message: statuses.append((success, message))
+        )
+
+        def fake_publish(title, message, server=None, topic=None, token=None, callback=None):
+            published.append((title, message, server, topic, token))
+            if callback is not None:
+                callback(True, "")
+
+        monkeypatch.setattr(task_model_module, "_publish_ntfy_message_async", fake_publish)
+
+        started = project_manager.sendTestNtfyNotification(
+            "https://example.ntfy",
+            "alerts",
+            "secret",
+        )
+
+        assert started is True
+        assert published == [
+            (
+                "ActionDraw Test Notification",
+                "This is a test notification from ActionDraw.",
+                "https://example.ntfy",
+                "alerts",
+                "secret",
+            )
+        ]
+        assert statuses == [(True, "Test notification sent")]
+
+    def test_project_manager_does_not_send_test_ntfy_without_topic(self, app, monkeypatch):
+        from task_model import TaskModel, ProjectManager, TabModel
+        import task_model as task_model_module
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        published = []
+        statuses = []
+        project_manager.testNotificationCompleted.connect(
+            lambda success, message: statuses.append((success, message))
+        )
+
+        monkeypatch.setattr(
+            task_model_module,
+            "_publish_ntfy_message_async",
+            lambda *args, **kwargs: published.append((args, kwargs)),
+        )
+
+        started = project_manager.sendTestNtfyNotification(
+            "https://example.ntfy",
+            "",
+            "secret",
+        )
+
+        assert started is False
+        assert published == []
+        assert statuses == [(False, "Notifications are not configured until you set an ntfy topic")]
+
+    def test_project_manager_reports_test_ntfy_publish_failure(self, app, monkeypatch):
+        from task_model import TaskModel, ProjectManager, TabModel
+        import task_model as task_model_module
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        statuses = []
+        project_manager.testNotificationCompleted.connect(
+            lambda success, message: statuses.append((success, message))
+        )
+
+        def fake_publish(title, message, server=None, topic=None, token=None, callback=None):
+            if callback is not None:
+                callback(False, "boom")
+
+        monkeypatch.setattr(task_model_module, "_publish_ntfy_message_async", fake_publish)
+
+        started = project_manager.sendTestNtfyNotification(
+            "https://example.ntfy",
+            "alerts",
+            "secret",
+        )
+
+        assert started is True
+        assert statuses == [(False, "Failed to send test notification: boom")]
 
     def test_project_manager_get_active_reminders_returns_sorted_cross_tab_results(self, app):
         from datetime import datetime, timedelta

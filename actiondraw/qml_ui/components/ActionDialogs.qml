@@ -55,6 +55,7 @@ Item {
         || contractDialog.visible
         || edgeDropTaskDialog.visible
         || clipboardPasteDialog.visible
+        || boxPdfDialog.visible
         || saveDialog.visible
         || loadDialog.visible
     )
@@ -116,6 +117,49 @@ Item {
         return dialogHost.roundedCurrentTime()
     }
 
+    function reminderPresetDateForTomorrow(hour, minute, nowValue) {
+        var now = nowValue || new Date()
+        return new Date(
+            now.getFullYear(),
+            now.getMonth(),
+            now.getDate() + 1,
+            hour,
+            minute,
+            0,
+            0
+        )
+    }
+
+    function reminderPresetNextOccurrence(hour, minute, nowValue) {
+        var now = nowValue || new Date()
+        var target = new Date(
+            now.getFullYear(),
+            now.getMonth(),
+            now.getDate(),
+            hour,
+            minute,
+            0,
+            0
+        )
+        if (target.getTime() <= now.getTime())
+            target.setDate(target.getDate() + 1)
+        return target
+    }
+
+    function reminderPresetPeriodLabel(name, hour, minute, nowValue) {
+        var now = nowValue || new Date()
+        var target = new Date(
+            now.getFullYear(),
+            now.getMonth(),
+            now.getDate(),
+            hour,
+            minute,
+            0,
+            0
+        )
+        return (target.getTime() > now.getTime() ? "This " : "Next ") + name + " (" + Qt.formatTime(target, "HH:mm") + ")"
+    }
+
     function daysInMonth(year, monthIndex) {
         return new Date(year, monthIndex + 1, 0).getDate()
     }
@@ -151,6 +195,18 @@ Item {
         timePickerPopup.selectedHour = currentTime.getHours()
         timePickerPopup.selectedMinute = currentTime.getMinutes()
         timePickerPopup.open()
+    }
+
+    function exportBoxDialogPdf(selectedFile) {
+        if (!markdownPdfExporter || !markdownPdfExporter.exportTabsToPdf)
+            return false
+        var title = String(boxDialog.title || "").trim()
+        if (title.length === 0)
+            title = "Markdown Export"
+        return markdownPdfExporter.exportTabsToPdf(title, [{
+            name: title,
+            text: String(boxDialog.textValue || "")
+        }], selectedFile)
     }
 
     Popup {
@@ -628,14 +684,27 @@ Item {
             }
         }
 
-        footer: DialogButtonBox {
-            id: boxDialogButtonBox
-            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+        footer: RowLayout {
+            spacing: 8
 
-            Component.onCompleted: {
-                var okButton = boxDialogButtonBox.standardButton(DialogButtonBox.Ok)
-                if (okButton)
-                    okButton.text = "Save (Ctrl+Enter)"
+            Button {
+                text: "Save PDF..."
+                onClicked: boxPdfDialog.open()
+            }
+
+            Item {
+                Layout.fillWidth: true
+            }
+
+            DialogButtonBox {
+                id: boxDialogButtonBox
+                standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+
+                Component.onCompleted: {
+                    var okButton = boxDialogButtonBox.standardButton(DialogButtonBox.Ok)
+                    if (okButton)
+                        okButton.text = "Save (Ctrl+Enter)"
+                }
             }
         }
 
@@ -1353,8 +1422,44 @@ Item {
             }
         }
 
-        footer: DialogButtonBox {
-            standardButtons: DialogButtonBox.Ok | DialogButtonBox.Cancel
+        footer: Frame {
+            padding: 12
+
+            contentItem: RowLayout {
+                spacing: 8
+
+                Button {
+                    text: "Test notification"
+                    enabled: !!projectManager && notificationSettingsDialog.topicConfigured
+                    onClicked: {
+                        if (!projectManager || !projectManager.sendTestNtfyNotification) {
+                            return
+                        }
+                        var started = projectManager.sendTestNtfyNotification(
+                            notificationSettingsDialog.serverValue,
+                            notificationSettingsDialog.topicValue,
+                            notificationSettingsDialog.tokenValue
+                        )
+                        if (started && root && root.showSaveNotification) {
+                            root.showSaveNotification("Sending test notification...")
+                        }
+                    }
+                }
+
+                Item {
+                    Layout.fillWidth: true
+                }
+
+                Button {
+                    text: "OK"
+                    onClicked: notificationSettingsDialog.accept()
+                }
+
+                Button {
+                    text: "Cancel"
+                    onClicked: notificationSettingsDialog.reject()
+                }
+            }
         }
 
         onAccepted: {
@@ -1402,6 +1507,23 @@ Item {
             dt.setMinutes(dt.getMinutes() + minutesFromNow)
             reminderDialog.dateValue = Qt.formatDateTime(dt, "yyyy-MM-dd")
             reminderDialog.timeValue = Qt.formatDateTime(dt, "HH:mm")
+        }
+
+        function setToDateTime(dt) {
+            reminderDialog.dateValue = dialogHost.formatDateValue(dt)
+            reminderDialog.timeValue = dialogHost.formatTimeValue(dt)
+        }
+
+        function setToTomorrowMorning() {
+            reminderDialog.setToDateTime(dialogHost.reminderPresetDateForTomorrow(8, 0))
+        }
+
+        function setToAfternoon() {
+            reminderDialog.setToDateTime(dialogHost.reminderPresetNextOccurrence(16, 0))
+        }
+
+        function setToEvening() {
+            reminderDialog.setToDateTime(dialogHost.reminderPresetNextOccurrence(20, 0))
         }
 
         onOpened: {
@@ -1534,6 +1656,34 @@ Item {
                 Button {
                     text: "+1d"
                     onClicked: reminderDialog.setToOffsetMinutes(24 * 60)
+                }
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                Button {
+                    Layout.fillWidth: true
+                    text: "Tomorrow morning (08:00)"
+                    onClicked: reminderDialog.setToTomorrowMorning()
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+
+                    Button {
+                        Layout.fillWidth: true
+                        text: dialogHost.reminderPresetPeriodLabel("afternoon", 16, 0)
+                        onClicked: reminderDialog.setToAfternoon()
+                    }
+
+                    Button {
+                        Layout.fillWidth: true
+                        text: dialogHost.reminderPresetPeriodLabel("evening", 20, 0)
+                        onClicked: reminderDialog.setToEvening()
+                    }
                 }
             }
 
@@ -2212,6 +2362,15 @@ Item {
             edgeDropTaskDialog.sourceType = "task"
             edgeDropTaskDialog.reverseDirection = false
         }
+    }
+
+    FileDialog {
+        id: boxPdfDialog
+        title: "Save Markdown PDF"
+        fileMode: FileDialog.SaveFile
+        nameFilters: ["PDF files (*.pdf)", "All files (*)"]
+        defaultSuffix: "pdf"
+        onAccepted: dialogHost.exportBoxDialogPdf(selectedFile)
     }
 
     FileDialog {
