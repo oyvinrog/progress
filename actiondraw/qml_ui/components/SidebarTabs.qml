@@ -98,6 +98,7 @@ Rectangle {
     }
 
     function openTabRenameDialog(tabIndex, tabName) {
+        renameTabDialog.mode = "rename"
         renameTabDialog.tabIndex = tabIndex
         renameTabDialog.currentName = tabName
         renameTabDialog.open()
@@ -110,6 +111,15 @@ Rectangle {
         if (!summary)
             return
         openTabRenameDialog(tabModel.currentTabIndex, summary.name || "")
+    }
+
+    function addNewTab() {
+        if (!tabModel)
+            return
+        renameTabDialog.mode = "create"
+        renameTabDialog.tabIndex = -1
+        renameTabDialog.currentName = ""
+        renameTabDialog.open()
     }
 
     function openTabIconDialog(tabIndex, tabIcon, tabName) {
@@ -811,13 +821,7 @@ Rectangle {
                 id: addTabMouseArea
                 anchors.fill: parent
                 hoverEnabled: true
-                onClicked: {
-                    if (tabModel) {
-                        tabModel.addTab("")
-                        if (projectManager)
-                            projectManager.switchTab(tabModel.tabCount - 1)
-                    }
-                }
+                onClicked: sidebar.addNewTab()
             }
         }
     }
@@ -1225,9 +1229,10 @@ Rectangle {
 
     Dialog {
         id: renameTabDialog
+        property string mode: "rename"
         property int tabIndex: -1
         property string currentName: ""
-        title: "Rename Tab"
+        title: mode === "create" ? "Add Tab" : "Rename Tab"
         modal: true
         anchors.centerIn: parent
         width: 300
@@ -1249,8 +1254,16 @@ Rectangle {
         }
 
         onAccepted: {
-            if (tabModel && renameTabField.text.trim())
-                tabModel.renameTab(tabIndex, renameTabField.text.trim())
+            var nextName = renameTabField.text.trim()
+            if (!tabModel || !nextName)
+                return
+            if (mode === "create") {
+                tabModel.addTab(nextName)
+                if (projectManager)
+                    projectManager.switchTab(tabModel.tabCount - 1)
+                return
+            }
+            tabModel.renameTab(tabIndex, nextName)
         }
     }
 }

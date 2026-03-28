@@ -2838,7 +2838,27 @@ class TestActionDrawQmlTaskInteractions:
         assert 'else if (sidebarTabs && sidebarTabs.renameCurrentTab)' in qml
         assert 'sidebarTabs.renameCurrentTab()' in qml
         assert 'function renameCurrentTab()' in sidebar_qml
+        assert 'renameTabDialog.mode = "rename"' in sidebar_qml
         assert 'openTabRenameDialog(tabModel.currentTabIndex, summary.name || "")' in sidebar_qml
+
+    def test_add_tab_opens_name_dialog_before_creating_tab(self):
+        sidebar_qml = (QML_DIR / "components" / "SidebarTabs.qml").read_text(encoding="utf-8")
+
+        assert 'function addNewTab()' in sidebar_qml
+        assert 'onClicked: sidebar.addNewTab()' in sidebar_qml
+        add_tab_section = sidebar_qml[sidebar_qml.index('function addNewTab()'):sidebar_qml.index('function openTabIconDialog(')]
+        assert 'renameTabDialog.mode = "create"' in add_tab_section
+        assert 'renameTabDialog.currentName = ""' in add_tab_section
+        assert 'renameTabDialog.open()' in add_tab_section
+        assert 'tabModel.addTab("")' not in add_tab_section
+        assert 'openTabRenameDialog(' not in add_tab_section
+
+        assert 'property string mode: "rename"' in sidebar_qml
+        assert 'title: mode === "create" ? "Add Tab" : "Rename Tab"' in sidebar_qml
+        assert 'if (mode === "create") {' in sidebar_qml
+        assert 'tabModel.addTab(nextName)' in sidebar_qml
+        assert 'projectManager.switchTab(tabModel.tabCount - 1)' in sidebar_qml
+        assert 'tabModel.renameTab(tabIndex, nextName)' in sidebar_qml
 
     def test_note_badge_excludes_freetext_items(self):
         qml = load_actiondraw_qml()
