@@ -1379,6 +1379,36 @@ class DiagramModel(
         self._drag_insert_edge_id = edge_id
         self.itemsChanged.emit()
 
+    def _expand_items_around_inserted_task(
+        self,
+        from_id: str,
+        to_id: str,
+        inserted_id: str,
+        direction_x: float,
+        direction_y: float,
+    ) -> None:
+        from_item = self.getItem(from_id)
+        to_item = self.getItem(to_id)
+        inserted_item = self.getItem(inserted_id)
+        if from_item is None or to_item is None or inserted_item is None:
+            return
+
+        padding = 80.0
+        minimum_spacing = inserted_item.width + padding
+        inserted_center_x, inserted_center_y = self._item_center(inserted_item)
+
+        for item, sign in ((from_item, -1.0), (to_item, 1.0)):
+            center_x, center_y = self._item_center(item)
+            distance = math.hypot(center_x - inserted_center_x, center_y - inserted_center_y)
+            missing_distance = minimum_spacing - distance
+            if missing_distance <= 0.0:
+                continue
+            self.moveItem(
+                item.id,
+                item.x + (direction_x * missing_distance * sign),
+                item.y + (direction_y * missing_distance * sign),
+            )
+
     @Slot(str, str, float, float, result=str)
     def insertTaskOnEdge(self, edge_id: str, text: str, x: float, y: float) -> str:
         """Create a task on an existing edge and reconnect around it."""
@@ -1389,10 +1419,28 @@ class DiagramModel(
         from_id = edge.from_id
         to_id = edge.to_id
         description = edge.description
+        from_item = self.getItem(from_id)
+        to_item = self.getItem(to_id)
+        direction_x = 0.0
+        direction_y = 0.0
+        should_expand = False
+        if from_item is not None and to_item is not None:
+            from_center_x, from_center_y = self._item_center(from_item)
+            to_center_x, to_center_y = self._item_center(to_item)
+            delta_x = to_center_x - from_center_x
+            delta_y = to_center_y - from_center_y
+            edge_length = math.hypot(delta_x, delta_y)
+            if edge_length > 1e-6:
+                direction_x = delta_x / edge_length
+                direction_y = delta_y / edge_length
+                should_expand = True
 
         new_id = self.addTaskFromText(text, x, y)
         if not new_id:
             return ""
+
+        if should_expand:
+            self._expand_items_around_inserted_task(from_id, to_id, new_id, direction_x, direction_y)
 
         self.removeEdge(edge_id)
         self.addEdge(from_id, new_id)

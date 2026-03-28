@@ -770,6 +770,89 @@ class TestTaskIntegration:
         assert diagram_model_with_task_model.edges[1]["fromId"] == inserted
         assert diagram_model_with_task_model.edges[1]["toId"] == target
 
+    def test_insert_task_on_edge_expands_horizontal_spacing(self, diagram_model_with_task_model):
+        """Inserting between horizontal items pushes both endpoints apart."""
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(200.0, 0.0, "Target")
+        diagram_model_with_task_model.addEdge(source, target)
+        edge_id = diagram_model_with_task_model.edges[0]["id"]
+
+        inserted = diagram_model_with_task_model.insertTaskOnEdge(
+            edge_id, "Inserted Task", 100.0, 0.0
+        )
+
+        assert inserted != ""
+        source_item = diagram_model_with_task_model.getItemSnapshot(source)
+        target_item = diagram_model_with_task_model.getItemSnapshot(target)
+        inserted_item = diagram_model_with_task_model.getItemSnapshot(inserted)
+        assert source_item["x"] < 0.0
+        assert target_item["x"] > 200.0
+        assert source_item["y"] == 0.0
+        assert target_item["y"] == 0.0
+        assert inserted_item["x"] == 100.0
+        assert inserted_item["y"] == 0.0
+
+    def test_insert_task_on_edge_expands_diagonally(self, diagram_model_with_task_model):
+        """Diagonal edges expand along both axes when space is tight."""
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(300.0, 300.0, "Target")
+        diagram_model_with_task_model.addEdge(source, target)
+        edge_id = diagram_model_with_task_model.edges[0]["id"]
+
+        inserted = diagram_model_with_task_model.insertTaskOnEdge(
+            edge_id, "Inserted Task", 120.0, 100.0
+        )
+
+        assert inserted != ""
+        source_item = diagram_model_with_task_model.getItemSnapshot(source)
+        target_item = diagram_model_with_task_model.getItemSnapshot(target)
+        assert source_item["x"] < 0.0
+        assert source_item["y"] < 0.0
+        assert target_item["x"] == 300.0
+        assert target_item["y"] == 300.0
+
+    def test_insert_task_on_edge_only_moves_cramped_side(self, diagram_model_with_task_model):
+        """Only endpoints lacking enough room are repositioned."""
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(400.0, 0.0, "Target")
+        diagram_model_with_task_model.addEdge(source, target)
+        edge_id = diagram_model_with_task_model.edges[0]["id"]
+
+        inserted = diagram_model_with_task_model.insertTaskOnEdge(
+            edge_id, "Inserted Task", 120.0, 0.0
+        )
+
+        assert inserted != ""
+        source_item = diagram_model_with_task_model.getItemSnapshot(source)
+        target_item = diagram_model_with_task_model.getItemSnapshot(target)
+        assert source_item["x"] < 0.0
+        assert target_item["x"] == 400.0
+        assert source_item["y"] == 0.0
+        assert target_item["y"] == 0.0
+
+    def test_insert_task_on_zero_length_edge_skips_expansion(self, diagram_model_with_task_model):
+        """Degenerate edges still split without moving endpoints."""
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(0.0, 0.0, "Target")
+        diagram_model_with_task_model.addEdge(source, target)
+        edge_id = diagram_model_with_task_model.edges[0]["id"]
+
+        inserted = diagram_model_with_task_model.insertTaskOnEdge(
+            edge_id, "Inserted Task", 100.0, 50.0
+        )
+
+        assert inserted != ""
+        assert len(diagram_model_with_task_model.edges) == 2
+        source_item = diagram_model_with_task_model.getItemSnapshot(source)
+        target_item = diagram_model_with_task_model.getItemSnapshot(target)
+        inserted_item = diagram_model_with_task_model.getItemSnapshot(inserted)
+        assert source_item["x"] == 0.0
+        assert source_item["y"] == 0.0
+        assert target_item["x"] == 0.0
+        assert target_item["y"] == 0.0
+        assert inserted_item["x"] == 100.0
+        assert inserted_item["y"] == 50.0
+
     def test_insert_task_on_edge_preserves_description_upstream(self, diagram_model_with_task_model):
         """Splitting an edge keeps its description on the upstream replacement edge."""
         source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
