@@ -577,6 +577,12 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Ctrl+Shift+M"
+        enabled: diagramModel !== null
+        onActivated: root.openWorkspaceMarkdownHub()
+    }
+
+    Shortcut {
         sequence: "Ctrl+N"
         enabled: diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen)
         onActivated: root.addConnectedNote()
@@ -1091,6 +1097,13 @@ ApplicationWindow {
         )
     }
 
+    function openWorkspaceMarkdownHub() {
+        if (!markdownNoteManager || !markdownNoteManager.openWorkspaceMarkdown)
+            return
+        var center = root.snapPoint(root.diagramCenterPoint())
+        markdownNoteManager.openWorkspaceMarkdown(center.x, center.y)
+    }
+
     function setZoomInternal(newZoom, focusX, focusY) {
         var clamped = clampZoom(newZoom)
         if (Math.abs(clamped - root.zoomLevel) < 0.0001)
@@ -1469,6 +1482,73 @@ ApplicationWindow {
                             elide: Text.ElideRight
                             Layout.fillWidth: true
                         }
+                    }
+
+                    Button {
+                        id: projectMarkdownButton
+                        text: "Project Markdown"
+                        flat: true
+                        padding: 0
+                        Layout.alignment: Qt.AlignVCenter
+                        contentItem: RowLayout {
+                            spacing: 8
+
+                            Rectangle {
+                                implicitWidth: 14
+                                implicitHeight: 16
+                                radius: 3
+                                color: "#edf6fd"
+                                border.color: "#86abc6"
+                                border.width: 1
+                                Layout.alignment: Qt.AlignVCenter
+
+                                Rectangle {
+                                    anchors.top: parent.top
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    height: 4
+                                    radius: 3
+                                    color: "#9ecfff"
+                                }
+
+                                Rectangle {
+                                    anchors.top: parent.top
+                                    anchors.topMargin: 7
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 3
+                                    width: parent.width - 6
+                                    height: 1
+                                    color: "#6887a3"
+                                }
+
+                                Rectangle {
+                                    anchors.top: parent.top
+                                    anchors.topMargin: 10
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 3
+                                    width: parent.width - 6
+                                    height: 1
+                                    color: "#6887a3"
+                                }
+                            }
+
+                            Text {
+                                text: projectMarkdownButton.text
+                                color: projectMarkdownButton.hovered ? "#f2f8ff" : "#d8e8f6"
+                                font.pixelSize: 11
+                                font.bold: true
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                        }
+                        background: Rectangle {
+                            radius: 999
+                            color: projectMarkdownButton.hovered ? "#21384a" : "#172937"
+                            border.color: projectMarkdownButton.hovered ? "#5f89a8" : "#35536a"
+                            border.width: 1
+                            implicitWidth: 150
+                            implicitHeight: 32
+                        }
+                        onClicked: root.openWorkspaceMarkdownHub()
                     }
 
                     ProgressStatsRow {

@@ -52,6 +52,7 @@ from actiondraw.priorityplot.model import (
     clamp_time_hours,
     compute_priority_score,
 )
+from actiondraw.markdown_note_tabs import normalize_editor_tabs
 
 
 CRACK_MODEL_PROFILE_NAME = "Top-end GPU cluster"
@@ -2115,6 +2116,7 @@ class ProjectManager(QObject):
     errorOccurred = Signal(str)  # Emitted with error message on failure
     recentProjectsChanged = Signal()  # Emitted when recent projects list changes
     currentFilePathChanged = Signal()  # Emitted when current file path changes
+    workspaceMarkdownTabsChanged = Signal()
     sidebarExpandedChanged = Signal()
     ntfySettingsChanged = Signal()
     testNotificationCompleted = Signal(bool, str, arguments=["success", "message"])
@@ -2179,6 +2181,7 @@ class ProjectManager(QObject):
         self._cached_encryption_credentials: Optional[EncryptionCredentials] = None
         self._cached_key_material: Optional[DerivedKeyMaterial] = None
         self._cached_encryption_file_path: str = ""
+        self._workspace_markdown_tabs = normalize_editor_tabs([], fallback_text="")
         self._last_saved_snapshot = self._serialize_project_payload(self._build_project_data())
 
     def scrubProjectData(self) -> None:
@@ -2198,6 +2201,8 @@ class ProjectManager(QObject):
 
         # Drop the last-saved snapshot (contains full serialized plaintext).
         self._last_saved_snapshot = ""
+        self._workspace_markdown_tabs = normalize_editor_tabs([], fallback_text="")
+        self.workspaceMarkdownTabsChanged.emit()
 
         # Clear live models (drops references to Task/DiagramItem objects).
         self._task_model.clear()
@@ -2762,6 +2767,36 @@ class ProjectManager(QObject):
         """Return the current project file path."""
         return self._current_file_path
 
+    @Property("QVariantList", notify=workspaceMarkdownTabsChanged)
+    def workspaceMarkdownTabs(self) -> List[Dict[str, str]]:
+        """Return the project-level ActionDraw markdown tabs."""
+        return normalize_editor_tabs(self._workspace_markdown_tabs, fallback_text="")
+
+    @Slot(result="QVariantList")
+    def getWorkspaceMarkdownTabs(self) -> List[Dict[str, str]]:
+        """Return normalized project-level markdown tabs."""
+        return self.workspaceMarkdownTabs
+
+    @Slot("QVariantList")
+    def setWorkspaceMarkdownTabs(self, tabs: List[Dict[str, str]]) -> None:
+        """Persist normalized project-level markdown tabs in memory."""
+        normalized_tabs = normalize_editor_tabs(tabs, fallback_text="")
+        if normalized_tabs == self._workspace_markdown_tabs:
+            return
+        self._workspace_markdown_tabs = normalized_tabs
+        self.workspaceMarkdownTabsChanged.emit()
+
+    @Slot(str, float, float, result=str)
+    def createTaskFromWorkspaceMarkdownSelection(self, selected_text: str, x: float, y: float) -> str:
+        """Create a top-level task from selected workspace markdown text."""
+        text = str(selected_text or "").strip()
+        if not text:
+            return ""
+        add_task_from_text = getattr(self._diagram_model, "addTaskFromText", None)
+        if not callable(add_task_from_text):
+            return ""
+        return str(add_task_from_text(text, float(x), float(y)) or "")
+
     def _normalize_file_path(self, file_path: str) -> str:
         """Convert file URLs into local paths, including Windows file URLs."""
         if file_path.startswith("file:"):
@@ -2805,6 +2840,7 @@ class ProjectManager(QObject):
                 "version": self.PROJECT_VERSION,
                 "tabs": tabs_data,
                 "active_tab": current_tab_index,
+                "workspace_markdown_tabs": normalize_editor_tabs(self._workspace_markdown_tabs, fallback_text=""),
             }
 
         return {
@@ -2815,6 +2851,7 @@ class ProjectManager(QObject):
                 "diagram": self._diagram_model.to_dict(),
             }],
             "active_tab": 0,
+            "workspace_markdown_tabs": normalize_editor_tabs(self._workspace_markdown_tabs, fallback_text=""),
         }
 
     def _serialize_project_payload(self, project_data: Dict[str, Any]) -> str:
@@ -3313,6 +3350,12 @@ class ProjectManager(QObject):
                 # Ensure at least one tab exists
                 if not tabs:
                     tabs = [Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})]
+
+            self._workspace_markdown_tabs = normalize_editor_tabs(
+                project_data.get("workspace_markdown_tabs"),
+                fallback_text="",
+            )
+            self.workspaceMarkdownTabsChanged.emit()
 
             # Validate active_tab index
             if active_tab < 0 or active_tab >= len(tabs):

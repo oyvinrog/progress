@@ -72,6 +72,13 @@ MenuBar {
             onTriggered: loadDialog.open()
         }
 
+        MenuItem {
+            text: "Project Markdown...\tCtrl+Shift+M"
+            icon.name: "accessories-text-editor"
+            enabled: hasDiagramModel()
+            onTriggered: root.openWorkspaceMarkdownHub()
+        }
+
         MenuSeparator {}
 
         Menu {

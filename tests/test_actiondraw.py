@@ -2112,6 +2112,23 @@ class TestMultiTabSupport:
         assert task_model.rowCount() == 1
         assert diagram_model.count == 1
 
+    def test_load_v1_format_initializes_workspace_markdown(self, app, tmp_path):
+        """Older projects gain a default ActionDraw-wide markdown workspace."""
+        import json
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        project_file = tmp_path / "v1_workspace.progress"
+        project_file.write_text(json.dumps({"version": "1.0", "tasks": {"tasks": []}, "diagram": {"items": [], "edges": [], "strokes": []}}))
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        project_manager.loadProject(str(project_file))
+
+        assert project_manager.getWorkspaceMarkdownTabs() == [{"name": "Tab 1", "text": ""}]
+
     def test_save_creates_encrypted_v1_2_envelope(self, app, tmp_path):
         """Saving a project creates encrypted v1.2 envelope format."""
         import json
@@ -2181,6 +2198,35 @@ class TestMultiTabSupport:
         assert task_model2.rowCount() == 1
         assert diagram_model2.count == 1
 
+    def test_roundtrip_workspace_markdown_tabs(self, app, tmp_path):
+        """Project-wide markdown tabs survive save/load."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        project_manager.setWorkspaceMarkdownTabs(
+            [
+                {"name": "Inbox", "text": "Top level notes"},
+                {"name": "Ideas", "text": "- draft feature"},
+            ]
+        )
+
+        project_file = tmp_path / "workspace_tabs.progress"
+        project_manager.saveProject(str(project_file))
+
+        task_model2 = TaskModel()
+        diagram_model2 = DiagramModel()
+        tab_model2 = TabModel()
+        project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
+        project_manager2.loadProject(str(project_file))
+
+        assert project_manager2.getWorkspaceMarkdownTabs() == [
+            {"name": "Inbox", "text": "Top level notes"},
+            {"name": "Ideas", "text": "- draft feature"},
+        ]
+
     def test_has_unsaved_changes_tracks_diagram_edits(self, app, tmp_path):
         """Unsaved state flips true after diagram changes and false after save."""
         from task_model import TaskModel, ProjectManager, TabModel
@@ -2198,6 +2244,22 @@ class TestMultiTabSupport:
         project_file = tmp_path / "unsaved_state.progress"
         project_manager.saveProject(str(project_file))
         assert project_manager.hasUnsavedChanges() is False
+
+    def test_has_unsaved_changes_tracks_workspace_markdown_edits(self, app, tmp_path):
+        """Editing the ActionDraw-wide markdown marks the project dirty."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        project_file = tmp_path / "workspace_unsaved.progress"
+        project_manager.saveProject(str(project_file))
+        assert project_manager.hasUnsavedChanges() is False
+
+        project_manager.setWorkspaceMarkdownTabs([{"name": "Inbox", "text": "replace notes"}])
+        assert project_manager.hasUnsavedChanges() is True
 
     def test_has_unsaved_changes_ignores_active_task_time_drift(self, app, tmp_path):
         """Auto-updating active task timers should not immediately re-mark project as unsaved."""
@@ -2903,6 +2965,25 @@ class TestActionDrawQmlTaskInteractions:
         assert 'text: "\\u2190 Back"' in qml
         assert 'projectManager.goBack()' in qml
         assert 'projectManager.canGoBack' in qml
+
+    def test_toolbar_does_not_expose_workspace_markdown_button(self):
+        qml = (QML_DIR / "components" / "ToolbarRow.qml").read_text(encoding="utf-8")
+
+        assert 'text: "ActionDraw Markdown"' not in qml
+        assert 'workspaceMarkdownButton' not in qml
+
+    def test_header_menu_and_shortcut_expose_project_markdown(self):
+        actiondraw_qml = load_actiondraw_qml()
+        menu_qml = (QML_DIR / "components" / "ActionMenuBar.qml").read_text(encoding="utf-8")
+
+        assert 'id: projectMarkdownButton' in actiondraw_qml
+        assert 'text: "Project Markdown"' in actiondraw_qml
+        assert 'onClicked: root.openWorkspaceMarkdownHub()' in actiondraw_qml
+        assert 'sequence: "Ctrl+Shift+M"' in actiondraw_qml
+        assert 'onActivated: root.openWorkspaceMarkdownHub()' in actiondraw_qml
+        assert 'text: "Project Markdown...\\tCtrl+Shift+M"' in menu_qml
+        assert 'icon.name: "accessories-text-editor"' in menu_qml
+        assert 'onTriggered: root.openWorkspaceMarkdownHub()' in menu_qml
 
     def test_shortcut_exposes_back_navigation(self):
         qml = load_actiondraw_qml()
@@ -5659,6 +5740,110 @@ class TestMarkdownNoteManager:
         assert manager.activeItemId == item_id
         assert manager._editor.save_confirmation_calls == 1
         assert empty_diagram_model.getItemMarkdown(item_id) == "Updated markdown"
+
+    def test_open_workspace_markdown_uses_project_tabs(self, empty_diagram_model, monkeypatch):
+        class _DummySignal:
+            def connect(self, _callback):
+                return None
+
+        class _DummyEditor:
+            def __init__(self, *_args, **_kwargs):
+                self.noteSaved = _DummySignal()
+                self.noteSavedAndClosed = _DummySignal()
+                self.noteCanceled = _DummySignal()
+                self.open_calls = []
+
+            def open(self, *args, **kwargs):
+                self.open_calls.append((args, kwargs))
+
+        class _DummyProjectManager:
+            def getWorkspaceMarkdownTabs(self):
+                return [{"name": "Inbox", "text": "Global scratchpad"}]
+
+        monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
+        manager = MarkdownNoteManager(empty_diagram_model, _DummyProjectManager())
+
+        manager.openWorkspaceMarkdown(320.0, 180.0)
+
+        assert manager.editorOpen is True
+        assert manager.activeEditorType == "workspace"
+        assert manager.activeItemId == ""
+        args, kwargs = manager._editor.open_calls[0]
+        assert args[0] == ""
+        assert args[1] == "Global scratchpad"
+        assert args[2] == "ActionDraw Markdown"
+        assert kwargs["editor_type"] == "workspace"
+        assert kwargs["tabs"] == [{"name": "Inbox", "text": "Global scratchpad"}]
+
+    def test_save_workspace_markdown_persists_via_project_manager(self, empty_diagram_model, monkeypatch):
+        class _DummySignal:
+            def connect(self, _callback):
+                return None
+
+        class _DummyEditor:
+            def __init__(self, *_args, **_kwargs):
+                self.noteSaved = _DummySignal()
+                self.noteSavedAndClosed = _DummySignal()
+                self.noteCanceled = _DummySignal()
+                self.save_confirmation_calls = 0
+
+            def show_save_confirmation(self):
+                self.save_confirmation_calls += 1
+
+        class _DummyProjectManager:
+            def __init__(self):
+                self.saved_tabs = None
+
+            def setWorkspaceMarkdownTabs(self, tabs):
+                self.saved_tabs = tabs
+
+        project_manager = _DummyProjectManager()
+        monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
+        manager = MarkdownNoteManager(empty_diagram_model, project_manager)
+        manager._set_editor_state("workspace", "", 300.0, 200.0, True)
+
+        manager._save_note(
+            "",
+            "Global note",
+            [
+                {"name": "Inbox", "text": "Global note"},
+                {"name": "Ideas", "text": "Drafts"},
+            ],
+        )
+
+        assert project_manager.saved_tabs == [
+            {"name": "Inbox", "text": "Global note"},
+            {"name": "Ideas", "text": "Drafts"},
+        ]
+        assert manager._editor.save_confirmation_calls == 1
+
+    def test_workspace_selection_creates_top_level_task(self, empty_diagram_model, monkeypatch):
+        class _DummySignal:
+            def connect(self, _callback):
+                return None
+
+        class _DummyEditor:
+            def __init__(self, *_args, **_kwargs):
+                self.noteSaved = _DummySignal()
+                self.noteSavedAndClosed = _DummySignal()
+                self.noteCanceled = _DummySignal()
+
+        class _DummyProjectManager:
+            def createTaskFromWorkspaceMarkdownSelection(self, selected_text, x, y):
+                assert selected_text == "Ship hub"
+                assert x == 410.0
+                assert y == 260.0
+                return "task_42"
+
+        monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
+        manager = MarkdownNoteManager(empty_diagram_model, _DummyProjectManager())
+        events = []
+        manager.taskCreated.connect(events.append)
+
+        task_id = manager.createTaskFromEditorSelection("workspace", "", 410.0, 260.0, "ignored", "Ship hub")
+
+        assert task_id == "task_42"
+        assert events == ["task_42"]
 
     def test_open_note_with_empty_markdown_uses_note_editor(self, empty_diagram_model, monkeypatch):
         class _DummySignal:

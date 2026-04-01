@@ -29,7 +29,7 @@ def create_actiondraw_window(
 
     engine = QQmlApplicationEngine()
     if markdown_note_manager is None:
-        markdown_note_manager = MarkdownNoteManager(diagram_model)
+        markdown_note_manager = MarkdownNoteManager(diagram_model, project_manager)
     if markdown_image_paster is None:
         markdown_image_paster = MarkdownImagePaster()
     markdown_preview_formatter = MarkdownPreviewFormatter()

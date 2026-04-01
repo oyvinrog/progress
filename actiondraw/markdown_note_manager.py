@@ -15,9 +15,10 @@ class MarkdownNoteManager(QObject):
     projectSaveRequested = Signal()
     editorStateChanged = Signal()
 
-    def __init__(self, diagram_model) -> None:
+    def __init__(self, diagram_model, project_manager=None) -> None:
         super().__init__()
         self._diagram_model = diagram_model
+        self._project_manager = project_manager
         self._editor_open = False
         self._active_editor_type = ""
         self._active_item_id = ""
@@ -103,11 +104,32 @@ class MarkdownNoteManager(QObject):
             tabs=self._diagram_model.getEditorTabs(source_item_id, "freetext") if source_item_id else normalize_editor_tabs([], fallback_text=text_value),
         )
 
+    @Slot(float, float)
+    def openWorkspaceMarkdown(self, x: float, y: float) -> None:
+        tabs = normalize_editor_tabs(
+            self._project_manager.getWorkspaceMarkdownTabs() if self._project_manager else [],
+            fallback_text="",
+        )
+        self._set_editor_state("workspace", "", float(x), float(y), True)
+        self._editor.open(
+            "",
+            tabs[0]["text"],
+            "ActionDraw Markdown",
+            editor_type="workspace",
+            target_x=float(x),
+            target_y=float(y),
+            tabs=tabs,
+        )
+
     def _save_note(self, item_id: str, note_text: str, tabs: list | None = None) -> None:
         normalized_tabs = normalize_editor_tabs(tabs, fallback_text=note_text or "")
         canonical_text = normalized_tabs[0]["text"]
         saved_item_id = ""
-        if self._active_editor_type == "freetext":
+        if self._active_editor_type == "workspace":
+            if self._project_manager is not None:
+                self._project_manager.setWorkspaceMarkdownTabs(normalized_tabs)
+                saved_item_id = "__workspace__"
+        elif self._active_editor_type == "freetext":
             if self._active_item_id:
                 self._diagram_model.setEditorTabs(self._active_item_id, "freetext", normalized_tabs)
                 saved_item_id = self._active_item_id
@@ -198,6 +220,13 @@ class MarkdownNoteManager(QObject):
             return ""
 
         source_id = item_id or ""
+        if editor_type == "workspace":
+            if self._project_manager is None:
+                return ""
+            task_id = self._project_manager.createTaskFromWorkspaceMarkdownSelection(selected_text, float(x), float(y))
+            if task_id:
+                self.taskCreated.emit(task_id)
+            return task_id
         if editor_type == "freetext" and not source_id:
             source_id = self._diagram_model.addPresetItemWithText(
                 "freetext",
