@@ -245,6 +245,42 @@ class MarkdownNoteManager(QObject):
             self.taskCreated.emit(task_id)
         return task_id
 
+    @Slot(str, str, float, float, str, str, result=int)
+    def createTabFromEditorSelection(
+        self,
+        editor_type: str,
+        item_id: str,
+        x: float,
+        y: float,
+        current_text: str,
+        selected_text: str,
+    ) -> int:
+        if self._project_manager is None:
+            return -1
+
+        text = str(selected_text or "").strip()
+        if not text:
+            return -1
+
+        if str(editor_type or "").strip().lower() == "freetext" and not (item_id or ""):
+            source_id = self._diagram_model.addPresetItemWithText(
+                "freetext",
+                float(x),
+                float(y),
+                current_text or "",
+            )
+            if source_id:
+                self._set_editor_state("freetext", source_id, float(x), float(y), True)
+                self.itemSaved.emit(source_id)
+
+        create_tab = getattr(self._project_manager, "createTabFromMarkdownSelection", None)
+        if not callable(create_tab):
+            return -1
+        created_index = create_tab(text)
+        if created_index is None:
+            return -1
+        return int(created_index)
+
     @Slot()
     def requestProjectSave(self) -> None:
         self.projectSaveRequested.emit()

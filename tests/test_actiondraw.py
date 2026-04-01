@@ -1133,11 +1133,13 @@ class TestCreateActionDrawWindow:
     def test_markdown_pdf_actions_are_present_in_qml(self):
         note_editor_qml = (QML_DIR / "MarkdownNoteEditorWindow.qml").read_text(encoding="utf-8")
         dialogs_qml = (QML_DIR / "components" / "ActionDialogs.qml").read_text(encoding="utf-8")
+        editor_pane_qml = (QML_DIR / "components" / "MarkdownEditorPane.qml").read_text(encoding="utf-8")
 
         assert 'text: "Save PDF..."' in note_editor_qml
         assert 'title: "Save Note PDF"' in note_editor_qml
         assert 'text: "Save PDF..."' in dialogs_qml
         assert 'title: "Save Markdown PDF"' in dialogs_qml
+        assert 'text: "Create Tab"' in editor_pane_qml
 
 
 class TestDiagramModelSerialization:
@@ -2942,6 +2944,23 @@ class TestMultiTabSupport:
         item = diagram_model.getItemSnapshot(created_item_id)
         assert item["taskIndex"] == 0
         assert item["text"] == "Backend API"
+
+    def test_project_manager_create_tab_from_markdown_selection_switches_to_new_tab(self, app):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        task_model.addTask("Existing task")
+        created_index = project_manager.createTabFromMarkdownSelection("Ship hub")
+
+        assert created_index == 1
+        assert tab_model.tabCount == 2
+        assert tab_model.currentTabIndex == 1
+        assert tab_model.getTabSummary(1)["name"] == "Ship hub"
+        assert tab_model.getAllTabs()[0].tasks["tasks"][0]["title"] == "Existing task"
 
 
 class TestActionDrawQmlTaskInteractions:
@@ -5844,6 +5863,29 @@ class TestMarkdownNoteManager:
 
         assert task_id == "task_42"
         assert events == ["task_42"]
+
+    def test_workspace_selection_creates_tab_via_project_manager(self, empty_diagram_model, monkeypatch):
+        class _DummySignal:
+            def connect(self, _callback):
+                return None
+
+        class _DummyEditor:
+            def __init__(self, *_args, **_kwargs):
+                self.noteSaved = _DummySignal()
+                self.noteSavedAndClosed = _DummySignal()
+                self.noteCanceled = _DummySignal()
+
+        class _DummyProjectManager:
+            def createTabFromMarkdownSelection(self, selected_text):
+                assert selected_text == "Ship hub"
+                return 3
+
+        monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
+        manager = MarkdownNoteManager(empty_diagram_model, _DummyProjectManager())
+
+        created_index = manager.createTabFromEditorSelection("workspace", "", 410.0, 260.0, "ignored", "Ship hub")
+
+        assert created_index == 3
 
     def test_open_note_with_empty_markdown_uses_note_editor(self, empty_diagram_model, monkeypatch):
         class _DummySignal:

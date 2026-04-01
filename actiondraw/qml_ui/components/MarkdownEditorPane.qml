@@ -9,6 +9,7 @@ Item {
     property string textValue: ""
     property string placeholderText: ""
     property bool allowCreateTask: false
+    property bool allowCreateTab: false
     property bool previewVisible: true
     property string sourceItemId: ""
     property string _cachedSelectionText: ""
@@ -17,6 +18,14 @@ Item {
     property int _minPreviewImageHeight: 48
 
     signal createTaskRequested(string selectedText)
+    signal createTabRequested(string selectedText)
+
+    function currentSelectedText() {
+        var selected = selectedTextNormalized()
+        if (selected.length === 0)
+            selected = root._cachedSelectionText
+        return selected
+    }
 
     function normalizeLineBreaks(value) {
         if (!value)
@@ -510,19 +519,29 @@ Item {
 
         RowLayout {
             Layout.fillWidth: true
-            visible: root.allowCreateTask
+            visible: root.allowCreateTask || root.allowCreateTab
 
             Item {
                 Layout.fillWidth: true
             }
 
             Button {
+                text: "Create Tab"
+                visible: root.allowCreateTab
+                enabled: root.currentSelectedText().length > 0
+                onClicked: {
+                    var selected = root.currentSelectedText()
+                    if (selected.length > 0)
+                        root.createTabRequested(selected)
+                }
+            }
+
+            Button {
                 text: "Create Task"
+                visible: root.allowCreateTask
                 enabled: root.selectedTextNormalized().length > 0 || root._cachedSelectionText.length > 0
                 onClicked: {
-                    var selected = root.selectedTextNormalized()
-                    if (selected.length === 0)
-                        selected = root._cachedSelectionText
+                    var selected = root.currentSelectedText()
                     if (selected.length > 0)
                         root.createTaskRequested(selected)
                 }

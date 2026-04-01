@@ -504,6 +504,7 @@ ApplicationWindow {
             Layout.fillHeight: true
             placeholderText: editorRoot.editorType === "freetext" ? "Write your text here..." : "Write your note here..."
             allowCreateTask: true
+            allowCreateTab: true
             previewVisible: true
             sourceItemId: editorRoot.noteId
             textValue: editorRoot.noteText
@@ -543,6 +544,24 @@ ApplicationWindow {
                 }
                 if (diagramModel && diagramModel.createTaskFromMarkdownSelection)
                     diagramModel.createTaskFromMarkdownSelection(editorRoot.noteId, selectedText)
+            }
+            onCreateTabRequested: function(selectedText) {
+                if (markdownNoteManager && markdownNoteManager.createTabFromEditorSelection) {
+                    markdownNoteManager.createTabFromEditorSelection(
+                        editorRoot.editorType,
+                        editorRoot.noteId,
+                        editorRoot.targetX,
+                        editorRoot.targetY,
+                        markdownEditor.textValue,
+                        selectedText
+                    )
+                    if (editorRoot.noteId.length === 0
+                        && editorRoot.editorType === "freetext"
+                        && markdownNoteManager.activeItemId
+                        && markdownNoteManager.activeItemId.length > 0) {
+                        editorRoot.noteId = markdownNoteManager.activeItemId
+                    }
+                }
             }
         }
 

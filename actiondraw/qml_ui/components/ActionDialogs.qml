@@ -659,8 +659,14 @@ Item {
                 textValue: boxDialog.textValue
                 placeholderText: "Label"
                 allowCreateTask: true
+                allowCreateTab: true
                 sourceItemId: boxDialog.editingItemId
                 onTextValueChanged: boxDialog.textValue = textValue
+                onCreateTabRequested: function(selectedText) {
+                    if (!projectManager || !projectManager.createTabFromMarkdownSelection)
+                        return
+                    projectManager.createTabFromMarkdownSelection(selectedText)
+                }
                 onCreateTaskRequested: function(selectedText) {
                     if (!diagramModel)
                         return

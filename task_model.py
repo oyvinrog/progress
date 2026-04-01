@@ -2797,6 +2797,22 @@ class ProjectManager(QObject):
             return ""
         return str(add_task_from_text(text, float(x), float(y)) or "")
 
+    @Slot(str, result=int)
+    def createTabFromMarkdownSelection(self, selected_text: str) -> int:
+        """Create and switch to a project tab from selected markdown text."""
+        if self._tab_model is None:
+            return -1
+
+        tab_name = str(selected_text or "").strip()
+        if not tab_name:
+            return -1
+
+        self._saveCurrentTabState()
+        self._tab_model.addTab(tab_name)
+        created_index = self._tab_model.tabCount - 1
+        self.switchTab(created_index)
+        return created_index
+
     def _normalize_file_path(self, file_path: str) -> str:
         """Convert file URLs into local paths, including Windows file URLs."""
         if file_path.startswith("file:"):
