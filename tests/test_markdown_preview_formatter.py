@@ -35,3 +35,12 @@ def test_unsupported_language_is_neutral_and_escaped():
     html = formatter.fencedCodeToHtml("javascript", "<script>alert(1)</script>")
     assert "<pre" in html
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+
+
+def test_markdown_to_display_html_renders_action_highlight_spans():
+    formatter = MarkdownPreviewFormatter()
+    html = formatter.markdownToDisplayHtml("\u2060Ship hub\u2061 and \u2062Do now\u2063")
+    assert "#60a5fa" in html
+    assert "#facc15" in html
+    assert "Ship hub" in html
+    assert "Do now" in html

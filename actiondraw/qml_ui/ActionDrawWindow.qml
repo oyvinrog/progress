@@ -3689,12 +3689,14 @@ ApplicationWindow {
                                         return itemRect.selected || itemRect.hovered
                                     return diagramModel.count <= 80 || itemRect.selected || itemRect.hovered
                                 }
-                                text: model.text
+                                text: (itemLabel.useMarkdown && markdownPreviewFormatter && markdownPreviewFormatter.markdownToDisplayHtml)
+                                    ? markdownPreviewFormatter.markdownToDisplayHtml(model.text)
+                                    : model.text
                                 color: itemRect.isTask && itemRect.taskCompleted ? "#c9d7ce" : model.textColor
                                 wrapMode: Text.WordWrap
                                 horizontalAlignment: Text.AlignHCenter
                                 verticalAlignment: Text.AlignVCenter
-                                textFormat: itemLabel.useMarkdown ? Text.MarkdownText : Text.PlainText
+                                textFormat: itemLabel.useMarkdown ? Text.RichText : Text.PlainText
                                 font.pixelSize: 14
                                 font.bold: itemRect.itemType === "task"
                                 font.strikeout: itemRect.isTask && itemRect.taskCompleted
@@ -3818,12 +3820,14 @@ ApplicationWindow {
                                         return itemRect.selected || itemRect.hovered
                                     return diagramModel.count <= 80 || itemRect.selected || itemRect.hovered
                                 }
-                                text: itemRect.freeTextDisplayText
+                                text: (freeTextLabel.useMarkdown && markdownPreviewFormatter && markdownPreviewFormatter.markdownToDisplayHtml)
+                                    ? markdownPreviewFormatter.markdownToDisplayHtml(itemRect.freeTextDisplayText)
+                                    : itemRect.freeTextDisplayText
                                 color: model.textColor
                                 wrapMode: Text.Wrap
                                 horizontalAlignment: Text.AlignLeft
                                 verticalAlignment: Text.AlignTop
-                                textFormat: freeTextLabel.useMarkdown ? Text.MarkdownText : Text.PlainText
+                                textFormat: freeTextLabel.useMarkdown ? Text.RichText : Text.PlainText
                                 font.pixelSize: 13
                                 maximumLineCount: freeTextLabel.useMarkdown ? 1000 : Math.max(1, Math.floor(height / (font.pixelSize * 1.35)))
                                 elide: freeTextLabel.useMarkdown ? Text.ElideNone : Text.ElideRight

@@ -1140,6 +1140,14 @@ class TestCreateActionDrawWindow:
         assert 'text: "Save PDF..."' in dialogs_qml
         assert 'title: "Save Markdown PDF"' in dialogs_qml
         assert 'text: "Create Tab"' in editor_pane_qml
+        assert 'property string _tabHighlightStart: "\\u2060"' in editor_pane_qml
+        assert 'property string _taskHighlightStart: "\\u2062"' in editor_pane_qml
+        assert 'persistentSelection: true' in editor_pane_qml
+        assert 'selectionColor: "#facc15"' in editor_pane_qml
+        assert 'editor.selectionColor = "#60a5fa"' in editor_pane_qml
+        assert 'textFormat: Text.RichText' in editor_pane_qml
+        assert 'root.wrapCurrentSelection(root._tabHighlightStart, root._tabHighlightEnd)' in editor_pane_qml
+        assert 'root.wrapCurrentSelection(root._taskHighlightStart, root._taskHighlightEnd)' in editor_pane_qml
 
 
 class TestDiagramModelSerialization:

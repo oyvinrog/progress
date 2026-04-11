@@ -6,6 +6,7 @@ import html
 from typing import Optional
 
 from PySide6.QtCore import QObject, Slot
+from PySide6.QtGui import QTextDocument
 
 try:
     from pygments import highlight
@@ -22,6 +23,11 @@ _PRE_STYLE = (
     "background:#111826;color:#dbe2f2;border:1px solid #334155;border-radius:6px;"
     "padding:10px;white-space:pre-wrap;font-family:Monospace;font-size:13px;"
 )
+
+_TAB_HIGHLIGHT_START = "\u2060"
+_TAB_HIGHLIGHT_END = "\u2061"
+_TASK_HIGHLIGHT_START = "\u2062"
+_TASK_HIGHLIGHT_END = "\u2063"
 
 
 class MarkdownPreviewFormatter(QObject):
@@ -53,6 +59,18 @@ class MarkdownPreviewFormatter(QObject):
             return self._sql_lexer
         return None
 
+    def _inject_action_highlights(self, source: str) -> str:
+        text = source or ""
+        text = text.replace(
+            _TAB_HIGHLIGHT_START,
+            '<span style="background-color:#60a5fa;color:#000000;">',
+        ).replace(_TAB_HIGHLIGHT_END, "</span>")
+        text = text.replace(
+            _TASK_HIGHLIGHT_START,
+            '<span style="background-color:#facc15;color:#000000;">',
+        ).replace(_TASK_HIGHLIGHT_END, "</span>")
+        return text
+
     @Slot(str, str, result=str)
     def fencedCodeToHtml(self, language: str, code: str) -> str:  # noqa: N802
         source = code or ""
@@ -66,3 +84,9 @@ class MarkdownPreviewFormatter(QObject):
         except Exception:
             body = html.escape(source)
         return f"<pre style=\"{_PRE_STYLE}\"><code>{body}</code></pre>"
+
+    @Slot(str, result=str)
+    def markdownToDisplayHtml(self, markdown: str) -> str:  # noqa: N802
+        document = QTextDocument()
+        document.setMarkdown(self._inject_action_highlights(markdown or ""))
+        return document.toHtml()

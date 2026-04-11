@@ -16,6 +16,10 @@ Item {
     property var _previewBlocks: []
     property int _minPreviewImageWidth: 48
     property int _minPreviewImageHeight: 48
+    property string _tabHighlightStart: "\u2060"
+    property string _tabHighlightEnd: "\u2061"
+    property string _taskHighlightStart: "\u2062"
+    property string _taskHighlightEnd: "\u2063"
 
     signal createTaskRequested(string selectedText)
     signal createTabRequested(string selectedText)
@@ -24,13 +28,51 @@ Item {
         var selected = selectedTextNormalized()
         if (selected.length === 0)
             selected = root._cachedSelectionText
-        return selected
+        return stripHighlightMarkers(selected)
+    }
+
+    function currentSelectionRange() {
+        var start = editor.selectionStart
+        var end = editor.selectionEnd
+        if (start < 0 || end < 0 || start === end)
+            return { start: -1, end: -1 }
+        return {
+            start: Math.min(start, end),
+            end: Math.max(start, end)
+        }
+    }
+
+    function wrapCurrentSelection(startMarker, endMarker) {
+        var range = currentSelectionRange()
+        if (range.start < 0 || range.end <= range.start)
+            return
+        var selected = editor.text.slice(range.start, range.end)
+        var wrapped = startMarker + stripHighlightMarkers(selected) + endMarker
+        editor.remove(range.start, range.end)
+        editor.insert(range.start, wrapped)
+        editor.select(range.start, range.start + wrapped.length)
+        root.refreshSelectionCache()
     }
 
     function normalizeLineBreaks(value) {
         if (!value)
             return ""
         return value.replace(/\u2029/g, "\n")
+    }
+
+    function stripHighlightMarkers(value) {
+        var text = String(value || "")
+        return text
+            .split(root._tabHighlightStart).join("")
+            .split(root._tabHighlightEnd).join("")
+            .split(root._taskHighlightStart).join("")
+            .split(root._taskHighlightEnd).join("")
+    }
+
+    function previewHtml(markdown) {
+        if (markdownPreviewFormatter && markdownPreviewFormatter.markdownToDisplayHtml)
+            return markdownPreviewFormatter.markdownToDisplayHtml(markdown)
+        return stripHighlightMarkers(markdown)
     }
 
     function focusEditor() {
@@ -62,7 +104,7 @@ Item {
             return ""
         var left = Math.min(start, end)
         var right = Math.max(start, end)
-        return editor.text.slice(left, right).replace(/\u2029/g, "\n").trim()
+        return stripHighlightMarkers(editor.text.slice(left, right).replace(/\u2029/g, "\n")).trim()
     }
 
     function refreshSelectionCache() {
@@ -257,6 +299,9 @@ Item {
                     placeholderText: root.placeholderText
                     wrapMode: TextEdit.Wrap
                     selectByMouse: true
+                    persistentSelection: true
+                    selectionColor: "#facc15"
+                    selectedTextColor: "#000000"
                     color: "#f5f6f8"
                     font.pixelSize: 14
                     background: Rectangle {
@@ -352,10 +397,10 @@ Item {
                                                 id: textPreview
                                                 visible: modelData && modelData.kind === "text"
                                                 width: parent.width
-                                                text: root.normalizeLineBreaks(markdownImagePaster
+                                                text: root.previewHtml(root.normalizeLineBreaks(markdownImagePaster
                                                     ? markdownImagePaster.expandMarkdownImages(modelData.text || "")
-                                                    : (modelData.text || ""))
-                                                textFormat: Text.MarkdownText
+                                                    : (modelData.text || "")))
+                                                textFormat: Text.RichText
                                                 wrapMode: Text.WordWrap
                                                 color: "#f5f6f8"
                                             }
@@ -531,8 +576,12 @@ Item {
                 enabled: root.currentSelectedText().length > 0
                 onClicked: {
                     var selected = root.currentSelectedText()
-                    if (selected.length > 0)
+                    if (selected.length > 0) {
+                        editor.selectionColor = "#60a5fa"
+                        editor.selectedTextColor = "#000000"
+                        root.wrapCurrentSelection(root._tabHighlightStart, root._tabHighlightEnd)
                         root.createTabRequested(selected)
+                    }
                 }
             }
 
@@ -542,8 +591,12 @@ Item {
                 enabled: root.selectedTextNormalized().length > 0 || root._cachedSelectionText.length > 0
                 onClicked: {
                     var selected = root.currentSelectedText()
-                    if (selected.length > 0)
+                    if (selected.length > 0) {
+                        editor.selectionColor = "#facc15"
+                        editor.selectedTextColor = "#000000"
+                        root.wrapCurrentSelection(root._taskHighlightStart, root._taskHighlightEnd)
                         root.createTaskRequested(selected)
+                    }
                 }
             }
         }
