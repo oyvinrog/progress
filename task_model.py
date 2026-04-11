@@ -47,6 +47,7 @@ from progress_crypto import (
     is_encrypted_envelope,
     yubikey_support_guidance,
 )
+from actiondraw.markdown_tab_clipboard import parse_tabs_from_clipboard_text
 from actiondraw.priorityplot.model import (
     clamp_subjective_value,
     clamp_time_hours,
@@ -2812,6 +2813,27 @@ class ProjectManager(QObject):
         created_index = self._tab_model.tabCount - 1
         self.switchTab(created_index)
         return created_index
+
+    @Slot(result=int)
+    def createTabsFromClipboard(self) -> int:
+        """Create project tabs from non-empty clipboard lines without switching tabs."""
+        if self._tab_model is None:
+            return 0
+
+        from PySide6.QtGui import QGuiApplication
+
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is None:
+            return 0
+
+        created_count = 0
+        for tab in parse_tabs_from_clipboard_text(clipboard.text()):
+            tab_name = str(tab.get("name", "") or "").strip()
+            if not tab_name:
+                continue
+            self._tab_model.addTab(tab_name)
+            created_count += 1
+        return created_count
 
     def _normalize_file_path(self, file_path: str) -> str:
         """Convert file URLs into local paths, including Windows file URLs."""

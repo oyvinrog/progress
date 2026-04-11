@@ -122,6 +122,12 @@ Rectangle {
         renameTabDialog.open()
     }
 
+    function pasteTabsFromClipboard() {
+        if (!projectManager || !projectManager.createTabsFromClipboard)
+            return
+        projectManager.createTabsFromClipboard()
+    }
+
     function openTabIconDialog(tabIndex, tabIcon, tabName) {
         tabIconDialog.tabIndex = tabIndex
         tabIconDialog.currentIcon = tabIcon || ""
@@ -826,34 +832,64 @@ Rectangle {
             }
         }
 
-        Rectangle {
+        RowLayout {
             Layout.fillWidth: true
-            height: 34
-            radius: 8
-            color: addTabMouseArea.containsMouse ? "#24425a" : "#193044"
-            border.color: "#325771"
-            border.width: 1
+            spacing: 8
 
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 10
-                anchors.rightMargin: 10
+            Rectangle {
+                Layout.fillWidth: true
+                height: 34
+                radius: 8
+                color: addTabMouseArea.containsMouse ? "#24425a" : "#193044"
+                border.color: "#325771"
+                border.width: 1
 
-                Text {
-                    text: sidebar.isExpanded ? "+ Add Tab" : "+"
-                    color: "#d2e4f3"
-                    font.pixelSize: sidebar.isExpanded ? 11 : 16
-                    font.bold: true
-                    horizontalAlignment: Text.AlignHCenter
-                    Layout.fillWidth: !sidebar.isExpanded
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 10
+                    anchors.rightMargin: 10
+
+                    Text {
+                        text: sidebar.isExpanded ? "+ Add Tab" : "+"
+                        color: "#d2e4f3"
+                        font.pixelSize: sidebar.isExpanded ? 11 : 16
+                        font.bold: true
+                        horizontalAlignment: Text.AlignHCenter
+                        Layout.fillWidth: !sidebar.isExpanded
+                    }
+                }
+
+                MouseArea {
+                    id: addTabMouseArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onClicked: sidebar.addNewTab()
                 }
             }
 
-            MouseArea {
-                id: addTabMouseArea
-                anchors.fill: parent
-                hoverEnabled: true
-                onClicked: sidebar.addNewTab()
+            Rectangle {
+                visible: sidebar.isExpanded
+                Layout.preferredWidth: 104
+                height: 34
+                radius: 8
+                color: pasteTabsMouseArea.containsMouse ? "#264939" : "#1b3b2e"
+                border.color: "#4f7d68"
+                border.width: 1
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "Paste Tabs"
+                    color: "#d8f2e4"
+                    font.pixelSize: 11
+                    font.bold: true
+                }
+
+                MouseArea {
+                    id: pasteTabsMouseArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onClicked: sidebar.pasteTabsFromClipboard()
+                }
             }
         }
     }

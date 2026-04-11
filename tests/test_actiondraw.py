@@ -5,6 +5,7 @@ import time
 
 import pytest
 from PySide6.QtCore import QModelIndex, QObject, QDateTime, Qt, QUrl, Slot
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, QQmlEngine
 
 from actiondraw import (
@@ -16,6 +17,7 @@ from actiondraw import (
     DrawingStroke,
     create_actiondraw_window,
 )
+from actiondraw.markdown_tab_clipboard import MarkdownTabClipboard, parse_tabs_from_clipboard_text
 from actiondraw.qml import QML_DIR
 from actiondraw.markdown_note_manager import MarkdownNoteManager
 from actiondraw.qml import load_actiondraw_qml
@@ -1150,6 +1152,43 @@ class TestCreateActionDrawWindow:
         assert 'root.wrapCurrentSelection(root._taskHighlightStart, root._taskHighlightEnd)' in editor_pane_qml
 
 
+class TestMarkdownTabClipboard:
+    def test_parse_tabs_from_clipboard_text_multiple_lines(self):
+        assert parse_tabs_from_clipboard_text("Inbox\nIdeas\nDone") == [
+            {"name": "Inbox", "text": ""},
+            {"name": "Ideas", "text": ""},
+            {"name": "Done", "text": ""},
+        ]
+
+    def test_parse_tabs_from_clipboard_text_ignores_blank_lines(self):
+        assert parse_tabs_from_clipboard_text("Inbox\n\n  \nIdeas\n") == [
+            {"name": "Inbox", "text": ""},
+            {"name": "Ideas", "text": ""},
+        ]
+
+    def test_parse_tabs_from_clipboard_text_trims_whitespace(self):
+        assert parse_tabs_from_clipboard_text("  Inbox  \r\n\tIdeas\t\rNext  ") == [
+            {"name": "Inbox", "text": ""},
+            {"name": "Ideas", "text": ""},
+            {"name": "Next", "text": ""},
+        ]
+
+    def test_parse_tabs_from_clipboard_text_empty_returns_no_tabs(self):
+        assert parse_tabs_from_clipboard_text(" \n\t\r\n ") == []
+
+    def test_clipboard_tabs_reads_plain_text_from_clipboard(self, app):
+        clipboard = QGuiApplication.clipboard()
+        assert clipboard is not None
+        clipboard.setText("Inbox\nIdeas")
+
+        helper = MarkdownTabClipboard()
+
+        assert helper.clipboardTabs() == [
+            {"name": "Inbox", "text": ""},
+            {"name": "Ideas", "text": ""},
+        ]
+
+
 class TestDiagramModelSerialization:
     """Tests for DiagramModel serialization (to_dict/from_dict)."""
 
@@ -2237,6 +2276,36 @@ class TestMultiTabSupport:
             {"name": "Ideas", "text": "- draft feature"},
         ]
 
+    def test_roundtrip_workspace_markdown_tabs_after_clipboard_import(self, app, tmp_path):
+        """Clipboard-imported workspace tabs survive save/load."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        imported_tabs = parse_tabs_from_clipboard_text("Inbox\nIdeas\nArchive")
+
+        project_manager.setWorkspaceMarkdownTabs(
+            [{"name": "Current", "text": "Existing body"}] + imported_tabs
+        )
+
+        project_file = tmp_path / "workspace_tabs_imported.progress"
+        project_manager.saveProject(str(project_file))
+
+        task_model2 = TaskModel()
+        diagram_model2 = DiagramModel()
+        tab_model2 = TabModel()
+        project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
+        project_manager2.loadProject(str(project_file))
+
+        assert project_manager2.getWorkspaceMarkdownTabs() == [
+            {"name": "Current", "text": "Existing body"},
+            {"name": "Inbox", "text": ""},
+            {"name": "Ideas", "text": ""},
+            {"name": "Archive", "text": ""},
+        ]
+
     def test_has_unsaved_changes_tracks_diagram_edits(self, app, tmp_path):
         """Unsaved state flips true after diagram changes and false after save."""
         from task_model import TaskModel, ProjectManager, TabModel
@@ -2970,6 +3039,31 @@ class TestMultiTabSupport:
         assert tab_model.getTabSummary(1)["name"] == "Ship hub"
         assert tab_model.getAllTabs()[0].tasks["tasks"][0]["title"] == "Existing task"
 
+    def test_project_manager_create_tabs_from_clipboard_appends_tabs_without_switching(self, app):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        clipboard = QGuiApplication.clipboard()
+        assert clipboard is not None
+        clipboard.setText("  Inbox  \n\nIdeas\nNext")
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        current_index = tab_model.currentTabIndex
+        created_count = project_manager.createTabsFromClipboard()
+
+        assert created_count == 3
+        assert tab_model.tabCount == 4
+        assert tab_model.currentTabIndex == current_index
+        assert [tab_model.getTabSummary(i)["name"] for i in range(tab_model.tabCount)] == [
+            "Main",
+            "Inbox",
+            "Ideas",
+            "Next",
+        ]
+
 
 class TestActionDrawQmlTaskInteractions:
     def test_linked_task_double_click_drills_to_tab(self):
@@ -3050,6 +3144,14 @@ class TestActionDrawQmlTaskInteractions:
         assert 'tabModel.addTab(nextName)' in sidebar_qml
         assert 'projectManager.switchTab(tabModel.tabCount - 1)' in sidebar_qml
         assert 'tabModel.renameTab(tabIndex, nextName)' in sidebar_qml
+
+    def test_sidebar_exposes_paste_tabs_from_clipboard_action(self):
+        sidebar_qml = (QML_DIR / "components" / "SidebarTabs.qml").read_text(encoding="utf-8")
+
+        assert 'function pasteTabsFromClipboard()' in sidebar_qml
+        assert 'projectManager.createTabsFromClipboard()' in sidebar_qml
+        assert 'text: "Paste Tabs"' in sidebar_qml
+        assert 'onClicked: sidebar.pasteTabsFromClipboard()' in sidebar_qml
 
     def test_recent_and_pinned_tabs_share_context_menu_helper(self):
         sidebar_qml = (QML_DIR / "components" / "SidebarTabs.qml").read_text(encoding="utf-8")
