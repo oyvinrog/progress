@@ -136,6 +136,20 @@ Rectangle {
         tabColorDialog.open()
     }
 
+    function openTabContextMenu(tabIndex) {
+        if (!tabModel || tabIndex === undefined || tabIndex === null || tabIndex < 0)
+            return
+
+        var summary = tabModel.getTabSummary ? tabModel.getTabSummary(tabIndex) : null
+        tabContextMenu.tabIndex = tabIndex
+        tabContextMenu.tabName = summary && summary.name ? summary.name : ""
+        tabContextMenu.tabIcon = summary && summary.icon ? summary.icon : ""
+        tabContextMenu.tabColor = summary && summary.color ? summary.color : ""
+        tabContextMenu.includeInPlot = summary ? summary.includeInPriorityPlot !== false : true
+        tabContextMenu.pinned = summary ? summary.pinned === true : false
+        tabContextMenu.popup()
+    }
+
     Component.onCompleted: refreshQuickAccess()
 
     Connections {
@@ -364,6 +378,22 @@ Rectangle {
                                 font.bold: true
                             }
                         }
+
+                        MouseArea {
+                            id: currentMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            acceptedButtons: Qt.LeftButton | Qt.RightButton
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: function(mouse) {
+                                if (mouse.button === Qt.RightButton) {
+                                    if (sidebar.tabModel && sidebar.tabModel.currentTabIndex >= 0)
+                                        sidebar.openTabContextMenu(sidebar.tabModel.currentTabIndex)
+                                } else if (sidebar.projectManager && sidebar.tabModel && sidebar.tabModel.currentTabIndex >= 0) {
+                                    sidebar.projectManager.switchTab(sidebar.tabModel.currentTabIndex)
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -430,10 +460,14 @@ Rectangle {
                                 id: recentMouse
                                 anchors.fill: parent
                                 hoverEnabled: true
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    if (sidebar.projectManager)
+                                onClicked: function(mouse) {
+                                    if (mouse.button === Qt.RightButton) {
+                                        sidebar.openTabContextMenu(tabIndex)
+                                    } else if (sidebar.projectManager) {
                                         sidebar.projectManager.switchTab(tabIndex)
+                                    }
                                 }
                             }
                         }
@@ -515,10 +549,14 @@ Rectangle {
                                 id: pinnedMouse
                                 anchors.fill: parent
                                 hoverEnabled: true
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    if (sidebar.projectManager)
+                                onClicked: function(mouse) {
+                                    if (mouse.button === Qt.RightButton) {
+                                        sidebar.openTabContextMenu(tabIndex)
+                                    } else if (sidebar.projectManager) {
                                         sidebar.projectManager.switchTab(tabIndex)
+                                    }
                                 }
                             }
                         }
@@ -765,13 +803,7 @@ Rectangle {
                                         return
                                     }
                                     if (mouse.button === Qt.RightButton) {
-                                        tabContextMenu.tabIndex = index
-                                        tabContextMenu.tabName = name
-                                        tabContextMenu.tabIcon = icon || ""
-                                        tabContextMenu.tabColor = color || ""
-                                        tabContextMenu.includeInPlot = includeInPriorityPlot !== false
-                                        tabContextMenu.pinned = pinned === true
-                                        tabContextMenu.popup()
+                                        sidebar.openTabContextMenu(index)
                                     } else {
                                         if (sidebar.projectManager)
                                             sidebar.projectManager.switchTab(index)

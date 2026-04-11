@@ -3051,6 +3051,28 @@ class TestActionDrawQmlTaskInteractions:
         assert 'projectManager.switchTab(tabModel.tabCount - 1)' in sidebar_qml
         assert 'tabModel.renameTab(tabIndex, nextName)' in sidebar_qml
 
+    def test_recent_and_pinned_tabs_share_context_menu_helper(self):
+        sidebar_qml = (QML_DIR / "components" / "SidebarTabs.qml").read_text(encoding="utf-8")
+
+        assert 'function openTabContextMenu(tabIndex)' in sidebar_qml
+        assert 'tabContextMenu.tabIndex = tabIndex' in sidebar_qml
+        assert 'tabContextMenu.includeInPlot = summary ? summary.includeInPriorityPlot !== false : true' in sidebar_qml
+        assert 'tabContextMenu.pinned = summary ? summary.pinned === true : false' in sidebar_qml
+        assert 'tabContextMenu.popup()' in sidebar_qml
+
+        current_section = sidebar_qml[sidebar_qml.index('id: currentMouse'):sidebar_qml.index('text: "Recent"')]
+        recent_section = sidebar_qml[sidebar_qml.index('id: recentMouse'):sidebar_qml.index('id: pinnedMouse')]
+        pinned_section = sidebar_qml[sidebar_qml.index('id: pinnedMouse'):sidebar_qml.index('Text {\n                        visible: sidebar.isExpanded && !sidebar.hasSingleTab')]
+        all_tabs_section = sidebar_qml[sidebar_qml.index('id: tabMouseArea'):sidebar_qml.index('onDoubleClicked: function(mouse) {')]
+
+        assert 'acceptedButtons: Qt.LeftButton | Qt.RightButton' in current_section
+        assert 'acceptedButtons: Qt.LeftButton | Qt.RightButton' in recent_section
+        assert 'acceptedButtons: Qt.LeftButton | Qt.RightButton' in pinned_section
+        assert 'sidebar.openTabContextMenu(sidebar.tabModel.currentTabIndex)' in current_section
+        assert 'sidebar.openTabContextMenu(tabIndex)' in recent_section
+        assert 'sidebar.openTabContextMenu(tabIndex)' in pinned_section
+        assert 'sidebar.openTabContextMenu(index)' in all_tabs_section
+
     def test_note_badge_excludes_freetext_items(self):
         qml = load_actiondraw_qml()
 
