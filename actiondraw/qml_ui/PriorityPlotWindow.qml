@@ -17,6 +17,8 @@ Window {
     property var projectManager: null
     property var projectManagerRef: projectManager
     property int selectedTabIndex: -1
+    property int pendingDeleteTabIndex: -1
+    property string pendingDeleteTabName: ""
 
     function modelCount() {
         if (!tabModelRef)
@@ -43,6 +45,29 @@ Window {
         }
 
         root.close()
+    }
+
+    function requestDeleteTab(tabIndex, tabName) {
+        if (tabIndex < 0 || tabIndex >= root.modelCount() || root.modelCount() <= 1)
+            return
+
+        root.pendingDeleteTabIndex = tabIndex
+        root.pendingDeleteTabName = tabName || ""
+        deleteTabDialog.open()
+    }
+
+    function confirmDeleteTab() {
+        if (root.pendingDeleteTabIndex < 0 || root.pendingDeleteTabIndex >= root.modelCount())
+            return
+
+        if (root.projectManagerRef && root.projectManagerRef.removeTab) {
+            root.projectManagerRef.removeTab(root.pendingDeleteTabIndex)
+        } else if (root.tabModelRef && root.tabModelRef.removeTab) {
+            root.tabModelRef.removeTab(root.pendingDeleteTabIndex)
+        }
+
+        root.pendingDeleteTabIndex = -1
+        root.pendingDeleteTabName = ""
     }
 
     onSelectedTabIndexChanged: {
@@ -185,7 +210,7 @@ Window {
                                     spacing: 8
 
                                     Button {
-                                        width: 118
+                                        width: 96
                                         height: 22
                                         text: (model.includeInPriorityPlot !== false) ? "Included in Plot" : "Excluded from Plot"
                                         onClicked: {
@@ -209,7 +234,7 @@ Window {
                                     }
 
                                     Button {
-                                        width: 72
+                                        width: 60
                                         height: 22
                                         text: "Drill To"
                                         onClicked: root.drillToTab(index)
@@ -217,6 +242,28 @@ Window {
                                             radius: 6
                                             color: "#2d6a46"
                                             border.color: "#8be0a8"
+                                            border.width: 1
+                                        }
+                                        contentItem: Text {
+                                            text: parent.text
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                            color: "#eff9ff"
+                                            font.pixelSize: 10
+                                            font.bold: true
+                                        }
+                                    }
+
+                                    Button {
+                                        width: 56
+                                        height: 22
+                                        text: "Delete"
+                                        enabled: root.modelCount() > 1
+                                        onClicked: root.requestDeleteTab(index, model.name)
+                                        background: Rectangle {
+                                            radius: 6
+                                            color: enabled ? "#6e2f39" : "#3d3034"
+                                            border.color: enabled ? "#f0a2ae" : "#8d7b81"
                                             border.width: 1
                                         }
                                         contentItem: Text {
@@ -237,6 +284,41 @@ Window {
         }
     }
 
+    Dialog {
+        id: deleteTabDialog
+        title: "Delete Task"
+        modal: true
+        standardButtons: Dialog.Yes | Dialog.No
+        anchors.centerIn: parent
+        onAccepted: root.confirmDeleteTab()
+        onRejected: {
+            root.pendingDeleteTabIndex = -1
+            root.pendingDeleteTabName = ""
+        }
+
+        contentItem: Column {
+            width: 260
+            spacing: 8
+
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                color: "#d9efff"
+                text: root.pendingDeleteTabName.length > 0
+                    ? "Delete \"" + root.pendingDeleteTabName + "\" from the priority plot?"
+                    : "Delete the selected task from the priority plot?"
+            }
+
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                color: "#9fc6de"
+                font.pixelSize: 11
+                text: "This removes the underlying tab and its saved tasks."
+            }
+        }
+    }
+
     Connections {
         target: root.tabModelRef
         function onModelReset() {
@@ -244,10 +326,18 @@ Window {
             if (root.selectedTabIndex >= count)
                 root.selectedTabIndex = -1
         }
-        function onRowsRemoved() {
+        function onRowsRemoved(parent, first, last) {
             var count = root.modelCount()
-            if (root.selectedTabIndex >= count)
+            if (count <= 0) {
                 root.selectedTabIndex = -1
+                return
+            }
+            if (root.selectedTabIndex > last) {
+                root.selectedTabIndex = root.selectedTabIndex - (last - first + 1)
+                return
+            }
+            if (root.selectedTabIndex >= first)
+                root.selectedTabIndex = Math.min(first, count - 1)
         }
     }
 }
