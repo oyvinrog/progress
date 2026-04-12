@@ -16,7 +16,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
@@ -401,6 +401,7 @@ class Tab:
     icon: str = ""
     color: str = ""
     pinned: bool = False
+    goals: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -1457,6 +1458,7 @@ class TabModel(QAbstractListModel):
     currentTabChanged = Signal()
     currentTabIndexChanged = Signal()
     recentTabsChanged = Signal()
+    goalsChanged = Signal()
 
     def __init__(self):
         super().__init__()
@@ -1894,6 +1896,44 @@ class TabModel(QAbstractListModel):
         self._tabs[index].pinned = normalized
         model_index = self.index(index, 0)
         self.dataChanged.emit(model_index, model_index, [self.PinnedRole])
+
+    @Slot(int, result="QVariant")
+    def getGoals(self, index: int):
+        """Return a copy of the goals list for the tab at *index*."""
+        if index < 0 or index >= len(self._tabs):
+            return []
+        return list(self._tabs[index].goals)
+
+    @Slot(int, str)
+    def addGoal(self, index: int, text: str) -> None:
+        """Append a new unchecked goal to the tab at *index*."""
+        text = str(text or "").strip()
+        if not text or index < 0 or index >= len(self._tabs):
+            return
+        self._tabs[index].goals.append({"text": text, "checked": False})
+        self.goalsChanged.emit()
+
+    @Slot(int, int)
+    def toggleGoal(self, index: int, goal_index: int) -> None:
+        """Toggle the checked state of a goal."""
+        if index < 0 or index >= len(self._tabs):
+            return
+        goals = self._tabs[index].goals
+        if goal_index < 0 or goal_index >= len(goals):
+            return
+        goals[goal_index]["checked"] = not goals[goal_index].get("checked", False)
+        self.goalsChanged.emit()
+
+    @Slot(int, int)
+    def removeGoal(self, index: int, goal_index: int) -> None:
+        """Remove a goal by index."""
+        if index < 0 or index >= len(self._tabs):
+            return
+        goals = self._tabs[index].goals
+        if goal_index < 0 or goal_index >= len(goals):
+            return
+        goals.pop(goal_index)
+        self.goalsChanged.emit()
 
     def _computePriorityScore(self, value: float, time_hours: float) -> float:
         return compute_priority_score(value, time_hours)
@@ -2872,6 +2912,7 @@ class ProjectManager(QObject):
                     "icon": tab.icon,
                     "color": tab.color,
                     "pinned": tab.pinned,
+                    "goals": tab.goals,
                 })
 
             return {
@@ -3382,6 +3423,7 @@ class ProjectManager(QObject):
                         icon=tab_data.get("icon", ""),
                         color=tab_data.get("color", ""),
                         pinned=tab_data.get("pinned", False),
+                        goals=tab_data.get("goals", []),
                     ))
                 active_tab = project_data.get("active_tab", 0)
 

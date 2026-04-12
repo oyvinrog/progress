@@ -1565,6 +1565,8 @@ ApplicationWindow {
                 diagramModel: diagramModelRef
                 projectManager: projectManagerRef
                 viewport: viewport
+                tabModel: tabModelRef
+                goalsDialog: dialogs.goalsDialog
             }
 
             Rectangle {
