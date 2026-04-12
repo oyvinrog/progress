@@ -3189,9 +3189,11 @@ class TestActionDrawQmlTaskInteractions:
 
         assert 'if (item.type === "freetext") {' in qml
         assert 'root.openFreeTextDialog(Qt.point(item.x, item.y), item.id, item.text)' in qml
-        assert 'ToolTip.text: model.text + (model.noteMarkdown && model.noteMarkdown !== model.text ? "\\n\\n" + model.noteMarkdown : "")' in qml
-        assert 'ToolTip.text: model.text + (model.noteMarkdown && model.noteMarkdown !== model.text ? "\\n\\n" + model.noteMarkdown : "")' not in qml[qml.index('id: freeTextLabel'):]
-        assert 'ToolTip.text: itemRect.freeTextDisplayText' in qml[qml.index('id: freeTextLabel'):]
+        # Tooltip is a floating Rectangle at root level, updated via onHoveredChanged
+        assert 'id: itemFloatingTooltip' in qml
+        assert 'root._itemTooltipVisible' in qml
+        assert 'root._itemTooltipText' in qml
+        assert 'itemRect.freeTextDisplayText' in qml
 
     def test_freetext_canvas_preview_has_tab_switcher(self):
         qml = load_actiondraw_qml()
@@ -3201,7 +3203,7 @@ class TestActionDrawQmlTaskInteractions:
         assert 'id: freeTextTabSwitcher' in qml
         assert 'visible: itemRect.freeTextTabCount > 1' in qml
         assert 'diagramModel.setItemTextTabIndex(itemRect.itemId, nextIndex)' in qml
-        assert 'text: itemRect.freeTextDisplayText' in qml[qml.index('id: freeTextLabel'):]
+        assert 'itemRect.freeTextDisplayText' in qml[qml.index('id: freeTextLabel'):]
 
     def test_edge_context_menu_exposes_add_task_instead_of_immediate_delete(self):
         qml = load_actiondraw_qml()

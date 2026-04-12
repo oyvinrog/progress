@@ -31,6 +31,12 @@ ApplicationWindow {
     property bool suppressClosePrompt: false
     property bool closeAfterSaveAsRequested: false
 
+    property bool _itemTooltipVisible: false
+    property string _itemTooltipText: ""
+    property real _itemTooltipX: 0
+    property real _itemTooltipY: 0
+    property string _itemTooltipHoveredId: ""
+
     menuBar: ActionMenuBar {
         root: root
         diagramModel: diagramModelRef
@@ -2602,6 +2608,8 @@ ApplicationWindow {
                                 id: itemHover
                             }
 
+
+
                             Rectangle {
                                 id: taskCheck
                                 visible: itemRect.isTask
@@ -3706,33 +3714,6 @@ ApplicationWindow {
                                 elide: itemLabel.useMarkdown ? Text.ElideNone : Text.ElideRight
                                 clip: true
 
-                                ToolTip.visible: labelHover.containsMouse
-                                ToolTip.delay: 400
-                                ToolTip.timeout: 2000
-                                ToolTip.text: {
-                                    var text = model.text
-                                    if (itemRect.itemType !== "note" && model.noteMarkdown && model.noteMarkdown !== model.text)
-                                        text += (text.length > 0 ? "\n\n" : "") + model.noteMarkdown
-                                    if (itemRect.hasLinkedSubtab) {
-                                        text += "\n\nSubtab: " + Math.round(itemRect.linkedSubtabCompletion) + "%"
-                                        if (itemRect.linkedSubtabActiveAction !== "")
-                                            text += "\nActive: " + itemRect.linkedSubtabActiveAction
-                                    }
-                                    if (itemRect.taskContractActive) {
-                                        text += "\n\nContract deadline: " + itemRect.taskContractDeadline
-                                        if (itemRect.taskContractBreached)
-                                            text += "\nStatus: OVERDUE"
-                                        text += "\nPunishment: " + itemRect.taskContractPunishment
-                                    }
-                                    return text
-                                }
-
-                                MouseArea {
-                                    id: labelHover
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    acceptedButtons: Qt.NoButton
-                                }
                             }
 
                             Text {
@@ -3756,17 +3737,6 @@ ApplicationWindow {
                                 elide: Text.ElideRight
                                 clip: true
 
-                                ToolTip.visible: obstacleHover.containsMouse
-                                ToolTip.delay: 400
-                                ToolTip.timeout: 2000
-                                ToolTip.text: model.text + (model.noteMarkdown && model.noteMarkdown !== model.text ? "\n\n" + model.noteMarkdown : "")
-
-                                MouseArea {
-                                    id: obstacleHover
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    acceptedButtons: Qt.NoButton
-                                }
                             }
 
                             Text {
@@ -3790,17 +3760,6 @@ ApplicationWindow {
                                 elide: Text.ElideRight
                                 clip: true
 
-                                ToolTip.visible: wishHover.containsMouse
-                                ToolTip.delay: 400
-                                ToolTip.timeout: 2000
-                                ToolTip.text: model.text + (model.noteMarkdown && model.noteMarkdown !== model.text ? "\n\n" + model.noteMarkdown : "")
-
-                                MouseArea {
-                                    id: wishHover
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    acceptedButtons: Qt.NoButton
-                                }
                             }
 
                             Text {
@@ -3835,17 +3794,6 @@ ApplicationWindow {
                                 elide: freeTextLabel.useMarkdown ? Text.ElideNone : Text.ElideRight
                                 clip: true
 
-                                ToolTip.visible: freeTextHover.containsMouse
-                                ToolTip.delay: 400
-                                ToolTip.timeout: 2000
-                                ToolTip.text: itemRect.freeTextDisplayText
-
-                                MouseArea {
-                                    id: freeTextHover
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    acceptedButtons: Qt.NoButton
-                                }
                             }
 
                             DragHandler {
@@ -4096,6 +4044,77 @@ ApplicationWindow {
                                 }
                             }
                         }
+                    }
+                }
+            }
+
+            MouseArea {
+                id: tooltipHoverArea
+                anchors.fill: parent
+                acceptedButtons: Qt.NoButton
+                hoverEnabled: true
+                z: 50
+                propagateComposedEvents: true
+
+                property string lastHitId: ""
+
+                onPositionChanged: function(mouse) {
+                    if (!diagramModel) return
+                    var diagramPos = mapToItem(diagramLayer, mouse.x, mouse.y)
+                    var hitId = diagramModel.itemIdAt(diagramPos.x, diagramPos.y)
+                    if (hitId !== lastHitId) {
+                        lastHitId = hitId
+                        tooltipDelayTimer.stop()
+                        root._itemTooltipVisible = false
+                        if (hitId.length > 0) {
+                            tooltipDelayTimer.screenX = mouse.x
+                            tooltipDelayTimer.screenY = mouse.y
+                            tooltipDelayTimer.restart()
+                        }
+                    } else if (hitId.length > 0 && root._itemTooltipVisible) {
+                        root._itemTooltipX = mouse.x + 12
+                        root._itemTooltipY = mouse.y + 18
+                    }
+                }
+
+                onExited: {
+                    lastHitId = ""
+                    tooltipDelayTimer.stop()
+                    root._itemTooltipVisible = false
+                }
+
+                Timer {
+                    id: tooltipDelayTimer
+                    interval: 400
+                    repeat: false
+                    property real screenX: 0
+                    property real screenY: 0
+                    onTriggered: {
+                        var hitId = tooltipHoverArea.lastHitId
+                        if (hitId.length === 0 || !diagramModel) return
+                        var snap = diagramModel.getItemSnapshot(hitId)
+                        if (!snap || !snap.text) return
+                        if (snap.type === "freetext") return
+                        var t = snap.text
+                        if (snap.type !== "note" && snap.type !== "freetext"
+                            && snap.noteMarkdown && snap.noteMarkdown !== snap.text)
+                            t += "\n\n" + snap.noteMarkdown
+                        if (snap.hasLinkedSubtab) {
+                            t += "\n\nSubtab: " + Math.round(snap.linkedSubtabCompletion) + "%"
+                            if (snap.linkedSubtabActiveAction !== "")
+                                t += "\nActive: " + snap.linkedSubtabActiveAction
+                        }
+                        if (snap.taskContractActive) {
+                            t += "\n\nContract deadline: " + snap.taskContractDeadline
+                            if (snap.taskContractBreached)
+                                t += "\nStatus: OVERDUE"
+                            t += "\nPunishment: " + snap.taskContractPunishment
+                        }
+                        root._itemTooltipText = t
+                        root._itemTooltipX = screenX + 12
+                        root._itemTooltipY = screenY + 18
+                        root._itemTooltipHoveredId = hitId
+                        root._itemTooltipVisible = true
                     }
                 }
             }
@@ -4680,6 +4699,37 @@ ApplicationWindow {
             color: "#132031"
             border.color: "#2a4462"
             border.width: 1
+        }
+    }
+
+    Rectangle {
+        id: itemFloatingTooltip
+        visible: root._itemTooltipVisible && root._itemTooltipText.length > 0
+        x: Math.max(4, Math.min(root._itemTooltipX, root.width - width - 4))
+        y: {
+            var below = root._itemTooltipY
+            if (below + height > root.height - 4)
+                return root._itemTooltipY - height - 8
+            return below
+        }
+        z: 9999
+        width: tooltipLabel.implicitWidth + 20
+        height: tooltipLabel.implicitHeight + 12
+        radius: 6
+        color: "#1a2636"
+        border.color: "#3b566f"
+        border.width: 1
+
+        Text {
+            id: tooltipLabel
+            anchors.centerIn: parent
+            width: Math.min(implicitWidth, 340)
+            text: root._itemTooltipText
+            color: "#e8edf3"
+            font.pixelSize: 12
+            wrapMode: Text.WordWrap
+            maximumLineCount: 12
+            elide: Text.ElideRight
         }
     }
 }
