@@ -4,6 +4,10 @@ import os
 import sys
 from pathlib import Path
 
+# Qt needs its platform/backend selected before PySide is imported.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("QT_QUICK_BACKEND", "software")
+
 import pytest
 from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QGuiApplication
@@ -17,16 +21,23 @@ if str(PROJECT_ROOT) not in sys.path:
 @pytest.fixture(scope="session")
 def app():
     """Provide a single QGuiApplication for all tests."""
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     instance = QGuiApplication.instance()
     if instance is None:
-        instance = QGuiApplication(sys.argv)
+        instance = QGuiApplication([])
 
     yield instance
 
-    # Avoid PySide shutdown crashes when clipboard owns QMimeData.
-    clipboard = QGuiApplication.clipboard()
-    if clipboard is not None:
-        clipboard.clear()
+    if instance is None or QCoreApplication.closingDown():
+        return
 
-    QCoreApplication.processEvents()
+    # Release clipboard-owned Qt objects before interpreter shutdown.
+    try:
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is not None:
+            clipboard.clear()
+        QCoreApplication.processEvents()
+        instance.quit()
+        QCoreApplication.processEvents()
+    except RuntimeError:
+        # PySide can already be tearing down during interpreter shutdown.
+        pass
