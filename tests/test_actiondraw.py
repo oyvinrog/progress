@@ -1131,17 +1131,27 @@ class TestCreateActionDrawWindow:
         assert isinstance(engine, QQmlApplicationEngine)
         assert engine.rootObjects()
         assert getattr(engine, "_markdown_pdf_exporter", None) is not None
+        assert getattr(engine, "_mcp_server_controller", None) is not None
 
     def test_markdown_pdf_actions_are_present_in_qml(self):
         note_editor_qml = (QML_DIR / "MarkdownNoteEditorWindow.qml").read_text(encoding="utf-8")
         dialogs_qml = (QML_DIR / "components" / "ActionDialogs.qml").read_text(encoding="utf-8")
         editor_pane_qml = (QML_DIR / "components" / "MarkdownEditorPane.qml").read_text(encoding="utf-8")
+        action_menu_qml = (QML_DIR / "components" / "ActionMenuBar.qml").read_text(encoding="utf-8")
+        window_qml = (QML_DIR / "ActionDrawWindow.qml").read_text(encoding="utf-8")
 
         assert 'text: "Save PDF..."' in note_editor_qml
         assert 'title: "Save Note PDF"' in note_editor_qml
         assert 'text: "Save PDF..."' in dialogs_qml
         assert 'title: "Save Markdown PDF"' in dialogs_qml
         assert 'text: "Create Tab"' in editor_pane_qml
+        assert 'title: "MCP"' in action_menu_qml
+        assert 'title: "Claude"' in action_menu_qml
+        assert 'title: "Codex"' in action_menu_qml
+        assert 'text: "Show Add Command..."' in action_menu_qml
+        assert 'text: "Copy Add Command"' in action_menu_qml
+        assert 'text: "Paste this command into your terminal to register the embedded ActionDraw MCP server."' in window_qml
+        assert 'title: root.mcpCommandDialogTitle' in window_qml
         assert 'property string _tabHighlightStart: "\\u2060"' in editor_pane_qml
         assert 'property string _taskHighlightStart: "\\u2062"' in editor_pane_qml
         assert 'persistentSelection: true' in editor_pane_qml

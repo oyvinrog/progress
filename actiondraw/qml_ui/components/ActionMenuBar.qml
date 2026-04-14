@@ -8,6 +8,7 @@ MenuBar {
     property var diagramModel: null
     property var taskModel: null
     property var projectManager: null
+    property var mcpServerController: null
     property var edgeCanvas: null
     property var viewport: null
     property var saveDialog: null
@@ -25,6 +26,10 @@ MenuBar {
 
     function hasProjectManager() {
         return projectManager !== null && projectManager !== undefined
+    }
+
+    function hasMcpServerController() {
+        return mcpServerController !== null && mcpServerController !== undefined
     }
 
     function canPasteFromClipboard() {
@@ -287,6 +292,68 @@ MenuBar {
             text: "Hierarchy Navigator..."
             enabled: root && root.openHierarchyWindow
             onTriggered: root.openHierarchyWindow()
+        }
+
+        MenuSeparator {}
+
+        Menu {
+            title: "MCP"
+            enabled: hasMcpServerController()
+
+            MenuItem {
+                text: hasMcpServerController() ? mcpServerController.statusText : "MCP server unavailable"
+                enabled: false
+            }
+
+            MenuSeparator {}
+
+            MenuItem {
+                text: "Start Server"
+                enabled: hasMcpServerController() && mcpServerController.status !== "running" && mcpServerController.status !== "starting"
+                onTriggered: mcpServerController.start()
+            }
+
+            MenuItem {
+                text: "Stop Server"
+                enabled: hasMcpServerController() && (mcpServerController.status === "running" || mcpServerController.status === "starting" || mcpServerController.status === "stopping")
+                onTriggered: mcpServerController.stop()
+            }
+
+            MenuSeparator {}
+
+            Menu {
+                title: "Claude"
+
+                MenuItem {
+                    text: "Show Add Command..."
+                    onTriggered: root.openMcpCommandDialog("Claude MCP Command", mcpServerController.claudeAddCommand)
+                }
+
+                MenuItem {
+                    text: "Copy Add Command"
+                    onTriggered: {
+                        if (mcpServerController.copyClaudeAddCommand())
+                            root.showSaveNotification("Claude MCP command copied")
+                    }
+                }
+            }
+
+            Menu {
+                title: "Codex"
+
+                MenuItem {
+                    text: "Show Add Command..."
+                    onTriggered: root.openMcpCommandDialog("Codex MCP Command", mcpServerController.codexAddCommand)
+                }
+
+                MenuItem {
+                    text: "Copy Add Command"
+                    onTriggered: {
+                        if (mcpServerController.copyCodexAddCommand())
+                            root.showSaveNotification("Codex MCP command copied")
+                    }
+                }
+            }
         }
 
         MenuSeparator {}

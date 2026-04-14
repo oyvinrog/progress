@@ -23,6 +23,7 @@ ApplicationWindow {
     property var projectManagerRef: projectManager
     property var markdownNoteManagerRef: markdownNoteManager
     property var tabModelRef: tabModel
+    property var mcpServerControllerRef: mcpServerController
     property var priorityPlotWindowRef: null
     property var hierarchyWindowRef: null
     property real hierarchyFocusZoom: 1.2
@@ -30,6 +31,8 @@ ApplicationWindow {
     property string yubiKeyPromptText: "Touch your YubiKey to continue."
     property bool suppressClosePrompt: false
     property bool closeAfterSaveAsRequested: false
+    property string mcpCommandDialogTitle: ""
+    property string mcpCommandDialogText: ""
 
     property bool _itemTooltipVisible: false
     property string _itemTooltipText: ""
@@ -42,6 +45,7 @@ ApplicationWindow {
         diagramModel: diagramModelRef
         taskModel: taskModelRef
         projectManager: projectManagerRef
+        mcpServerController: mcpServerControllerRef
         edgeCanvas: edgeCanvas
         viewport: viewport
         saveDialog: dialogs.saveDialog
@@ -281,6 +285,12 @@ ApplicationWindow {
     function showErrorDialog(message) {
         errorDialog.messageText = message
         errorDialog.open()
+    }
+
+    function openMcpCommandDialog(title, command) {
+        mcpCommandDialogTitle = title
+        mcpCommandDialogText = command
+        mcpCommandDialog.open()
     }
 
     function showYubiKeyPrompt(message) {
@@ -4290,6 +4300,87 @@ ApplicationWindow {
                     color: "#f5f8fc"
                     font.pixelSize: 13
                 }
+            }
+        }
+    }
+
+    Dialog {
+        id: mcpCommandDialog
+        modal: true
+        title: root.mcpCommandDialogTitle
+        anchors.centerIn: parent
+        width: Math.min(root.width - 60, 760)
+
+        background: Rectangle {
+            radius: 10
+            color: "#0f1b27"
+            border.color: "#4f6780"
+            border.width: 1
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 12
+
+            Label {
+                text: "Paste this command into your terminal to register the embedded ActionDraw MCP server."
+                color: "#d7e5f5"
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 150
+                radius: 8
+                color: "#09131c"
+                border.color: "#31495f"
+                border.width: 1
+
+                ScrollView {
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    clip: true
+
+                    TextArea {
+                        id: mcpCommandTextArea
+                        readOnly: true
+                        text: root.mcpCommandDialogText
+                        wrapMode: TextEdit.WrapAnywhere
+                        selectByMouse: true
+                        color: "#f5f8fc"
+                        selectionColor: "#3b82f6"
+                        selectedTextColor: "#f8fbff"
+                        font.family: "Monospace"
+                        font.pixelSize: 13
+                        background: null
+                    }
+                }
+            }
+        }
+
+        footer: RowLayout {
+            spacing: 8
+
+            Item {
+                Layout.fillWidth: true
+            }
+
+            Button {
+                text: "Copy"
+                onClicked: {
+                    if (mcpServerControllerRef && root.mcpCommandDialogText === mcpServerControllerRef.claudeAddCommand) {
+                        mcpServerControllerRef.copyClaudeAddCommand()
+                        root.showSaveNotification("Claude MCP command copied")
+                    } else if (mcpServerControllerRef && root.mcpCommandDialogText === mcpServerControllerRef.codexAddCommand) {
+                        mcpServerControllerRef.copyCodexAddCommand()
+                        root.showSaveNotification("Codex MCP command copied")
+                    }
+                }
+            }
+
+            Button {
+                text: "Close"
+                onClicked: mcpCommandDialog.close()
             }
         }
     }
