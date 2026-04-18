@@ -1,11 +1,14 @@
 """Shared pytest fixtures for Qt application lifecycle."""
 
-import sys
 import os
+import sys
 from pathlib import Path
 
+# Qt needs its platform/backend selected before PySide is imported.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("QT_QUICK_BACKEND", "software")
+
 import pytest
-from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QGuiApplication
 
 # Ensure tests can import local packages/modules regardless of invocation cwd.
@@ -17,16 +20,9 @@ if str(PROJECT_ROOT) not in sys.path:
 @pytest.fixture(scope="session")
 def app():
     """Provide a single QGuiApplication for all tests."""
-    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     instance = QGuiApplication.instance()
     if instance is None:
-        instance = QGuiApplication(sys.argv)
-
-    yield instance
-
-    # Avoid PySide shutdown crashes when clipboard owns QMimeData.
-    clipboard = QGuiApplication.clipboard()
-    if clipboard is not None:
-        clipboard.clear()
-
-    QCoreApplication.processEvents()
+        instance = QGuiApplication([])
+    # Keep teardown empty: several CI PySide/Python combinations segfault if
+    # we touch the application, clipboard, or event loop during fixture cleanup.
+    return instance

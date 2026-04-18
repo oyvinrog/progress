@@ -30,15 +30,11 @@ except Exception:  # pragma: no cover - import availability depends on environme
     Type = None  # type: ignore[assignment]
     hash_secret_raw = None  # type: ignore[assignment]
 
-try:  # pragma: no cover - import availability depends on environment
-    from ykman.device import list_all_devices
-    from yubikit.core.otp import OtpConnection
-    from yubikit.yubiotp import SLOT, YubiOtpSession
-except Exception:  # pragma: no cover - import availability depends on environment
-    list_all_devices = None  # type: ignore[assignment]
-    OtpConnection = None  # type: ignore[assignment]
-    SLOT = None  # type: ignore[assignment]
-    YubiOtpSession = None  # type: ignore[assignment]
+list_all_devices = None  # type: ignore[assignment]
+OtpConnection = None  # type: ignore[assignment]
+SLOT = None  # type: ignore[assignment]
+YubiOtpSession = None  # type: ignore[assignment]
+_YUBIKEY_IMPORT_ATTEMPTED = False
 
 
 class CryptoError(Exception):
@@ -593,10 +589,31 @@ def _default_yubikey_provider() -> YubiKeyProvider:
 
 
 def _has_native_yubikey_api() -> bool:
+    _ensure_yubikey_api_imported()
     return all(
         value is not None
         for value in (list_all_devices, OtpConnection, YubiOtpSession, SLOT)
     )
+
+
+def _ensure_yubikey_api_imported() -> None:
+    global list_all_devices, OtpConnection, SLOT, YubiOtpSession, _YUBIKEY_IMPORT_ATTEMPTED
+
+    if _YUBIKEY_IMPORT_ATTEMPTED:
+        return
+    _YUBIKEY_IMPORT_ATTEMPTED = True
+
+    try:  # pragma: no cover - import availability depends on environment
+        from ykman.device import list_all_devices as _list_all_devices
+        from yubikit.core.otp import OtpConnection as _otp_connection
+        from yubikit.yubiotp import SLOT as _slot, YubiOtpSession as _yubiotp_session
+    except Exception:  # pragma: no cover - import availability depends on environment
+        return
+
+    list_all_devices = _list_all_devices
+    OtpConnection = _otp_connection
+    SLOT = _slot
+    YubiOtpSession = _yubiotp_session
 
 
 def _resolve_ykman_binary(*, raise_on_missing: bool = True) -> Optional[str]:

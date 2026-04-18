@@ -5,6 +5,7 @@ import time
 
 import pytest
 from PySide6.QtCore import QModelIndex, QObject, QDateTime, Qt, QUrl, Slot
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, QQmlEngine
 
 from actiondraw import (
@@ -16,6 +17,7 @@ from actiondraw import (
     DrawingStroke,
     create_actiondraw_window,
 )
+from actiondraw.markdown_tab_clipboard import MarkdownTabClipboard, parse_tabs_from_clipboard_text
 from actiondraw.qml import QML_DIR
 from actiondraw.markdown_note_manager import MarkdownNoteManager
 from actiondraw.qml import load_actiondraw_qml
@@ -770,6 +772,89 @@ class TestTaskIntegration:
         assert diagram_model_with_task_model.edges[1]["fromId"] == inserted
         assert diagram_model_with_task_model.edges[1]["toId"] == target
 
+    def test_insert_task_on_edge_expands_horizontal_spacing(self, diagram_model_with_task_model):
+        """Inserting between horizontal items pushes both endpoints apart."""
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(200.0, 0.0, "Target")
+        diagram_model_with_task_model.addEdge(source, target)
+        edge_id = diagram_model_with_task_model.edges[0]["id"]
+
+        inserted = diagram_model_with_task_model.insertTaskOnEdge(
+            edge_id, "Inserted Task", 100.0, 0.0
+        )
+
+        assert inserted != ""
+        source_item = diagram_model_with_task_model.getItemSnapshot(source)
+        target_item = diagram_model_with_task_model.getItemSnapshot(target)
+        inserted_item = diagram_model_with_task_model.getItemSnapshot(inserted)
+        assert source_item["x"] < 0.0
+        assert target_item["x"] > 200.0
+        assert source_item["y"] == 0.0
+        assert target_item["y"] == 0.0
+        assert inserted_item["x"] == 100.0
+        assert inserted_item["y"] == 0.0
+
+    def test_insert_task_on_edge_expands_diagonally(self, diagram_model_with_task_model):
+        """Diagonal edges expand along both axes when space is tight."""
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(300.0, 300.0, "Target")
+        diagram_model_with_task_model.addEdge(source, target)
+        edge_id = diagram_model_with_task_model.edges[0]["id"]
+
+        inserted = diagram_model_with_task_model.insertTaskOnEdge(
+            edge_id, "Inserted Task", 120.0, 100.0
+        )
+
+        assert inserted != ""
+        source_item = diagram_model_with_task_model.getItemSnapshot(source)
+        target_item = diagram_model_with_task_model.getItemSnapshot(target)
+        assert source_item["x"] < 0.0
+        assert source_item["y"] < 0.0
+        assert target_item["x"] == 300.0
+        assert target_item["y"] == 300.0
+
+    def test_insert_task_on_edge_only_moves_cramped_side(self, diagram_model_with_task_model):
+        """Only endpoints lacking enough room are repositioned."""
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(400.0, 0.0, "Target")
+        diagram_model_with_task_model.addEdge(source, target)
+        edge_id = diagram_model_with_task_model.edges[0]["id"]
+
+        inserted = diagram_model_with_task_model.insertTaskOnEdge(
+            edge_id, "Inserted Task", 120.0, 0.0
+        )
+
+        assert inserted != ""
+        source_item = diagram_model_with_task_model.getItemSnapshot(source)
+        target_item = diagram_model_with_task_model.getItemSnapshot(target)
+        assert source_item["x"] < 0.0
+        assert target_item["x"] == 400.0
+        assert source_item["y"] == 0.0
+        assert target_item["y"] == 0.0
+
+    def test_insert_task_on_zero_length_edge_skips_expansion(self, diagram_model_with_task_model):
+        """Degenerate edges still split without moving endpoints."""
+        source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
+        target = diagram_model_with_task_model.addBox(0.0, 0.0, "Target")
+        diagram_model_with_task_model.addEdge(source, target)
+        edge_id = diagram_model_with_task_model.edges[0]["id"]
+
+        inserted = diagram_model_with_task_model.insertTaskOnEdge(
+            edge_id, "Inserted Task", 100.0, 50.0
+        )
+
+        assert inserted != ""
+        assert len(diagram_model_with_task_model.edges) == 2
+        source_item = diagram_model_with_task_model.getItemSnapshot(source)
+        target_item = diagram_model_with_task_model.getItemSnapshot(target)
+        inserted_item = diagram_model_with_task_model.getItemSnapshot(inserted)
+        assert source_item["x"] == 0.0
+        assert source_item["y"] == 0.0
+        assert target_item["x"] == 0.0
+        assert target_item["y"] == 0.0
+        assert inserted_item["x"] == 100.0
+        assert inserted_item["y"] == 50.0
+
     def test_insert_task_on_edge_preserves_description_upstream(self, diagram_model_with_task_model):
         """Splitting an edge keeps its description on the upstream replacement edge."""
         source = diagram_model_with_task_model.addBox(0.0, 0.0, "Source")
@@ -1046,15 +1131,72 @@ class TestCreateActionDrawWindow:
         assert isinstance(engine, QQmlApplicationEngine)
         assert engine.rootObjects()
         assert getattr(engine, "_markdown_pdf_exporter", None) is not None
+        assert getattr(engine, "_mcp_server_controller", None) is not None
 
     def test_markdown_pdf_actions_are_present_in_qml(self):
         note_editor_qml = (QML_DIR / "MarkdownNoteEditorWindow.qml").read_text(encoding="utf-8")
         dialogs_qml = (QML_DIR / "components" / "ActionDialogs.qml").read_text(encoding="utf-8")
+        editor_pane_qml = (QML_DIR / "components" / "MarkdownEditorPane.qml").read_text(encoding="utf-8")
+        action_menu_qml = (QML_DIR / "components" / "ActionMenuBar.qml").read_text(encoding="utf-8")
+        window_qml = (QML_DIR / "ActionDrawWindow.qml").read_text(encoding="utf-8")
 
         assert 'text: "Save PDF..."' in note_editor_qml
         assert 'title: "Save Note PDF"' in note_editor_qml
         assert 'text: "Save PDF..."' in dialogs_qml
         assert 'title: "Save Markdown PDF"' in dialogs_qml
+        assert 'text: "Create Tab"' in editor_pane_qml
+        assert 'title: "MCP"' in action_menu_qml
+        assert 'title: "Claude"' in action_menu_qml
+        assert 'title: "Codex"' in action_menu_qml
+        assert 'text: "Show Add Command..."' in action_menu_qml
+        assert 'text: "Copy Add Command"' in action_menu_qml
+        assert 'text: "Paste this command into your terminal to register the embedded ActionDraw MCP server."' in window_qml
+        assert 'title: root.mcpCommandDialogTitle' in window_qml
+        assert 'property string _tabHighlightStart: "\\u2060"' in editor_pane_qml
+        assert 'property string _taskHighlightStart: "\\u2062"' in editor_pane_qml
+        assert 'persistentSelection: true' in editor_pane_qml
+        assert 'selectionColor: "#facc15"' in editor_pane_qml
+        assert 'editor.selectionColor = "#60a5fa"' in editor_pane_qml
+        assert 'textFormat: Text.RichText' in editor_pane_qml
+        assert 'root.wrapCurrentSelection(root._tabHighlightStart, root._tabHighlightEnd)' in editor_pane_qml
+        assert 'root.wrapCurrentSelection(root._taskHighlightStart, root._taskHighlightEnd)' in editor_pane_qml
+
+
+class TestMarkdownTabClipboard:
+    def test_parse_tabs_from_clipboard_text_multiple_lines(self):
+        assert parse_tabs_from_clipboard_text("Inbox\nIdeas\nDone") == [
+            {"name": "Inbox", "text": ""},
+            {"name": "Ideas", "text": ""},
+            {"name": "Done", "text": ""},
+        ]
+
+    def test_parse_tabs_from_clipboard_text_ignores_blank_lines(self):
+        assert parse_tabs_from_clipboard_text("Inbox\n\n  \nIdeas\n") == [
+            {"name": "Inbox", "text": ""},
+            {"name": "Ideas", "text": ""},
+        ]
+
+    def test_parse_tabs_from_clipboard_text_trims_whitespace(self):
+        assert parse_tabs_from_clipboard_text("  Inbox  \r\n\tIdeas\t\rNext  ") == [
+            {"name": "Inbox", "text": ""},
+            {"name": "Ideas", "text": ""},
+            {"name": "Next", "text": ""},
+        ]
+
+    def test_parse_tabs_from_clipboard_text_empty_returns_no_tabs(self):
+        assert parse_tabs_from_clipboard_text(" \n\t\r\n ") == []
+
+    def test_clipboard_tabs_reads_plain_text_from_clipboard(self, app):
+        clipboard = QGuiApplication.clipboard()
+        assert clipboard is not None
+        clipboard.setText("Inbox\nIdeas")
+
+        helper = MarkdownTabClipboard()
+
+        assert helper.clipboardTabs() == [
+            {"name": "Inbox", "text": ""},
+            {"name": "Ideas", "text": ""},
+        ]
 
 
 class TestDiagramModelSerialization:
@@ -2029,6 +2171,23 @@ class TestMultiTabSupport:
         assert task_model.rowCount() == 1
         assert diagram_model.count == 1
 
+    def test_load_v1_format_initializes_workspace_markdown(self, app, tmp_path):
+        """Older projects gain a default ActionDraw-wide markdown workspace."""
+        import json
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        project_file = tmp_path / "v1_workspace.progress"
+        project_file.write_text(json.dumps({"version": "1.0", "tasks": {"tasks": []}, "diagram": {"items": [], "edges": [], "strokes": []}}))
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        project_manager.loadProject(str(project_file))
+
+        assert project_manager.getWorkspaceMarkdownTabs() == [{"name": "Tab 1", "text": ""}]
+
     def test_save_creates_encrypted_v1_2_envelope(self, app, tmp_path):
         """Saving a project creates encrypted v1.2 envelope format."""
         import json
@@ -2098,6 +2257,65 @@ class TestMultiTabSupport:
         assert task_model2.rowCount() == 1
         assert diagram_model2.count == 1
 
+    def test_roundtrip_workspace_markdown_tabs(self, app, tmp_path):
+        """Project-wide markdown tabs survive save/load."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        project_manager.setWorkspaceMarkdownTabs(
+            [
+                {"name": "Inbox", "text": "Top level notes"},
+                {"name": "Ideas", "text": "- draft feature"},
+            ]
+        )
+
+        project_file = tmp_path / "workspace_tabs.progress"
+        project_manager.saveProject(str(project_file))
+
+        task_model2 = TaskModel()
+        diagram_model2 = DiagramModel()
+        tab_model2 = TabModel()
+        project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
+        project_manager2.loadProject(str(project_file))
+
+        assert project_manager2.getWorkspaceMarkdownTabs() == [
+            {"name": "Inbox", "text": "Top level notes"},
+            {"name": "Ideas", "text": "- draft feature"},
+        ]
+
+    def test_roundtrip_workspace_markdown_tabs_after_clipboard_import(self, app, tmp_path):
+        """Clipboard-imported workspace tabs survive save/load."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        imported_tabs = parse_tabs_from_clipboard_text("Inbox\nIdeas\nArchive")
+
+        project_manager.setWorkspaceMarkdownTabs(
+            [{"name": "Current", "text": "Existing body"}] + imported_tabs
+        )
+
+        project_file = tmp_path / "workspace_tabs_imported.progress"
+        project_manager.saveProject(str(project_file))
+
+        task_model2 = TaskModel()
+        diagram_model2 = DiagramModel()
+        tab_model2 = TabModel()
+        project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
+        project_manager2.loadProject(str(project_file))
+
+        assert project_manager2.getWorkspaceMarkdownTabs() == [
+            {"name": "Current", "text": "Existing body"},
+            {"name": "Inbox", "text": ""},
+            {"name": "Ideas", "text": ""},
+            {"name": "Archive", "text": ""},
+        ]
+
     def test_has_unsaved_changes_tracks_diagram_edits(self, app, tmp_path):
         """Unsaved state flips true after diagram changes and false after save."""
         from task_model import TaskModel, ProjectManager, TabModel
@@ -2115,6 +2333,22 @@ class TestMultiTabSupport:
         project_file = tmp_path / "unsaved_state.progress"
         project_manager.saveProject(str(project_file))
         assert project_manager.hasUnsavedChanges() is False
+
+    def test_has_unsaved_changes_tracks_workspace_markdown_edits(self, app, tmp_path):
+        """Editing the ActionDraw-wide markdown marks the project dirty."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        project_file = tmp_path / "workspace_unsaved.progress"
+        project_manager.saveProject(str(project_file))
+        assert project_manager.hasUnsavedChanges() is False
+
+        project_manager.setWorkspaceMarkdownTabs([{"name": "Inbox", "text": "replace notes"}])
+        assert project_manager.hasUnsavedChanges() is True
 
     def test_has_unsaved_changes_ignores_active_task_time_drift(self, app, tmp_path):
         """Auto-updating active task timers should not immediately re-mark project as unsaved."""
@@ -2798,6 +3032,48 @@ class TestMultiTabSupport:
         assert item["taskIndex"] == 0
         assert item["text"] == "Backend API"
 
+    def test_project_manager_create_tab_from_markdown_selection_switches_to_new_tab(self, app):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        task_model.addTask("Existing task")
+        created_index = project_manager.createTabFromMarkdownSelection("Ship hub")
+
+        assert created_index == 1
+        assert tab_model.tabCount == 2
+        assert tab_model.currentTabIndex == 1
+        assert tab_model.getTabSummary(1)["name"] == "Ship hub"
+        assert tab_model.getAllTabs()[0].tasks["tasks"][0]["title"] == "Existing task"
+
+    def test_project_manager_create_tabs_from_clipboard_appends_tabs_without_switching(self, app):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        clipboard = QGuiApplication.clipboard()
+        assert clipboard is not None
+        clipboard.setText("  Inbox  \n\nIdeas\nNext")
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        current_index = tab_model.currentTabIndex
+        created_count = project_manager.createTabsFromClipboard()
+
+        assert created_count == 3
+        assert tab_model.tabCount == 4
+        assert tab_model.currentTabIndex == current_index
+        assert [tab_model.getTabSummary(i)["name"] for i in range(tab_model.tabCount)] == [
+            "Main",
+            "Inbox",
+            "Ideas",
+            "Next",
+        ]
+
 
 class TestActionDrawQmlTaskInteractions:
     def test_linked_task_double_click_drills_to_tab(self):
@@ -2821,6 +3097,25 @@ class TestActionDrawQmlTaskInteractions:
         assert 'projectManager.goBack()' in qml
         assert 'projectManager.canGoBack' in qml
 
+    def test_toolbar_does_not_expose_workspace_markdown_button(self):
+        qml = (QML_DIR / "components" / "ToolbarRow.qml").read_text(encoding="utf-8")
+
+        assert 'text: "ActionDraw Markdown"' not in qml
+        assert 'workspaceMarkdownButton' not in qml
+
+    def test_header_menu_and_shortcut_expose_project_markdown(self):
+        actiondraw_qml = load_actiondraw_qml()
+        menu_qml = (QML_DIR / "components" / "ActionMenuBar.qml").read_text(encoding="utf-8")
+
+        assert 'id: projectMarkdownButton' in actiondraw_qml
+        assert 'text: "Project Markdown"' in actiondraw_qml
+        assert 'onClicked: root.openWorkspaceMarkdownHub()' in actiondraw_qml
+        assert 'sequence: "Ctrl+Shift+M"' in actiondraw_qml
+        assert 'onActivated: root.openWorkspaceMarkdownHub()' in actiondraw_qml
+        assert 'text: "Project Markdown...\\tCtrl+Shift+M"' in menu_qml
+        assert 'icon.name: "accessories-text-editor"' in menu_qml
+        assert 'onTriggered: root.openWorkspaceMarkdownHub()' in menu_qml
+
     def test_shortcut_exposes_back_navigation(self):
         qml = load_actiondraw_qml()
 
@@ -2838,7 +3133,57 @@ class TestActionDrawQmlTaskInteractions:
         assert 'else if (sidebarTabs && sidebarTabs.renameCurrentTab)' in qml
         assert 'sidebarTabs.renameCurrentTab()' in qml
         assert 'function renameCurrentTab()' in sidebar_qml
+        assert 'renameTabDialog.mode = "rename"' in sidebar_qml
         assert 'openTabRenameDialog(tabModel.currentTabIndex, summary.name || "")' in sidebar_qml
+
+    def test_add_tab_opens_name_dialog_before_creating_tab(self):
+        sidebar_qml = (QML_DIR / "components" / "SidebarTabs.qml").read_text(encoding="utf-8")
+
+        assert 'function addNewTab()' in sidebar_qml
+        assert 'onClicked: sidebar.addNewTab()' in sidebar_qml
+        add_tab_section = sidebar_qml[sidebar_qml.index('function addNewTab()'):sidebar_qml.index('function openTabIconDialog(')]
+        assert 'renameTabDialog.mode = "create"' in add_tab_section
+        assert 'renameTabDialog.currentName = ""' in add_tab_section
+        assert 'renameTabDialog.open()' in add_tab_section
+        assert 'tabModel.addTab("")' not in add_tab_section
+        assert 'openTabRenameDialog(' not in add_tab_section
+
+        assert 'property string mode: "rename"' in sidebar_qml
+        assert 'title: mode === "create" ? "Add Tab" : "Rename Tab"' in sidebar_qml
+        assert 'if (mode === "create") {' in sidebar_qml
+        assert 'tabModel.addTab(nextName)' in sidebar_qml
+        assert 'projectManager.switchTab(tabModel.tabCount - 1)' in sidebar_qml
+        assert 'tabModel.renameTab(tabIndex, nextName)' in sidebar_qml
+
+    def test_sidebar_exposes_paste_tabs_from_clipboard_action(self):
+        sidebar_qml = (QML_DIR / "components" / "SidebarTabs.qml").read_text(encoding="utf-8")
+
+        assert 'function pasteTabsFromClipboard()' in sidebar_qml
+        assert 'projectManager.createTabsFromClipboard()' in sidebar_qml
+        assert 'text: "Paste Tabs"' in sidebar_qml
+        assert 'onClicked: sidebar.pasteTabsFromClipboard()' in sidebar_qml
+
+    def test_recent_and_pinned_tabs_share_context_menu_helper(self):
+        sidebar_qml = (QML_DIR / "components" / "SidebarTabs.qml").read_text(encoding="utf-8")
+
+        assert 'function openTabContextMenu(tabIndex)' in sidebar_qml
+        assert 'tabContextMenu.tabIndex = tabIndex' in sidebar_qml
+        assert 'tabContextMenu.includeInPlot = summary ? summary.includeInPriorityPlot !== false : true' in sidebar_qml
+        assert 'tabContextMenu.pinned = summary ? summary.pinned === true : false' in sidebar_qml
+        assert 'tabContextMenu.popup()' in sidebar_qml
+
+        current_section = sidebar_qml[sidebar_qml.index('id: currentMouse'):sidebar_qml.index('text: "Recent"')]
+        recent_section = sidebar_qml[sidebar_qml.index('id: recentMouse'):sidebar_qml.index('id: pinnedMouse')]
+        pinned_section = sidebar_qml[sidebar_qml.index('id: pinnedMouse'):sidebar_qml.index('Text {\n                        visible: sidebar.isExpanded && !sidebar.hasSingleTab')]
+        all_tabs_section = sidebar_qml[sidebar_qml.index('id: tabMouseArea'):sidebar_qml.index('onDoubleClicked: function(mouse) {')]
+
+        assert 'acceptedButtons: Qt.LeftButton | Qt.RightButton' in current_section
+        assert 'acceptedButtons: Qt.LeftButton | Qt.RightButton' in recent_section
+        assert 'acceptedButtons: Qt.LeftButton | Qt.RightButton' in pinned_section
+        assert 'sidebar.openTabContextMenu(sidebar.tabModel.currentTabIndex)' in current_section
+        assert 'sidebar.openTabContextMenu(tabIndex)' in recent_section
+        assert 'sidebar.openTabContextMenu(tabIndex)' in pinned_section
+        assert 'sidebar.openTabContextMenu(index)' in all_tabs_section
 
     def test_note_badge_excludes_freetext_items(self):
         qml = load_actiondraw_qml()
@@ -2854,9 +3199,11 @@ class TestActionDrawQmlTaskInteractions:
 
         assert 'if (item.type === "freetext") {' in qml
         assert 'root.openFreeTextDialog(Qt.point(item.x, item.y), item.id, item.text)' in qml
-        assert 'ToolTip.text: model.text + (model.noteMarkdown && model.noteMarkdown !== model.text ? "\\n\\n" + model.noteMarkdown : "")' in qml
-        assert 'ToolTip.text: model.text + (model.noteMarkdown && model.noteMarkdown !== model.text ? "\\n\\n" + model.noteMarkdown : "")' not in qml[qml.index('id: freeTextLabel'):]
-        assert 'ToolTip.text: itemRect.freeTextDisplayText' in qml[qml.index('id: freeTextLabel'):]
+        # Tooltip is a floating Rectangle at root level, updated via onHoveredChanged
+        assert 'id: itemFloatingTooltip' in qml
+        assert 'root._itemTooltipVisible' in qml
+        assert 'root._itemTooltipText' in qml
+        assert 'itemRect.freeTextDisplayText' in qml
 
     def test_freetext_canvas_preview_has_tab_switcher(self):
         qml = load_actiondraw_qml()
@@ -2866,7 +3213,7 @@ class TestActionDrawQmlTaskInteractions:
         assert 'id: freeTextTabSwitcher' in qml
         assert 'visible: itemRect.freeTextTabCount > 1' in qml
         assert 'diagramModel.setItemTextTabIndex(itemRect.itemId, nextIndex)' in qml
-        assert 'text: itemRect.freeTextDisplayText' in qml[qml.index('id: freeTextLabel'):]
+        assert 'itemRect.freeTextDisplayText' in qml[qml.index('id: freeTextLabel'):]
 
     def test_edge_context_menu_exposes_add_task_instead_of_immediate_delete(self):
         qml = load_actiondraw_qml()
@@ -5556,6 +5903,133 @@ class TestMarkdownNoteManager:
         assert manager.activeItemId == item_id
         assert manager._editor.save_confirmation_calls == 1
         assert empty_diagram_model.getItemMarkdown(item_id) == "Updated markdown"
+
+    def test_open_workspace_markdown_uses_project_tabs(self, empty_diagram_model, monkeypatch):
+        class _DummySignal:
+            def connect(self, _callback):
+                return None
+
+        class _DummyEditor:
+            def __init__(self, *_args, **_kwargs):
+                self.noteSaved = _DummySignal()
+                self.noteSavedAndClosed = _DummySignal()
+                self.noteCanceled = _DummySignal()
+                self.open_calls = []
+
+            def open(self, *args, **kwargs):
+                self.open_calls.append((args, kwargs))
+
+        class _DummyProjectManager:
+            def getWorkspaceMarkdownTabs(self):
+                return [{"name": "Inbox", "text": "Global scratchpad"}]
+
+        monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
+        manager = MarkdownNoteManager(empty_diagram_model, _DummyProjectManager())
+
+        manager.openWorkspaceMarkdown(320.0, 180.0)
+
+        assert manager.editorOpen is True
+        assert manager.activeEditorType == "workspace"
+        assert manager.activeItemId == ""
+        args, kwargs = manager._editor.open_calls[0]
+        assert args[0] == ""
+        assert args[1] == "Global scratchpad"
+        assert args[2] == "ActionDraw Markdown"
+        assert kwargs["editor_type"] == "workspace"
+        assert kwargs["tabs"] == [{"name": "Inbox", "text": "Global scratchpad"}]
+
+    def test_save_workspace_markdown_persists_via_project_manager(self, empty_diagram_model, monkeypatch):
+        class _DummySignal:
+            def connect(self, _callback):
+                return None
+
+        class _DummyEditor:
+            def __init__(self, *_args, **_kwargs):
+                self.noteSaved = _DummySignal()
+                self.noteSavedAndClosed = _DummySignal()
+                self.noteCanceled = _DummySignal()
+                self.save_confirmation_calls = 0
+
+            def show_save_confirmation(self):
+                self.save_confirmation_calls += 1
+
+        class _DummyProjectManager:
+            def __init__(self):
+                self.saved_tabs = None
+
+            def setWorkspaceMarkdownTabs(self, tabs):
+                self.saved_tabs = tabs
+
+        project_manager = _DummyProjectManager()
+        monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
+        manager = MarkdownNoteManager(empty_diagram_model, project_manager)
+        manager._set_editor_state("workspace", "", 300.0, 200.0, True)
+
+        manager._save_note(
+            "",
+            "Global note",
+            [
+                {"name": "Inbox", "text": "Global note"},
+                {"name": "Ideas", "text": "Drafts"},
+            ],
+        )
+
+        assert project_manager.saved_tabs == [
+            {"name": "Inbox", "text": "Global note"},
+            {"name": "Ideas", "text": "Drafts"},
+        ]
+        assert manager._editor.save_confirmation_calls == 1
+
+    def test_workspace_selection_creates_top_level_task(self, empty_diagram_model, monkeypatch):
+        class _DummySignal:
+            def connect(self, _callback):
+                return None
+
+        class _DummyEditor:
+            def __init__(self, *_args, **_kwargs):
+                self.noteSaved = _DummySignal()
+                self.noteSavedAndClosed = _DummySignal()
+                self.noteCanceled = _DummySignal()
+
+        class _DummyProjectManager:
+            def createTaskFromWorkspaceMarkdownSelection(self, selected_text, x, y):
+                assert selected_text == "Ship hub"
+                assert x == 410.0
+                assert y == 260.0
+                return "task_42"
+
+        monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
+        manager = MarkdownNoteManager(empty_diagram_model, _DummyProjectManager())
+        events = []
+        manager.taskCreated.connect(events.append)
+
+        task_id = manager.createTaskFromEditorSelection("workspace", "", 410.0, 260.0, "ignored", "Ship hub")
+
+        assert task_id == "task_42"
+        assert events == ["task_42"]
+
+    def test_workspace_selection_creates_tab_via_project_manager(self, empty_diagram_model, monkeypatch):
+        class _DummySignal:
+            def connect(self, _callback):
+                return None
+
+        class _DummyEditor:
+            def __init__(self, *_args, **_kwargs):
+                self.noteSaved = _DummySignal()
+                self.noteSavedAndClosed = _DummySignal()
+                self.noteCanceled = _DummySignal()
+
+        class _DummyProjectManager:
+            def createTabFromMarkdownSelection(self, selected_text):
+                assert selected_text == "Ship hub"
+                return 3
+
+        monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
+        manager = MarkdownNoteManager(empty_diagram_model, _DummyProjectManager())
+
+        created_index = manager.createTabFromEditorSelection("workspace", "", 410.0, 260.0, "ignored", "Ship hub")
+
+        assert created_index == 3
 
     def test_open_note_with_empty_markdown_uses_note_editor(self, empty_diagram_model, monkeypatch):
         class _DummySignal:

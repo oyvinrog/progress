@@ -106,3 +106,24 @@ def test_bridge_accepts_property_text_document(app):
     bridge = MarkdownHighlighterBridge()
     bridge.attachToTextDocument(_PropertyDoc(document))
     assert len(bridge._highlighters) == 1
+
+
+def test_invisible_action_markers_are_highlighted(app):
+    document = QTextDocument()
+    highlighter = MarkdownCodeFenceHighlighter(document)
+    document.setPlainText("\u2060Ship hub\u2061 and \u2062Do now\u2063")
+    highlighter.rehighlight()
+
+    ranges = _format_ranges_for_line(document, "\u2060Ship hub\u2061 and \u2062Do now\u2063")
+    assert any(
+        r.start == 1
+        and r.length == len("Ship hub")
+        and r.format.background().color().name().lower() == "#60a5fa"
+        and r.format.foreground().color().name().lower() == "#000000"
+        for r in ranges
+    )
+    assert any(
+        r.format.background().color().name().lower() == "#facc15"
+        and r.format.foreground().color().name().lower() == "#000000"
+        for r in ranges
+    )

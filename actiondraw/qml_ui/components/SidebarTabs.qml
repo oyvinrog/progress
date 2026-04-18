@@ -98,6 +98,7 @@ Rectangle {
     }
 
     function openTabRenameDialog(tabIndex, tabName) {
+        renameTabDialog.mode = "rename"
         renameTabDialog.tabIndex = tabIndex
         renameTabDialog.currentName = tabName
         renameTabDialog.open()
@@ -112,6 +113,21 @@ Rectangle {
         openTabRenameDialog(tabModel.currentTabIndex, summary.name || "")
     }
 
+    function addNewTab() {
+        if (!tabModel)
+            return
+        renameTabDialog.mode = "create"
+        renameTabDialog.tabIndex = -1
+        renameTabDialog.currentName = ""
+        renameTabDialog.open()
+    }
+
+    function pasteTabsFromClipboard() {
+        if (!projectManager || !projectManager.createTabsFromClipboard)
+            return
+        projectManager.createTabsFromClipboard()
+    }
+
     function openTabIconDialog(tabIndex, tabIcon, tabName) {
         tabIconDialog.tabIndex = tabIndex
         tabIconDialog.currentIcon = tabIcon || ""
@@ -124,6 +140,20 @@ Rectangle {
         tabColorDialog.currentColor = tabColor || ""
         tabColorDialog.currentName = tabName || ""
         tabColorDialog.open()
+    }
+
+    function openTabContextMenu(tabIndex) {
+        if (!tabModel || tabIndex === undefined || tabIndex === null || tabIndex < 0)
+            return
+
+        var summary = tabModel.getTabSummary ? tabModel.getTabSummary(tabIndex) : null
+        tabContextMenu.tabIndex = tabIndex
+        tabContextMenu.tabName = summary && summary.name ? summary.name : ""
+        tabContextMenu.tabIcon = summary && summary.icon ? summary.icon : ""
+        tabContextMenu.tabColor = summary && summary.color ? summary.color : ""
+        tabContextMenu.includeInPlot = summary ? summary.includeInPriorityPlot !== false : true
+        tabContextMenu.pinned = summary ? summary.pinned === true : false
+        tabContextMenu.popup()
     }
 
     Component.onCompleted: refreshQuickAccess()
@@ -354,6 +384,22 @@ Rectangle {
                                 font.bold: true
                             }
                         }
+
+                        MouseArea {
+                            id: currentMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            acceptedButtons: Qt.LeftButton | Qt.RightButton
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: function(mouse) {
+                                if (mouse.button === Qt.RightButton) {
+                                    if (sidebar.tabModel && sidebar.tabModel.currentTabIndex >= 0)
+                                        sidebar.openTabContextMenu(sidebar.tabModel.currentTabIndex)
+                                } else if (sidebar.projectManager && sidebar.tabModel && sidebar.tabModel.currentTabIndex >= 0) {
+                                    sidebar.projectManager.switchTab(sidebar.tabModel.currentTabIndex)
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -420,10 +466,14 @@ Rectangle {
                                 id: recentMouse
                                 anchors.fill: parent
                                 hoverEnabled: true
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    if (sidebar.projectManager)
+                                onClicked: function(mouse) {
+                                    if (mouse.button === Qt.RightButton) {
+                                        sidebar.openTabContextMenu(tabIndex)
+                                    } else if (sidebar.projectManager) {
                                         sidebar.projectManager.switchTab(tabIndex)
+                                    }
                                 }
                             }
                         }
@@ -505,10 +555,14 @@ Rectangle {
                                 id: pinnedMouse
                                 anchors.fill: parent
                                 hoverEnabled: true
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    if (sidebar.projectManager)
+                                onClicked: function(mouse) {
+                                    if (mouse.button === Qt.RightButton) {
+                                        sidebar.openTabContextMenu(tabIndex)
+                                    } else if (sidebar.projectManager) {
                                         sidebar.projectManager.switchTab(tabIndex)
+                                    }
                                 }
                             }
                         }
@@ -755,13 +809,7 @@ Rectangle {
                                         return
                                     }
                                     if (mouse.button === Qt.RightButton) {
-                                        tabContextMenu.tabIndex = index
-                                        tabContextMenu.tabName = name
-                                        tabContextMenu.tabIcon = icon || ""
-                                        tabContextMenu.tabColor = color || ""
-                                        tabContextMenu.includeInPlot = includeInPriorityPlot !== false
-                                        tabContextMenu.pinned = pinned === true
-                                        tabContextMenu.popup()
+                                        sidebar.openTabContextMenu(index)
                                     } else {
                                         if (sidebar.projectManager)
                                             sidebar.projectManager.switchTab(index)
@@ -784,39 +832,63 @@ Rectangle {
             }
         }
 
-        Rectangle {
+        RowLayout {
             Layout.fillWidth: true
-            height: 34
-            radius: 8
-            color: addTabMouseArea.containsMouse ? "#24425a" : "#193044"
-            border.color: "#325771"
-            border.width: 1
+            spacing: 8
 
-            RowLayout {
-                anchors.fill: parent
-                anchors.leftMargin: 10
-                anchors.rightMargin: 10
+            Rectangle {
+                Layout.fillWidth: true
+                height: 34
+                radius: 8
+                color: addTabMouseArea.containsMouse ? "#24425a" : "#193044"
+                border.color: "#325771"
+                border.width: 1
 
-                Text {
-                    text: sidebar.isExpanded ? "+ Add Tab" : "+"
-                    color: "#d2e4f3"
-                    font.pixelSize: sidebar.isExpanded ? 11 : 16
-                    font.bold: true
-                    horizontalAlignment: Text.AlignHCenter
-                    Layout.fillWidth: !sidebar.isExpanded
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 10
+                    anchors.rightMargin: 10
+
+                    Text {
+                        text: sidebar.isExpanded ? "+ Add Tab" : "+"
+                        color: "#d2e4f3"
+                        font.pixelSize: sidebar.isExpanded ? 11 : 16
+                        font.bold: true
+                        horizontalAlignment: Text.AlignHCenter
+                        Layout.fillWidth: !sidebar.isExpanded
+                    }
+                }
+
+                MouseArea {
+                    id: addTabMouseArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onClicked: sidebar.addNewTab()
                 }
             }
 
-            MouseArea {
-                id: addTabMouseArea
-                anchors.fill: parent
-                hoverEnabled: true
-                onClicked: {
-                    if (tabModel) {
-                        tabModel.addTab("")
-                        if (projectManager)
-                            projectManager.switchTab(tabModel.tabCount - 1)
-                    }
+            Rectangle {
+                visible: sidebar.isExpanded
+                Layout.preferredWidth: 104
+                height: 34
+                radius: 8
+                color: pasteTabsMouseArea.containsMouse ? "#264939" : "#1b3b2e"
+                border.color: "#4f7d68"
+                border.width: 1
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "Paste Tabs"
+                    color: "#d8f2e4"
+                    font.pixelSize: 11
+                    font.bold: true
+                }
+
+                MouseArea {
+                    id: pasteTabsMouseArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onClicked: sidebar.pasteTabsFromClipboard()
                 }
             }
         }
@@ -1225,9 +1297,10 @@ Rectangle {
 
     Dialog {
         id: renameTabDialog
+        property string mode: "rename"
         property int tabIndex: -1
         property string currentName: ""
-        title: "Rename Tab"
+        title: mode === "create" ? "Add Tab" : "Rename Tab"
         modal: true
         anchors.centerIn: parent
         width: 300
@@ -1249,8 +1322,16 @@ Rectangle {
         }
 
         onAccepted: {
-            if (tabModel && renameTabField.text.trim())
-                tabModel.renameTab(tabIndex, renameTabField.text.trim())
+            var nextName = renameTabField.text.trim()
+            if (!tabModel || !nextName)
+                return
+            if (mode === "create") {
+                tabModel.addTab(nextName)
+                if (projectManager)
+                    projectManager.switchTab(tabModel.tabCount - 1)
+                return
+            }
+            tabModel.renameTab(tabIndex, nextName)
         }
     }
 }

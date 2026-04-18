@@ -13,6 +13,7 @@ from .markdown_image_paster import MarkdownImagePaster
 from .markdown_preview_formatter import MarkdownPreviewFormatter
 from .markdown_pdf_exporter import MarkdownPdfExporter
 from .markdown_syntax_highlighter import MarkdownHighlighterBridge
+from .mcp_server import ActionDrawMcpServerController
 from .qml import ACTIONDRAW_QML_PATH, QML_DIR
 
 
@@ -23,18 +24,26 @@ def create_actiondraw_window(
     markdown_note_manager=None,
     markdown_image_paster=None,
     tab_model=None,
+    mcp_server_controller=None,
 ) -> QQmlApplicationEngine:
     """Create and return a QQmlApplicationEngine hosting the ActionDraw UI."""
     from .markdown_note_manager import MarkdownNoteManager
 
     engine = QQmlApplicationEngine()
     if markdown_note_manager is None:
-        markdown_note_manager = MarkdownNoteManager(diagram_model)
+        markdown_note_manager = MarkdownNoteManager(diagram_model, project_manager)
     if markdown_image_paster is None:
         markdown_image_paster = MarkdownImagePaster()
     markdown_preview_formatter = MarkdownPreviewFormatter()
     markdown_pdf_exporter = MarkdownPdfExporter(markdown_image_paster)
     markdown_highlighter_bridge = MarkdownHighlighterBridge()
+    if mcp_server_controller is None:
+        mcp_server_controller = ActionDrawMcpServerController(
+            task_model,
+            diagram_model,
+            project_manager=project_manager,
+            tab_model=tab_model,
+        )
     engine.rootContext().setContextProperty("diagramModel", diagram_model)
     engine.rootContext().setContextProperty("taskModel", task_model)
     engine.rootContext().setContextProperty("projectManager", project_manager)
@@ -44,11 +53,13 @@ def create_actiondraw_window(
     engine.rootContext().setContextProperty("markdownPdfExporter", markdown_pdf_exporter)
     engine.rootContext().setContextProperty("markdownHighlighterBridge", markdown_highlighter_bridge)
     engine.rootContext().setContextProperty("tabModel", tab_model)
+    engine.rootContext().setContextProperty("mcpServerController", mcp_server_controller)
     engine._markdown_note_manager = markdown_note_manager
     engine._markdown_image_paster = markdown_image_paster
     engine._markdown_preview_formatter = markdown_preview_formatter
     engine._markdown_pdf_exporter = markdown_pdf_exporter
     engine._markdown_highlighter_bridge = markdown_highlighter_bridge
+    engine._mcp_server_controller = mcp_server_controller
     engine.addImportPath(str(QML_DIR))
     engine.load(QUrl.fromLocalFile(str(ACTIONDRAW_QML_PATH)))
     return engine
@@ -69,12 +80,19 @@ def main() -> int:
     diagram_model = DiagramModel(task_model=task_model)
     tab_model = TabModel()
     project_manager = ProjectManager(task_model, diagram_model, tab_model)
+    mcp_server_controller = ActionDrawMcpServerController(
+        task_model,
+        diagram_model,
+        project_manager=project_manager,
+        tab_model=tab_model,
+    )
 
     engine = create_actiondraw_window(
         diagram_model,
         task_model,
         project_manager,
         tab_model=tab_model,
+        mcp_server_controller=mcp_server_controller,
     )
     if not engine.rootObjects():
         return 1

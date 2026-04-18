@@ -40,6 +40,7 @@ Item {
     property alias loadDialog: loadDialog
     property alias folderDialog: folderDialog
     property alias clipboardPasteDialog: clipboardPasteDialog
+    property alias goalsDialog: goalsDialog
     property bool anyDialogVisible: (
         addDialog.visible
         || boxDialog.visible
@@ -58,6 +59,7 @@ Item {
         || boxPdfDialog.visible
         || saveDialog.visible
         || loadDialog.visible
+        || goalsDialog.visible
     )
 
     anchors.fill: parent
@@ -659,8 +661,14 @@ Item {
                 textValue: boxDialog.textValue
                 placeholderText: "Label"
                 allowCreateTask: true
+                allowCreateTab: true
                 sourceItemId: boxDialog.editingItemId
                 onTextValueChanged: boxDialog.textValue = textValue
+                onCreateTabRequested: function(selectedText) {
+                    if (!projectManager || !projectManager.createTabFromMarkdownSelection)
+                        return
+                    projectManager.createTabFromMarkdownSelection(selectedText)
+                }
                 onCreateTaskRequested: function(selectedText) {
                     if (!diagramModel)
                         return
@@ -2463,5 +2471,165 @@ Item {
                 }
             }
         }
+    }
+
+    Dialog {
+        id: goalsDialog
+        modal: true
+        title: "Outcome Goals"
+        anchors.centerIn: parent
+        width: 420
+
+        property var currentGoals: []
+
+        function refresh() {
+            if (tabModel) {
+                currentGoals = tabModel.getGoals(tabModel.currentTabIndex)
+            }
+        }
+
+        function addGoalAction() {
+            var text = newGoalField.text.trim()
+            if (text.length === 0 || !tabModel) return
+            tabModel.addGoal(tabModel.currentTabIndex, text)
+            newGoalField.text = ""
+            refresh()
+        }
+
+        onOpened: {
+            refresh()
+            newGoalField.text = ""
+            newGoalField.forceActiveFocus()
+        }
+
+        contentItem: ColumnLayout {
+            width: 400
+            spacing: 12
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                TextField {
+                    id: newGoalField
+                    Layout.fillWidth: true
+                    placeholderText: "Enter a new goal..."
+                    selectByMouse: true
+                    color: "#f5f6f8"
+                    background: Rectangle {
+                        color: "#1b2028"
+                        radius: 4
+                        border.color: "#384458"
+                    }
+                    Keys.onReturnPressed: goalsDialog.addGoalAction()
+                    Keys.onEnterPressed: goalsDialog.addGoalAction()
+                }
+
+                Button {
+                    text: "Add"
+                    onClicked: goalsDialog.addGoalAction()
+                    contentItem: Text {
+                        text: "Add"
+                        color: "#f5f6f8"
+                        font.pixelSize: 12
+                        font.bold: true
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        radius: 4
+                        color: parent.hovered ? "#2d7ab3" : "#1c2e3e"
+                        border.color: "#355069"
+                        border.width: 1
+                    }
+                }
+            }
+
+            ListView {
+                id: goalsListView
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.min(contentHeight, 300)
+                Layout.maximumHeight: 300
+                model: goalsDialog.currentGoals
+                clip: true
+                spacing: 4
+
+                delegate: Rectangle {
+                    width: goalsListView.width
+                    height: goalRow.implicitHeight + 12
+                    radius: 4
+                    color: "#1b2028"
+                    border.color: "#384458"
+                    border.width: 1
+
+                    RowLayout {
+                        id: goalRow
+                        anchors.fill: parent
+                        anchors.margins: 6
+                        spacing: 8
+
+                        CheckBox {
+                            id: goalCheck
+                            checked: modelData.checked || false
+                            onToggled: {
+                                if (tabModel) {
+                                    tabModel.toggleGoal(tabModel.currentTabIndex, index)
+                                    goalsDialog.refresh()
+                                }
+                            }
+                        }
+
+                        Label {
+                            Layout.fillWidth: true
+                            text: modelData.text || ""
+                            color: (modelData.checked) ? "#728699" : "#f5f6f8"
+                            font.strikeout: modelData.checked || false
+                            font.pixelSize: 13
+                            wrapMode: Text.WordWrap
+                        }
+
+                        Button {
+                            text: "\u00d7"
+                            flat: true
+                            implicitWidth: 28
+                            implicitHeight: 28
+                            contentItem: Text {
+                                text: "\u00d7"
+                                color: parent.hovered ? "#ff6b6b" : "#728699"
+                                font.pixelSize: 16
+                                font.bold: true
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            background: Rectangle {
+                                radius: 4
+                                color: parent.hovered ? "#2a1a1a" : "transparent"
+                            }
+                            onClicked: {
+                                if (tabModel) {
+                                    tabModel.removeGoal(tabModel.currentTabIndex, index)
+                                    goalsDialog.refresh()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Label {
+                visible: goalsDialog.currentGoals.length === 0
+                text: "No goals yet. Add one above."
+                color: "#728699"
+                font.italic: true
+                Layout.fillWidth: true
+                horizontalAlignment: Text.AlignHCenter
+            }
+        }
+
+        footer: DialogButtonBox {
+            standardButtons: DialogButtonBox.Close
+        }
+
+        onRejected: goalsDialog.close()
     }
 }

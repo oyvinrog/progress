@@ -8,6 +8,8 @@ Rectangle {
     property var diagramModel: null
     property var projectManager: null
     property var viewport: null
+    property var tabModel: null
+    property var goalsDialog: null
 
     Layout.fillWidth: true
     implicitHeight: 48
@@ -79,6 +81,32 @@ Rectangle {
             onClicked: {
                 if (diagramModel)
                     diagramModel.setDrawingMode(!diagramModel.drawingMode)
+            }
+        }
+
+        Button {
+            id: goalsButton
+            text: "★ Goals"
+            flat: true
+            padding: 8
+            icon.name: "starred"
+            contentItem: Text {
+                text: goalsButton.text
+                color: "#d6e2ee"
+                font.pixelSize: 12
+                font.bold: true
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+            }
+            background: Rectangle {
+                radius: 8
+                color: goalsButton.hovered ? "#26394b" : "#1c2e3e"
+                border.color: "#355069"
+                border.width: 1
+            }
+            onClicked: {
+                if (goalsDialog)
+                    goalsDialog.open()
             }
         }
 

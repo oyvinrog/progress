@@ -16,7 +16,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
@@ -47,11 +47,13 @@ from progress_crypto import (
     is_encrypted_envelope,
     yubikey_support_guidance,
 )
+from actiondraw.markdown_tab_clipboard import parse_tabs_from_clipboard_text
 from actiondraw.priorityplot.model import (
     clamp_subjective_value,
     clamp_time_hours,
     compute_priority_score,
 )
+from actiondraw.markdown_note_tabs import normalize_editor_tabs
 
 
 CRACK_MODEL_PROFILE_NAME = "Top-end GPU cluster"
@@ -399,6 +401,7 @@ class Tab:
     icon: str = ""
     color: str = ""
     pinned: bool = False
+    goals: List[Dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -1455,6 +1458,7 @@ class TabModel(QAbstractListModel):
     currentTabChanged = Signal()
     currentTabIndexChanged = Signal()
     recentTabsChanged = Signal()
+    goalsChanged = Signal()
 
     def __init__(self):
         super().__init__()
@@ -1893,6 +1897,44 @@ class TabModel(QAbstractListModel):
         model_index = self.index(index, 0)
         self.dataChanged.emit(model_index, model_index, [self.PinnedRole])
 
+    @Slot(int, result="QVariant")
+    def getGoals(self, index: int):
+        """Return a copy of the goals list for the tab at *index*."""
+        if index < 0 or index >= len(self._tabs):
+            return []
+        return list(self._tabs[index].goals)
+
+    @Slot(int, str)
+    def addGoal(self, index: int, text: str) -> None:
+        """Append a new unchecked goal to the tab at *index*."""
+        text = str(text or "").strip()
+        if not text or index < 0 or index >= len(self._tabs):
+            return
+        self._tabs[index].goals.append({"text": text, "checked": False})
+        self.goalsChanged.emit()
+
+    @Slot(int, int)
+    def toggleGoal(self, index: int, goal_index: int) -> None:
+        """Toggle the checked state of a goal."""
+        if index < 0 or index >= len(self._tabs):
+            return
+        goals = self._tabs[index].goals
+        if goal_index < 0 or goal_index >= len(goals):
+            return
+        goals[goal_index]["checked"] = not goals[goal_index].get("checked", False)
+        self.goalsChanged.emit()
+
+    @Slot(int, int)
+    def removeGoal(self, index: int, goal_index: int) -> None:
+        """Remove a goal by index."""
+        if index < 0 or index >= len(self._tabs):
+            return
+        goals = self._tabs[index].goals
+        if goal_index < 0 or goal_index >= len(goals):
+            return
+        goals.pop(goal_index)
+        self.goalsChanged.emit()
+
     def _computePriorityScore(self, value: float, time_hours: float) -> float:
         return compute_priority_score(value, time_hours)
 
@@ -2115,6 +2157,7 @@ class ProjectManager(QObject):
     errorOccurred = Signal(str)  # Emitted with error message on failure
     recentProjectsChanged = Signal()  # Emitted when recent projects list changes
     currentFilePathChanged = Signal()  # Emitted when current file path changes
+    workspaceMarkdownTabsChanged = Signal()
     sidebarExpandedChanged = Signal()
     ntfySettingsChanged = Signal()
     testNotificationCompleted = Signal(bool, str, arguments=["success", "message"])
@@ -2179,6 +2222,7 @@ class ProjectManager(QObject):
         self._cached_encryption_credentials: Optional[EncryptionCredentials] = None
         self._cached_key_material: Optional[DerivedKeyMaterial] = None
         self._cached_encryption_file_path: str = ""
+        self._workspace_markdown_tabs = normalize_editor_tabs([], fallback_text="")
         self._last_saved_snapshot = self._serialize_project_payload(self._build_project_data())
 
     def scrubProjectData(self) -> None:
@@ -2198,6 +2242,8 @@ class ProjectManager(QObject):
 
         # Drop the last-saved snapshot (contains full serialized plaintext).
         self._last_saved_snapshot = ""
+        self._workspace_markdown_tabs = normalize_editor_tabs([], fallback_text="")
+        self.workspaceMarkdownTabsChanged.emit()
 
         # Clear live models (drops references to Task/DiagramItem objects).
         self._task_model.clear()
@@ -2762,6 +2808,73 @@ class ProjectManager(QObject):
         """Return the current project file path."""
         return self._current_file_path
 
+    @Property("QVariantList", notify=workspaceMarkdownTabsChanged)
+    def workspaceMarkdownTabs(self) -> List[Dict[str, str]]:
+        """Return the project-level ActionDraw markdown tabs."""
+        return normalize_editor_tabs(self._workspace_markdown_tabs, fallback_text="")
+
+    @Slot(result="QVariantList")
+    def getWorkspaceMarkdownTabs(self) -> List[Dict[str, str]]:
+        """Return normalized project-level markdown tabs."""
+        return self.workspaceMarkdownTabs
+
+    @Slot("QVariantList")
+    def setWorkspaceMarkdownTabs(self, tabs: List[Dict[str, str]]) -> None:
+        """Persist normalized project-level markdown tabs in memory."""
+        normalized_tabs = normalize_editor_tabs(tabs, fallback_text="")
+        if normalized_tabs == self._workspace_markdown_tabs:
+            return
+        self._workspace_markdown_tabs = normalized_tabs
+        self.workspaceMarkdownTabsChanged.emit()
+
+    @Slot(str, float, float, result=str)
+    def createTaskFromWorkspaceMarkdownSelection(self, selected_text: str, x: float, y: float) -> str:
+        """Create a top-level task from selected workspace markdown text."""
+        text = str(selected_text or "").strip()
+        if not text:
+            return ""
+        add_task_from_text = getattr(self._diagram_model, "addTaskFromText", None)
+        if not callable(add_task_from_text):
+            return ""
+        return str(add_task_from_text(text, float(x), float(y)) or "")
+
+    @Slot(str, result=int)
+    def createTabFromMarkdownSelection(self, selected_text: str) -> int:
+        """Create and switch to a project tab from selected markdown text."""
+        if self._tab_model is None:
+            return -1
+
+        tab_name = str(selected_text or "").strip()
+        if not tab_name:
+            return -1
+
+        self._saveCurrentTabState()
+        self._tab_model.addTab(tab_name)
+        created_index = self._tab_model.tabCount - 1
+        self.switchTab(created_index)
+        return created_index
+
+    @Slot(result=int)
+    def createTabsFromClipboard(self) -> int:
+        """Create project tabs from non-empty clipboard lines without switching tabs."""
+        if self._tab_model is None:
+            return 0
+
+        from PySide6.QtGui import QGuiApplication
+
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is None:
+            return 0
+
+        created_count = 0
+        for tab in parse_tabs_from_clipboard_text(clipboard.text()):
+            tab_name = str(tab.get("name", "") or "").strip()
+            if not tab_name:
+                continue
+            self._tab_model.addTab(tab_name)
+            created_count += 1
+        return created_count
+
     def _normalize_file_path(self, file_path: str) -> str:
         """Convert file URLs into local paths, including Windows file URLs."""
         if file_path.startswith("file:"):
@@ -2799,12 +2912,14 @@ class ProjectManager(QObject):
                     "icon": tab.icon,
                     "color": tab.color,
                     "pinned": tab.pinned,
+                    "goals": tab.goals,
                 })
 
             return {
                 "version": self.PROJECT_VERSION,
                 "tabs": tabs_data,
                 "active_tab": current_tab_index,
+                "workspace_markdown_tabs": normalize_editor_tabs(self._workspace_markdown_tabs, fallback_text=""),
             }
 
         return {
@@ -2815,6 +2930,7 @@ class ProjectManager(QObject):
                 "diagram": self._diagram_model.to_dict(),
             }],
             "active_tab": 0,
+            "workspace_markdown_tabs": normalize_editor_tabs(self._workspace_markdown_tabs, fallback_text=""),
         }
 
     def _serialize_project_payload(self, project_data: Dict[str, Any]) -> str:
@@ -3307,12 +3423,19 @@ class ProjectManager(QObject):
                         icon=tab_data.get("icon", ""),
                         color=tab_data.get("color", ""),
                         pinned=tab_data.get("pinned", False),
+                        goals=tab_data.get("goals", []),
                     ))
                 active_tab = project_data.get("active_tab", 0)
 
                 # Ensure at least one tab exists
                 if not tabs:
                     tabs = [Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})]
+
+            self._workspace_markdown_tabs = normalize_editor_tabs(
+                project_data.get("workspace_markdown_tabs"),
+                fallback_text="",
+            )
+            self.workspaceMarkdownTabsChanged.emit()
 
             # Validate active_tab index
             if active_tab < 0 or active_tab >= len(tabs):
