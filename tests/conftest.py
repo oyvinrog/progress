@@ -27,16 +27,13 @@ def app():
 
     yield instance
 
-    if instance is None or QCoreApplication.closingDown():
-        return
-
     # Release clipboard-owned Qt objects before interpreter shutdown.
+    # Avoid explicitly quitting the app here: some PySide/Python combinations
+    # crash when QObject-backed models/timers are still unwinding.
     try:
         clipboard = QGuiApplication.clipboard()
         if clipboard is not None:
             clipboard.clear()
-        QCoreApplication.processEvents()
-        instance.quit()
         QCoreApplication.processEvents()
     except RuntimeError:
         # PySide can already be tearing down during interpreter shutdown.
