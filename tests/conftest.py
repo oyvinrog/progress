@@ -9,7 +9,6 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
 
 import pytest
-from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QGuiApplication
 
 # Ensure tests can import local packages/modules regardless of invocation cwd.
@@ -24,17 +23,6 @@ def app():
     instance = QGuiApplication.instance()
     if instance is None:
         instance = QGuiApplication([])
-
-    yield instance
-
-    # Release clipboard-owned Qt objects before interpreter shutdown.
-    # Avoid explicitly quitting the app here: some PySide/Python combinations
-    # crash when QObject-backed models/timers are still unwinding.
-    try:
-        clipboard = QGuiApplication.clipboard()
-        if clipboard is not None:
-            clipboard.clear()
-        QCoreApplication.processEvents()
-    except RuntimeError:
-        # PySide can already be tearing down during interpreter shutdown.
-        pass
+    # Keep teardown empty: several CI PySide/Python combinations segfault if
+    # we touch the application, clipboard, or event loop during fixture cleanup.
+    return instance
