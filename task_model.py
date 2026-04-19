@@ -393,6 +393,7 @@ class Tab:
     name: str
     tasks: Dict[str, Any]  # TaskModel.to_dict() data
     diagram: Dict[str, Any]  # DiagramModel.to_dict() data
+    markdown_tabs: List[Dict[str, str]] = field(default_factory=list)
     priority: int = 0  # 0 = no priority, 1-3 = priority levels
     priority_time_hours: float = 1.01
     priority_subjective_value: float = 1.0
@@ -2072,6 +2073,7 @@ class TabModel(QAbstractListModel):
         self.beginResetModel()
         self._tabs = tabs if tabs else [Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})]
         for tab in self._tabs:
+            tab.markdown_tabs = normalize_editor_tabs(getattr(tab, "markdown_tabs", []), fallback_text="")
             tab.priority_time_hours = clamp_time_hours(getattr(tab, "priority_time_hours", 1.01))
             tab.priority_subjective_value = clamp_subjective_value(getattr(tab, "priority_subjective_value", 1.0))
             tab.include_in_priority_plot = bool(getattr(tab, "include_in_priority_plot", True))
@@ -2158,6 +2160,7 @@ class ProjectManager(QObject):
     recentProjectsChanged = Signal()  # Emitted when recent projects list changes
     currentFilePathChanged = Signal()  # Emitted when current file path changes
     workspaceMarkdownTabsChanged = Signal()
+    currentTabMarkdownTabsChanged = Signal()
     sidebarExpandedChanged = Signal()
     ntfySettingsChanged = Signal()
     testNotificationCompleted = Signal(bool, str, arguments=["success", "message"])
@@ -2244,6 +2247,7 @@ class ProjectManager(QObject):
         self._last_saved_snapshot = ""
         self._workspace_markdown_tabs = normalize_editor_tabs([], fallback_text="")
         self.workspaceMarkdownTabsChanged.emit()
+        self.currentTabMarkdownTabsChanged.emit()
 
         # Clear live models (drops references to Task/DiagramItem objects).
         self._task_model.clear()
@@ -2827,6 +2831,33 @@ class ProjectManager(QObject):
         self._workspace_markdown_tabs = normalized_tabs
         self.workspaceMarkdownTabsChanged.emit()
 
+    @Slot(result="QVariantList")
+    def getCurrentTabMarkdownTabs(self) -> List[Dict[str, str]]:
+        """Return normalized markdown tabs for the active project tab."""
+        if self._tab_model is None or self._tab_model.tabCount <= 0:
+            return normalize_editor_tabs([], fallback_text="")
+        current_index = self._tab_model.currentTabIndex
+        tabs = self._tab_model.getAllTabs()
+        if current_index < 0 or current_index >= len(tabs):
+            return normalize_editor_tabs([], fallback_text="")
+        return normalize_editor_tabs(getattr(tabs[current_index], "markdown_tabs", []), fallback_text="")
+
+    @Slot("QVariantList")
+    def setCurrentTabMarkdownTabs(self, tabs: List[Dict[str, str]]) -> None:
+        """Persist normalized markdown tabs for the active project tab."""
+        if self._tab_model is None or self._tab_model.tabCount <= 0:
+            return
+        current_index = self._tab_model.currentTabIndex
+        all_tabs = self._tab_model.getAllTabs()
+        if current_index < 0 or current_index >= len(all_tabs):
+            return
+        normalized_tabs = normalize_editor_tabs(tabs, fallback_text="")
+        current_tab = all_tabs[current_index]
+        if normalized_tabs == current_tab.markdown_tabs:
+            return
+        current_tab.markdown_tabs = normalized_tabs
+        self.currentTabMarkdownTabsChanged.emit()
+
     @Slot(str, float, float, result=str)
     def createTaskFromWorkspaceMarkdownSelection(self, selected_text: str, x: float, y: float) -> str:
         """Create a top-level task from selected workspace markdown text."""
@@ -2904,6 +2935,7 @@ class ProjectManager(QObject):
                     "name": tab.name,
                     "tasks": current_tasks if index == current_tab_index else tab.tasks,
                     "diagram": current_diagram if index == current_tab_index else tab.diagram,
+                    "markdown_tabs": normalize_editor_tabs(tab.markdown_tabs, fallback_text=""),
                     "priority": tab.priority,
                     "priority_time_hours": tab.priority_time_hours,
                     "priority_subjective_value": tab.priority_subjective_value,
@@ -3415,6 +3447,7 @@ class ProjectManager(QObject):
                         name=tab_data.get("name", "Tab"),
                         tasks=tab_data.get("tasks", {"tasks": []}),
                         diagram=tab_data.get("diagram", {"items": [], "edges": [], "strokes": []}),
+                        markdown_tabs=normalize_editor_tabs(tab_data.get("markdown_tabs"), fallback_text=""),
                         priority=tab_data.get("priority", 0),
                         priority_time_hours=tab_data.get("priority_time_hours", 1.01),
                         priority_subjective_value=tab_data.get("priority_subjective_value", 1.0),
@@ -3436,6 +3469,7 @@ class ProjectManager(QObject):
                 fallback_text="",
             )
             self.workspaceMarkdownTabsChanged.emit()
+            self.currentTabMarkdownTabsChanged.emit()
 
             # Validate active_tab index
             if active_tab < 0 or active_tab >= len(tabs):
@@ -3604,6 +3638,7 @@ class ProjectManager(QObject):
         self._task_model.from_dict(tab_data.tasks)
         self._diagram_model.from_dict(tab_data.diagram)
 
+        self.currentTabMarkdownTabsChanged.emit()
         self.tabSwitched.emit()
 
     @Slot(int)
@@ -3643,4 +3678,5 @@ class ProjectManager(QObject):
         self._task_model.from_dict(tab_data.tasks)
         self._diagram_model.from_dict(tab_data.diagram)
 
+        self.currentTabMarkdownTabsChanged.emit()
         self.tabSwitched.emit()

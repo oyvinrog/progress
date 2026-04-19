@@ -78,6 +78,13 @@ MenuBar {
         }
 
         MenuItem {
+            text: "Tab Markdown...\tCtrl+Alt+M"
+            icon.name: "document-edit"
+            enabled: hasDiagramModel()
+            onTriggered: root.openTabMarkdownHub()
+        }
+
+        MenuItem {
             text: "Project Markdown...\tCtrl+Shift+M"
             icon.name: "accessories-text-editor"
             enabled: hasDiagramModel()

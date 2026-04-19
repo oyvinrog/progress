@@ -43,10 +43,19 @@ def _sample_backend() -> ActionDrawMcpBackend:
 
     tab_model = TabModel()
     project_manager = ProjectManager(task_model, diagram_model, tab_model)
+    project_manager.setWorkspaceMarkdownTabs([
+        {"name": "Inbox", "text": "Project-wide markdown"},
+    ])
+    tab_model.getAllTabs()[0].markdown_tabs = [
+        {"name": "Overview", "text": "Main tab markdown"},
+    ]
 
     tab_model.addTab("Later")
     later_tasks = TaskModel()
     later_tasks.addTask("Deep work block", -1)
+    tab_model.getAllTabs()[1].markdown_tabs = [
+        {"name": "Plan", "text": "Later tab markdown"},
+    ]
     tab_model.setTabData(
         1,
         later_tasks.to_dict(),
@@ -108,6 +117,7 @@ class TestBuildActionDrawMcpServer:
         current_tasks = _call_tool(server, "list_tasks", {})
         later_tasks = _call_tool(server, "list_tasks", {"tab_index": 1})
         items = _call_tool(server, "list_diagram_items", {})
+        snapshot = _call_tool(server, "get_project_snapshot", {})
         focus_items = _call_tool(server, "identify_focus_items", {"limit": 3})
 
         assert summary["currentTabName"] == "Main"
@@ -115,6 +125,15 @@ class TestBuildActionDrawMcpServer:
         assert current_tasks[0]["title"] == "Ship MCP server"
         assert later_tasks[0]["title"] == "Deep work block"
         assert items[0]["item_type"] == "task"
+        assert snapshot["project"]["workspaceMarkdownTabs"] == [
+            {"name": "Inbox", "text": "Project-wide markdown"},
+        ]
+        assert snapshot["tabs"][0]["tabMarkdownTabs"] == [
+            {"name": "Overview", "text": "Main tab markdown"},
+        ]
+        assert snapshot["tabs"][1]["tabMarkdownTabs"] == [
+            {"name": "Plan", "text": "Later tab markdown"},
+        ]
         assert focus_items["items"]
 
     def test_mutation_tools_update_models(self, app):
