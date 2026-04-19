@@ -121,6 +121,29 @@ class MarkdownNoteManager(QObject):
             tabs=tabs,
         )
 
+    @Slot(float, float)
+    def openTabMarkdown(self, x: float, y: float) -> None:
+        tabs = normalize_editor_tabs(
+            self._project_manager.getCurrentTabMarkdownTabs() if self._project_manager else [],
+            fallback_text="",
+        )
+        tab_name = ""
+        if self._project_manager is not None:
+            tab_model = getattr(self._project_manager, "_tab_model", None)
+            if tab_model is not None:
+                tab_name = str(getattr(tab_model, "currentTabName", "") or "").strip()
+        title = f"{tab_name} Markdown" if tab_name else "Tab Markdown"
+        self._set_editor_state("tab", "", float(x), float(y), True)
+        self._editor.open(
+            "",
+            tabs[0]["text"],
+            title,
+            editor_type="tab",
+            target_x=float(x),
+            target_y=float(y),
+            tabs=tabs,
+        )
+
     def _save_note(self, item_id: str, note_text: str, tabs: list | None = None) -> None:
         normalized_tabs = normalize_editor_tabs(tabs, fallback_text=note_text or "")
         canonical_text = normalized_tabs[0]["text"]
@@ -129,6 +152,10 @@ class MarkdownNoteManager(QObject):
             if self._project_manager is not None:
                 self._project_manager.setWorkspaceMarkdownTabs(normalized_tabs)
                 saved_item_id = "__workspace__"
+        elif self._active_editor_type == "tab":
+            if self._project_manager is not None:
+                self._project_manager.setCurrentTabMarkdownTabs(normalized_tabs)
+                saved_item_id = "__tab__"
         elif self._active_editor_type == "freetext":
             if self._active_item_id:
                 self._diagram_model.setEditorTabs(self._active_item_id, "freetext", normalized_tabs)
@@ -220,7 +247,7 @@ class MarkdownNoteManager(QObject):
             return ""
 
         source_id = item_id or ""
-        if editor_type == "workspace":
+        if editor_type == "workspace" or editor_type == "tab":
             if self._project_manager is None:
                 return ""
             task_id = self._project_manager.createTaskFromWorkspaceMarkdownSelection(selected_text, float(x), float(y))

@@ -17,6 +17,7 @@ import uvicorn
 from task_model import ProjectManager, TabModel, TaskModel
 
 from .model import DiagramModel
+from .markdown_note_tabs import normalize_editor_tabs
 
 DEFAULT_MCP_HOST = "127.0.0.1"
 DEFAULT_MCP_PORT = 8765
@@ -134,6 +135,9 @@ class ActionDrawMcpBackend:
                 diagram_payload = self._copy_payload(tab.diagram)
             name = str(getattr(tab, "name", "") or self._tab_name(tab_index))
             extra = {
+                "tabMarkdownTabs": self._copy_payload(
+                    normalize_editor_tabs(getattr(tab, "markdown_tabs", []), fallback_text="")
+                ),
                 "priority": getattr(tab, "priority", 0),
                 "priorityTimeHours": float(getattr(tab, "priority_time_hours", 1.01)),
                 "prioritySubjectiveValue": float(getattr(tab, "priority_subjective_value", 1.0)),

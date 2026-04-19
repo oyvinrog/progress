@@ -2316,6 +2316,73 @@ class TestMultiTabSupport:
             {"name": "Archive", "text": ""},
         ]
 
+    def test_roundtrip_tab_markdown_tabs(self, app, tmp_path):
+        """Per-tab markdown tabs survive save/load."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        tab_model.getAllTabs()[0].markdown_tabs = [
+            {"name": "Overview", "text": "Main tab notes"},
+            {"name": "Ideas", "text": "- keep this local to the tab"},
+        ]
+        tab_model.addTab("Second Tab")
+        tab_model.getAllTabs()[1].markdown_tabs = [
+            {"name": "Notes", "text": "Second tab markdown"},
+        ]
+
+        project_file = tmp_path / "tab_markdown_tabs.progress"
+        project_manager.saveProject(str(project_file))
+
+        task_model2 = TaskModel()
+        diagram_model2 = DiagramModel()
+        tab_model2 = TabModel()
+        project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
+        project_manager2.loadProject(str(project_file))
+
+        assert tab_model2.getAllTabs()[0].markdown_tabs == [
+            {"name": "Overview", "text": "Main tab notes"},
+            {"name": "Ideas", "text": "- keep this local to the tab"},
+        ]
+        assert tab_model2.getAllTabs()[1].markdown_tabs == [
+            {"name": "Notes", "text": "Second tab markdown"},
+        ]
+
+    def test_get_and_set_current_tab_markdown_tabs(self, app):
+        """Current-tab markdown helpers read and write the active tab."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        project_manager.setCurrentTabMarkdownTabs([
+            {"name": "Plan", "text": "Main tab markdown"},
+        ])
+        assert project_manager.getCurrentTabMarkdownTabs() == [
+            {"name": "Plan", "text": "Main tab markdown"},
+        ]
+
+        tab_model.addTab("Second Tab")
+        project_manager.switchTab(1)
+        assert project_manager.getCurrentTabMarkdownTabs() == [{"name": "Tab 1", "text": ""}]
+
+        project_manager.setCurrentTabMarkdownTabs([
+            {"name": "Notes", "text": "Second tab markdown"},
+        ])
+        assert project_manager.getCurrentTabMarkdownTabs() == [
+            {"name": "Notes", "text": "Second tab markdown"},
+        ]
+
+        project_manager.switchTab(0)
+        assert project_manager.getCurrentTabMarkdownTabs() == [
+            {"name": "Plan", "text": "Main tab markdown"},
+        ]
+
     def test_has_unsaved_changes_tracks_diagram_edits(self, app, tmp_path):
         """Unsaved state flips true after diagram changes and false after save."""
         from task_model import TaskModel, ProjectManager, TabModel
@@ -2348,6 +2415,22 @@ class TestMultiTabSupport:
         assert project_manager.hasUnsavedChanges() is False
 
         project_manager.setWorkspaceMarkdownTabs([{"name": "Inbox", "text": "replace notes"}])
+        assert project_manager.hasUnsavedChanges() is True
+
+    def test_has_unsaved_changes_tracks_current_tab_markdown_edits(self, app, tmp_path):
+        """Editing current-tab markdown marks the project dirty."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        project_file = tmp_path / "tab_markdown_unsaved.progress"
+        project_manager.saveProject(str(project_file))
+        assert project_manager.hasUnsavedChanges() is False
+
+        project_manager.setCurrentTabMarkdownTabs([{"name": "Plan", "text": "replace notes"}])
         assert project_manager.hasUnsavedChanges() is True
 
     def test_has_unsaved_changes_ignores_active_task_time_drift(self, app, tmp_path):
@@ -3106,6 +3189,15 @@ class TestActionDrawQmlTaskInteractions:
     def test_header_menu_and_shortcut_expose_project_markdown(self):
         actiondraw_qml = load_actiondraw_qml()
         menu_qml = (QML_DIR / "components" / "ActionMenuBar.qml").read_text(encoding="utf-8")
+
+        assert 'id: tabMarkdownButton' in actiondraw_qml
+        assert 'text: "Tab Markdown"' in actiondraw_qml
+        assert 'onClicked: root.openTabMarkdownHub()' in actiondraw_qml
+        assert 'sequence: "Ctrl+Alt+M"' in actiondraw_qml
+        assert 'onActivated: root.openTabMarkdownHub()' in actiondraw_qml
+        assert 'text: "Tab Markdown...\\tCtrl+Alt+M"' in menu_qml
+        assert 'icon.name: "document-edit"' in menu_qml
+        assert 'onTriggered: root.openTabMarkdownHub()' in menu_qml
 
         assert 'id: projectMarkdownButton' in actiondraw_qml
         assert 'text: "Project Markdown"' in actiondraw_qml
@@ -5938,6 +6030,46 @@ class TestMarkdownNoteManager:
         assert kwargs["editor_type"] == "workspace"
         assert kwargs["tabs"] == [{"name": "Inbox", "text": "Global scratchpad"}]
 
+    def test_open_tab_markdown_uses_current_tab_tabs(self, empty_diagram_model, monkeypatch):
+        class _DummySignal:
+            def connect(self, _callback):
+                return None
+
+        class _DummyEditor:
+            def __init__(self, *_args, **_kwargs):
+                self.noteSaved = _DummySignal()
+                self.noteSavedAndClosed = _DummySignal()
+                self.noteCanceled = _DummySignal()
+                self.open_calls = []
+
+            def open(self, *args, **kwargs):
+                self.open_calls.append((args, kwargs))
+
+        class _DummyTabModel:
+            currentTabName = "Sprint"
+
+        class _DummyProjectManager:
+            def __init__(self):
+                self._tab_model = _DummyTabModel()
+
+            def getCurrentTabMarkdownTabs(self):
+                return [{"name": "Plan", "text": "Current tab scratchpad"}]
+
+        monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
+        manager = MarkdownNoteManager(empty_diagram_model, _DummyProjectManager())
+
+        manager.openTabMarkdown(320.0, 180.0)
+
+        assert manager.editorOpen is True
+        assert manager.activeEditorType == "tab"
+        assert manager.activeItemId == ""
+        args, kwargs = manager._editor.open_calls[0]
+        assert args[0] == ""
+        assert args[1] == "Current tab scratchpad"
+        assert args[2] == "Sprint Markdown"
+        assert kwargs["editor_type"] == "tab"
+        assert kwargs["tabs"] == [{"name": "Plan", "text": "Current tab scratchpad"}]
+
     def test_save_workspace_markdown_persists_via_project_manager(self, empty_diagram_model, monkeypatch):
         class _DummySignal:
             def connect(self, _callback):
@@ -5978,6 +6110,47 @@ class TestMarkdownNoteManager:
             {"name": "Inbox", "text": "Global note"},
             {"name": "Ideas", "text": "Drafts"},
         ]
+
+    def test_save_tab_markdown_persists_via_project_manager(self, empty_diagram_model, monkeypatch):
+        class _DummySignal:
+            def connect(self, _callback):
+                return None
+
+        class _DummyEditor:
+            def __init__(self, *_args, **_kwargs):
+                self.noteSaved = _DummySignal()
+                self.noteSavedAndClosed = _DummySignal()
+                self.noteCanceled = _DummySignal()
+                self.save_confirmation_calls = 0
+
+            def show_save_confirmation(self):
+                self.save_confirmation_calls += 1
+
+        class _DummyProjectManager:
+            def __init__(self):
+                self.saved_tabs = None
+
+            def setCurrentTabMarkdownTabs(self, tabs):
+                self.saved_tabs = tabs
+
+        project_manager = _DummyProjectManager()
+        monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
+        manager = MarkdownNoteManager(empty_diagram_model, project_manager)
+        manager._set_editor_state("tab", "", 300.0, 200.0, True)
+
+        manager._save_note(
+            "",
+            "Tab note",
+            [
+                {"name": "Plan", "text": "Tab note"},
+                {"name": "Ideas", "text": "Local drafts"},
+            ],
+        )
+
+        assert project_manager.saved_tabs == [
+            {"name": "Plan", "text": "Tab note"},
+            {"name": "Ideas", "text": "Local drafts"},
+        ]
         assert manager._editor.save_confirmation_calls == 1
 
     def test_workspace_selection_creates_top_level_task(self, empty_diagram_model, monkeypatch):
@@ -6007,6 +6180,34 @@ class TestMarkdownNoteManager:
 
         assert task_id == "task_42"
         assert events == ["task_42"]
+
+    def test_tab_selection_creates_top_level_task(self, empty_diagram_model, monkeypatch):
+        class _DummySignal:
+            def connect(self, _callback):
+                return None
+
+        class _DummyEditor:
+            def __init__(self, *_args, **_kwargs):
+                self.noteSaved = _DummySignal()
+                self.noteSavedAndClosed = _DummySignal()
+                self.noteCanceled = _DummySignal()
+
+        class _DummyProjectManager:
+            def createTaskFromWorkspaceMarkdownSelection(self, selected_text, x, y):
+                assert selected_text == "Ship hub"
+                assert x == 410.0
+                assert y == 260.0
+                return "task_43"
+
+        monkeypatch.setattr("actiondraw.markdown_note_manager.MarkdownNoteEditor", _DummyEditor)
+        manager = MarkdownNoteManager(empty_diagram_model, _DummyProjectManager())
+        events = []
+        manager.taskCreated.connect(events.append)
+
+        task_id = manager.createTaskFromEditorSelection("tab", "", 410.0, 260.0, "ignored", "Ship hub")
+
+        assert task_id == "task_43"
+        assert events == ["task_43"]
 
     def test_workspace_selection_creates_tab_via_project_manager(self, empty_diagram_model, monkeypatch):
         class _DummySignal:

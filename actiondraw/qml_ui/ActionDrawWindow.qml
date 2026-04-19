@@ -593,6 +593,12 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Ctrl+Alt+M"
+        enabled: diagramModel !== null
+        onActivated: root.openTabMarkdownHub()
+    }
+
+    Shortcut {
         sequence: "Ctrl+Shift+M"
         enabled: diagramModel !== null
         onActivated: root.openWorkspaceMarkdownHub()
@@ -1120,6 +1126,13 @@ ApplicationWindow {
         markdownNoteManager.openWorkspaceMarkdown(center.x, center.y)
     }
 
+    function openTabMarkdownHub() {
+        if (!markdownNoteManager || !markdownNoteManager.openTabMarkdown)
+            return
+        var center = root.snapPoint(root.diagramCenterPoint())
+        markdownNoteManager.openTabMarkdown(center.x, center.y)
+    }
+
     function setZoomInternal(newZoom, focusX, focusY) {
         var clamped = clampZoom(newZoom)
         if (Math.abs(clamped - root.zoomLevel) < 0.0001)
@@ -1498,6 +1511,73 @@ ApplicationWindow {
                             elide: Text.ElideRight
                             Layout.fillWidth: true
                         }
+                    }
+
+                    Button {
+                        id: tabMarkdownButton
+                        text: "Tab Markdown"
+                        flat: true
+                        padding: 0
+                        Layout.alignment: Qt.AlignVCenter
+                        contentItem: RowLayout {
+                            spacing: 8
+
+                            Rectangle {
+                                implicitWidth: 14
+                                implicitHeight: 16
+                                radius: 3
+                                color: "#f4f6dc"
+                                border.color: "#b6ba78"
+                                border.width: 1
+                                Layout.alignment: Qt.AlignVCenter
+
+                                Rectangle {
+                                    anchors.top: parent.top
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    height: 4
+                                    radius: 3
+                                    color: "#dfe588"
+                                }
+
+                                Rectangle {
+                                    anchors.top: parent.top
+                                    anchors.topMargin: 7
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 3
+                                    width: parent.width - 6
+                                    height: 1
+                                    color: "#7f8450"
+                                }
+
+                                Rectangle {
+                                    anchors.top: parent.top
+                                    anchors.topMargin: 10
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 3
+                                    width: parent.width - 6
+                                    height: 1
+                                    color: "#7f8450"
+                                }
+                            }
+
+                            Text {
+                                text: tabMarkdownButton.text
+                                color: tabMarkdownButton.hovered ? "#fffef0" : "#f0efcf"
+                                font.pixelSize: 11
+                                font.bold: true
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                        }
+                        background: Rectangle {
+                            radius: 999
+                            color: tabMarkdownButton.hovered ? "#46461b" : "#2e2f17"
+                            border.color: tabMarkdownButton.hovered ? "#a7ac5c" : "#6d7140"
+                            border.width: 1
+                            implicitWidth: 126
+                            implicitHeight: 32
+                        }
+                        onClicked: root.openTabMarkdownHub()
                     }
 
                     Button {
