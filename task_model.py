@@ -138,6 +138,31 @@ def _publish_ntfy_message_async(
     threading.Thread(target=_worker, name="ntfy-reminder", daemon=True).start()
 
 
+def _parse_local_datetime(reminder_str: str) -> Optional[float]:
+    """Parse a local or ISO datetime string into a timestamp."""
+    normalized = str(reminder_str or "").strip()
+    if not normalized:
+        return None
+
+    for fmt in (
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%dT%H:%M",
+        "%Y-%m-%dT%H:%M:%S",
+    ):
+        try:
+            parsed = datetime.strptime(normalized, fmt)
+            return parsed.timestamp()
+        except ValueError:
+            continue
+
+    try:
+        parsed = datetime.fromisoformat(normalized)
+        return parsed.timestamp()
+    except ValueError:
+        return None
+
+
 def _infer_charset_size(passphrase: str) -> int:
     """Infer the brute-force character pool from observed passphrase characters."""
     has_lower = any("a" <= ch <= "z" for ch in passphrase)
@@ -385,6 +410,15 @@ class Task:
     contract_punishment: str = ""  # user-defined punishment text
     contract_breached: bool = False  # whether deadline has passed before completion
     contract_breach_notified: bool = False  # whether breach alert has been emitted
+
+
+@dataclass
+class StandaloneReminder:
+    """Represents a project-wide reminder that is not tied to a task."""
+
+    title: str
+    reminder_at: float
+    reminder_send_notification: bool = False
 
 
 @dataclass
@@ -742,28 +776,7 @@ class TaskModel(QAbstractListModel):
 
     def _parseReminderDateTime(self, reminder_str: str) -> Optional[float]:
         """Parse reminder datetime string as local time and return timestamp."""
-        normalized = reminder_str.strip()
-        if not normalized:
-            return None
-
-        for fmt in (
-            "%Y-%m-%d %H:%M",
-            "%Y-%m-%d %H:%M:%S",
-            "%Y-%m-%dT%H:%M",
-            "%Y-%m-%dT%H:%M:%S",
-        ):
-            try:
-                parsed = datetime.strptime(normalized, fmt)
-                return parsed.timestamp()
-            except ValueError:
-                continue
-
-        try:
-            # Supports ISO inputs including timezone offsets.
-            parsed = datetime.fromisoformat(normalized)
-            return parsed.timestamp()
-        except ValueError:
-            return None
+        return _parse_local_datetime(reminder_str)
 
     @Slot(int, str)
     def setCountdownTimer(self, row: int, duration_str: str) -> None:
@@ -2168,6 +2181,7 @@ class ProjectManager(QObject):
     tabSwitched = Signal()  # Emitted when switching to a different tab
     taskDrillRequested = Signal(int, arguments=["taskIndex"])
     taskReminderDue = Signal(int, int, str, arguments=["tabIndex", "taskIndex", "taskTitle"])
+    standaloneReminderDue = Signal(str, arguments=["title"])
     taskContractBreached = Signal(
         int,
         int,
@@ -2203,10 +2217,11 @@ class ProjectManager(QObject):
         self._settings = QSettings("ProgressTracker", "ProgressTracker")
         self._sidebar_expanded = self._load_sidebar_expanded_setting()
         self._recent_projects: List[str] = self._load_recent_projects()
+        self._standalone_reminders: List[StandaloneReminder] = []
         self._navigation_back_stack: List[NavigationSnapshot] = []
         self._restoring_navigation = False
         self._reminder_timer = QTimer(self)
-        self._reminder_timer.timeout.connect(self._checkBackgroundTabReminders)
+        self._reminder_timer.timeout.connect(self._processReminderTimers)
         self._reminder_timer.start(1000)
         self._task_model.taskReminderDue.connect(self._onCurrentTabReminderDue)
         self._task_model.taskContractBreached.connect(self._onCurrentTabContractBreached)
@@ -2248,6 +2263,7 @@ class ProjectManager(QObject):
         self._workspace_markdown_tabs = normalize_editor_tabs([], fallback_text="")
         self.workspaceMarkdownTabsChanged.emit()
         self.currentTabMarkdownTabsChanged.emit()
+        self._standalone_reminders = []
 
         # Clear live models (drops references to Task/DiagramItem objects).
         self._task_model.clear()
@@ -2329,13 +2345,22 @@ class ProjectManager(QObject):
                 return name
         return "Main" if tab_index == 0 else f"Tab {tab_index + 1}"
 
-    def _publishReminderNotification(self, tab_index: int, task_title: str) -> None:
+    def _publishReminderNotification(
+        self,
+        tab_index: int,
+        reminder_title: str,
+        *,
+        scope_label: Optional[str] = None,
+    ) -> None:
         """Send an ntfy notification for a due reminder when configured."""
-        title = task_title.strip() or "Task"
-        tab_name = self._tabDisplayName(tab_index)
+        title = reminder_title.strip() or "Reminder"
         message = f"Reminder due: {title}"
-        if tab_name:
-            message += f"\nTab: {tab_name}"
+        if scope_label:
+            message += f"\nScope: {scope_label}"
+        else:
+            tab_name = self._tabDisplayName(tab_index)
+            if tab_name:
+                message += f"\nTab: {tab_name}"
         _publish_ntfy_message_async(
             "ActionDraw Reminder",
             message,
@@ -2343,6 +2368,53 @@ class ProjectManager(QObject):
             self.ntfyTopic,
             self.ntfyToken,
         )
+
+    def _standalone_reminder_to_dict(
+        self,
+        reminder: StandaloneReminder,
+        reminder_index: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "title": reminder.title,
+            "reminder_at": reminder.reminder_at,
+        }
+        if reminder.reminder_send_notification:
+            payload["reminder_send_notification"] = True
+        if reminder_index is not None:
+            payload["standaloneIndex"] = reminder_index
+        return payload
+
+    def _serialize_standalone_reminders(self) -> List[Dict[str, Any]]:
+        return [self._standalone_reminder_to_dict(reminder) for reminder in self._standalone_reminders]
+
+    def _load_standalone_reminders(self, payload: Any) -> None:
+        self._standalone_reminders = []
+        if not isinstance(payload, list):
+            return
+        for entry in payload:
+            if not isinstance(entry, dict):
+                continue
+            title = str(entry.get("title", "") or "").strip()
+            if not title:
+                continue
+            reminder_at = entry.get("reminder_at")
+            try:
+                reminder_ts = float(reminder_at)
+            except (TypeError, ValueError):
+                continue
+            self._standalone_reminders.append(
+                StandaloneReminder(
+                    title=title,
+                    reminder_at=reminder_ts,
+                    reminder_send_notification=bool(entry.get("reminder_send_notification", False)),
+                )
+            )
+        self._standalone_reminders.sort(key=lambda reminder: float(reminder.reminder_at))
+
+    def _processReminderTimers(self) -> None:
+        """Process reminder timers for background tabs and standalone reminders."""
+        self._checkBackgroundTabReminders()
+        self._checkStandaloneReminders()
 
     def _onCurrentTabReminderDue(self, task_index: int, task_title: str) -> None:
         tab_index = self._tab_model.currentTabIndex if self._tab_model is not None else 0
@@ -2445,6 +2517,32 @@ class ProjectManager(QObject):
         if sent_notification:
             self._save_after_reminder()
 
+    def _checkStandaloneReminders(self) -> None:
+        """Emit due project-wide reminders and clear them once handled."""
+        if not self._standalone_reminders:
+            return
+
+        now = time.time()
+        remaining: List[StandaloneReminder] = []
+        sent_notification = False
+
+        for reminder in self._standalone_reminders:
+            if float(reminder.reminder_at) > now:
+                remaining.append(reminder)
+                continue
+
+            if reminder.reminder_send_notification:
+                self._publishReminderNotification(0, reminder.title, scope_label="Project")
+                sent_notification = True
+            self.standaloneReminderDue.emit(reminder.title)
+
+        if len(remaining) == len(self._standalone_reminders):
+            return
+
+        self._standalone_reminders = remaining
+        if sent_notification:
+            self._save_after_reminder()
+
     def _save_after_reminder(self) -> None:
         """Persist the project so the cleared notification flag survives a crash."""
         if self._current_file_path:
@@ -2482,6 +2580,33 @@ class ProjectManager(QObject):
             model_index,
             [self._tab_model.CompletionRole, self._tab_model.ActiveTaskTitleRole],
         )
+
+    @Slot(result="QVariantList")
+    def getActiveStandaloneReminders(self) -> List[Dict[str, Any]]:
+        """Return active project-wide standalone reminders sorted by soonest first."""
+        now = time.time()
+        reminders: List[Dict[str, Any]] = []
+        for reminder_index, reminder in enumerate(self._standalone_reminders):
+            reminder_ts = float(reminder.reminder_at)
+            if reminder_ts <= now:
+                continue
+            reminders.append(
+                {
+                    "kind": "standalone",
+                    "title": reminder.title,
+                    "taskTitle": reminder.title,
+                    "tabIndex": -1,
+                    "tabName": "Project",
+                    "taskIndex": -1,
+                    "standaloneIndex": reminder_index,
+                    "reminderAt": reminder_ts,
+                    "reminderText": datetime.fromtimestamp(reminder_ts).strftime("%Y-%m-%d %H:%M"),
+                    "isCurrentTab": False,
+                }
+            )
+
+        reminders.sort(key=lambda entry: float(entry.get("reminderAt", 0.0)))
+        return reminders
 
     @Slot(result="QVariantList")
     def getActiveReminders(self) -> List[Dict[str, Any]]:
@@ -2523,9 +2648,12 @@ class ProjectManager(QObject):
                 title = str(task.get("title", "")).strip() or "Task"
                 reminders.append(
                     {
+                        "kind": "task",
+                        "title": title,
                         "tabIndex": tab_index,
                         "tabName": tab_name,
                         "taskIndex": task_index,
+                        "standaloneIndex": -1,
                         "taskTitle": title,
                         "reminderAt": reminder_ts,
                         "reminderText": datetime.fromtimestamp(reminder_ts).strftime("%Y-%m-%d %H:%M"),
@@ -2533,6 +2661,7 @@ class ProjectManager(QObject):
                     }
                 )
 
+        reminders.extend(self.getActiveStandaloneReminders())
         reminders.sort(key=lambda entry: float(entry.get("reminderAt", 0.0)))
         return reminders
 
@@ -2630,6 +2759,40 @@ class ProjectManager(QObject):
         task.pop("reminder_at", None)
         task.pop("reminder_send_notification", None)
         self._emit_tab_summary_changed(tab_index)
+
+    @Slot(str, str, result=bool)
+    @Slot(str, str, bool, result=bool)
+    def addStandaloneReminder(
+        self,
+        title: str,
+        reminder_at_str: str,
+        send_notification: bool = False,
+    ) -> bool:
+        """Create a project-wide standalone reminder."""
+        normalized_title = str(title or "").strip()
+        if not normalized_title:
+            return False
+
+        reminder_at = _parse_local_datetime(reminder_at_str)
+        if reminder_at is None:
+            return False
+
+        self._standalone_reminders.append(
+            StandaloneReminder(
+                title=normalized_title,
+                reminder_at=reminder_at,
+                reminder_send_notification=bool(send_notification),
+            )
+        )
+        self._standalone_reminders.sort(key=lambda reminder: float(reminder.reminder_at))
+        return True
+
+    @Slot(int)
+    def clearStandaloneReminder(self, reminder_index: int) -> None:
+        """Clear a project-wide standalone reminder by its current list index."""
+        if reminder_index < 0 or reminder_index >= len(self._standalone_reminders):
+            return
+        self._standalone_reminders.pop(reminder_index)
 
     def _string_setting(self, key: str, default: str = "") -> str:
         """Read a string setting from QSettings."""
@@ -2952,6 +3115,7 @@ class ProjectManager(QObject):
                 "tabs": tabs_data,
                 "active_tab": current_tab_index,
                 "workspace_markdown_tabs": normalize_editor_tabs(self._workspace_markdown_tabs, fallback_text=""),
+                "standalone_reminders": self._serialize_standalone_reminders(),
             }
 
         return {
@@ -2963,6 +3127,7 @@ class ProjectManager(QObject):
             }],
             "active_tab": 0,
             "workspace_markdown_tabs": normalize_editor_tabs(self._workspace_markdown_tabs, fallback_text=""),
+            "standalone_reminders": self._serialize_standalone_reminders(),
         }
 
     def _serialize_project_payload(self, project_data: Dict[str, Any]) -> str:
@@ -3468,6 +3633,7 @@ class ProjectManager(QObject):
                 project_data.get("workspace_markdown_tabs"),
                 fallback_text="",
             )
+            self._load_standalone_reminders(project_data.get("standalone_reminders", []))
             self.workspaceMarkdownTabsChanged.emit()
             self.currentTabMarkdownTabsChanged.emit()
 

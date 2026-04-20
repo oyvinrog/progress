@@ -450,18 +450,27 @@ def _identify_focus_items(snapshot: Dict[str, Any], limit: int = 5) -> Dict[str,
     for reminder in snapshot.get("reminders", []):
         if not isinstance(reminder, dict):
             continue
-        key = ("reminder", int(reminder.get("tabIndex", 0)), int(reminder.get("taskIndex", -1)))
+        reminder_kind = str(reminder.get("kind", "task") or "task")
+        key = (
+            "reminder",
+            reminder_kind,
+            int(reminder.get("tabIndex", 0)),
+            int(reminder.get("taskIndex", -1)),
+            int(reminder.get("standaloneIndex", -1)),
+        )
         if key in seen:
             continue
         seen.add(key)
+        title = str(reminder.get("title", "") or reminder.get("taskTitle", "") or "Reminder")
         candidates.append(
             {
-                "kind": "reminder",
+                "kind": reminder_kind == "standalone" and "standaloneReminder" or "reminder",
                 "priority": 70,
                 "tabIndex": int(reminder.get("tabIndex", 0)),
                 "tabName": str(reminder.get("tabName", "") or ""),
                 "taskIndex": int(reminder.get("taskIndex", -1)),
-                "taskTitle": str(reminder.get("taskTitle", "") or ""),
+                "taskTitle": title,
+                "title": title,
                 "reason": f"Reminder set for {reminder.get('reminderText', '')}",
             }
         )

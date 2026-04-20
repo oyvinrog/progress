@@ -311,17 +311,21 @@ ApplicationWindow {
             return
         root.reminderPopupBusy = true
         var nextReminder = root.reminderQueue.shift()
+        root.pendingReminderKind = nextReminder.kind || "task"
         root.pendingReminderTabIndex = nextReminder.tabIndex
         root.pendingReminderTaskIndex = nextReminder.taskIndex
-        root.pendingReminderTaskTitle = nextReminder.taskTitle
+        root.pendingReminderStandaloneIndex = nextReminder.standaloneIndex !== undefined ? nextReminder.standaloneIndex : -1
+        root.pendingReminderTaskTitle = nextReminder.title || nextReminder.taskTitle
         reminderPopup.open()
     }
 
-    function showReminderAlert(tabIndex, taskIndex, taskTitle) {
+    function showReminderAlert(tabIndex, taskIndex, taskTitle, kind, standaloneIndex) {
         var reminder = {
+            kind: kind && kind.length > 0 ? kind : "task",
             tabIndex: tabIndex,
             taskIndex: taskIndex,
-            taskTitle: taskTitle && taskTitle.length > 0 ? taskTitle : "Task",
+            standaloneIndex: standaloneIndex !== undefined ? standaloneIndex : -1,
+            title: taskTitle && taskTitle.length > 0 ? taskTitle : "Reminder",
         }
         root.reminderQueue.push(reminder)
         if (!reminderPopup.visible)
@@ -504,6 +508,8 @@ ApplicationWindow {
     property string lastCreatedTaskId: ""
     property int pendingReminderTabIndex: 0
     property int pendingReminderTaskIndex: -1
+    property int pendingReminderStandaloneIndex: -1
+    property string pendingReminderKind: "task"
     property string pendingReminderTaskTitle: ""
     property var reminderQueue: []
     property bool reminderPopupBusy: false
@@ -1240,7 +1246,8 @@ ApplicationWindow {
 
             Rectangle {
                 Layout.fillWidth: true
-                visible: (root.activeReminders && root.activeReminders.length > 0)
+                visible: !!projectManager
+                    || (root.activeReminders && root.activeReminders.length > 0)
                     || (root.activeContracts && root.activeContracts.length > 0)
                 radius: 10
                 color: "#18232d"
@@ -1261,7 +1268,7 @@ ApplicationWindow {
                         color: "#21313d"
                         border.color: "#3b566a"
                         border.width: 1
-                        visible: root.activeReminders && root.activeReminders.length > 0
+                        visible: projectManager !== null
 
                         RowLayout {
                             id: reminderHeaderRow
@@ -1278,7 +1285,7 @@ ApplicationWindow {
                             }
 
                             Text {
-                                text: root.activeReminders.length + " pending"
+                                text: (root.activeReminders ? root.activeReminders.length : 0) + " pending"
                                 color: "#d6a66b"
                                 font.pixelSize: 10
                                 font.bold: true
@@ -1286,6 +1293,11 @@ ApplicationWindow {
 
                             Item {
                                 Layout.fillWidth: true
+                            }
+
+                            Button {
+                                text: "New Reminder"
+                                onClicked: dialogs.openStandaloneReminderDialog()
                             }
 
                             Button {
@@ -1324,7 +1336,7 @@ ApplicationWindow {
                                         spacing: 1
 
                                         Text {
-                                            text: "[" + modelData.tabName + "] " + modelData.taskTitle
+                                            text: "[" + modelData.tabName + "] " + (modelData.title || modelData.taskTitle)
                                             color: "#fff7ef"
                                             font.pixelSize: 11
                                             font.bold: true
@@ -1341,6 +1353,7 @@ ApplicationWindow {
 
                                     Button {
                                         text: "Open Task"
+                                        visible: modelData.kind !== "standalone"
                                         onClicked: {
                                             if (projectManager && projectManager.openTabTask)
                                                 projectManager.openTabTask(Number(modelData.tabIndex), Number(modelData.taskIndex))
@@ -1350,7 +1363,10 @@ ApplicationWindow {
                                     Button {
                                         text: "Clear"
                                         onClicked: {
-                                            if (projectManager && projectManager.clearReminder) {
+                                            if (modelData.kind === "standalone" && projectManager && projectManager.clearStandaloneReminder) {
+                                                projectManager.clearStandaloneReminder(Number(modelData.standaloneIndex))
+                                                root.refreshActiveReminders()
+                                            } else if (projectManager && projectManager.clearReminder) {
                                                 projectManager.clearReminder(Number(modelData.tabIndex), Number(modelData.taskIndex))
                                                 root.refreshActiveReminders()
                                             }
@@ -4495,8 +4511,16 @@ ApplicationWindow {
 
             Text {
                 Layout.fillWidth: true
-                text: root.pendingReminderTaskTitle && root.pendingReminderTaskTitle.length > 0 ? root.pendingReminderTaskTitle : "Task"
+                text: root.pendingReminderTaskTitle && root.pendingReminderTaskTitle.length > 0 ? root.pendingReminderTaskTitle : "Reminder"
                 color: "#f5f6f8"
+                wrapMode: Text.WordWrap
+            }
+
+            Text {
+                Layout.fillWidth: true
+                visible: root.pendingReminderKind === "standalone"
+                text: "Project reminder"
+                color: "#f1c892"
                 wrapMode: Text.WordWrap
             }
 
@@ -4505,6 +4529,7 @@ ApplicationWindow {
 
                 Button {
                     text: "Open Task"
+                    visible: root.pendingReminderKind !== "standalone"
                     onClicked: {
                         var tabIndex = root.pendingReminderTabIndex
                         var taskIndex = root.pendingReminderTaskIndex
@@ -4658,7 +4683,12 @@ ApplicationWindow {
         function onTaskReminderDue(tabIndex, taskIndex, taskTitle) {
             root.showWindow()
             root.refreshActiveReminders()
-            root.showReminderAlert(tabIndex, taskIndex, taskTitle)
+            root.showReminderAlert(tabIndex, taskIndex, taskTitle, "task", -1)
+        }
+        function onStandaloneReminderDue(title) {
+            root.showWindow()
+            root.refreshActiveReminders()
+            root.showReminderAlert(-1, -1, title, "standalone", -1)
         }
         function onTaskContractBreached(tabIndex, taskIndex, taskTitle, punishment, deadlineText) {
             root.showWindow()

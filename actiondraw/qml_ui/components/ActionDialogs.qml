@@ -199,6 +199,16 @@ Item {
         timePickerPopup.open()
     }
 
+    function openStandaloneReminderDialog() {
+        reminderDialog.standaloneMode = true
+        reminderDialog.taskIndex = -1
+        reminderDialog.standaloneTitle = ""
+        reminderDialog.dateValue = ""
+        reminderDialog.timeValue = ""
+        reminderDialog.sendNotification = false
+        reminderDialog.open()
+    }
+
     function exportBoxDialogPdf(selectedFile) {
         if (!markdownPdfExporter || !markdownPdfExporter.exportTabsToPdf)
             return false
@@ -1492,6 +1502,8 @@ Item {
         title: "Set Reminder"
         width: 420
         property int taskIndex: -1
+        property bool standaloneMode: false
+        property string standaloneTitle: ""
         property string dateValue: ""
         property string timeValue: ""
         property bool sendNotification: false
@@ -1546,10 +1558,27 @@ Item {
             spacing: 12
 
             Label {
-                text: "Set a local date and time reminder."
+                text: reminderDialog.standaloneMode
+                    ? "Set a project-wide reminder not tied to any task."
+                    : "Set a local date and time reminder."
                 color: "#8a93a5"
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
+            }
+
+            TextField {
+                Layout.fillWidth: true
+                visible: reminderDialog.standaloneMode
+                text: reminderDialog.standaloneTitle
+                placeholderText: "Reminder title"
+                selectByMouse: true
+                color: "#f5f6f8"
+                background: Rectangle {
+                    color: "#1b2028"
+                    radius: 4
+                    border.color: "#384458"
+                }
+                onTextChanged: reminderDialog.standaloneTitle = text
             }
 
             Rectangle {
@@ -1710,14 +1739,37 @@ Item {
         }
 
         onAccepted: {
-            if (diagramModel && reminderDialog.taskIndex >= 0) {
-                if (reminderDialog.sendNotification && projectManager && !projectManager.ntfyConfigured) {
-                    if (root && root.showSaveNotification)
-                        root.showSaveNotification("Go to Notification Settings to configure notifications")
-                    return
-                }
-                var reminderValue = reminderDialog.dateValue.trim() + " " + reminderDialog.timeValue.trim()
-                if (reminderDialog.dateValue.trim().length > 0 && reminderDialog.timeValue.trim().length > 0) {
+            if (reminderDialog.sendNotification && projectManager && !projectManager.ntfyConfigured) {
+                if (root && root.showSaveNotification)
+                    root.showSaveNotification("Go to Notification Settings to configure notifications")
+                return
+            }
+            var reminderValue = reminderDialog.dateValue.trim() + " " + reminderDialog.timeValue.trim()
+            if (reminderDialog.dateValue.trim().length > 0 && reminderDialog.timeValue.trim().length > 0) {
+                if (reminderDialog.standaloneMode) {
+                    if (!projectManager || !projectManager.addStandaloneReminder) {
+                        if (root && root.showSaveNotification)
+                            root.showSaveNotification("Project reminders are unavailable")
+                        return
+                    }
+                    if (reminderDialog.standaloneTitle.trim().length === 0) {
+                        if (root && root.showSaveNotification)
+                            root.showSaveNotification("Reminder title is required")
+                        return
+                    }
+                    var standaloneSaved = projectManager.addStandaloneReminder(
+                        reminderDialog.standaloneTitle,
+                        reminderValue,
+                        reminderDialog.sendNotification
+                    )
+                    if (!standaloneSaved) {
+                        if (root && root.showSaveNotification)
+                            root.showSaveNotification("Invalid reminder. Use YYYY-MM-DD and HH:MM")
+                        return
+                    }
+                    if (root && root.refreshActiveReminders)
+                        root.refreshActiveReminders()
+                } else if (diagramModel && reminderDialog.taskIndex >= 0) {
                     var saved = diagramModel.setTaskReminderAt(
                         reminderDialog.taskIndex,
                         reminderValue,
@@ -1728,6 +1780,8 @@ Item {
                             root.showSaveNotification("Invalid reminder. Use YYYY-MM-DD and HH:MM")
                         return
                     }
+                    if (root && root.refreshActiveReminders)
+                        root.refreshActiveReminders()
                 }
             }
             reminderDialog.close()
@@ -1736,6 +1790,8 @@ Item {
 
         onClosed: {
             reminderDialog.taskIndex = -1
+            reminderDialog.standaloneMode = false
+            reminderDialog.standaloneTitle = ""
             reminderDialog.dateValue = ""
             reminderDialog.timeValue = ""
             reminderDialog.sendNotification = false
@@ -1750,6 +1806,7 @@ Item {
         function openEditor() {
             if (reminderContextMenu.taskIndex < 0)
                 return
+            reminderDialog.standaloneMode = false
             reminderDialog.taskIndex = reminderContextMenu.taskIndex
             var parts = reminderDialog.parseReminderParts(reminderContextMenu.reminderAt)
             reminderDialog.dateValue = parts.date

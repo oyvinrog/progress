@@ -1161,6 +1161,17 @@ class TestCreateActionDrawWindow:
         assert 'root.wrapCurrentSelection(root._tabHighlightStart, root._tabHighlightEnd)' in editor_pane_qml
         assert 'root.wrapCurrentSelection(root._taskHighlightStart, root._taskHighlightEnd)' in editor_pane_qml
 
+    def test_qml_contains_standalone_reminder_actions(self):
+        dialogs_qml = (QML_DIR / "components" / "ActionDialogs.qml").read_text(encoding="utf-8")
+        window_qml = (QML_DIR / "ActionDrawWindow.qml").read_text(encoding="utf-8")
+
+        assert 'function openStandaloneReminderDialog()' in dialogs_qml
+        assert 'property bool standaloneMode: false' in dialogs_qml
+        assert 'projectManager.addStandaloneReminder' in dialogs_qml
+        assert 'text: "New Reminder"' in window_qml
+        assert 'projectManager.clearStandaloneReminder' in window_qml
+        assert 'visible: root.pendingReminderKind !== "standalone"' in window_qml
+
 
 class TestMarkdownTabClipboard:
     def test_parse_tabs_from_clipboard_text_multiple_lines(self):
@@ -4122,6 +4133,119 @@ class TestTaskReminders:
         assert [entry["taskTitle"] for entry in reminders] == ["Background Reminder", "Current Reminder"]
         assert reminders[0]["tabName"] == "Tab 2"
         assert reminders[1]["tabName"] == "Main"
+
+    def test_project_manager_get_active_reminders_includes_standalone_entries(self, app):
+        from datetime import datetime, timedelta
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        task_model.addTask("Current Reminder", -1)
+        current_str = (datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
+        assert task_model.setReminderAt(0, current_str) is True
+
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        standalone_str = (datetime.now() + timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M")
+        assert project_manager.addStandaloneReminder("Water plants", standalone_str, True) is True
+
+        reminders = project_manager.getActiveReminders()
+
+        assert [entry["title"] for entry in reminders] == ["Water plants", "Current Reminder"]
+        assert reminders[0]["kind"] == "standalone"
+        assert reminders[0]["tabName"] == "Project"
+        assert reminders[0]["taskIndex"] == -1
+        assert reminders[1]["kind"] == "task"
+
+    def test_project_manager_clears_standalone_reminder(self, app):
+        from datetime import datetime, timedelta
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        reminder_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        assert project_manager.addStandaloneReminder("Inbox review", reminder_str) is True
+
+        reminders = project_manager.getActiveStandaloneReminders()
+        assert reminders[0]["title"] == "Inbox review"
+
+        project_manager.clearStandaloneReminder(0)
+
+        assert project_manager.getActiveStandaloneReminders() == []
+
+    def test_project_manager_emits_due_signal_for_standalone_reminder(self, app):
+        from datetime import datetime, timedelta
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        reminder_str = (datetime.now() - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M")
+        assert project_manager.addStandaloneReminder("Call mom", reminder_str) is True
+
+        due = []
+        project_manager.standaloneReminderDue.connect(lambda title: due.append(title))
+        project_manager._checkStandaloneReminders()
+
+        assert due == ["Call mom"]
+        assert project_manager.getActiveStandaloneReminders() == []
+
+    def test_project_manager_sends_ntfy_for_standalone_due_reminder(self, app, monkeypatch):
+        from datetime import datetime, timedelta
+        from task_model import TaskModel, ProjectManager, TabModel
+        import task_model as task_model_module
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        project_manager.saveNtfySettings("https://example.ntfy", "alerts", "secret")
+
+        reminder_str = (datetime.now() - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M")
+        assert project_manager.addStandaloneReminder("Stretch", reminder_str, True) is True
+
+        published = []
+        monkeypatch.setattr(
+            task_model_module,
+            "_publish_ntfy_message_async",
+            lambda title, message, server=None, topic=None, token=None: published.append((title, message, server, topic, token)),
+        )
+
+        project_manager._checkStandaloneReminders()
+
+        assert published == [("ActionDraw Reminder", "Reminder due: Stretch\nScope: Project", "https://example.ntfy", "alerts", "secret")]
+
+    def test_project_manager_builds_and_loads_standalone_reminder_payload(self, app):
+        from datetime import datetime, timedelta
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        reminder_str = (datetime.now() + timedelta(hours=3)).strftime("%Y-%m-%d %H:%M")
+        assert project_manager.addStandaloneReminder("Backup laptop", reminder_str, True) is True
+
+        payload = project_manager._build_project_data()
+        assert payload["standalone_reminders"][0]["title"] == "Backup laptop"
+        assert payload["standalone_reminders"][0]["reminder_send_notification"] is True
+
+        other_task_model = TaskModel()
+        other_diagram_model = DiagramModel(task_model=other_task_model)
+        other_tab_model = TabModel()
+        other_project_manager = ProjectManager(other_task_model, other_diagram_model, other_tab_model)
+        other_project_manager._load_standalone_reminders(payload["standalone_reminders"])
+
+        loaded = other_project_manager.getActiveStandaloneReminders()
+        assert loaded[0]["title"] == "Backup laptop"
+        assert loaded[0]["kind"] == "standalone"
 
     def test_project_manager_clear_reminder_clears_current_tab(self, app):
         from datetime import datetime, timedelta

@@ -46,6 +46,7 @@ def _sample_backend() -> ActionDrawMcpBackend:
     project_manager.setWorkspaceMarkdownTabs([
         {"name": "Inbox", "text": "Project-wide markdown"},
     ])
+    project_manager.addStandaloneReminder("Water plants", "2099-01-01 08:00", True)
     tab_model.getAllTabs()[0].markdown_tabs = [
         {"name": "Overview", "text": "Main tab markdown"},
     ]
@@ -118,6 +119,7 @@ class TestBuildActionDrawMcpServer:
         later_tasks = _call_tool(server, "list_tasks", {"tab_index": 1})
         items = _call_tool(server, "list_diagram_items", {})
         snapshot = _call_tool(server, "get_project_snapshot", {})
+        reminders = _call_tool(server, "get_active_reminders", {})
         focus_items = _call_tool(server, "identify_focus_items", {"limit": 3})
 
         assert summary["currentTabName"] == "Main"
@@ -134,7 +136,10 @@ class TestBuildActionDrawMcpServer:
         assert snapshot["tabs"][1]["tabMarkdownTabs"] == [
             {"name": "Plan", "text": "Later tab markdown"},
         ]
+        assert any(entry["kind"] == "standalone" and entry["title"] == "Water plants" for entry in reminders)
+        assert any(entry["kind"] == "standalone" and entry["title"] == "Water plants" for entry in snapshot["reminders"])
         assert focus_items["items"]
+        assert any(item["kind"] == "standaloneReminder" for item in focus_items["items"])
 
     def test_mutation_tools_update_models(self, app):
         backend = _sample_backend()
