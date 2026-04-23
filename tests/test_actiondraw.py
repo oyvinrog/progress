@@ -1171,6 +1171,13 @@ class TestCreateActionDrawWindow:
         assert 'text: "New Reminder"' in window_qml
         assert 'projectManager.clearStandaloneReminder' in window_qml
         assert 'visible: root.pendingReminderKind !== "standalone"' in window_qml
+        assert 'text: "Renew"' in window_qml
+        assert 'function openReminderRenewDialog()' in window_qml
+        assert 'dialogs.reminderDialog.sendNotification = root.pendingReminderSendNotification' in window_qml
+        assert 'dialogs.reminderDialog.standaloneTitle = root.pendingReminderTaskTitle || ""' in window_qml
+        assert 'Qt.callLater(root.openReminderRenewDialog)' in window_qml
+        assert 'text: "Open Task"' in window_qml
+        assert 'text: "Dismiss"' in window_qml
 
     def test_qml_active_reminders_show_countdown_and_absolute_time(self):
         window_qml = (QML_DIR / "ActionDrawWindow.qml").read_text(encoding="utf-8")
@@ -3754,13 +3761,30 @@ class TestTaskReminders:
         assert task_model_with_reminder.setReminderAt(0, reminder_str) is True
 
         due = []
-        task_model_with_reminder.taskReminderDue.connect(lambda idx, title: due.append((idx, title)))
+        task_model_with_reminder.taskReminderDue.connect(
+            lambda idx, title, send_notification: due.append((idx, title, send_notification))
+        )
         task_model_with_reminder._updateActiveTasks()
 
-        assert due == [(0, "Task with reminder")]
+        assert due == [(0, "Task with reminder", False)]
         index = task_model_with_reminder.index(0, 0)
         active = task_model_with_reminder.data(index, task_model_with_reminder.ReminderActiveRole)
         assert active == False
+
+    def test_due_reminder_signal_preserves_notification_flag_before_clear(self, task_model_with_reminder):
+        from datetime import datetime, timedelta
+
+        reminder_str = (datetime.now() - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M")
+        assert task_model_with_reminder.setReminderAt(0, reminder_str, True) is True
+
+        due = []
+        task_model_with_reminder.taskReminderDue.connect(
+            lambda idx, title, send_notification: due.append((idx, title, send_notification))
+        )
+        task_model_with_reminder._updateActiveTasks()
+
+        assert due == [(0, "Task with reminder", True)]
+        assert task_model_with_reminder.isReminderNotificationEnabled(0) is False
 
     def test_reminder_serialization(self, task_model_with_reminder):
         from datetime import datetime, timedelta
@@ -3885,10 +3909,12 @@ class TestTaskReminders:
         project_manager.saveNtfySettings("https://ntfy.sh", "", "")
 
         due = []
-        project_manager.taskReminderDue.connect(lambda tab_idx, task_idx, title: due.append((tab_idx, task_idx, title)))
+        project_manager.taskReminderDue.connect(
+            lambda tab_idx, task_idx, title, send_notification: due.append((tab_idx, task_idx, title, send_notification))
+        )
         task_model._updateActiveTasks()
 
-        assert due == [(0, 0, "Current Reminder")]
+        assert due == [(0, 0, "Current Reminder", False)]
 
     def test_project_manager_emits_background_tab_reminder_due(self, app):
         import time
@@ -3920,10 +3946,12 @@ class TestTaskReminders:
         )
 
         due = []
-        project_manager.taskReminderDue.connect(lambda tab_idx, task_idx, title: due.append((tab_idx, task_idx, title)))
+        project_manager.taskReminderDue.connect(
+            lambda tab_idx, task_idx, title, send_notification: due.append((tab_idx, task_idx, title, send_notification))
+        )
         project_manager._checkBackgroundTabReminders()
 
-        assert due == [(1, 0, "Background Reminder")]
+        assert due == [(1, 0, "Background Reminder", True)]
 
         # Reminder is cleared after firing
         tabs = tab_model.getAllTabs()
@@ -4240,10 +4268,29 @@ class TestTaskReminders:
         assert project_manager.addStandaloneReminder("Call mom", reminder_str) is True
 
         due = []
-        project_manager.standaloneReminderDue.connect(lambda title: due.append(title))
+        project_manager.standaloneReminderDue.connect(lambda title, send_notification: due.append((title, send_notification)))
         project_manager._checkStandaloneReminders()
 
-        assert due == ["Call mom"]
+        assert due == [("Call mom", False)]
+        assert project_manager.getActiveStandaloneReminders() == []
+
+    def test_project_manager_standalone_due_signal_preserves_notification_flag(self, app):
+        from datetime import datetime, timedelta
+        from task_model import ProjectManager, TabModel, TaskModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        reminder_str = (datetime.now() - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M")
+        assert project_manager.addStandaloneReminder("Stretch", reminder_str, True) is True
+
+        due = []
+        project_manager.standaloneReminderDue.connect(lambda title, send_notification: due.append((title, send_notification)))
+        project_manager._checkStandaloneReminders()
+
+        assert due == [("Stretch", True)]
         assert project_manager.getActiveStandaloneReminders() == []
 
     def test_project_manager_sends_ntfy_for_standalone_due_reminder(self, app, monkeypatch):

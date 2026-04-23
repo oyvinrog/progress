@@ -486,7 +486,7 @@ class TaskModel(QAbstractListModel):
     taskCompletionChanged = Signal(int, bool, arguments=['taskIndex', 'completed'])
     taskCountdownChanged = Signal(int, arguments=['taskIndex'])
     taskReminderChanged = Signal(int, arguments=['taskIndex'])
-    taskReminderDue = Signal(int, str, arguments=['taskIndex', 'taskTitle'])
+    taskReminderDue = Signal(int, str, bool, arguments=['taskIndex', 'taskTitle', 'sendNotification'])
     taskContractChanged = Signal(int, arguments=['taskIndex'])
     taskContractBreached = Signal(
         int,
@@ -1006,7 +1006,7 @@ class TaskModel(QAbstractListModel):
         current_time = time.time()
         changed = False
         countdown_task_indices = []
-        due_reminders: List[Tuple[int, str]] = []
+        due_reminders: List[Tuple[int, str, bool]] = []
         contract_task_indices = []
         due_contracts: List[Tuple[int, str, str, str]] = []
 
@@ -1022,7 +1022,7 @@ class TaskModel(QAbstractListModel):
                 countdown_task_indices.append(i)
 
             if task.reminder_at is not None and not task.completed and task.reminder_at <= current_time:
-                due_reminders.append((i, task.title))
+                due_reminders.append((i, task.title, bool(task.reminder_send_notification)))
 
             if self._isContractActive(task):
                 contract_task_indices.append(i)
@@ -1070,13 +1070,13 @@ class TaskModel(QAbstractListModel):
             )
             self.taskContractChanged.emit(i)
 
-        for i, task_title in due_reminders:
+        for i, task_title, send_notification in due_reminders:
             task = self._tasks[i]
             task.reminder_at = None
             idx = self.index(i, 0)
             self.dataChanged.emit(idx, idx, [self.ReminderActiveRole, self.ReminderAtRole])
             self.taskReminderChanged.emit(i)
-            self.taskReminderDue.emit(i, task_title)
+            self.taskReminderDue.emit(i, task_title, send_notification)
             task.reminder_send_notification = False
 
         for i, task_title, punishment, deadline_text in due_contracts:
@@ -2190,8 +2190,8 @@ class ProjectManager(QObject):
     canGoBackChanged = Signal()
     tabSwitched = Signal()  # Emitted when switching to a different tab
     taskDrillRequested = Signal(int, arguments=["taskIndex"])
-    taskReminderDue = Signal(int, int, str, arguments=["tabIndex", "taskIndex", "taskTitle"])
-    standaloneReminderDue = Signal(str, arguments=["title"])
+    taskReminderDue = Signal(int, int, str, bool, arguments=["tabIndex", "taskIndex", "taskTitle", "sendNotification"])
+    standaloneReminderDue = Signal(str, bool, arguments=["title", "sendNotification"])
     taskContractBreached = Signal(
         int,
         int,
@@ -2426,13 +2426,13 @@ class ProjectManager(QObject):
         self._checkBackgroundTabReminders()
         self._checkStandaloneReminders()
 
-    def _onCurrentTabReminderDue(self, task_index: int, task_title: str) -> None:
+    def _onCurrentTabReminderDue(self, task_index: int, task_title: str, send_notification: bool) -> None:
         tab_index = self._tab_model.currentTabIndex if self._tab_model is not None else 0
         sent_notification = False
-        if self._task_model.isReminderNotificationEnabled(task_index):
+        if send_notification:
             self._publishReminderNotification(tab_index, task_title)
             sent_notification = True
-        self.taskReminderDue.emit(tab_index, task_index, task_title)
+        self.taskReminderDue.emit(tab_index, task_index, task_title, send_notification)
         if sent_notification:
             self._save_after_reminder()
 
@@ -2487,7 +2487,7 @@ class ProjectManager(QObject):
                     if send_notification:
                         self._publishReminderNotification(tab_index, title)
                         sent_notification = True
-                    self.taskReminderDue.emit(tab_index, task_index, title)
+                    self.taskReminderDue.emit(tab_index, task_index, title, send_notification)
 
                 deadline_at = task.get("contract_deadline_at")
                 punishment = str(task.get("contract_punishment", "")).strip()
@@ -2544,7 +2544,7 @@ class ProjectManager(QObject):
             if reminder.reminder_send_notification:
                 self._publishReminderNotification(0, reminder.title, scope_label="Project")
                 sent_notification = True
-            self.standaloneReminderDue.emit(reminder.title)
+            self.standaloneReminderDue.emit(reminder.title, bool(reminder.reminder_send_notification))
 
         if len(remaining) == len(self._standalone_reminders):
             return
