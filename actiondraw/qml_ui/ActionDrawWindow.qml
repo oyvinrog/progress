@@ -1344,6 +1344,14 @@ ApplicationWindow {
                                         }
 
                                         Text {
+                                            text: "Due in " + (modelData.countdownText || "0:00")
+                                            color: "#ffe3a8"
+                                            font.pixelSize: 10
+                                            font.bold: true
+                                            elide: Text.ElideRight
+                                        }
+
+                                        Text {
                                             text: "Remind at " + modelData.reminderText
                                             color: "#f1c892"
                                             font.pixelSize: 10

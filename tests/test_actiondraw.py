@@ -1172,6 +1172,12 @@ class TestCreateActionDrawWindow:
         assert 'projectManager.clearStandaloneReminder' in window_qml
         assert 'visible: root.pendingReminderKind !== "standalone"' in window_qml
 
+    def test_qml_active_reminders_show_countdown_and_absolute_time(self):
+        window_qml = (QML_DIR / "ActionDrawWindow.qml").read_text(encoding="utf-8")
+
+        assert 'text: "Due in " + (modelData.countdownText || "0:00")' in window_qml
+        assert 'text: "Remind at " + modelData.reminderText' in window_qml
+
 
 class TestMarkdownTabClipboard:
     def test_parse_tabs_from_clipboard_text_multiple_lines(self):
@@ -4157,6 +4163,50 @@ class TestTaskReminders:
         assert reminders[0]["tabName"] == "Project"
         assert reminders[0]["taskIndex"] == -1
         assert reminders[1]["kind"] == "task"
+
+    def test_project_manager_active_reminders_include_live_countdown_metadata(self, app, monkeypatch):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        fixed_now = 1_700_000_000.0
+        monkeypatch.setattr("task_model.time.time", lambda: fixed_now)
+
+        task_model = TaskModel()
+        task_model.addTask("Current Reminder", -1)
+        task_model._tasks[0].reminder_at = fixed_now + 179.9
+
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        reminders = project_manager.getActiveReminders()
+
+        assert reminders[0]["secondsRemaining"] == 179
+        assert reminders[0]["countdownText"] == "2:59"
+        assert reminders[0]["taskTitle"] == "Current Reminder"
+
+    def test_project_manager_standalone_reminders_include_hour_countdown_metadata(self, app, monkeypatch):
+        from task_model import ProjectManager, StandaloneReminder, TabModel, TaskModel
+
+        fixed_now = 1_700_000_000.0
+        monkeypatch.setattr("task_model.time.time", lambda: fixed_now)
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        project_manager._standalone_reminders = [
+            StandaloneReminder(
+                title="Long Reminder",
+                reminder_at=fixed_now + 3_661.2,
+                reminder_send_notification=False,
+            )
+        ]
+
+        reminders = project_manager.getActiveStandaloneReminders()
+
+        assert reminders[0]["secondsRemaining"] == 3661
+        assert reminders[0]["countdownText"] == "1:01:01"
+        assert reminders[0]["kind"] == "standalone"
 
     def test_project_manager_clears_standalone_reminder(self, app):
         from datetime import datetime, timedelta
