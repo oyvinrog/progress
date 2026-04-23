@@ -316,20 +316,40 @@ ApplicationWindow {
         root.pendingReminderTaskIndex = nextReminder.taskIndex
         root.pendingReminderStandaloneIndex = nextReminder.standaloneIndex !== undefined ? nextReminder.standaloneIndex : -1
         root.pendingReminderTaskTitle = nextReminder.title || nextReminder.taskTitle
+        root.pendingReminderSendNotification = nextReminder.sendNotification || false
         reminderPopup.open()
     }
 
-    function showReminderAlert(tabIndex, taskIndex, taskTitle, kind, standaloneIndex) {
+    function showReminderAlert(tabIndex, taskIndex, taskTitle, kind, standaloneIndex, sendNotification) {
         var reminder = {
             kind: kind && kind.length > 0 ? kind : "task",
             tabIndex: tabIndex,
             taskIndex: taskIndex,
             standaloneIndex: standaloneIndex !== undefined ? standaloneIndex : -1,
             title: taskTitle && taskTitle.length > 0 ? taskTitle : "Reminder",
+            sendNotification: sendNotification || false,
         }
         root.reminderQueue.push(reminder)
         if (!reminderPopup.visible)
             root.showNextReminderAlert()
+    }
+
+    function openReminderRenewDialog() {
+        if (!dialogs || !dialogs.reminderDialog)
+            return
+        dialogs.reminderDialog.dateValue = ""
+        dialogs.reminderDialog.timeValue = ""
+        dialogs.reminderDialog.sendNotification = root.pendingReminderSendNotification
+        if (root.pendingReminderKind === "standalone") {
+            dialogs.reminderDialog.standaloneMode = true
+            dialogs.reminderDialog.taskIndex = -1
+            dialogs.reminderDialog.standaloneTitle = root.pendingReminderTaskTitle || ""
+        } else {
+            dialogs.reminderDialog.standaloneMode = false
+            dialogs.reminderDialog.taskIndex = root.pendingReminderTaskIndex
+            dialogs.reminderDialog.standaloneTitle = ""
+        }
+        dialogs.reminderDialog.open()
     }
 
     function refreshActiveReminders() {
@@ -511,6 +531,7 @@ ApplicationWindow {
     property int pendingReminderStandaloneIndex: -1
     property string pendingReminderKind: "task"
     property string pendingReminderTaskTitle: ""
+    property bool pendingReminderSendNotification: false
     property var reminderQueue: []
     property bool reminderPopupBusy: false
     property int pendingContractTabIndex: 0
@@ -1339,6 +1360,14 @@ ApplicationWindow {
                                             text: "[" + modelData.tabName + "] " + (modelData.title || modelData.taskTitle)
                                             color: "#fff7ef"
                                             font.pixelSize: 11
+                                            font.bold: true
+                                            elide: Text.ElideRight
+                                        }
+
+                                        Text {
+                                            text: "Due in " + (modelData.countdownText || "0:00")
+                                            color: "#ffe3a8"
+                                            font.pixelSize: 10
                                             font.bold: true
                                             elide: Text.ElideRight
                                         }
@@ -4543,6 +4572,14 @@ ApplicationWindow {
                 }
 
                 Button {
+                    text: "Renew"
+                    onClicked: {
+                        reminderPopup.close()
+                        Qt.callLater(root.openReminderRenewDialog)
+                    }
+                }
+
+                Button {
                     text: "Dismiss"
                     onClicked: reminderPopup.close()
                 }
@@ -4680,15 +4717,15 @@ ApplicationWindow {
     Connections {
         target: projectManager
         enabled: projectManager !== null
-        function onTaskReminderDue(tabIndex, taskIndex, taskTitle) {
+        function onTaskReminderDue(tabIndex, taskIndex, taskTitle, sendNotification) {
             root.showWindow()
             root.refreshActiveReminders()
-            root.showReminderAlert(tabIndex, taskIndex, taskTitle, "task", -1)
+            root.showReminderAlert(tabIndex, taskIndex, taskTitle, "task", -1, sendNotification)
         }
-        function onStandaloneReminderDue(title) {
+        function onStandaloneReminderDue(title, sendNotification) {
             root.showWindow()
             root.refreshActiveReminders()
-            root.showReminderAlert(-1, -1, title, "standalone", -1)
+            root.showReminderAlert(-1, -1, title, "standalone", -1, sendNotification)
         }
         function onTaskContractBreached(tabIndex, taskIndex, taskTitle, punishment, deadlineText) {
             root.showWindow()

@@ -163,6 +163,16 @@ def _parse_local_datetime(reminder_str: str) -> Optional[float]:
         return None
 
 
+def _format_short_countdown(total_seconds: float) -> str:
+    """Format remaining seconds as M:SS or H:MM:SS for reminder countdowns."""
+    total_secs = max(0, int(math.floor(float(total_seconds))))
+    hours, remainder = divmod(total_secs, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours > 0:
+        return f"{hours}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes}:{seconds:02d}"
+
+
 def _infer_charset_size(passphrase: str) -> int:
     """Infer the brute-force character pool from observed passphrase characters."""
     has_lower = any("a" <= ch <= "z" for ch in passphrase)
@@ -476,7 +486,7 @@ class TaskModel(QAbstractListModel):
     taskCompletionChanged = Signal(int, bool, arguments=['taskIndex', 'completed'])
     taskCountdownChanged = Signal(int, arguments=['taskIndex'])
     taskReminderChanged = Signal(int, arguments=['taskIndex'])
-    taskReminderDue = Signal(int, str, arguments=['taskIndex', 'taskTitle'])
+    taskReminderDue = Signal(int, str, bool, arguments=['taskIndex', 'taskTitle', 'sendNotification'])
     taskContractChanged = Signal(int, arguments=['taskIndex'])
     taskContractBreached = Signal(
         int,
@@ -996,7 +1006,7 @@ class TaskModel(QAbstractListModel):
         current_time = time.time()
         changed = False
         countdown_task_indices = []
-        due_reminders: List[Tuple[int, str]] = []
+        due_reminders: List[Tuple[int, str, bool]] = []
         contract_task_indices = []
         due_contracts: List[Tuple[int, str, str, str]] = []
 
@@ -1012,7 +1022,7 @@ class TaskModel(QAbstractListModel):
                 countdown_task_indices.append(i)
 
             if task.reminder_at is not None and not task.completed and task.reminder_at <= current_time:
-                due_reminders.append((i, task.title))
+                due_reminders.append((i, task.title, bool(task.reminder_send_notification)))
 
             if self._isContractActive(task):
                 contract_task_indices.append(i)
@@ -1060,13 +1070,13 @@ class TaskModel(QAbstractListModel):
             )
             self.taskContractChanged.emit(i)
 
-        for i, task_title in due_reminders:
+        for i, task_title, send_notification in due_reminders:
             task = self._tasks[i]
             task.reminder_at = None
             idx = self.index(i, 0)
             self.dataChanged.emit(idx, idx, [self.ReminderActiveRole, self.ReminderAtRole])
             self.taskReminderChanged.emit(i)
-            self.taskReminderDue.emit(i, task_title)
+            self.taskReminderDue.emit(i, task_title, send_notification)
             task.reminder_send_notification = False
 
         for i, task_title, punishment, deadline_text in due_contracts:
@@ -2180,8 +2190,8 @@ class ProjectManager(QObject):
     canGoBackChanged = Signal()
     tabSwitched = Signal()  # Emitted when switching to a different tab
     taskDrillRequested = Signal(int, arguments=["taskIndex"])
-    taskReminderDue = Signal(int, int, str, arguments=["tabIndex", "taskIndex", "taskTitle"])
-    standaloneReminderDue = Signal(str, arguments=["title"])
+    taskReminderDue = Signal(int, int, str, bool, arguments=["tabIndex", "taskIndex", "taskTitle", "sendNotification"])
+    standaloneReminderDue = Signal(str, bool, arguments=["title", "sendNotification"])
     taskContractBreached = Signal(
         int,
         int,
@@ -2416,13 +2426,13 @@ class ProjectManager(QObject):
         self._checkBackgroundTabReminders()
         self._checkStandaloneReminders()
 
-    def _onCurrentTabReminderDue(self, task_index: int, task_title: str) -> None:
+    def _onCurrentTabReminderDue(self, task_index: int, task_title: str, send_notification: bool) -> None:
         tab_index = self._tab_model.currentTabIndex if self._tab_model is not None else 0
         sent_notification = False
-        if self._task_model.isReminderNotificationEnabled(task_index):
+        if send_notification:
             self._publishReminderNotification(tab_index, task_title)
             sent_notification = True
-        self.taskReminderDue.emit(tab_index, task_index, task_title)
+        self.taskReminderDue.emit(tab_index, task_index, task_title, send_notification)
         if sent_notification:
             self._save_after_reminder()
 
@@ -2477,7 +2487,7 @@ class ProjectManager(QObject):
                     if send_notification:
                         self._publishReminderNotification(tab_index, title)
                         sent_notification = True
-                    self.taskReminderDue.emit(tab_index, task_index, title)
+                    self.taskReminderDue.emit(tab_index, task_index, title, send_notification)
 
                 deadline_at = task.get("contract_deadline_at")
                 punishment = str(task.get("contract_punishment", "")).strip()
@@ -2534,7 +2544,7 @@ class ProjectManager(QObject):
             if reminder.reminder_send_notification:
                 self._publishReminderNotification(0, reminder.title, scope_label="Project")
                 sent_notification = True
-            self.standaloneReminderDue.emit(reminder.title)
+            self.standaloneReminderDue.emit(reminder.title, bool(reminder.reminder_send_notification))
 
         if len(remaining) == len(self._standalone_reminders):
             return
@@ -2547,6 +2557,35 @@ class ProjectManager(QObject):
         """Persist the project so the cleared notification flag survives a crash."""
         if self._current_file_path:
             self.saveCurrentProject()
+
+    def _build_active_reminder_payload(
+        self,
+        *,
+        kind: str,
+        title: str,
+        tab_index: int,
+        tab_name: str,
+        task_index: int,
+        standalone_index: int,
+        reminder_ts: float,
+        is_current_tab: bool,
+        now: float,
+    ) -> Dict[str, Any]:
+        seconds_remaining = max(0, int(math.floor(reminder_ts - now)))
+        return {
+            "kind": kind,
+            "title": title,
+            "taskTitle": title,
+            "tabIndex": tab_index,
+            "tabName": tab_name,
+            "taskIndex": task_index,
+            "standaloneIndex": standalone_index,
+            "reminderAt": reminder_ts,
+            "reminderText": datetime.fromtimestamp(reminder_ts).strftime("%Y-%m-%d %H:%M"),
+            "secondsRemaining": seconds_remaining,
+            "countdownText": _format_short_countdown(seconds_remaining),
+            "isCurrentTab": is_current_tab,
+        }
 
     def _get_cross_tab_tasks(self, tab_index: int) -> Optional[List[Dict[str, Any]]]:
         """Return mutable task dictionaries for a tab, if available."""
@@ -2591,18 +2630,17 @@ class ProjectManager(QObject):
             if reminder_ts <= now:
                 continue
             reminders.append(
-                {
-                    "kind": "standalone",
-                    "title": reminder.title,
-                    "taskTitle": reminder.title,
-                    "tabIndex": -1,
-                    "tabName": "Project",
-                    "taskIndex": -1,
-                    "standaloneIndex": reminder_index,
-                    "reminderAt": reminder_ts,
-                    "reminderText": datetime.fromtimestamp(reminder_ts).strftime("%Y-%m-%d %H:%M"),
-                    "isCurrentTab": False,
-                }
+                self._build_active_reminder_payload(
+                    kind="standalone",
+                    title=reminder.title,
+                    tab_index=-1,
+                    tab_name="Project",
+                    task_index=-1,
+                    standalone_index=reminder_index,
+                    reminder_ts=reminder_ts,
+                    is_current_tab=False,
+                    now=now,
+                )
             )
 
         reminders.sort(key=lambda entry: float(entry.get("reminderAt", 0.0)))
@@ -2647,18 +2685,17 @@ class ProjectManager(QObject):
                     continue
                 title = str(task.get("title", "")).strip() or "Task"
                 reminders.append(
-                    {
-                        "kind": "task",
-                        "title": title,
-                        "tabIndex": tab_index,
-                        "tabName": tab_name,
-                        "taskIndex": task_index,
-                        "standaloneIndex": -1,
-                        "taskTitle": title,
-                        "reminderAt": reminder_ts,
-                        "reminderText": datetime.fromtimestamp(reminder_ts).strftime("%Y-%m-%d %H:%M"),
-                        "isCurrentTab": tab_index == current_tab_index,
-                    }
+                    self._build_active_reminder_payload(
+                        kind="task",
+                        title=title,
+                        tab_index=tab_index,
+                        tab_name=tab_name,
+                        task_index=task_index,
+                        standalone_index=-1,
+                        reminder_ts=reminder_ts,
+                        is_current_tab=tab_index == current_tab_index,
+                        now=now,
+                    )
                 )
 
         reminders.extend(self.getActiveStandaloneReminders())
