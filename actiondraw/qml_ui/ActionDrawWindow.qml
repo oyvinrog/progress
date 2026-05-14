@@ -2001,6 +2001,23 @@ ApplicationWindow {
                             }
                         }
                         MenuItem {
+                            id: addToKanbanMenuItem
+                            text: "Add to Kanban"
+                            icon.name: "view-list-details"
+                            visible: {
+                                if (!diagramModel || !projectManager || !tabModel || !diagramLayer.contextMenuItemId)
+                                    return false
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                return item && item.type === "task" && item.taskIndex >= 0
+                            }
+                            height: visible ? implicitHeight : 0
+                            onTriggered: {
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                if (item && item.taskIndex >= 0 && projectManager)
+                                    projectManager.addTaskToKanban(item.taskIndex)
+                            }
+                        }
+                        MenuItem {
                             id: openChatGptMenuItem
                             text: "Open ChatGPT"
                             icon.name: "help-contents"

@@ -3233,6 +3233,43 @@ class TestMultiTabSupport:
         assert item["taskIndex"] == 0
         assert item["text"] == "Backend API"
 
+    def test_project_manager_add_task_to_kanban_creates_ready_drill_tab(self, app):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        task_model.addTask("Prep release", -1)
+        task_model.addTask("Write checklist", 0)
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        created_index = project_manager.addTaskToKanban(0)
+
+        assert created_index == 1
+        assert tab_model.currentTabIndex == 0
+        assert tab_model.getTabSummary(created_index)["name"] == "Prep release"
+        assert tab_model.getTabSummary(created_index)["kanbanStatus"] == "ready"
+        assert tab_model.getTabSummary(created_index)["kanbanSlotHour"] == -1
+        assert tab_model.getAllTabs()[created_index].tasks["tasks"][0]["title"] == "Write checklist"
+
+    def test_project_manager_add_task_to_kanban_reuses_existing_drill_tab(self, app):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        task_model.addTask("Existing card", -1)
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        tab_model.addTab("Existing card")
+        tab_model.setKanbanPlacement(1, "todo", -1)
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        created_index = project_manager.addTaskToKanban(0)
+
+        assert created_index == 1
+        assert tab_model.tabCount == 2
+        assert tab_model.currentTabIndex == 0
+        assert tab_model.getTabSummary(1)["kanbanStatus"] == "ready"
+
     def test_project_manager_create_tab_from_markdown_selection_switches_to_new_tab(self, app):
         from task_model import TaskModel, ProjectManager, TabModel
 
@@ -3290,6 +3327,9 @@ class TestActionDrawQmlTaskInteractions:
         assert 'id: renameTaskMenuItem' in qml
         assert 'text: "Rename Task..."' in qml
         assert 'id: drillToTabMenuItem' in qml
+        assert 'id: addToKanbanMenuItem' in qml
+        assert 'text: "Add to Kanban"' in qml
+        assert "projectManager.addTaskToKanban(item.taskIndex)" in qml
 
     def test_toolbar_exposes_back_button(self):
         qml = (QML_DIR / "components" / "ToolbarRow.qml").read_text(encoding="utf-8")

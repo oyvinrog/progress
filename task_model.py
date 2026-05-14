@@ -3839,9 +3839,38 @@ class ProjectManager(QObject):
         if task_index < 0 or task_index >= self._task_model.rowCount():
             return
 
+        target_index = self._findOrCreateDrillTab(task_index)
+        if target_index < 0:
+            return
+
+        if self._shouldCaptureNavigation(target_index):
+            self._pushNavigationSnapshot(self._currentNavigationSnapshot())
+        self.switchTab(target_index)
+
+    @Slot(int, result=int)
+    def addTaskToKanban(self, task_index: int) -> int:
+        """Create or find a task's drill tab and place it in the kanban Ready lane."""
+        if self._tab_model is None:
+            return -1
+        if task_index < 0 or task_index >= self._task_model.rowCount():
+            return -1
+
+        target_index = self._findOrCreateDrillTab(task_index)
+        if target_index < 0:
+            return -1
+        self._tab_model.setKanbanPlacement(target_index, "ready", -1)
+        return target_index
+
+    def _findOrCreateDrillTab(self, task_index: int) -> int:
+        """Return the tab backing a task drill target, creating it when needed."""
+        if self._tab_model is None:
+            return -1
+        if task_index < 0 or task_index >= self._task_model.rowCount():
+            return -1
+
         task_title = self._task_model.getTaskTitle(task_index).strip()
         if not task_title:
-            return
+            return -1
 
         target_index = -1
         for idx, tab in enumerate(self._tab_model.getAllTabs()):
@@ -3861,9 +3890,7 @@ class ProjectManager(QObject):
             target_index = self._tab_model.tabCount - 1
             self._tab_model.setTabData(target_index, subtasks_data, diagram_data)
 
-        if self._shouldCaptureNavigation(target_index):
-            self._pushNavigationSnapshot(self._currentNavigationSnapshot())
-        self.switchTab(target_index)
+        return target_index
 
     @Slot()
     def goBack(self) -> None:
