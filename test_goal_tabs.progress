@@ -1,0 +1,4110 @@
+{
+  "version": "1.1",
+  "tabs": [
+    {
+      "name": "Create data model for patient registry",
+      "tasks": {
+        "tasks": [
+          {
+            "title": "Create data model for patient registry",
+            "completed": false,
+            "time_spent": 3600.0,
+            "parent_index": -1,
+            "indent_level": 0,
+            "custom_estimate": 28800.0
+          },
+          {
+            "title": "Interview admissions and clinical leads",
+            "completed": true,
+            "time_spent": 3600.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "List required patient attributes",
+            "completed": true,
+            "time_spent": 2400.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 3600.0
+          },
+          {
+            "title": "Define visit and encounter entities",
+            "completed": false,
+            "time_spent": 1200.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Map consent and privacy fields",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 3600.0
+          },
+          {
+            "title": "Review model with reporting team",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 3600.0
+          },
+          {
+            "title": "Document version 1 schema",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          }
+        ]
+      },
+      "diagram": {
+        "items": [
+          {
+            "id": "patient_item_0",
+            "item_type": "box",
+            "x": 40.0,
+            "y": 70.0,
+            "width": 120.0,
+            "height": 60.0,
+            "text": "Start",
+            "task_index": -1,
+            "color": "#2f855a",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "patient_item_1",
+            "item_type": "task",
+            "x": 220.0,
+            "y": 45.0,
+            "width": 190.0,
+            "height": 72.0,
+            "text": "Interview leads",
+            "task_index": 1,
+            "color": "#27ae60",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "patient_item_2",
+            "item_type": "task",
+            "x": 465.0,
+            "y": 45.0,
+            "width": 200.0,
+            "height": 72.0,
+            "text": "Patient attributes",
+            "task_index": 2,
+            "color": "#27ae60",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "patient_item_3",
+            "item_type": "task",
+            "x": 720.0,
+            "y": 45.0,
+            "width": 205.0,
+            "height": 72.0,
+            "text": "Visits and encounters",
+            "task_index": 3,
+            "color": "#f39c12",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "patient_item_4",
+            "item_type": "task",
+            "x": 465.0,
+            "y": 180.0,
+            "width": 200.0,
+            "height": 72.0,
+            "text": "Consent fields",
+            "task_index": 4,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "patient_item_5",
+            "item_type": "database",
+            "x": 720.0,
+            "y": 180.0,
+            "width": 150.0,
+            "height": 86.0,
+            "text": "Registry schema",
+            "task_index": 6,
+            "color": "#c18f5e",
+            "text_color": "#1b2028",
+            "note_tabs": [
+              {
+                "name": "Entities",
+                "text": "Patient, Encounter, Consent, ContactPreference, RegistryAudit"
+              },
+              {
+                "name": "Checks",
+                "text": "Verify required fields, foreign keys, nullable fields, and deletion rules."
+              }
+            ]
+          },
+          {
+            "id": "patient_item_6",
+            "item_type": "note",
+            "x": 960.0,
+            "y": 70.0,
+            "width": 220.0,
+            "height": 120.0,
+            "text": "Acceptance: model can answer active patient count, consent status, and latest visit.",
+            "task_index": -1,
+            "color": "#f5f0e6",
+            "text_color": "#2d3436"
+          }
+        ],
+        "edges": [
+          {
+            "id": "patient_edge_0",
+            "from_id": "patient_item_0",
+            "to_id": "patient_item_1",
+            "description": ""
+          },
+          {
+            "id": "patient_edge_1",
+            "from_id": "patient_item_1",
+            "to_id": "patient_item_2",
+            "description": ""
+          },
+          {
+            "id": "patient_edge_2",
+            "from_id": "patient_item_2",
+            "to_id": "patient_item_3",
+            "description": ""
+          },
+          {
+            "id": "patient_edge_3",
+            "from_id": "patient_item_2",
+            "to_id": "patient_item_4",
+            "description": "privacy"
+          },
+          {
+            "id": "patient_edge_4",
+            "from_id": "patient_item_3",
+            "to_id": "patient_item_5",
+            "description": ""
+          },
+          {
+            "id": "patient_edge_5",
+            "from_id": "patient_item_4",
+            "to_id": "patient_item_5",
+            "description": ""
+          },
+          {
+            "id": "patient_edge_6",
+            "from_id": "patient_item_5",
+            "to_id": "patient_item_6",
+            "description": "review"
+          }
+        ],
+        "strokes": [],
+        "current_task_index": 3
+      },
+      "markdown_tabs": [
+        {
+          "name": "Goal",
+          "text": "# Create data model for patient registry\n\nA fictive verification tab for checking task hierarchy, diagram task bindings, note tabs, colors, and current-task highlighting."
+        },
+        {
+          "name": "Risks",
+          "text": "- Missing consent history\n- Ambiguous patient identifiers\n- Reporting fields added too late"
+        }
+      ],
+      "priority": 3,
+      "priority_time_hours": 8.0,
+      "priority_subjective_value": 9.0,
+      "priority_score": 1.125,
+      "include_in_priority_plot": true,
+      "icon": "DB",
+      "color": "#4a9eff",
+      "pinned": true,
+      "goals": [
+        {
+          "text": "Schema draft reviewed by clinical and reporting stakeholders",
+          "checked": false
+        }
+      ],
+      "kanban_status": "doing",
+      "kanban_slot_hour": 10
+    },
+    {
+      "name": "Clean up old mail address",
+      "tasks": {
+        "tasks": [
+          {
+            "title": "Clean up old mail address",
+            "completed": false,
+            "time_spent": 1800.0,
+            "parent_index": -1,
+            "indent_level": 0,
+            "custom_estimate": 14400.0
+          },
+          {
+            "title": "Export forwarding rules and aliases",
+            "completed": true,
+            "time_spent": 1200.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 1800.0
+          },
+          {
+            "title": "Find accounts still using the address",
+            "completed": false,
+            "time_spent": 900.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 3600.0
+          },
+          {
+            "title": "Update recovery email on critical services",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 3600.0
+          },
+          {
+            "title": "Archive important mail threads",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 2400.0
+          },
+          {
+            "title": "Set final autoresponder",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 1200.0
+          },
+          {
+            "title": "Disable sign-in after quiet period",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 1800.0
+          }
+        ]
+      },
+      "diagram": {
+        "items": [
+          {
+            "id": "mail_item_0",
+            "item_type": "box",
+            "x": 55.0,
+            "y": 70.0,
+            "width": 125.0,
+            "height": 60.0,
+            "text": "Inventory",
+            "task_index": 1,
+            "color": "#27ae60",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "mail_item_1",
+            "item_type": "task",
+            "x": 245.0,
+            "y": 70.0,
+            "width": 185.0,
+            "height": 72.0,
+            "text": "Find linked accounts",
+            "task_index": 2,
+            "color": "#f39c12",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "mail_item_2",
+            "item_type": "task",
+            "x": 500.0,
+            "y": 40.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Update recovery email",
+            "task_index": 3,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "mail_item_3",
+            "item_type": "task",
+            "x": 500.0,
+            "y": 165.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Archive mail threads",
+            "task_index": 4,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "mail_item_4",
+            "item_type": "task",
+            "x": 780.0,
+            "y": 70.0,
+            "width": 190.0,
+            "height": 72.0,
+            "text": "Autoresponder",
+            "task_index": 5,
+            "color": "#9b59b6",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "mail_item_5",
+            "item_type": "task",
+            "x": 1040.0,
+            "y": 70.0,
+            "width": 190.0,
+            "height": 72.0,
+            "text": "Disable sign-in",
+            "task_index": 6,
+            "color": "#e74c3c",
+            "text_color": "#ffffff",
+            "obstacle_markdown": "Only disable after no important messages arrive for 30 days."
+          },
+          {
+            "id": "mail_item_6",
+            "item_type": "freetext",
+            "x": 245.0,
+            "y": 210.0,
+            "width": 210.0,
+            "height": 120.0,
+            "text": "Verification cues:\n- split branch\n- obstacle note\n- current task marker",
+            "task_index": -1,
+            "color": "#f5f0e6",
+            "text_color": "#2d3436",
+            "text_tabs": [
+              {
+                "name": "Visible",
+                "text": "Verification cues:\n- split branch\n- obstacle note\n- current task marker"
+              },
+              {
+                "name": "Hidden",
+                "text": "This tab checks free-text tab persistence."
+              }
+            ]
+          }
+        ],
+        "edges": [
+          {
+            "id": "mail_edge_0",
+            "from_id": "mail_item_0",
+            "to_id": "mail_item_1",
+            "description": ""
+          },
+          {
+            "id": "mail_edge_1",
+            "from_id": "mail_item_1",
+            "to_id": "mail_item_2",
+            "description": "critical"
+          },
+          {
+            "id": "mail_edge_2",
+            "from_id": "mail_item_1",
+            "to_id": "mail_item_3",
+            "description": "archive"
+          },
+          {
+            "id": "mail_edge_3",
+            "from_id": "mail_item_2",
+            "to_id": "mail_item_4",
+            "description": ""
+          },
+          {
+            "id": "mail_edge_4",
+            "from_id": "mail_item_3",
+            "to_id": "mail_item_4",
+            "description": ""
+          },
+          {
+            "id": "mail_edge_5",
+            "from_id": "mail_item_4",
+            "to_id": "mail_item_5",
+            "description": "after quiet period"
+          }
+        ],
+        "strokes": [],
+        "current_task_index": 2
+      },
+      "markdown_tabs": [
+        {
+          "name": "Goal",
+          "text": "# Clean up old mail address\n\nUse this tab to verify task state, branch edges, freetext tabs, and obstacle markdown."
+        }
+      ],
+      "priority": 2,
+      "priority_time_hours": 4.0,
+      "priority_subjective_value": 7.0,
+      "priority_score": 1.75,
+      "include_in_priority_plot": true,
+      "icon": "MAIL",
+      "color": "#f39c12",
+      "pinned": true,
+      "goals": [
+        {
+          "text": "Old address can be disabled without losing access to critical accounts",
+          "checked": false
+        }
+      ],
+      "kanban_status": "todo",
+      "kanban_slot_hour": -1
+    },
+    {
+      "name": "Prepare monthly quality dashboard",
+      "tasks": {
+        "tasks": [
+          {
+            "title": "Prepare monthly quality dashboard",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": -1,
+            "indent_level": 0,
+            "custom_estimate": 21600.0
+          },
+          {
+            "title": "Collect source extracts",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 3600.0
+          },
+          {
+            "title": "Validate measure definitions",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 3600.0
+          },
+          {
+            "title": "Build draft charts",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Add narrative for outliers",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 3600.0
+          },
+          {
+            "title": "Send preview to leadership",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 1800.0
+          }
+        ]
+      },
+      "diagram": {
+        "items": [
+          {
+            "id": "dashboard_item_0",
+            "item_type": "cloud",
+            "x": 50.0,
+            "y": 80.0,
+            "width": 145.0,
+            "height": 80.0,
+            "text": "Source extracts",
+            "task_index": 1,
+            "color": "#7fb3d5",
+            "text_color": "#1b2028"
+          },
+          {
+            "id": "dashboard_item_1",
+            "item_type": "task",
+            "x": 275.0,
+            "y": 80.0,
+            "width": 190.0,
+            "height": 72.0,
+            "text": "Validate measures",
+            "task_index": 2,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "dashboard_item_2",
+            "item_type": "task",
+            "x": 535.0,
+            "y": 80.0,
+            "width": 180.0,
+            "height": 72.0,
+            "text": "Draft charts",
+            "task_index": 3,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "dashboard_item_3",
+            "item_type": "note",
+            "x": 790.0,
+            "y": 35.0,
+            "width": 230.0,
+            "height": 110.0,
+            "text": "Explain outliers before sharing. Flag data gaps separately from performance signals.",
+            "task_index": 4,
+            "color": "#f5f0e6",
+            "text_color": "#2d3436"
+          },
+          {
+            "id": "dashboard_item_4",
+            "item_type": "task",
+            "x": 1085.0,
+            "y": 80.0,
+            "width": 190.0,
+            "height": 72.0,
+            "text": "Send preview",
+            "task_index": 5,
+            "color": "#9b59b6",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "dashboard_item_5",
+            "item_type": "box",
+            "x": 535.0,
+            "y": 225.0,
+            "width": 220.0,
+            "height": 68.0,
+            "text": "Dashboard ready for review",
+            "task_index": 0,
+            "color": "#2f855a",
+            "text_color": "#ffffff"
+          }
+        ],
+        "edges": [
+          {
+            "id": "dashboard_edge_0",
+            "from_id": "dashboard_item_0",
+            "to_id": "dashboard_item_1",
+            "description": ""
+          },
+          {
+            "id": "dashboard_edge_1",
+            "from_id": "dashboard_item_1",
+            "to_id": "dashboard_item_2",
+            "description": ""
+          },
+          {
+            "id": "dashboard_edge_2",
+            "from_id": "dashboard_item_2",
+            "to_id": "dashboard_item_3",
+            "description": "context"
+          },
+          {
+            "id": "dashboard_edge_3",
+            "from_id": "dashboard_item_3",
+            "to_id": "dashboard_item_4",
+            "description": ""
+          },
+          {
+            "id": "dashboard_edge_4",
+            "from_id": "dashboard_item_2",
+            "to_id": "dashboard_item_5",
+            "description": "visual check"
+          },
+          {
+            "id": "dashboard_edge_5",
+            "from_id": "dashboard_item_4",
+            "to_id": "dashboard_item_5",
+            "description": "approval"
+          }
+        ],
+        "strokes": [
+          {
+            "id": "dashboard_stroke_0",
+            "color": "#ffcc00",
+            "width": 4.0,
+            "points": [
+              {
+                "x": 520.0,
+                "y": 205.0
+              },
+              {
+                "x": 560.0,
+                "y": 195.0
+              },
+              {
+                "x": 620.0,
+                "y": 202.0
+              },
+              {
+                "x": 680.0,
+                "y": 190.0
+              }
+            ]
+          }
+        ],
+        "current_task_index": 1
+      },
+      "markdown_tabs": [
+        {
+          "name": "Goal",
+          "text": "# Prepare monthly quality dashboard\n\nThis tab includes a freehand stroke so drawing-layer persistence can be checked."
+        }
+      ],
+      "priority": 1,
+      "priority_time_hours": 6.0,
+      "priority_subjective_value": 6.0,
+      "priority_score": 1.0,
+      "include_in_priority_plot": true,
+      "icon": "Q",
+      "color": "#2f855a",
+      "pinned": false,
+      "goals": [
+        {
+          "text": "Leadership receives a clear draft with validated measures",
+          "checked": false
+        }
+      ],
+      "kanban_status": "todo",
+      "kanban_slot_hour": -1
+    },
+    {
+      "name": "Reconcile duplicate vendor records",
+      "tasks": {
+        "tasks": [
+          {
+            "title": "Reconcile duplicate vendor records",
+            "completed": false,
+            "time_spent": 900.0,
+            "parent_index": -1,
+            "indent_level": 0,
+            "custom_estimate": 18000.0
+          },
+          {
+            "title": "Export vendor master list",
+            "completed": true,
+            "time_spent": 600.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Detect duplicate tax IDs",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          },
+          {
+            "title": "Merge confirmed duplicate records",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 3600.0
+          },
+          {
+            "title": "Notify finance owner",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Archive merge report",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          }
+        ]
+      },
+      "diagram": {
+        "items": [
+          {
+            "id": "messy_3_item_0",
+            "item_type": "box",
+            "x": 45.0,
+            "y": 70.0,
+            "width": 170.0,
+            "height": 64.0,
+            "text": "Goal",
+            "task_index": 0,
+            "color": "#8e44ad",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_3_item_1",
+            "item_type": "task",
+            "x": 275.0,
+            "y": 45.0,
+            "width": 195.0,
+            "height": 72.0,
+            "text": "Export vendor master list",
+            "task_index": 1,
+            "color": "#27ae60",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_3_item_2",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Detect duplicate tax IDs",
+            "task_index": 2,
+            "color": "#f39c12",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_3_item_3",
+            "item_type": "task",
+            "x": 815.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Merge confirmed duplicate records",
+            "task_index": 3,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_3_item_4",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 185.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Notify finance owner",
+            "task_index": 4,
+            "color": "#9b59b6",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_3_item_5",
+            "item_type": "note",
+            "x": 1085.0,
+            "y": 55.0,
+            "width": 230.0,
+            "height": 120.0,
+            "text": "Watch item count and tab navigation for: Reconcile duplicate vendor records.",
+            "task_index": 5,
+            "color": "#f5f0e6",
+            "text_color": "#2d3436",
+            "note_tabs": [
+              {
+                "name": "Summary",
+                "text": "# Reconcile duplicate vendor records\n\nSynthetic messy-tab verification note."
+              },
+              {
+                "name": "Edge cases",
+                "text": "Check long titles, repeated colors, mixed completion, and branch edges."
+              }
+            ]
+          },
+          {
+            "id": "messy_3_item_6",
+            "item_type": "obstacle",
+            "x": 815.0,
+            "y": 185.0,
+            "width": 205.0,
+            "height": 82.0,
+            "text": "Blocked decision",
+            "task_index": -1,
+            "color": "#e74c3c",
+            "text_color": "#ffffff",
+            "obstacle_markdown": "Synthetic blocker used to verify messy projects with extra side nodes."
+          }
+        ],
+        "edges": [
+          {
+            "id": "messy_3_edge_0",
+            "from_id": "messy_3_item_0",
+            "to_id": "messy_3_item_1",
+            "description": ""
+          },
+          {
+            "id": "messy_3_edge_1",
+            "from_id": "messy_3_item_1",
+            "to_id": "messy_3_item_2",
+            "description": ""
+          },
+          {
+            "id": "messy_3_edge_2",
+            "from_id": "messy_3_item_2",
+            "to_id": "messy_3_item_3",
+            "description": "main path"
+          },
+          {
+            "id": "messy_3_edge_3",
+            "from_id": "messy_3_item_2",
+            "to_id": "messy_3_item_4",
+            "description": "parallel"
+          },
+          {
+            "id": "messy_3_edge_4",
+            "from_id": "messy_3_item_3",
+            "to_id": "messy_3_item_5",
+            "description": "finish"
+          },
+          {
+            "id": "messy_3_edge_5",
+            "from_id": "messy_3_item_4",
+            "to_id": "messy_3_item_6",
+            "description": "mess"
+          }
+        ],
+        "strokes": [
+          {
+            "id": "messy_3_stroke_0",
+            "color": "#ffcc00",
+            "width": 3.0,
+            "points": [
+              {
+                "x": 500.0,
+                "y": 180.0
+              },
+              {
+                "x": 560.0,
+                "y": 170.0
+              },
+              {
+                "x": 650.0,
+                "y": 176.0
+              }
+            ]
+          }
+        ],
+        "current_task_index": 2
+      },
+      "markdown_tabs": [
+        {
+          "name": "Goal",
+          "text": "# Reconcile duplicate vendor records\n\nSynthetic tab 4 for high-tab-count ActionDraw verification."
+        },
+        {
+          "name": "Mess notes",
+          "text": "- Similar shape layout\n- Different colors and priorities\n- Mixed completion states"
+        }
+      ],
+      "priority": 3,
+      "priority_time_hours": 5.0,
+      "priority_subjective_value": 8.0,
+      "priority_score": 1.6,
+      "include_in_priority_plot": true,
+      "icon": "VEN",
+      "color": "#8e44ad",
+      "pinned": true,
+      "goals": [
+        {
+          "text": "Reconcile duplicate vendor records reaches a reviewable stopping point",
+          "checked": false
+        }
+      ],
+      "kanban_status": "doing",
+      "kanban_slot_hour": 11
+    },
+    {
+      "name": "Plan clinic move weekend checklist",
+      "tasks": {
+        "tasks": [
+          {
+            "title": "Plan clinic move weekend checklist",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": -1,
+            "indent_level": 0,
+            "custom_estimate": 27000.0
+          },
+          {
+            "title": "Confirm floor plan",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Label equipment by room",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          },
+          {
+            "title": "Book moving crew",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 3600.0
+          },
+          {
+            "title": "Test network drops",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Publish staff schedule",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          }
+        ]
+      },
+      "diagram": {
+        "items": [
+          {
+            "id": "messy_4_item_0",
+            "item_type": "box",
+            "x": 45.0,
+            "y": 70.0,
+            "width": 170.0,
+            "height": 64.0,
+            "text": "Goal",
+            "task_index": 0,
+            "color": "#16a085",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_4_item_1",
+            "item_type": "task",
+            "x": 275.0,
+            "y": 45.0,
+            "width": 195.0,
+            "height": 72.0,
+            "text": "Confirm floor plan",
+            "task_index": 1,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_4_item_2",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Label equipment by room",
+            "task_index": 2,
+            "color": "#f39c12",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_4_item_3",
+            "item_type": "task",
+            "x": 815.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Book moving crew",
+            "task_index": 3,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_4_item_4",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 203.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Test network drops",
+            "task_index": 4,
+            "color": "#9b59b6",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_4_item_5",
+            "item_type": "note",
+            "x": 1085.0,
+            "y": 55.0,
+            "width": 230.0,
+            "height": 120.0,
+            "text": "Watch item count and tab navigation for: Plan clinic move weekend checklist.",
+            "task_index": 5,
+            "color": "#f5f0e6",
+            "text_color": "#2d3436",
+            "note_tabs": [
+              {
+                "name": "Summary",
+                "text": "# Plan clinic move weekend checklist\n\nSynthetic messy-tab verification note."
+              },
+              {
+                "name": "Edge cases",
+                "text": "Check long titles, repeated colors, mixed completion, and branch edges."
+              }
+            ]
+          },
+          {
+            "id": "messy_4_item_6",
+            "item_type": "freetext",
+            "x": 815.0,
+            "y": 203.0,
+            "width": 220.0,
+            "height": 104.0,
+            "text": "Side note\nFollow-up\nOwner TBD",
+            "task_index": -1,
+            "color": "#f5f0e6",
+            "text_color": "#2d3436",
+            "text_tabs": [
+              {
+                "name": "Visible",
+                "text": "Side note\nFollow-up\nOwner TBD"
+              },
+              {
+                "name": "Parking lot",
+                "text": "Synthetic hidden free-text tab for clutter testing."
+              }
+            ]
+          }
+        ],
+        "edges": [
+          {
+            "id": "messy_4_edge_0",
+            "from_id": "messy_4_item_0",
+            "to_id": "messy_4_item_1",
+            "description": ""
+          },
+          {
+            "id": "messy_4_edge_1",
+            "from_id": "messy_4_item_1",
+            "to_id": "messy_4_item_2",
+            "description": ""
+          },
+          {
+            "id": "messy_4_edge_2",
+            "from_id": "messy_4_item_2",
+            "to_id": "messy_4_item_3",
+            "description": "main path"
+          },
+          {
+            "id": "messy_4_edge_3",
+            "from_id": "messy_4_item_2",
+            "to_id": "messy_4_item_4",
+            "description": "parallel"
+          },
+          {
+            "id": "messy_4_edge_4",
+            "from_id": "messy_4_item_3",
+            "to_id": "messy_4_item_5",
+            "description": "finish"
+          },
+          {
+            "id": "messy_4_edge_5",
+            "from_id": "messy_4_item_4",
+            "to_id": "messy_4_item_6",
+            "description": "mess"
+          }
+        ],
+        "strokes": [],
+        "current_task_index": -1
+      },
+      "markdown_tabs": [
+        {
+          "name": "Goal",
+          "text": "# Plan clinic move weekend checklist\n\nSynthetic tab 5 for high-tab-count ActionDraw verification."
+        },
+        {
+          "name": "Mess notes",
+          "text": "- Similar shape layout\n- Different colors and priorities\n- Mixed completion states"
+        }
+      ],
+      "priority": 2,
+      "priority_time_hours": 7.5,
+      "priority_subjective_value": 7.0,
+      "priority_score": 0.933,
+      "include_in_priority_plot": true,
+      "icon": "MOVE",
+      "color": "#16a085",
+      "pinned": false,
+      "goals": [
+        {
+          "text": "Plan clinic move weekend checklist reaches a reviewable stopping point",
+          "checked": false
+        }
+      ],
+      "kanban_status": "todo",
+      "kanban_slot_hour": -1
+    },
+    {
+      "name": "Review access rights for contractors",
+      "tasks": {
+        "tasks": [
+          {
+            "title": "Review access rights for contractors",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": -1,
+            "indent_level": 0,
+            "custom_estimate": 16200.0
+          },
+          {
+            "title": "Export contractor accounts",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Match contracts to managers",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          },
+          {
+            "title": "Remove expired access",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 3600.0
+          },
+          {
+            "title": "Document exceptions",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Send attestation summary",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          }
+        ]
+      },
+      "diagram": {
+        "items": [
+          {
+            "id": "messy_5_item_0",
+            "item_type": "box",
+            "x": 45.0,
+            "y": 70.0,
+            "width": 170.0,
+            "height": 64.0,
+            "text": "Goal",
+            "task_index": 0,
+            "color": "#d35400",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_5_item_1",
+            "item_type": "task",
+            "x": 275.0,
+            "y": 45.0,
+            "width": 195.0,
+            "height": 72.0,
+            "text": "Export contractor accounts",
+            "task_index": 1,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_5_item_2",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Match contracts to managers",
+            "task_index": 2,
+            "color": "#f39c12",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_5_item_3",
+            "item_type": "task",
+            "x": 815.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Remove expired access",
+            "task_index": 3,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_5_item_4",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 221.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Document exceptions",
+            "task_index": 4,
+            "color": "#9b59b6",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_5_item_5",
+            "item_type": "note",
+            "x": 1085.0,
+            "y": 55.0,
+            "width": 230.0,
+            "height": 120.0,
+            "text": "Watch item count and tab navigation for: Review access rights for contractors.",
+            "task_index": 5,
+            "color": "#f5f0e6",
+            "text_color": "#2d3436",
+            "note_tabs": [
+              {
+                "name": "Summary",
+                "text": "# Review access rights for contractors\n\nSynthetic messy-tab verification note."
+              },
+              {
+                "name": "Edge cases",
+                "text": "Check long titles, repeated colors, mixed completion, and branch edges."
+              }
+            ]
+          },
+          {
+            "id": "messy_5_item_6",
+            "item_type": "obstacle",
+            "x": 815.0,
+            "y": 221.0,
+            "width": 205.0,
+            "height": 82.0,
+            "text": "Blocked decision",
+            "task_index": -1,
+            "color": "#e74c3c",
+            "text_color": "#ffffff",
+            "obstacle_markdown": "Synthetic blocker used to verify messy projects with extra side nodes."
+          }
+        ],
+        "edges": [
+          {
+            "id": "messy_5_edge_0",
+            "from_id": "messy_5_item_0",
+            "to_id": "messy_5_item_1",
+            "description": ""
+          },
+          {
+            "id": "messy_5_edge_1",
+            "from_id": "messy_5_item_1",
+            "to_id": "messy_5_item_2",
+            "description": ""
+          },
+          {
+            "id": "messy_5_edge_2",
+            "from_id": "messy_5_item_2",
+            "to_id": "messy_5_item_3",
+            "description": "main path"
+          },
+          {
+            "id": "messy_5_edge_3",
+            "from_id": "messy_5_item_2",
+            "to_id": "messy_5_item_4",
+            "description": "parallel"
+          },
+          {
+            "id": "messy_5_edge_4",
+            "from_id": "messy_5_item_3",
+            "to_id": "messy_5_item_5",
+            "description": "finish"
+          },
+          {
+            "id": "messy_5_edge_5",
+            "from_id": "messy_5_item_4",
+            "to_id": "messy_5_item_6",
+            "description": "mess"
+          }
+        ],
+        "strokes": [],
+        "current_task_index": 2
+      },
+      "markdown_tabs": [
+        {
+          "name": "Goal",
+          "text": "# Review access rights for contractors\n\nSynthetic tab 6 for high-tab-count ActionDraw verification."
+        },
+        {
+          "name": "Mess notes",
+          "text": "- Similar shape layout\n- Different colors and priorities\n- Mixed completion states"
+        }
+      ],
+      "priority": 3,
+      "priority_time_hours": 4.5,
+      "priority_subjective_value": 8.5,
+      "priority_score": 1.889,
+      "include_in_priority_plot": true,
+      "icon": "KEY",
+      "color": "#d35400",
+      "pinned": true,
+      "goals": [
+        {
+          "text": "Review access rights for contractors reaches a reviewable stopping point",
+          "checked": false
+        }
+      ],
+      "kanban_status": "doing",
+      "kanban_slot_hour": 14
+    },
+    {
+      "name": "Draft onboarding path for new analysts",
+      "tasks": {
+        "tasks": [
+          {
+            "title": "Draft onboarding path for new analysts",
+            "completed": true,
+            "time_spent": 1800.0,
+            "parent_index": -1,
+            "indent_level": 0,
+            "custom_estimate": 21600.0
+          },
+          {
+            "title": "Collect recurring questions",
+            "completed": true,
+            "time_spent": 600.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Write first-week checklist",
+            "completed": true,
+            "time_spent": 1200.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          },
+          {
+            "title": "Record tool walkthrough",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 3600.0
+          },
+          {
+            "title": "Create sample assignment",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Review with senior analyst",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          }
+        ]
+      },
+      "diagram": {
+        "items": [
+          {
+            "id": "messy_6_item_0",
+            "item_type": "box",
+            "x": 45.0,
+            "y": 70.0,
+            "width": 170.0,
+            "height": 64.0,
+            "text": "Goal",
+            "task_index": 0,
+            "color": "#2c7be5",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_6_item_1",
+            "item_type": "task",
+            "x": 275.0,
+            "y": 45.0,
+            "width": 195.0,
+            "height": 72.0,
+            "text": "Collect recurring questions",
+            "task_index": 1,
+            "color": "#27ae60",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_6_item_2",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Write first-week checklist",
+            "task_index": 2,
+            "color": "#27ae60",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_6_item_3",
+            "item_type": "task",
+            "x": 815.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Record tool walkthrough",
+            "task_index": 3,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_6_item_4",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 239.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Create sample assignment",
+            "task_index": 4,
+            "color": "#9b59b6",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_6_item_5",
+            "item_type": "note",
+            "x": 1085.0,
+            "y": 55.0,
+            "width": 230.0,
+            "height": 120.0,
+            "text": "Watch item count and tab navigation for: Draft onboarding path for new analysts.",
+            "task_index": 5,
+            "color": "#f5f0e6",
+            "text_color": "#2d3436",
+            "note_tabs": [
+              {
+                "name": "Summary",
+                "text": "# Draft onboarding path for new analysts\n\nSynthetic messy-tab verification note."
+              },
+              {
+                "name": "Edge cases",
+                "text": "Check long titles, repeated colors, mixed completion, and branch edges."
+              }
+            ]
+          },
+          {
+            "id": "messy_6_item_6",
+            "item_type": "freetext",
+            "x": 815.0,
+            "y": 239.0,
+            "width": 220.0,
+            "height": 104.0,
+            "text": "Side note\nFollow-up\nOwner TBD",
+            "task_index": -1,
+            "color": "#f5f0e6",
+            "text_color": "#2d3436",
+            "text_tabs": [
+              {
+                "name": "Visible",
+                "text": "Side note\nFollow-up\nOwner TBD"
+              },
+              {
+                "name": "Parking lot",
+                "text": "Synthetic hidden free-text tab for clutter testing."
+              }
+            ]
+          }
+        ],
+        "edges": [
+          {
+            "id": "messy_6_edge_0",
+            "from_id": "messy_6_item_0",
+            "to_id": "messy_6_item_1",
+            "description": ""
+          },
+          {
+            "id": "messy_6_edge_1",
+            "from_id": "messy_6_item_1",
+            "to_id": "messy_6_item_2",
+            "description": ""
+          },
+          {
+            "id": "messy_6_edge_2",
+            "from_id": "messy_6_item_2",
+            "to_id": "messy_6_item_3",
+            "description": "main path"
+          },
+          {
+            "id": "messy_6_edge_3",
+            "from_id": "messy_6_item_2",
+            "to_id": "messy_6_item_4",
+            "description": "parallel"
+          },
+          {
+            "id": "messy_6_edge_4",
+            "from_id": "messy_6_item_3",
+            "to_id": "messy_6_item_5",
+            "description": "finish"
+          },
+          {
+            "id": "messy_6_edge_5",
+            "from_id": "messy_6_item_4",
+            "to_id": "messy_6_item_6",
+            "description": "mess"
+          }
+        ],
+        "strokes": [],
+        "current_task_index": -1
+      },
+      "markdown_tabs": [
+        {
+          "name": "Goal",
+          "text": "# Draft onboarding path for new analysts\n\nSynthetic tab 7 for high-tab-count ActionDraw verification."
+        },
+        {
+          "name": "Mess notes",
+          "text": "- Similar shape layout\n- Different colors and priorities\n- Mixed completion states"
+        }
+      ],
+      "priority": 1,
+      "priority_time_hours": 6.0,
+      "priority_subjective_value": 5.5,
+      "priority_score": 0.917,
+      "include_in_priority_plot": true,
+      "icon": "ONB",
+      "color": "#2c7be5",
+      "pinned": false,
+      "goals": [
+        {
+          "text": "Draft onboarding path for new analysts reaches a reviewable stopping point",
+          "checked": true
+        }
+      ],
+      "kanban_status": "done",
+      "kanban_slot_hour": -1
+    },
+    {
+      "name": "Clean shared drive project folders",
+      "tasks": {
+        "tasks": [
+          {
+            "title": "Clean shared drive project folders",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": -1,
+            "indent_level": 0,
+            "custom_estimate": 32400.0
+          },
+          {
+            "title": "Inventory root folders",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Find abandoned drafts",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          },
+          {
+            "title": "Move final deliverables",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 3600.0
+          },
+          {
+            "title": "Delete approved duplicates",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Publish naming convention",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          }
+        ]
+      },
+      "diagram": {
+        "items": [
+          {
+            "id": "messy_7_item_0",
+            "item_type": "box",
+            "x": 45.0,
+            "y": 70.0,
+            "width": 170.0,
+            "height": 64.0,
+            "text": "Goal",
+            "task_index": 0,
+            "color": "#607d8b",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_7_item_1",
+            "item_type": "task",
+            "x": 275.0,
+            "y": 45.0,
+            "width": 195.0,
+            "height": 72.0,
+            "text": "Inventory root folders",
+            "task_index": 1,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_7_item_2",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Find abandoned drafts",
+            "task_index": 2,
+            "color": "#f39c12",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_7_item_3",
+            "item_type": "task",
+            "x": 815.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Move final deliverables",
+            "task_index": 3,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_7_item_4",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 185.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Delete approved duplicates",
+            "task_index": 4,
+            "color": "#9b59b6",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_7_item_5",
+            "item_type": "note",
+            "x": 1085.0,
+            "y": 55.0,
+            "width": 230.0,
+            "height": 120.0,
+            "text": "Watch item count and tab navigation for: Clean shared drive project folders.",
+            "task_index": 5,
+            "color": "#f5f0e6",
+            "text_color": "#2d3436",
+            "note_tabs": [
+              {
+                "name": "Summary",
+                "text": "# Clean shared drive project folders\n\nSynthetic messy-tab verification note."
+              },
+              {
+                "name": "Edge cases",
+                "text": "Check long titles, repeated colors, mixed completion, and branch edges."
+              }
+            ]
+          },
+          {
+            "id": "messy_7_item_6",
+            "item_type": "obstacle",
+            "x": 815.0,
+            "y": 185.0,
+            "width": 205.0,
+            "height": 82.0,
+            "text": "Blocked decision",
+            "task_index": -1,
+            "color": "#e74c3c",
+            "text_color": "#ffffff",
+            "obstacle_markdown": "Synthetic blocker used to verify messy projects with extra side nodes."
+          }
+        ],
+        "edges": [
+          {
+            "id": "messy_7_edge_0",
+            "from_id": "messy_7_item_0",
+            "to_id": "messy_7_item_1",
+            "description": ""
+          },
+          {
+            "id": "messy_7_edge_1",
+            "from_id": "messy_7_item_1",
+            "to_id": "messy_7_item_2",
+            "description": ""
+          },
+          {
+            "id": "messy_7_edge_2",
+            "from_id": "messy_7_item_2",
+            "to_id": "messy_7_item_3",
+            "description": "main path"
+          },
+          {
+            "id": "messy_7_edge_3",
+            "from_id": "messy_7_item_2",
+            "to_id": "messy_7_item_4",
+            "description": "parallel"
+          },
+          {
+            "id": "messy_7_edge_4",
+            "from_id": "messy_7_item_3",
+            "to_id": "messy_7_item_5",
+            "description": "finish"
+          },
+          {
+            "id": "messy_7_edge_5",
+            "from_id": "messy_7_item_4",
+            "to_id": "messy_7_item_6",
+            "description": "mess"
+          }
+        ],
+        "strokes": [],
+        "current_task_index": -1
+      },
+      "markdown_tabs": [
+        {
+          "name": "Goal",
+          "text": "# Clean shared drive project folders\n\nSynthetic tab 8 for high-tab-count ActionDraw verification."
+        },
+        {
+          "name": "Mess notes",
+          "text": "- Similar shape layout\n- Different colors and priorities\n- Mixed completion states"
+        }
+      ],
+      "priority": 1,
+      "priority_time_hours": 9.0,
+      "priority_subjective_value": 4.5,
+      "priority_score": 0.5,
+      "include_in_priority_plot": true,
+      "icon": "DRV",
+      "color": "#607d8b",
+      "pinned": false,
+      "goals": [
+        {
+          "text": "Clean shared drive project folders reaches a reviewable stopping point",
+          "checked": false
+        }
+      ],
+      "kanban_status": "todo",
+      "kanban_slot_hour": -1
+    },
+    {
+      "name": "Build incident response contact tree",
+      "tasks": {
+        "tasks": [
+          {
+            "title": "Build incident response contact tree",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": -1,
+            "indent_level": 0,
+            "custom_estimate": 12600.0
+          },
+          {
+            "title": "List escalation roles",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Confirm phone numbers",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          },
+          {
+            "title": "Create call order",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 3600.0
+          },
+          {
+            "title": "Run tabletop test",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Store offline copy",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          }
+        ]
+      },
+      "diagram": {
+        "items": [
+          {
+            "id": "messy_8_item_0",
+            "item_type": "box",
+            "x": 45.0,
+            "y": 70.0,
+            "width": 170.0,
+            "height": 64.0,
+            "text": "Goal",
+            "task_index": 0,
+            "color": "#c0392b",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_8_item_1",
+            "item_type": "task",
+            "x": 275.0,
+            "y": 45.0,
+            "width": 195.0,
+            "height": 72.0,
+            "text": "List escalation roles",
+            "task_index": 1,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_8_item_2",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Confirm phone numbers",
+            "task_index": 2,
+            "color": "#f39c12",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_8_item_3",
+            "item_type": "task",
+            "x": 815.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Create call order",
+            "task_index": 3,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_8_item_4",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 203.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Run tabletop test",
+            "task_index": 4,
+            "color": "#9b59b6",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_8_item_5",
+            "item_type": "note",
+            "x": 1085.0,
+            "y": 55.0,
+            "width": 230.0,
+            "height": 120.0,
+            "text": "Watch item count and tab navigation for: Build incident response contact tree.",
+            "task_index": 5,
+            "color": "#f5f0e6",
+            "text_color": "#2d3436",
+            "note_tabs": [
+              {
+                "name": "Summary",
+                "text": "# Build incident response contact tree\n\nSynthetic messy-tab verification note."
+              },
+              {
+                "name": "Edge cases",
+                "text": "Check long titles, repeated colors, mixed completion, and branch edges."
+              }
+            ]
+          },
+          {
+            "id": "messy_8_item_6",
+            "item_type": "freetext",
+            "x": 815.0,
+            "y": 203.0,
+            "width": 220.0,
+            "height": 104.0,
+            "text": "Side note\nFollow-up\nOwner TBD",
+            "task_index": -1,
+            "color": "#f5f0e6",
+            "text_color": "#2d3436",
+            "text_tabs": [
+              {
+                "name": "Visible",
+                "text": "Side note\nFollow-up\nOwner TBD"
+              },
+              {
+                "name": "Parking lot",
+                "text": "Synthetic hidden free-text tab for clutter testing."
+              }
+            ]
+          }
+        ],
+        "edges": [
+          {
+            "id": "messy_8_edge_0",
+            "from_id": "messy_8_item_0",
+            "to_id": "messy_8_item_1",
+            "description": ""
+          },
+          {
+            "id": "messy_8_edge_1",
+            "from_id": "messy_8_item_1",
+            "to_id": "messy_8_item_2",
+            "description": ""
+          },
+          {
+            "id": "messy_8_edge_2",
+            "from_id": "messy_8_item_2",
+            "to_id": "messy_8_item_3",
+            "description": "main path"
+          },
+          {
+            "id": "messy_8_edge_3",
+            "from_id": "messy_8_item_2",
+            "to_id": "messy_8_item_4",
+            "description": "parallel"
+          },
+          {
+            "id": "messy_8_edge_4",
+            "from_id": "messy_8_item_3",
+            "to_id": "messy_8_item_5",
+            "description": "finish"
+          },
+          {
+            "id": "messy_8_edge_5",
+            "from_id": "messy_8_item_4",
+            "to_id": "messy_8_item_6",
+            "description": "mess"
+          }
+        ],
+        "strokes": [
+          {
+            "id": "messy_8_stroke_0",
+            "color": "#ffcc00",
+            "width": 3.0,
+            "points": [
+              {
+                "x": 500.0,
+                "y": 180.0
+              },
+              {
+                "x": 560.0,
+                "y": 170.0
+              },
+              {
+                "x": 650.0,
+                "y": 176.0
+              }
+            ]
+          }
+        ],
+        "current_task_index": 2
+      },
+      "markdown_tabs": [
+        {
+          "name": "Goal",
+          "text": "# Build incident response contact tree\n\nSynthetic tab 9 for high-tab-count ActionDraw verification."
+        },
+        {
+          "name": "Mess notes",
+          "text": "- Similar shape layout\n- Different colors and priorities\n- Mixed completion states"
+        }
+      ],
+      "priority": 3,
+      "priority_time_hours": 3.5,
+      "priority_subjective_value": 9.0,
+      "priority_score": 2.571,
+      "include_in_priority_plot": true,
+      "icon": "IR",
+      "color": "#c0392b",
+      "pinned": true,
+      "goals": [
+        {
+          "text": "Build incident response contact tree reaches a reviewable stopping point",
+          "checked": false
+        }
+      ],
+      "kanban_status": "doing",
+      "kanban_slot_hour": 9
+    },
+    {
+      "name": "Prepare grant application budget",
+      "tasks": {
+        "tasks": [
+          {
+            "title": "Prepare grant application budget",
+            "completed": false,
+            "time_spent": 900.0,
+            "parent_index": -1,
+            "indent_level": 0,
+            "custom_estimate": 28800.0
+          },
+          {
+            "title": "Gather vendor quotes",
+            "completed": true,
+            "time_spent": 600.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Estimate personnel time",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          },
+          {
+            "title": "Map costs to categories",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 3600.0
+          },
+          {
+            "title": "Check funder limits",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Submit budget draft",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          }
+        ]
+      },
+      "diagram": {
+        "items": [
+          {
+            "id": "messy_9_item_0",
+            "item_type": "box",
+            "x": 45.0,
+            "y": 70.0,
+            "width": 170.0,
+            "height": 64.0,
+            "text": "Goal",
+            "task_index": 0,
+            "color": "#27ae60",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_9_item_1",
+            "item_type": "task",
+            "x": 275.0,
+            "y": 45.0,
+            "width": 195.0,
+            "height": 72.0,
+            "text": "Gather vendor quotes",
+            "task_index": 1,
+            "color": "#27ae60",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_9_item_2",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Estimate personnel time",
+            "task_index": 2,
+            "color": "#f39c12",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_9_item_3",
+            "item_type": "task",
+            "x": 815.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Map costs to categories",
+            "task_index": 3,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_9_item_4",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 221.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Check funder limits",
+            "task_index": 4,
+            "color": "#9b59b6",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_9_item_5",
+            "item_type": "note",
+            "x": 1085.0,
+            "y": 55.0,
+            "width": 230.0,
+            "height": 120.0,
+            "text": "Watch item count and tab navigation for: Prepare grant application budget.",
+            "task_index": 5,
+            "color": "#f5f0e6",
+            "text_color": "#2d3436",
+            "note_tabs": [
+              {
+                "name": "Summary",
+                "text": "# Prepare grant application budget\n\nSynthetic messy-tab verification note."
+              },
+              {
+                "name": "Edge cases",
+                "text": "Check long titles, repeated colors, mixed completion, and branch edges."
+              }
+            ]
+          },
+          {
+            "id": "messy_9_item_6",
+            "item_type": "obstacle",
+            "x": 815.0,
+            "y": 221.0,
+            "width": 205.0,
+            "height": 82.0,
+            "text": "Blocked decision",
+            "task_index": -1,
+            "color": "#e74c3c",
+            "text_color": "#ffffff",
+            "obstacle_markdown": "Synthetic blocker used to verify messy projects with extra side nodes."
+          }
+        ],
+        "edges": [
+          {
+            "id": "messy_9_edge_0",
+            "from_id": "messy_9_item_0",
+            "to_id": "messy_9_item_1",
+            "description": ""
+          },
+          {
+            "id": "messy_9_edge_1",
+            "from_id": "messy_9_item_1",
+            "to_id": "messy_9_item_2",
+            "description": ""
+          },
+          {
+            "id": "messy_9_edge_2",
+            "from_id": "messy_9_item_2",
+            "to_id": "messy_9_item_3",
+            "description": "main path"
+          },
+          {
+            "id": "messy_9_edge_3",
+            "from_id": "messy_9_item_2",
+            "to_id": "messy_9_item_4",
+            "description": "parallel"
+          },
+          {
+            "id": "messy_9_edge_4",
+            "from_id": "messy_9_item_3",
+            "to_id": "messy_9_item_5",
+            "description": "finish"
+          },
+          {
+            "id": "messy_9_edge_5",
+            "from_id": "messy_9_item_4",
+            "to_id": "messy_9_item_6",
+            "description": "mess"
+          }
+        ],
+        "strokes": [],
+        "current_task_index": -1
+      },
+      "markdown_tabs": [
+        {
+          "name": "Goal",
+          "text": "# Prepare grant application budget\n\nSynthetic tab 10 for high-tab-count ActionDraw verification."
+        },
+        {
+          "name": "Mess notes",
+          "text": "- Similar shape layout\n- Different colors and priorities\n- Mixed completion states"
+        }
+      ],
+      "priority": 2,
+      "priority_time_hours": 8.0,
+      "priority_subjective_value": 8.0,
+      "priority_score": 1.0,
+      "include_in_priority_plot": true,
+      "icon": "BUD",
+      "color": "#27ae60",
+      "pinned": false,
+      "goals": [
+        {
+          "text": "Prepare grant application budget reaches a reviewable stopping point",
+          "checked": false
+        }
+      ],
+      "kanban_status": "todo",
+      "kanban_slot_hour": -1
+    },
+    {
+      "name": "Reduce noisy monitoring alerts",
+      "tasks": {
+        "tasks": [
+          {
+            "title": "Reduce noisy monitoring alerts",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": -1,
+            "indent_level": 0,
+            "custom_estimate": 19800.0
+          },
+          {
+            "title": "Rank alerts by volume",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Identify duplicate checks",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          },
+          {
+            "title": "Tune warning thresholds",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 3600.0
+          },
+          {
+            "title": "Add ownership labels",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Measure alert reduction",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          }
+        ]
+      },
+      "diagram": {
+        "items": [
+          {
+            "id": "messy_10_item_0",
+            "item_type": "box",
+            "x": 45.0,
+            "y": 70.0,
+            "width": 170.0,
+            "height": 64.0,
+            "text": "Goal",
+            "task_index": 0,
+            "color": "#f39c12",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_10_item_1",
+            "item_type": "task",
+            "x": 275.0,
+            "y": 45.0,
+            "width": 195.0,
+            "height": 72.0,
+            "text": "Rank alerts by volume",
+            "task_index": 1,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_10_item_2",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Identify duplicate checks",
+            "task_index": 2,
+            "color": "#f39c12",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_10_item_3",
+            "item_type": "task",
+            "x": 815.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Tune warning thresholds",
+            "task_index": 3,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_10_item_4",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 239.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Add ownership labels",
+            "task_index": 4,
+            "color": "#9b59b6",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_10_item_5",
+            "item_type": "note",
+            "x": 1085.0,
+            "y": 55.0,
+            "width": 230.0,
+            "height": 120.0,
+            "text": "Watch item count and tab navigation for: Reduce noisy monitoring alerts.",
+            "task_index": 5,
+            "color": "#f5f0e6",
+            "text_color": "#2d3436",
+            "note_tabs": [
+              {
+                "name": "Summary",
+                "text": "# Reduce noisy monitoring alerts\n\nSynthetic messy-tab verification note."
+              },
+              {
+                "name": "Edge cases",
+                "text": "Check long titles, repeated colors, mixed completion, and branch edges."
+              }
+            ]
+          },
+          {
+            "id": "messy_10_item_6",
+            "item_type": "freetext",
+            "x": 815.0,
+            "y": 239.0,
+            "width": 220.0,
+            "height": 104.0,
+            "text": "Side note\nFollow-up\nOwner TBD",
+            "task_index": -1,
+            "color": "#f5f0e6",
+            "text_color": "#2d3436",
+            "text_tabs": [
+              {
+                "name": "Visible",
+                "text": "Side note\nFollow-up\nOwner TBD"
+              },
+              {
+                "name": "Parking lot",
+                "text": "Synthetic hidden free-text tab for clutter testing."
+              }
+            ]
+          }
+        ],
+        "edges": [
+          {
+            "id": "messy_10_edge_0",
+            "from_id": "messy_10_item_0",
+            "to_id": "messy_10_item_1",
+            "description": ""
+          },
+          {
+            "id": "messy_10_edge_1",
+            "from_id": "messy_10_item_1",
+            "to_id": "messy_10_item_2",
+            "description": ""
+          },
+          {
+            "id": "messy_10_edge_2",
+            "from_id": "messy_10_item_2",
+            "to_id": "messy_10_item_3",
+            "description": "main path"
+          },
+          {
+            "id": "messy_10_edge_3",
+            "from_id": "messy_10_item_2",
+            "to_id": "messy_10_item_4",
+            "description": "parallel"
+          },
+          {
+            "id": "messy_10_edge_4",
+            "from_id": "messy_10_item_3",
+            "to_id": "messy_10_item_5",
+            "description": "finish"
+          },
+          {
+            "id": "messy_10_edge_5",
+            "from_id": "messy_10_item_4",
+            "to_id": "messy_10_item_6",
+            "description": "mess"
+          }
+        ],
+        "strokes": [],
+        "current_task_index": 2
+      },
+      "markdown_tabs": [
+        {
+          "name": "Goal",
+          "text": "# Reduce noisy monitoring alerts\n\nSynthetic tab 11 for high-tab-count ActionDraw verification."
+        },
+        {
+          "name": "Mess notes",
+          "text": "- Similar shape layout\n- Different colors and priorities\n- Mixed completion states"
+        }
+      ],
+      "priority": 2,
+      "priority_time_hours": 5.5,
+      "priority_subjective_value": 7.5,
+      "priority_score": 1.364,
+      "include_in_priority_plot": true,
+      "icon": "ALRT",
+      "color": "#f39c12",
+      "pinned": false,
+      "goals": [
+        {
+          "text": "Reduce noisy monitoring alerts reaches a reviewable stopping point",
+          "checked": false
+        }
+      ],
+      "kanban_status": "doing",
+      "kanban_slot_hour": 15
+    },
+    {
+      "name": "Design consent form translation workflow",
+      "tasks": {
+        "tasks": [
+          {
+            "title": "Design consent form translation workflow",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": -1,
+            "indent_level": 0,
+            "custom_estimate": 23400.0
+          },
+          {
+            "title": "Select languages",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Assign certified translators",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          },
+          {
+            "title": "Review clinical terms",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 3600.0
+          },
+          {
+            "title": "Approve final PDFs",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Track future revisions",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          }
+        ]
+      },
+      "diagram": {
+        "items": [
+          {
+            "id": "messy_11_item_0",
+            "item_type": "box",
+            "x": 45.0,
+            "y": 70.0,
+            "width": 170.0,
+            "height": 64.0,
+            "text": "Goal",
+            "task_index": 0,
+            "color": "#9b59b6",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_11_item_1",
+            "item_type": "task",
+            "x": 275.0,
+            "y": 45.0,
+            "width": 195.0,
+            "height": 72.0,
+            "text": "Select languages",
+            "task_index": 1,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_11_item_2",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Assign certified translators",
+            "task_index": 2,
+            "color": "#f39c12",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_11_item_3",
+            "item_type": "task",
+            "x": 815.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Review clinical terms",
+            "task_index": 3,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_11_item_4",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 185.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Approve final PDFs",
+            "task_index": 4,
+            "color": "#9b59b6",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_11_item_5",
+            "item_type": "note",
+            "x": 1085.0,
+            "y": 55.0,
+            "width": 230.0,
+            "height": 120.0,
+            "text": "Watch item count and tab navigation for: Design consent form translation workflow.",
+            "task_index": 5,
+            "color": "#f5f0e6",
+            "text_color": "#2d3436",
+            "note_tabs": [
+              {
+                "name": "Summary",
+                "text": "# Design consent form translation workflow\n\nSynthetic messy-tab verification note."
+              },
+              {
+                "name": "Edge cases",
+                "text": "Check long titles, repeated colors, mixed completion, and branch edges."
+              }
+            ]
+          },
+          {
+            "id": "messy_11_item_6",
+            "item_type": "obstacle",
+            "x": 815.0,
+            "y": 185.0,
+            "width": 205.0,
+            "height": 82.0,
+            "text": "Blocked decision",
+            "task_index": -1,
+            "color": "#e74c3c",
+            "text_color": "#ffffff",
+            "obstacle_markdown": "Synthetic blocker used to verify messy projects with extra side nodes."
+          }
+        ],
+        "edges": [
+          {
+            "id": "messy_11_edge_0",
+            "from_id": "messy_11_item_0",
+            "to_id": "messy_11_item_1",
+            "description": ""
+          },
+          {
+            "id": "messy_11_edge_1",
+            "from_id": "messy_11_item_1",
+            "to_id": "messy_11_item_2",
+            "description": ""
+          },
+          {
+            "id": "messy_11_edge_2",
+            "from_id": "messy_11_item_2",
+            "to_id": "messy_11_item_3",
+            "description": "main path"
+          },
+          {
+            "id": "messy_11_edge_3",
+            "from_id": "messy_11_item_2",
+            "to_id": "messy_11_item_4",
+            "description": "parallel"
+          },
+          {
+            "id": "messy_11_edge_4",
+            "from_id": "messy_11_item_3",
+            "to_id": "messy_11_item_5",
+            "description": "finish"
+          },
+          {
+            "id": "messy_11_edge_5",
+            "from_id": "messy_11_item_4",
+            "to_id": "messy_11_item_6",
+            "description": "mess"
+          }
+        ],
+        "strokes": [],
+        "current_task_index": -1
+      },
+      "markdown_tabs": [
+        {
+          "name": "Goal",
+          "text": "# Design consent form translation workflow\n\nSynthetic tab 12 for high-tab-count ActionDraw verification."
+        },
+        {
+          "name": "Mess notes",
+          "text": "- Similar shape layout\n- Different colors and priorities\n- Mixed completion states"
+        }
+      ],
+      "priority": 2,
+      "priority_time_hours": 6.5,
+      "priority_subjective_value": 7.0,
+      "priority_score": 1.077,
+      "include_in_priority_plot": true,
+      "icon": "TR",
+      "color": "#9b59b6",
+      "pinned": false,
+      "goals": [
+        {
+          "text": "Design consent form translation workflow reaches a reviewable stopping point",
+          "checked": false
+        }
+      ],
+      "kanban_status": "todo",
+      "kanban_slot_hour": -1
+    },
+    {
+      "name": "Migrate legacy spreadsheet tracker",
+      "tasks": {
+        "tasks": [
+          {
+            "title": "Migrate legacy spreadsheet tracker",
+            "completed": false,
+            "time_spent": 900.0,
+            "parent_index": -1,
+            "indent_level": 0,
+            "custom_estimate": 36000.0
+          },
+          {
+            "title": "Profile spreadsheet columns",
+            "completed": true,
+            "time_spent": 600.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Define import validation",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          },
+          {
+            "title": "Clean malformed rows",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 3600.0
+          },
+          {
+            "title": "Run trial import",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Retire old spreadsheet",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          }
+        ]
+      },
+      "diagram": {
+        "items": [
+          {
+            "id": "messy_12_item_0",
+            "item_type": "box",
+            "x": 45.0,
+            "y": 70.0,
+            "width": 170.0,
+            "height": 64.0,
+            "text": "Goal",
+            "task_index": 0,
+            "color": "#3498db",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_12_item_1",
+            "item_type": "task",
+            "x": 275.0,
+            "y": 45.0,
+            "width": 195.0,
+            "height": 72.0,
+            "text": "Profile spreadsheet columns",
+            "task_index": 1,
+            "color": "#27ae60",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_12_item_2",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Define import validation",
+            "task_index": 2,
+            "color": "#f39c12",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_12_item_3",
+            "item_type": "task",
+            "x": 815.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Clean malformed rows",
+            "task_index": 3,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_12_item_4",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 203.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Run trial import",
+            "task_index": 4,
+            "color": "#9b59b6",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_12_item_5",
+            "item_type": "note",
+            "x": 1085.0,
+            "y": 55.0,
+            "width": 230.0,
+            "height": 120.0,
+            "text": "Watch item count and tab navigation for: Migrate legacy spreadsheet tracker.",
+            "task_index": 5,
+            "color": "#f5f0e6",
+            "text_color": "#2d3436",
+            "note_tabs": [
+              {
+                "name": "Summary",
+                "text": "# Migrate legacy spreadsheet tracker\n\nSynthetic messy-tab verification note."
+              },
+              {
+                "name": "Edge cases",
+                "text": "Check long titles, repeated colors, mixed completion, and branch edges."
+              }
+            ]
+          },
+          {
+            "id": "messy_12_item_6",
+            "item_type": "freetext",
+            "x": 815.0,
+            "y": 203.0,
+            "width": 220.0,
+            "height": 104.0,
+            "text": "Side note\nFollow-up\nOwner TBD",
+            "task_index": -1,
+            "color": "#f5f0e6",
+            "text_color": "#2d3436",
+            "text_tabs": [
+              {
+                "name": "Visible",
+                "text": "Side note\nFollow-up\nOwner TBD"
+              },
+              {
+                "name": "Parking lot",
+                "text": "Synthetic hidden free-text tab for clutter testing."
+              }
+            ]
+          }
+        ],
+        "edges": [
+          {
+            "id": "messy_12_edge_0",
+            "from_id": "messy_12_item_0",
+            "to_id": "messy_12_item_1",
+            "description": ""
+          },
+          {
+            "id": "messy_12_edge_1",
+            "from_id": "messy_12_item_1",
+            "to_id": "messy_12_item_2",
+            "description": ""
+          },
+          {
+            "id": "messy_12_edge_2",
+            "from_id": "messy_12_item_2",
+            "to_id": "messy_12_item_3",
+            "description": "main path"
+          },
+          {
+            "id": "messy_12_edge_3",
+            "from_id": "messy_12_item_2",
+            "to_id": "messy_12_item_4",
+            "description": "parallel"
+          },
+          {
+            "id": "messy_12_edge_4",
+            "from_id": "messy_12_item_3",
+            "to_id": "messy_12_item_5",
+            "description": "finish"
+          },
+          {
+            "id": "messy_12_edge_5",
+            "from_id": "messy_12_item_4",
+            "to_id": "messy_12_item_6",
+            "description": "mess"
+          }
+        ],
+        "strokes": [],
+        "current_task_index": -1
+      },
+      "markdown_tabs": [
+        {
+          "name": "Goal",
+          "text": "# Migrate legacy spreadsheet tracker\n\nSynthetic tab 13 for high-tab-count ActionDraw verification."
+        },
+        {
+          "name": "Mess notes",
+          "text": "- Similar shape layout\n- Different colors and priorities\n- Mixed completion states"
+        }
+      ],
+      "priority": 3,
+      "priority_time_hours": 10.0,
+      "priority_subjective_value": 8.0,
+      "priority_score": 0.8,
+      "include_in_priority_plot": true,
+      "icon": "XLS",
+      "color": "#3498db",
+      "pinned": false,
+      "goals": [
+        {
+          "text": "Migrate legacy spreadsheet tracker reaches a reviewable stopping point",
+          "checked": false
+        }
+      ],
+      "kanban_status": "todo",
+      "kanban_slot_hour": -1
+    },
+    {
+      "name": "Audit notification templates",
+      "tasks": {
+        "tasks": [
+          {
+            "title": "Audit notification templates",
+            "completed": true,
+            "time_spent": 1800.0,
+            "parent_index": -1,
+            "indent_level": 0,
+            "custom_estimate": 14400.0
+          },
+          {
+            "title": "List active templates",
+            "completed": true,
+            "time_spent": 600.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Remove obsolete wording",
+            "completed": true,
+            "time_spent": 1200.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          },
+          {
+            "title": "Check links and phone numbers",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 3600.0
+          },
+          {
+            "title": "Approve tone changes",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Schedule template release",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          }
+        ]
+      },
+      "diagram": {
+        "items": [
+          {
+            "id": "messy_13_item_0",
+            "item_type": "box",
+            "x": 45.0,
+            "y": 70.0,
+            "width": 170.0,
+            "height": 64.0,
+            "text": "Goal",
+            "task_index": 0,
+            "color": "#e67e22",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_13_item_1",
+            "item_type": "task",
+            "x": 275.0,
+            "y": 45.0,
+            "width": 195.0,
+            "height": 72.0,
+            "text": "List active templates",
+            "task_index": 1,
+            "color": "#27ae60",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_13_item_2",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Remove obsolete wording",
+            "task_index": 2,
+            "color": "#27ae60",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_13_item_3",
+            "item_type": "task",
+            "x": 815.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Check links and phone numbers",
+            "task_index": 3,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_13_item_4",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 221.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Approve tone changes",
+            "task_index": 4,
+            "color": "#9b59b6",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_13_item_5",
+            "item_type": "note",
+            "x": 1085.0,
+            "y": 55.0,
+            "width": 230.0,
+            "height": 120.0,
+            "text": "Watch item count and tab navigation for: Audit notification templates.",
+            "task_index": 5,
+            "color": "#f5f0e6",
+            "text_color": "#2d3436",
+            "note_tabs": [
+              {
+                "name": "Summary",
+                "text": "# Audit notification templates\n\nSynthetic messy-tab verification note."
+              },
+              {
+                "name": "Edge cases",
+                "text": "Check long titles, repeated colors, mixed completion, and branch edges."
+              }
+            ]
+          },
+          {
+            "id": "messy_13_item_6",
+            "item_type": "obstacle",
+            "x": 815.0,
+            "y": 221.0,
+            "width": 205.0,
+            "height": 82.0,
+            "text": "Blocked decision",
+            "task_index": -1,
+            "color": "#e74c3c",
+            "text_color": "#ffffff",
+            "obstacle_markdown": "Synthetic blocker used to verify messy projects with extra side nodes."
+          }
+        ],
+        "edges": [
+          {
+            "id": "messy_13_edge_0",
+            "from_id": "messy_13_item_0",
+            "to_id": "messy_13_item_1",
+            "description": ""
+          },
+          {
+            "id": "messy_13_edge_1",
+            "from_id": "messy_13_item_1",
+            "to_id": "messy_13_item_2",
+            "description": ""
+          },
+          {
+            "id": "messy_13_edge_2",
+            "from_id": "messy_13_item_2",
+            "to_id": "messy_13_item_3",
+            "description": "main path"
+          },
+          {
+            "id": "messy_13_edge_3",
+            "from_id": "messy_13_item_2",
+            "to_id": "messy_13_item_4",
+            "description": "parallel"
+          },
+          {
+            "id": "messy_13_edge_4",
+            "from_id": "messy_13_item_3",
+            "to_id": "messy_13_item_5",
+            "description": "finish"
+          },
+          {
+            "id": "messy_13_edge_5",
+            "from_id": "messy_13_item_4",
+            "to_id": "messy_13_item_6",
+            "description": "mess"
+          }
+        ],
+        "strokes": [
+          {
+            "id": "messy_13_stroke_0",
+            "color": "#ffcc00",
+            "width": 3.0,
+            "points": [
+              {
+                "x": 500.0,
+                "y": 180.0
+              },
+              {
+                "x": 560.0,
+                "y": 170.0
+              },
+              {
+                "x": 650.0,
+                "y": 176.0
+              }
+            ]
+          }
+        ],
+        "current_task_index": -1
+      },
+      "markdown_tabs": [
+        {
+          "name": "Goal",
+          "text": "# Audit notification templates\n\nSynthetic tab 14 for high-tab-count ActionDraw verification."
+        },
+        {
+          "name": "Mess notes",
+          "text": "- Similar shape layout\n- Different colors and priorities\n- Mixed completion states"
+        }
+      ],
+      "priority": 1,
+      "priority_time_hours": 4.0,
+      "priority_subjective_value": 5.0,
+      "priority_score": 1.25,
+      "include_in_priority_plot": true,
+      "icon": "MSG",
+      "color": "#e67e22",
+      "pinned": false,
+      "goals": [
+        {
+          "text": "Audit notification templates reaches a reviewable stopping point",
+          "checked": true
+        }
+      ],
+      "kanban_status": "done",
+      "kanban_slot_hour": -1
+    },
+    {
+      "name": "Prepare quarterly risk review",
+      "tasks": {
+        "tasks": [
+          {
+            "title": "Prepare quarterly risk review",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": -1,
+            "indent_level": 0,
+            "custom_estimate": 25200.0
+          },
+          {
+            "title": "Collect open risks",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Score likelihood and impact",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          },
+          {
+            "title": "Write mitigation updates",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 3600.0
+          },
+          {
+            "title": "Build meeting pack",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Capture decisions",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          }
+        ]
+      },
+      "diagram": {
+        "items": [
+          {
+            "id": "messy_14_item_0",
+            "item_type": "box",
+            "x": 45.0,
+            "y": 70.0,
+            "width": 170.0,
+            "height": 64.0,
+            "text": "Goal",
+            "task_index": 0,
+            "color": "#34495e",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_14_item_1",
+            "item_type": "task",
+            "x": 275.0,
+            "y": 45.0,
+            "width": 195.0,
+            "height": 72.0,
+            "text": "Collect open risks",
+            "task_index": 1,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_14_item_2",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Score likelihood and impact",
+            "task_index": 2,
+            "color": "#f39c12",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_14_item_3",
+            "item_type": "task",
+            "x": 815.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Write mitigation updates",
+            "task_index": 3,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_14_item_4",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 239.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Build meeting pack",
+            "task_index": 4,
+            "color": "#9b59b6",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_14_item_5",
+            "item_type": "note",
+            "x": 1085.0,
+            "y": 55.0,
+            "width": 230.0,
+            "height": 120.0,
+            "text": "Watch item count and tab navigation for: Prepare quarterly risk review.",
+            "task_index": 5,
+            "color": "#f5f0e6",
+            "text_color": "#2d3436",
+            "note_tabs": [
+              {
+                "name": "Summary",
+                "text": "# Prepare quarterly risk review\n\nSynthetic messy-tab verification note."
+              },
+              {
+                "name": "Edge cases",
+                "text": "Check long titles, repeated colors, mixed completion, and branch edges."
+              }
+            ]
+          },
+          {
+            "id": "messy_14_item_6",
+            "item_type": "freetext",
+            "x": 815.0,
+            "y": 239.0,
+            "width": 220.0,
+            "height": 104.0,
+            "text": "Side note\nFollow-up\nOwner TBD",
+            "task_index": -1,
+            "color": "#f5f0e6",
+            "text_color": "#2d3436",
+            "text_tabs": [
+              {
+                "name": "Visible",
+                "text": "Side note\nFollow-up\nOwner TBD"
+              },
+              {
+                "name": "Parking lot",
+                "text": "Synthetic hidden free-text tab for clutter testing."
+              }
+            ]
+          }
+        ],
+        "edges": [
+          {
+            "id": "messy_14_edge_0",
+            "from_id": "messy_14_item_0",
+            "to_id": "messy_14_item_1",
+            "description": ""
+          },
+          {
+            "id": "messy_14_edge_1",
+            "from_id": "messy_14_item_1",
+            "to_id": "messy_14_item_2",
+            "description": ""
+          },
+          {
+            "id": "messy_14_edge_2",
+            "from_id": "messy_14_item_2",
+            "to_id": "messy_14_item_3",
+            "description": "main path"
+          },
+          {
+            "id": "messy_14_edge_3",
+            "from_id": "messy_14_item_2",
+            "to_id": "messy_14_item_4",
+            "description": "parallel"
+          },
+          {
+            "id": "messy_14_edge_4",
+            "from_id": "messy_14_item_3",
+            "to_id": "messy_14_item_5",
+            "description": "finish"
+          },
+          {
+            "id": "messy_14_edge_5",
+            "from_id": "messy_14_item_4",
+            "to_id": "messy_14_item_6",
+            "description": "mess"
+          }
+        ],
+        "strokes": [],
+        "current_task_index": 2
+      },
+      "markdown_tabs": [
+        {
+          "name": "Goal",
+          "text": "# Prepare quarterly risk review\n\nSynthetic tab 15 for high-tab-count ActionDraw verification."
+        },
+        {
+          "name": "Mess notes",
+          "text": "- Similar shape layout\n- Different colors and priorities\n- Mixed completion states"
+        }
+      ],
+      "priority": 3,
+      "priority_time_hours": 7.0,
+      "priority_subjective_value": 9.0,
+      "priority_score": 1.286,
+      "include_in_priority_plot": true,
+      "icon": "RISK",
+      "color": "#34495e",
+      "pinned": true,
+      "goals": [
+        {
+          "text": "Prepare quarterly risk review reaches a reviewable stopping point",
+          "checked": false
+        }
+      ],
+      "kanban_status": "doing",
+      "kanban_slot_hour": 13
+    },
+    {
+      "name": "Organize hardware return process",
+      "tasks": {
+        "tasks": [
+          {
+            "title": "Organize hardware return process",
+            "completed": false,
+            "time_spent": 900.0,
+            "parent_index": -1,
+            "indent_level": 0,
+            "custom_estimate": 18000.0
+          },
+          {
+            "title": "Find assigned hardware",
+            "completed": true,
+            "time_spent": 600.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Send return instructions",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          },
+          {
+            "title": "Track received devices",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 3600.0
+          },
+          {
+            "title": "Wipe returned laptops",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Close asset tickets",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          }
+        ]
+      },
+      "diagram": {
+        "items": [
+          {
+            "id": "messy_15_item_0",
+            "item_type": "box",
+            "x": 45.0,
+            "y": 70.0,
+            "width": 170.0,
+            "height": 64.0,
+            "text": "Goal",
+            "task_index": 0,
+            "color": "#795548",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_15_item_1",
+            "item_type": "task",
+            "x": 275.0,
+            "y": 45.0,
+            "width": 195.0,
+            "height": 72.0,
+            "text": "Find assigned hardware",
+            "task_index": 1,
+            "color": "#27ae60",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_15_item_2",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Send return instructions",
+            "task_index": 2,
+            "color": "#f39c12",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_15_item_3",
+            "item_type": "task",
+            "x": 815.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Track received devices",
+            "task_index": 3,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_15_item_4",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 185.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Wipe returned laptops",
+            "task_index": 4,
+            "color": "#9b59b6",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_15_item_5",
+            "item_type": "note",
+            "x": 1085.0,
+            "y": 55.0,
+            "width": 230.0,
+            "height": 120.0,
+            "text": "Watch item count and tab navigation for: Organize hardware return process.",
+            "task_index": 5,
+            "color": "#f5f0e6",
+            "text_color": "#2d3436",
+            "note_tabs": [
+              {
+                "name": "Summary",
+                "text": "# Organize hardware return process\n\nSynthetic messy-tab verification note."
+              },
+              {
+                "name": "Edge cases",
+                "text": "Check long titles, repeated colors, mixed completion, and branch edges."
+              }
+            ]
+          },
+          {
+            "id": "messy_15_item_6",
+            "item_type": "obstacle",
+            "x": 815.0,
+            "y": 185.0,
+            "width": 205.0,
+            "height": 82.0,
+            "text": "Blocked decision",
+            "task_index": -1,
+            "color": "#e74c3c",
+            "text_color": "#ffffff",
+            "obstacle_markdown": "Synthetic blocker used to verify messy projects with extra side nodes."
+          }
+        ],
+        "edges": [
+          {
+            "id": "messy_15_edge_0",
+            "from_id": "messy_15_item_0",
+            "to_id": "messy_15_item_1",
+            "description": ""
+          },
+          {
+            "id": "messy_15_edge_1",
+            "from_id": "messy_15_item_1",
+            "to_id": "messy_15_item_2",
+            "description": ""
+          },
+          {
+            "id": "messy_15_edge_2",
+            "from_id": "messy_15_item_2",
+            "to_id": "messy_15_item_3",
+            "description": "main path"
+          },
+          {
+            "id": "messy_15_edge_3",
+            "from_id": "messy_15_item_2",
+            "to_id": "messy_15_item_4",
+            "description": "parallel"
+          },
+          {
+            "id": "messy_15_edge_4",
+            "from_id": "messy_15_item_3",
+            "to_id": "messy_15_item_5",
+            "description": "finish"
+          },
+          {
+            "id": "messy_15_edge_5",
+            "from_id": "messy_15_item_4",
+            "to_id": "messy_15_item_6",
+            "description": "mess"
+          }
+        ],
+        "strokes": [],
+        "current_task_index": -1
+      },
+      "markdown_tabs": [
+        {
+          "name": "Goal",
+          "text": "# Organize hardware return process\n\nSynthetic tab 16 for high-tab-count ActionDraw verification."
+        },
+        {
+          "name": "Mess notes",
+          "text": "- Similar shape layout\n- Different colors and priorities\n- Mixed completion states"
+        }
+      ],
+      "priority": 1,
+      "priority_time_hours": 5.0,
+      "priority_subjective_value": 4.0,
+      "priority_score": 0.8,
+      "include_in_priority_plot": true,
+      "icon": "HW",
+      "color": "#795548",
+      "pinned": false,
+      "goals": [
+        {
+          "text": "Organize hardware return process reaches a reviewable stopping point",
+          "checked": false
+        }
+      ],
+      "kanban_status": "todo",
+      "kanban_slot_hour": -1
+    },
+    {
+      "name": "Improve patient portal FAQ",
+      "tasks": {
+        "tasks": [
+          {
+            "title": "Improve patient portal FAQ",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": -1,
+            "indent_level": 0,
+            "custom_estimate": 16200.0
+          },
+          {
+            "title": "Review support tickets",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Group recurring questions",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          },
+          {
+            "title": "Write clearer answers",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 3600.0
+          },
+          {
+            "title": "Add screenshots",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Publish update note",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          }
+        ]
+      },
+      "diagram": {
+        "items": [
+          {
+            "id": "messy_16_item_0",
+            "item_type": "box",
+            "x": 45.0,
+            "y": 70.0,
+            "width": 170.0,
+            "height": 64.0,
+            "text": "Goal",
+            "task_index": 0,
+            "color": "#00a8a8",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_16_item_1",
+            "item_type": "task",
+            "x": 275.0,
+            "y": 45.0,
+            "width": 195.0,
+            "height": 72.0,
+            "text": "Review support tickets",
+            "task_index": 1,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_16_item_2",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Group recurring questions",
+            "task_index": 2,
+            "color": "#f39c12",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_16_item_3",
+            "item_type": "task",
+            "x": 815.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Write clearer answers",
+            "task_index": 3,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_16_item_4",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 203.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Add screenshots",
+            "task_index": 4,
+            "color": "#9b59b6",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_16_item_5",
+            "item_type": "note",
+            "x": 1085.0,
+            "y": 55.0,
+            "width": 230.0,
+            "height": 120.0,
+            "text": "Watch item count and tab navigation for: Improve patient portal FAQ.",
+            "task_index": 5,
+            "color": "#f5f0e6",
+            "text_color": "#2d3436",
+            "note_tabs": [
+              {
+                "name": "Summary",
+                "text": "# Improve patient portal FAQ\n\nSynthetic messy-tab verification note."
+              },
+              {
+                "name": "Edge cases",
+                "text": "Check long titles, repeated colors, mixed completion, and branch edges."
+              }
+            ]
+          },
+          {
+            "id": "messy_16_item_6",
+            "item_type": "freetext",
+            "x": 815.0,
+            "y": 203.0,
+            "width": 220.0,
+            "height": 104.0,
+            "text": "Side note\nFollow-up\nOwner TBD",
+            "task_index": -1,
+            "color": "#f5f0e6",
+            "text_color": "#2d3436",
+            "text_tabs": [
+              {
+                "name": "Visible",
+                "text": "Side note\nFollow-up\nOwner TBD"
+              },
+              {
+                "name": "Parking lot",
+                "text": "Synthetic hidden free-text tab for clutter testing."
+              }
+            ]
+          }
+        ],
+        "edges": [
+          {
+            "id": "messy_16_edge_0",
+            "from_id": "messy_16_item_0",
+            "to_id": "messy_16_item_1",
+            "description": ""
+          },
+          {
+            "id": "messy_16_edge_1",
+            "from_id": "messy_16_item_1",
+            "to_id": "messy_16_item_2",
+            "description": ""
+          },
+          {
+            "id": "messy_16_edge_2",
+            "from_id": "messy_16_item_2",
+            "to_id": "messy_16_item_3",
+            "description": "main path"
+          },
+          {
+            "id": "messy_16_edge_3",
+            "from_id": "messy_16_item_2",
+            "to_id": "messy_16_item_4",
+            "description": "parallel"
+          },
+          {
+            "id": "messy_16_edge_4",
+            "from_id": "messy_16_item_3",
+            "to_id": "messy_16_item_5",
+            "description": "finish"
+          },
+          {
+            "id": "messy_16_edge_5",
+            "from_id": "messy_16_item_4",
+            "to_id": "messy_16_item_6",
+            "description": "mess"
+          }
+        ],
+        "strokes": [],
+        "current_task_index": -1
+      },
+      "markdown_tabs": [
+        {
+          "name": "Goal",
+          "text": "# Improve patient portal FAQ\n\nSynthetic tab 17 for high-tab-count ActionDraw verification."
+        },
+        {
+          "name": "Mess notes",
+          "text": "- Similar shape layout\n- Different colors and priorities\n- Mixed completion states"
+        }
+      ],
+      "priority": 2,
+      "priority_time_hours": 4.5,
+      "priority_subjective_value": 6.0,
+      "priority_score": 1.333,
+      "include_in_priority_plot": true,
+      "icon": "FAQ",
+      "color": "#00a8a8",
+      "pinned": false,
+      "goals": [
+        {
+          "text": "Improve patient portal FAQ reaches a reviewable stopping point",
+          "checked": false
+        }
+      ],
+      "kanban_status": "todo",
+      "kanban_slot_hour": -1
+    },
+    {
+      "name": "Coordinate annual data retention review",
+      "tasks": {
+        "tasks": [
+          {
+            "title": "Coordinate annual data retention review",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": -1,
+            "indent_level": 0,
+            "custom_estimate": 34200.0
+          },
+          {
+            "title": "List retention rules",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Identify expired datasets",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          },
+          {
+            "title": "Confirm legal holds",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 3600.0
+          },
+          {
+            "title": "Approve deletion batch",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 5400.0
+          },
+          {
+            "title": "Record review evidence",
+            "completed": false,
+            "time_spent": 0.0,
+            "parent_index": 0,
+            "indent_level": 1,
+            "custom_estimate": 7200.0
+          }
+        ]
+      },
+      "diagram": {
+        "items": [
+          {
+            "id": "messy_17_item_0",
+            "item_type": "box",
+            "x": 45.0,
+            "y": 70.0,
+            "width": 170.0,
+            "height": 64.0,
+            "text": "Goal",
+            "task_index": 0,
+            "color": "#b83280",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_17_item_1",
+            "item_type": "task",
+            "x": 275.0,
+            "y": 45.0,
+            "width": 195.0,
+            "height": 72.0,
+            "text": "List retention rules",
+            "task_index": 1,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_17_item_2",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Identify expired datasets",
+            "task_index": 2,
+            "color": "#f39c12",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_17_item_3",
+            "item_type": "task",
+            "x": 815.0,
+            "y": 45.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Confirm legal holds",
+            "task_index": 3,
+            "color": "#4a9eff",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_17_item_4",
+            "item_type": "task",
+            "x": 540.0,
+            "y": 221.0,
+            "width": 210.0,
+            "height": 72.0,
+            "text": "Approve deletion batch",
+            "task_index": 4,
+            "color": "#9b59b6",
+            "text_color": "#ffffff"
+          },
+          {
+            "id": "messy_17_item_5",
+            "item_type": "note",
+            "x": 1085.0,
+            "y": 55.0,
+            "width": 230.0,
+            "height": 120.0,
+            "text": "Watch item count and tab navigation for: Coordinate annual data retention review.",
+            "task_index": 5,
+            "color": "#f5f0e6",
+            "text_color": "#2d3436",
+            "note_tabs": [
+              {
+                "name": "Summary",
+                "text": "# Coordinate annual data retention review\n\nSynthetic messy-tab verification note."
+              },
+              {
+                "name": "Edge cases",
+                "text": "Check long titles, repeated colors, mixed completion, and branch edges."
+              }
+            ]
+          },
+          {
+            "id": "messy_17_item_6",
+            "item_type": "obstacle",
+            "x": 815.0,
+            "y": 221.0,
+            "width": 205.0,
+            "height": 82.0,
+            "text": "Blocked decision",
+            "task_index": -1,
+            "color": "#e74c3c",
+            "text_color": "#ffffff",
+            "obstacle_markdown": "Synthetic blocker used to verify messy projects with extra side nodes."
+          }
+        ],
+        "edges": [
+          {
+            "id": "messy_17_edge_0",
+            "from_id": "messy_17_item_0",
+            "to_id": "messy_17_item_1",
+            "description": ""
+          },
+          {
+            "id": "messy_17_edge_1",
+            "from_id": "messy_17_item_1",
+            "to_id": "messy_17_item_2",
+            "description": ""
+          },
+          {
+            "id": "messy_17_edge_2",
+            "from_id": "messy_17_item_2",
+            "to_id": "messy_17_item_3",
+            "description": "main path"
+          },
+          {
+            "id": "messy_17_edge_3",
+            "from_id": "messy_17_item_2",
+            "to_id": "messy_17_item_4",
+            "description": "parallel"
+          },
+          {
+            "id": "messy_17_edge_4",
+            "from_id": "messy_17_item_3",
+            "to_id": "messy_17_item_5",
+            "description": "finish"
+          },
+          {
+            "id": "messy_17_edge_5",
+            "from_id": "messy_17_item_4",
+            "to_id": "messy_17_item_6",
+            "description": "mess"
+          }
+        ],
+        "strokes": [],
+        "current_task_index": 2
+      },
+      "markdown_tabs": [
+        {
+          "name": "Goal",
+          "text": "# Coordinate annual data retention review\n\nSynthetic tab 18 for high-tab-count ActionDraw verification."
+        },
+        {
+          "name": "Mess notes",
+          "text": "- Similar shape layout\n- Different colors and priorities\n- Mixed completion states"
+        }
+      ],
+      "priority": 3,
+      "priority_time_hours": 9.5,
+      "priority_subjective_value": 8.5,
+      "priority_score": 0.895,
+      "include_in_priority_plot": true,
+      "icon": "RET",
+      "color": "#b83280",
+      "pinned": true,
+      "goals": [
+        {
+          "text": "Coordinate annual data retention review reaches a reviewable stopping point",
+          "checked": false
+        }
+      ],
+      "kanban_status": "doing",
+      "kanban_slot_hour": 16
+    }
+  ],
+  "active_tab": 0,
+  "workspace_markdown_tabs": [
+    {
+      "name": "Verification",
+      "text": "# ActionDraw test drawing\n\nExpected coverage:\n\n- Multiple goal tabs\n- Nested task lists\n- Diagram items bound to task indexes\n- Edges with descriptions\n- Note, database, cloud, freetext, and task items\n- Per-tab markdown tabs\n- Item editor tabs\n- Obstacle markdown\n- Freehand stroke persistence\n- Kanban and priority metadata\n\nExtended messy-project pass: 15 additional tabs added, 18 tabs total."
+    }
+  ],
+  "standalone_reminders": []
+}
