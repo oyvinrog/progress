@@ -18,6 +18,7 @@ Window {
     property var slotHours: [8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
     property string createStatus: "todo"
     property int createSlotHour: -1
+    property string todoSearchText: ""
     property int pendingDeleteTabIndex: -1
     property string pendingDeleteTabName: ""
     property var dropZones: []
@@ -52,6 +53,36 @@ Window {
         if (targetStatus !== "in_progress")
             return status === targetStatus
         return status === "in_progress" && slot === Number(targetSlotHour)
+    }
+
+    function todoSearchMatches(cardName) {
+        var query = todoSearchText.trim().toLowerCase()
+        if (query.length === 0)
+            return true
+        return String(cardName || "").toLowerCase().indexOf(query) >= 0
+    }
+
+    function cardMatchesSection(cardStatus, cardSlotHour, cardName, targetStatus, targetSlotHour) {
+        if (!placementMatches(cardStatus, cardSlotHour, targetStatus, targetSlotHour))
+            return false
+        if (targetStatus !== "todo")
+            return true
+        return todoSearchMatches(cardName)
+    }
+
+    function todoSearchHasMatches() {
+        var query = todoSearchText.trim()
+        if (query.length === 0 || !tabModelRef || !tabModelRef.getTabSummary)
+            return true
+        for (var i = 0; i < modelCount(); ++i) {
+            var summary = tabModelRef.getTabSummary(i)
+            if (summary
+                    && placementMatches(summary.kanbanStatus, summary.kanbanSlotHour, "todo", -1)
+                    && todoSearchMatches(summary.name)) {
+                return true
+            }
+        }
+        return false
     }
 
     function setPlacement(tabIndex, status, slotHour) {
@@ -369,6 +400,7 @@ Window {
             property string sectionTitle: ""
             property string targetStatus: "todo"
             property int targetSlotHour: -1
+            property bool showTodoSearch: targetStatus === "todo"
             objectName: "kanbanDrop_" + targetStatus + "_" + targetSlotHour
 
             Layout.fillWidth: true
@@ -419,6 +451,17 @@ Window {
                     }
                 }
 
+                TextField {
+                    visible: sectionRoot.showTodoSearch
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: sectionRoot.showTodoSearch ? 34 : 0
+                    objectName: "kanbanTodoSearchField"
+                    placeholderText: "Search Todo"
+                    text: root.todoSearchText
+                    selectByMouse: true
+                    onTextChanged: root.todoSearchText = text
+                }
+
                 Flickable {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
@@ -436,9 +479,10 @@ Window {
                             model: root.tabModelRef
 
                             delegate: Loader {
-                                property bool placedHere: root.placementMatches(
+                                property bool placedHere: root.cardMatchesSection(
                                     kanbanStatus,
                                     kanbanSlotHour,
+                                    name,
                                     sectionRoot.targetStatus,
                                     sectionRoot.targetSlotHour
                                 )
@@ -456,6 +500,18 @@ Window {
                                     item.activeTaskTitle = activeTaskTitle || ""
                                 }
                             }
+                        }
+
+                        Text {
+                            visible: sectionRoot.targetStatus === "todo"
+                                && root.todoSearchText.trim().length > 0
+                                && !root.todoSearchHasMatches()
+                            width: cardsColumn.width
+                            text: "No Todo matches"
+                            color: "#8eabba"
+                            font.pixelSize: 12
+                            horizontalAlignment: Text.AlignHCenter
+                            padding: 14
                         }
                     }
                 }
@@ -492,12 +548,23 @@ Window {
             spacing: 12
 
             Loader {
-                Layout.preferredWidth: 280
+                Layout.preferredWidth: 220
                 Layout.fillHeight: true
                 sourceComponent: boardSectionComponent
                 onLoaded: {
                     item.sectionTitle = "Todo"
                     item.targetStatus = "todo"
+                    item.targetSlotHour = -1
+                }
+            }
+
+            Loader {
+                Layout.preferredWidth: 220
+                Layout.fillHeight: true
+                sourceComponent: boardSectionComponent
+                onLoaded: {
+                    item.sectionTitle = "Ready"
+                    item.targetStatus = "ready"
                     item.targetSlotHour = -1
                 }
             }
@@ -551,7 +618,7 @@ Window {
             }
 
             Loader {
-                Layout.preferredWidth: 280
+                Layout.preferredWidth: 220
                 Layout.fillHeight: true
                 sourceComponent: boardSectionComponent
                 onLoaded: {
@@ -614,7 +681,7 @@ Window {
             Label {
                 text: root.createStatus === "in_progress"
                     ? "Create in " + root.slotLabel(root.createSlotHour)
-                    : "Create in " + (root.createStatus === "done" ? "Done" : "Todo")
+                    : "Create in " + (root.createStatus === "done" ? "Done" : (root.createStatus === "ready" ? "Ready" : "Todo"))
             }
 
             TextField {

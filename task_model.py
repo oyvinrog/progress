@@ -1554,7 +1554,7 @@ class TabModel(QAbstractListModel):
     @staticmethod
     def _normalizeKanbanStatus(status: str) -> str:
         normalized = str(status or "").strip().lower()
-        if normalized in {"todo", "in_progress", "done"}:
+        if normalized in {"todo", "ready", "in_progress", "done"}:
             return normalized
         return "todo"
 

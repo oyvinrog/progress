@@ -2390,8 +2390,10 @@ class TestMultiTabSupport:
         tab_model.setKanbanPlacement(0, "todo", -1)
         tab_model.addTab("Second Tab")
         tab_model.setKanbanPlacement(1, "in_progress", 11)
+        tab_model.addTab("Ready Tab")
+        tab_model.setKanbanPlacement(2, "ready", 12)
         tab_model.addTab("Done Tab")
-        tab_model.setKanbanPlacement(2, "done", -1)
+        tab_model.setKanbanPlacement(3, "done", -1)
 
         project_file = tmp_path / "kanban_tabs.progress"
         project_manager.saveProject(str(project_file))
@@ -2406,6 +2408,7 @@ class TestMultiTabSupport:
         assert [(s["kanbanStatus"], s["kanbanSlotHour"]) for s in summaries] == [
             ("todo", -1),
             ("in_progress", 11),
+            ("ready", -1),
             ("done", -1),
         ]
 
@@ -3291,6 +3294,11 @@ class TestActionDrawQmlTaskInteractions:
         assert "root.registerDropZone(sectionRoot)" in kanban_qml
         assert "function beginCardDrag(" in kanban_qml
         assert "function endCardDrag()" in kanban_qml
+        assert 'item.sectionTitle = "Ready"' in kanban_qml
+        assert 'item.targetStatus = "ready"' in kanban_qml
+        assert 'objectName: "kanbanTodoSearchField"' in kanban_qml
+        assert "root.todoSearchText" in kanban_qml
+        assert '"Ready"' in kanban_qml
         assert "onPositionChanged" in kanban_qml
         assert "preventStealing: true" in kanban_qml
         assert "root.dragActive" in kanban_qml
@@ -3349,6 +3357,67 @@ class TestActionDrawQmlTaskInteractions:
             moved_card = find_visual_item(root, "kanbanCard_1", visible=True)
             assert moved_card is not card
             assert moved_card.height() > 0
+        finally:
+            root.close()
+            root.deleteLater()
+            engine.deleteLater()
+
+    def test_kanban_todo_search_filters_only_todo_cards(self, app):
+        from task_model import TabModel
+
+        def find_visual_item(root, object_name, visible=None):
+            pending = [root.contentItem()]
+            while pending:
+                item = pending.pop(0)
+                if (
+                    item.objectName() == object_name
+                    and (visible is None or item.isVisible() == visible)
+                ):
+                    return item
+                pending.extend(item.childItems())
+            return None
+
+        model = TabModel()
+        model.renameTab(0, "Alpha Todo")
+        model.addTab("Beta Todo")
+        model.addTab("Alpha Ready")
+        model.setKanbanPlacement(2, "ready", -1)
+        model.addTab("Alpha Doing")
+        model.setKanbanPlacement(3, "in_progress", 10)
+        engine = QQmlEngine()
+        component = QQmlComponent(engine, QUrl.fromLocalFile(str(QML_DIR / "KanbanWindow.qml")))
+        root = component.createWithInitialProperties({"tabModel": model})
+        assert root is not None, component.errorString()
+
+        try:
+            for _ in range(20):
+                app.processEvents()
+
+            search_field = find_visual_item(root, "kanbanTodoSearchField", visible=True)
+            assert isinstance(search_field, QQuickItem)
+
+            assert find_visual_item(root, "kanbanCard_0", visible=True) is not None
+            assert find_visual_item(root, "kanbanCard_1", visible=True) is not None
+            assert find_visual_item(root, "kanbanCard_2", visible=True) is not None
+            assert find_visual_item(root, "kanbanCard_3", visible=True) is not None
+
+            root.setProperty("todoSearchText", "alpha")
+            for _ in range(10):
+                app.processEvents()
+
+            assert find_visual_item(root, "kanbanCard_0", visible=True) is not None
+            assert find_visual_item(root, "kanbanCard_1", visible=True) is None
+            assert find_visual_item(root, "kanbanCard_2", visible=True) is not None
+            assert find_visual_item(root, "kanbanCard_3", visible=True) is not None
+
+            root.setProperty("todoSearchText", "missing")
+            for _ in range(10):
+                app.processEvents()
+
+            assert find_visual_item(root, "kanbanCard_0", visible=True) is None
+            assert find_visual_item(root, "kanbanCard_1", visible=True) is None
+            assert find_visual_item(root, "kanbanCard_2", visible=True) is not None
+            assert find_visual_item(root, "kanbanCard_3", visible=True) is not None
         finally:
             root.close()
             root.deleteLater()
@@ -5465,10 +5534,15 @@ class TestTabModelKanban:
         assert model.setKanbanPlacement(99, "done", -1) is False
         assert model.getAllTabs()[0].kanban_status == "todo"
 
-    def test_kanban_done_clears_slot_and_invalid_status_defaults_to_todo(self, app):
+    def test_kanban_unscheduled_lanes_clear_slot_and_invalid_status_defaults_to_todo(self, app):
         from task_model import TabModel
 
         model = TabModel()
+
+        assert model.setKanbanPlacement(0, "in_progress", 12) is True
+        assert model.setKanbanPlacement(0, "ready", 12) is True
+        assert model.getTabSummary(0)["kanbanStatus"] == "ready"
+        assert model.getTabSummary(0)["kanbanSlotHour"] == -1
 
         assert model.setKanbanPlacement(0, "in_progress", 12) is True
         assert model.setKanbanPlacement(0, "done", 12) is True
