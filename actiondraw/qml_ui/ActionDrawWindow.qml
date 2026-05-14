@@ -4722,6 +4722,9 @@ ApplicationWindow {
             root.refreshOverviewData()
             Qt.callLater(root.applyDefaultView)
         }
+        function onKanbanBoardRequested() {
+            root.openKanbanWindow()
+        }
         function onTaskDrillRequested(taskIndex) {
             root.showWindow()
             root.drillToTask(taskIndex)

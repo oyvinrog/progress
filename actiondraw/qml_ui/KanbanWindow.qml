@@ -158,7 +158,9 @@ Window {
     function openTab(tabIndex) {
         if (tabIndex < 0 || tabIndex >= root.modelCount())
             return
-        if (projectManagerRef && projectManagerRef.switchTab)
+        if (projectManagerRef && projectManagerRef.openKanbanTab)
+            projectManagerRef.openKanbanTab(tabIndex)
+        else if (projectManagerRef && projectManagerRef.switchTab)
             projectManagerRef.switchTab(tabIndex)
         else if (tabModelRef && tabModelRef.setCurrentTab)
             tabModelRef.setCurrentTab(tabIndex)

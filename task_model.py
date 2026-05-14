@@ -456,6 +456,7 @@ class NavigationSnapshot:
     """Represents a restorable drill-navigation context."""
     tab_index: int
     task_index: int = -1
+    view_kind: str = "diagram"
 
 
 class TaskModel(QAbstractListModel):
@@ -2251,6 +2252,7 @@ class ProjectManager(QObject):
     testNotificationCompleted = Signal(bool, str, arguments=["success", "message"])
     canGoBackChanged = Signal()
     tabSwitched = Signal()  # Emitted when switching to a different tab
+    kanbanBoardRequested = Signal()
     taskDrillRequested = Signal(int, arguments=["taskIndex"])
     taskReminderDue = Signal(int, int, str, bool, arguments=["tabIndex", "taskIndex", "taskTitle", "sendNotification"])
     standaloneReminderDue = Signal(str, bool, arguments=["title", "sendNotification"])
@@ -2393,6 +2395,10 @@ class ProjectManager(QObject):
         )
 
     def _restoreNavigationSnapshot(self, snapshot: NavigationSnapshot) -> None:
+        if snapshot.view_kind == "kanban":
+            self.kanbanBoardRequested.emit()
+            return
+
         if self._tab_model is not None:
             if snapshot.tab_index < 0 or snapshot.tab_index >= self._tab_model.tabCount:
                 return
@@ -3813,6 +3819,17 @@ class ProjectManager(QObject):
             if self._tab_model.currentTabIndex != tab_index:
                 self.switchTab(tab_index)
         self.drillToTask(task_index)
+
+    @Slot(int)
+    def openKanbanTab(self, tab_index: int) -> None:
+        """Open a tab from the kanban board and keep back navigation to kanban."""
+        if self._tab_model is None:
+            return
+        if tab_index < 0 or tab_index >= self._tab_model.tabCount:
+            return
+
+        self._pushNavigationSnapshot(NavigationSnapshot(tab_index=tab_index, view_kind="kanban"))
+        self.switchTab(tab_index)
 
     @Slot(int)
     def drillToTab(self, task_index: int) -> None:

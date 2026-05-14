@@ -3061,6 +3061,29 @@ class TestMultiTabSupport:
         assert tab_model.currentTabIndex == 1
         assert project_manager.canGoBack is False
 
+    def test_project_manager_open_kanban_tab_back_reopens_kanban(self, app):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        tab_model.addTab("Second")
+
+        requested = []
+        project_manager.kanbanBoardRequested.connect(lambda: requested.append(True))
+
+        project_manager.openKanbanTab(1)
+
+        assert tab_model.currentTabIndex == 1
+        assert project_manager.canGoBack is True
+
+        project_manager.goBack()
+
+        assert requested == [True]
+        assert tab_model.currentTabIndex == 1
+        assert project_manager.canGoBack is False
+
     def test_project_manager_go_back_unwinds_multiple_drills(self, app):
         from task_model import TaskModel, ProjectManager, TabModel
 
@@ -3293,6 +3316,9 @@ class TestActionDrawQmlTaskInteractions:
         assert "function dropTabAt(" in kanban_qml
         assert "root.registerDropZone(sectionRoot)" in kanban_qml
         assert "function beginCardDrag(" in kanban_qml
+        assert "projectManagerRef.openKanbanTab(tabIndex)" in kanban_qml
+        assert "function onKanbanBoardRequested()" in actiondraw_qml
+        assert "root.openKanbanWindow()" in actiondraw_qml
         assert "function endCardDrag()" in kanban_qml
         assert 'item.sectionTitle = "Ready"' in kanban_qml
         assert 'item.targetStatus = "ready"' in kanban_qml
