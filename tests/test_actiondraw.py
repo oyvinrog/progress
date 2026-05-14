@@ -3328,6 +3328,12 @@ class TestActionDrawQmlTaskInteractions:
         assert "onPositionChanged" in kanban_qml
         assert "preventStealing: true" in kanban_qml
         assert "root.dragActive" in kanban_qml
+        assert "function inProgressSlotHeight(" in kanban_qml
+        assert "property real desiredHeight:" in kanban_qml
+        assert "root.inProgressSlotHeight(slotHour)" in kanban_qml
+        assert "cardsColumn.forceLayout" in kanban_qml
+        assert "wrapMode: Text.WordWrap" in kanban_qml
+        assert "maximumLineCount: 2" in kanban_qml
         assert 'text: "Move"' not in kanban_qml
         assert "function beginMoveMode(" not in kanban_qml
         assert "placeMoveMode" not in kanban_qml
@@ -3383,6 +3389,105 @@ class TestActionDrawQmlTaskInteractions:
             moved_card = find_visual_item(root, "kanbanCard_1", visible=True)
             assert moved_card is not card
             assert moved_card.height() > 0
+        finally:
+            root.close()
+            root.deleteLater()
+            engine.deleteLater()
+
+    def test_kanban_in_progress_slot_expands_for_multiple_tabs(self, app):
+        from task_model import TabModel
+
+        def find_visual_item(root, object_name, visible=None):
+            pending = [root.contentItem()]
+            while pending:
+                item = pending.pop(0)
+                if (
+                    item.objectName() == object_name
+                    and (visible is None or item.isVisible() == visible)
+                ):
+                    return item
+                pending.extend(item.childItems())
+            return None
+
+        def find_visual_item_descendant(parent, object_name, visible=None):
+            pending = [parent]
+            while pending:
+                item = pending.pop(0)
+                if (
+                    item.objectName() == object_name
+                    and (visible is None or item.isVisible() == visible)
+                ):
+                    return item
+                pending.extend(item.childItems())
+            return None
+
+        def item_bounds_in(item, parent):
+            top_left = item.mapToItem(parent, QPointF(0, 0))
+            return (
+                top_left.x(),
+                top_left.y(),
+                top_left.x() + item.width(),
+                top_left.y() + item.height(),
+            )
+
+        model = TabModel()
+        model.renameTab(0, "First long scheduled tab title that should wrap instead of disappearing")
+        model.setKanbanPlacement(0, "in_progress", 10)
+        model.addTab("Second long scheduled tab title that should also remain readable")
+
+        engine = QQmlEngine()
+        component = QQmlComponent(engine, QUrl.fromLocalFile(str(QML_DIR / "KanbanWindow.qml")))
+        root = component.createWithInitialProperties({"tabModel": model})
+        assert root is not None, component.errorString()
+
+        try:
+            for _ in range(30):
+                app.processEvents()
+
+            slot = find_visual_item(root, "kanbanDrop_in_progress_10", visible=True)
+            first_card = find_visual_item(root, "kanbanCard_0", visible=True)
+            second_card = find_visual_item(root, "kanbanCard_1", visible=True)
+            assert isinstance(slot, QQuickItem)
+            assert isinstance(first_card, QQuickItem)
+            assert isinstance(second_card, QQuickItem)
+            assert slot.height() == 154
+
+            start = second_card.mapToScene(QPointF(second_card.width() / 2, second_card.height() / 2)).toPoint()
+            end = slot.mapToScene(QPointF(slot.width() / 2, slot.height() / 2)).toPoint()
+            QTest.mousePress(root, Qt.LeftButton, Qt.NoModifier, start)
+            for step in range(1, 8):
+                x = start.x() + (end.x() - start.x()) * step // 7
+                y = start.y() + (end.y() - start.y()) * step // 7
+                QTest.mouseMove(root, QPointF(x, y).toPoint(), 20)
+                app.processEvents()
+            QTest.mouseRelease(root, Qt.LeftButton, Qt.NoModifier, end)
+
+            for _ in range(30):
+                app.processEvents()
+
+            assert model.getTabSummary(1)["kanbanStatus"] == "in_progress"
+            assert model.getTabSummary(1)["kanbanSlotHour"] == 10
+            slot = find_visual_item(root, "kanbanDrop_in_progress_10", visible=True)
+            first_card = find_visual_item(root, "kanbanCard_0", visible=True)
+            second_card = find_visual_item(root, "kanbanCard_1", visible=True)
+            assert isinstance(slot, QQuickItem)
+            assert isinstance(first_card, QQuickItem)
+            assert isinstance(second_card, QQuickItem)
+            assert slot.height() > 154
+
+            first_card = find_visual_item_descendant(slot, "kanbanCard_0", visible=True)
+            second_card = find_visual_item_descendant(slot, "kanbanCard_1", visible=True)
+            assert isinstance(first_card, QQuickItem)
+            assert isinstance(second_card, QQuickItem)
+            first_bounds = item_bounds_in(first_card, slot)
+            second_bounds = item_bounds_in(second_card, slot)
+            assert first_bounds[1] >= 0
+            assert second_bounds[1] >= 0
+            assert first_bounds[3] <= slot.height()
+            assert second_bounds[3] <= slot.height()
+            assert first_bounds[3] <= second_bounds[1] or second_bounds[3] <= first_bounds[1]
+            assert first_card.height() >= 70
+            assert second_card.height() >= 70
         finally:
             root.close()
             root.deleteLater()

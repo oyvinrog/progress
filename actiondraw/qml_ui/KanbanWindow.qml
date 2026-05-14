@@ -28,6 +28,13 @@ Window {
     property string dragTabIcon: ""
     property real dragSceneX: 0
     property real dragSceneY: 0
+    property int kanbanSlotMinHeight: 154
+    property int kanbanCardMinHeight: 70
+    property int kanbanCardWithActiveMinHeight: 94
+    property int kanbanCardEstimatedHeight: 104
+    property int kanbanSectionChromeHeight: 58
+    property int kanbanCardSpacing: 8
+    property int kanbanLayoutRevision: 0
 
     function modelCount() {
         if (!tabModelRef)
@@ -70,6 +77,39 @@ Window {
         return todoSearchMatches(cardName)
     }
 
+    function sectionCardCount(targetStatus, targetSlotHour) {
+        if (!tabModelRef || !tabModelRef.getTabSummary)
+            return 0
+        var count = 0
+        for (var i = 0; i < modelCount(); ++i) {
+            var summary = tabModelRef.getTabSummary(i)
+            if (summary
+                    && cardMatchesSection(
+                        summary.kanbanStatus,
+                        summary.kanbanSlotHour,
+                        summary.name,
+                        targetStatus,
+                        targetSlotHour
+                    )) {
+                count += 1
+            }
+        }
+        return count
+    }
+
+    function inProgressSlotHeight(slotHour) {
+        var revision = kanbanLayoutRevision
+        var count = sectionCardCount("in_progress", slotHour)
+        if (count <= 1)
+            return kanbanSlotMinHeight
+        return Math.max(
+            kanbanSlotMinHeight,
+            kanbanSectionChromeHeight
+                + count * kanbanCardEstimatedHeight
+                + Math.max(0, count - 1) * kanbanCardSpacing
+        )
+    }
+
     function todoSearchHasMatches() {
         var query = todoSearchText.trim()
         if (query.length === 0 || !tabModelRef || !tabModelRef.getTabSummary)
@@ -89,6 +129,7 @@ Window {
         if (!tabModelRef || !tabModelRef.setKanbanPlacement)
             return
         tabModelRef.setKanbanPlacement(Number(tabIndex), status, Number(slotHour))
+        kanbanLayoutRevision += 1
     }
 
     function registerDropZone(zone) {
@@ -212,6 +253,27 @@ Window {
         }
     }
 
+    Connections {
+        target: root.tabModelRef
+        ignoreUnknownSignals: true
+
+        function onKanbanChanged() {
+            root.kanbanLayoutRevision += 1
+        }
+
+        function onRowsInserted() {
+            root.kanbanLayoutRevision += 1
+        }
+
+        function onRowsRemoved() {
+            root.kanbanLayoutRevision += 1
+        }
+
+        function onModelReset() {
+            root.kanbanLayoutRevision += 1
+        }
+    }
+
     Component {
         id: kanbanCardComponent
 
@@ -232,7 +294,11 @@ Window {
             objectName: "kanbanCard_" + tabIndex
 
             width: parent ? parent.width : 240
-            height: activeTaskTitle.length > 0 ? 82 : 62
+            implicitHeight: Math.max(
+                activeTaskTitle.length > 0 ? root.kanbanCardWithActiveMinHeight : root.kanbanCardMinHeight,
+                cardContent.implicitHeight + 16
+            )
+            height: implicitHeight
             radius: 8
             color: cardMouse.containsMouse ? "#203445" : "#172737"
             border.color: cardMouse.containsMouse ? "#72b8d8" : "#314b5f"
@@ -327,6 +393,7 @@ Window {
             }
 
             RowLayout {
+                id: cardContent
                 anchors.fill: parent
                 anchors.leftMargin: 12
                 anchors.rightMargin: 8
@@ -352,6 +419,8 @@ Window {
                         color: "#f0f7ff"
                         font.pixelSize: 13
                         font.bold: true
+                        wrapMode: Text.WordWrap
+                        maximumLineCount: 2
                         elide: Text.ElideRight
                         Layout.fillWidth: true
                     }
@@ -361,6 +430,8 @@ Window {
                         text: "Active: " + activeTaskTitle
                         color: "#9fd0b3"
                         font.pixelSize: 10
+                        wrapMode: Text.WordWrap
+                        maximumLineCount: 2
                         elide: Text.ElideRight
                         Layout.fillWidth: true
                     }
@@ -405,6 +476,8 @@ Window {
             property bool showTodoSearch: targetStatus === "todo"
             objectName: "kanbanDrop_" + targetStatus + "_" + targetSlotHour
 
+            width: parent ? parent.width : 220
+            height: parent ? parent.height : root.kanbanSlotMinHeight
             Layout.fillWidth: true
             Layout.fillHeight: true
             radius: 10
@@ -489,10 +562,13 @@ Window {
                                     sectionRoot.targetSlotHour
                                 )
                                 width: cardsColumn.width
-                                height: placedHere ? (activeTaskTitle.length > 0 ? 82 : 62) : 0
+                                height: placedHere && item ? item.implicitHeight : 0
                                 visible: placedHere
                                 active: placedHere
                                 sourceComponent: kanbanCardComponent
+                                onHeightChanged: Qt.callLater(cardsColumn.forceLayout)
+                                onVisibleChanged: Qt.callLater(cardsColumn.forceLayout)
+                                onActiveChanged: Qt.callLater(cardsColumn.forceLayout)
                                 onLoaded: {
                                     item.modelIndex = index
                                     item.tabName = name || ""
@@ -604,13 +680,21 @@ Window {
                                 model: root.slotHours
 
                                 delegate: Loader {
+                                    property int slotHour: Number(modelData)
+                                    property real desiredHeight: root.kanbanLayoutRevision >= 0
+                                        ? root.inProgressSlotHeight(slotHour)
+                                        : root.kanbanSlotMinHeight
                                     Layout.fillWidth: true
-                                    Layout.preferredHeight: 154
+                                    Layout.minimumHeight: desiredHeight
+                                    Layout.preferredHeight: desiredHeight
+                                    height: desiredHeight
                                     sourceComponent: boardSectionComponent
                                     onLoaded: {
-                                        item.sectionTitle = root.slotLabel(modelData)
+                                        item.width = Qt.binding(function() { return width })
+                                        item.height = Qt.binding(function() { return desiredHeight })
+                                        item.sectionTitle = root.slotLabel(slotHour)
                                         item.targetStatus = "in_progress"
-                                        item.targetSlotHour = Number(modelData)
+                                        item.targetSlotHour = slotHour
                                     }
                                 }
                             }
