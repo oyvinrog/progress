@@ -26,6 +26,7 @@ ApplicationWindow {
     property var mcpServerControllerRef: mcpServerController
     property var priorityPlotWindowRef: null
     property var hierarchyWindowRef: null
+    property var kanbanWindowRef: null
     property real hierarchyFocusZoom: 1.2
     property bool yubiKeyPromptVisible: false
     property string yubiKeyPromptText: "Touch your YubiKey to continue."
@@ -137,6 +138,37 @@ ApplicationWindow {
         priorityPlotWindowRef = win
         win.closing.connect(function() {
             priorityPlotWindowRef = null
+        })
+        win.show()
+        win.raise()
+        win.requestActivate()
+    }
+
+    function openKanbanWindow() {
+        if (!tabModelRef)
+            return
+        if (kanbanWindowRef) {
+            kanbanWindowRef.show()
+            kanbanWindowRef.raise()
+            kanbanWindowRef.requestActivate()
+            return
+        }
+        var component = Qt.createComponent(Qt.resolvedUrl("KanbanWindow.qml"))
+        if (component.status === Component.Error) {
+            console.log("Failed to load KanbanWindow:", component.errorString())
+            return
+        }
+        var win = component.createObject(root, {
+            "tabModel": tabModelRef,
+            "projectManager": projectManagerRef
+        })
+        if (!win) {
+            console.log("Failed to instantiate KanbanWindow")
+            return
+        }
+        kanbanWindowRef = win
+        win.closing.connect(function() {
+            kanbanWindowRef = null
         })
         win.show()
         win.raise()
