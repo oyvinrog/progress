@@ -1,12 +1,15 @@
 """Tests for the rewritten actiondraw module."""
 
+import json
 import os
 import time
 
 import pytest
-from PySide6.QtCore import QModelIndex, QObject, QDateTime, Qt, QUrl, Slot
+from PySide6.QtCore import QModelIndex, QObject, QDateTime, QPointF, Qt, QUrl, Slot
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlApplicationEngine, QQmlComponent, QQmlEngine
+from PySide6.QtQuick import QQuickItem
+from PySide6.QtTest import QTest
 
 from actiondraw import (
     DiagramEdge,
@@ -2375,6 +2378,74 @@ class TestMultiTabSupport:
             {"name": "Notes", "text": "Second tab markdown"},
         ]
 
+    def test_roundtrip_tab_kanban_metadata(self, app, tmp_path):
+        """Per-tab kanban placement survives save/load."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        tab_model.setKanbanPlacement(0, "todo", -1)
+        tab_model.addTab("Second Tab")
+        tab_model.setKanbanPlacement(1, "in_progress", 11)
+        tab_model.addTab("Ready Tab")
+        tab_model.setKanbanPlacement(2, "ready", 12)
+        tab_model.addTab("Done Tab")
+        tab_model.setKanbanPlacement(3, "done", -1)
+
+        project_file = tmp_path / "kanban_tabs.progress"
+        project_manager.saveProject(str(project_file))
+
+        task_model2 = TaskModel()
+        diagram_model2 = DiagramModel(task_model=task_model2)
+        tab_model2 = TabModel()
+        project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
+        project_manager2.loadProject(str(project_file))
+
+        summaries = [tab_model2.getTabSummary(i) for i in range(tab_model2.tabCount)]
+        assert [(s["kanbanStatus"], s["kanbanSlotHour"]) for s in summaries] == [
+            ("todo", -1),
+            ("in_progress", 11),
+            ("ready", -1),
+            ("done", -1),
+        ]
+
+    def test_load_old_project_defaults_tab_kanban_metadata(self, app, tmp_path):
+        """Older project files load tabs onto Todo when kanban fields are absent."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        project_file = tmp_path / "old_tabs.progress"
+        project_file.write_text(
+            json.dumps({
+                "version": "1.1",
+                "tabs": [
+                    {
+                        "name": "Main",
+                        "tasks": {"tasks": []},
+                        "diagram": {"items": [], "edges": [], "strokes": []},
+                    },
+                    {
+                        "name": "Legacy",
+                        "tasks": {"tasks": []},
+                        "diagram": {"items": [], "edges": [], "strokes": []},
+                    },
+                ],
+                "active_tab": 0,
+            }),
+            encoding="utf-8",
+        )
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        project_manager.loadProject(str(project_file))
+
+        assert [tab_model.getTabSummary(i)["kanbanStatus"] for i in range(tab_model.tabCount)] == ["todo", "todo"]
+        assert [tab_model.getTabSummary(i)["kanbanSlotHour"] for i in range(tab_model.tabCount)] == [-1, -1]
+
     def test_get_and_set_current_tab_markdown_tabs(self, app):
         """Current-tab markdown helpers read and write the active tab."""
         from task_model import TaskModel, ProjectManager, TabModel
@@ -2990,6 +3061,29 @@ class TestMultiTabSupport:
         assert tab_model.currentTabIndex == 1
         assert project_manager.canGoBack is False
 
+    def test_project_manager_open_kanban_tab_back_reopens_kanban(self, app):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+        tab_model.addTab("Second")
+
+        requested = []
+        project_manager.kanbanBoardRequested.connect(lambda: requested.append(True))
+
+        project_manager.openKanbanTab(1)
+
+        assert tab_model.currentTabIndex == 1
+        assert project_manager.canGoBack is True
+
+        project_manager.goBack()
+
+        assert requested == [True]
+        assert tab_model.currentTabIndex == 1
+        assert project_manager.canGoBack is False
+
     def test_project_manager_go_back_unwinds_multiple_drills(self, app):
         from task_model import TaskModel, ProjectManager, TabModel
 
@@ -3139,6 +3233,43 @@ class TestMultiTabSupport:
         assert item["taskIndex"] == 0
         assert item["text"] == "Backend API"
 
+    def test_project_manager_add_task_to_kanban_creates_ready_drill_tab(self, app):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        task_model.addTask("Prep release", -1)
+        task_model.addTask("Write checklist", 0)
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        created_index = project_manager.addTaskToKanban(0)
+
+        assert created_index == 1
+        assert tab_model.currentTabIndex == 0
+        assert tab_model.getTabSummary(created_index)["name"] == "Prep release"
+        assert tab_model.getTabSummary(created_index)["kanbanStatus"] == "ready"
+        assert tab_model.getTabSummary(created_index)["kanbanSlotHour"] == -1
+        assert tab_model.getAllTabs()[created_index].tasks["tasks"][0]["title"] == "Write checklist"
+
+    def test_project_manager_add_task_to_kanban_reuses_existing_drill_tab(self, app):
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        task_model.addTask("Existing card", -1)
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        tab_model.addTab("Existing card")
+        tab_model.setKanbanPlacement(1, "todo", -1)
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        created_index = project_manager.addTaskToKanban(0)
+
+        assert created_index == 1
+        assert tab_model.tabCount == 2
+        assert tab_model.currentTabIndex == 0
+        assert tab_model.getTabSummary(1)["kanbanStatus"] == "ready"
+
     def test_project_manager_create_tab_from_markdown_selection_switches_to_new_tab(self, app):
         from task_model import TaskModel, ProjectManager, TabModel
 
@@ -3196,6 +3327,9 @@ class TestActionDrawQmlTaskInteractions:
         assert 'id: renameTaskMenuItem' in qml
         assert 'text: "Rename Task..."' in qml
         assert 'id: drillToTabMenuItem' in qml
+        assert 'id: addToKanbanMenuItem' in qml
+        assert 'text: "Add to Kanban"' in qml
+        assert "projectManager.addTaskToKanban(item.taskIndex)" in qml
 
     def test_toolbar_exposes_back_button(self):
         qml = (QML_DIR / "components" / "ToolbarRow.qml").read_text(encoding="utf-8")
@@ -3203,6 +3337,262 @@ class TestActionDrawQmlTaskInteractions:
         assert 'text: "\\u2190 Back"' in qml
         assert 'projectManager.goBack()' in qml
         assert 'projectManager.canGoBack' in qml
+
+    def test_tools_menu_exposes_kanban_board(self):
+        actiondraw_qml = load_actiondraw_qml()
+        menu_qml = (QML_DIR / "components" / "ActionMenuBar.qml").read_text(encoding="utf-8")
+        kanban_qml = (QML_DIR / "KanbanWindow.qml").read_text(encoding="utf-8")
+
+        assert "function openKanbanWindow()" in actiondraw_qml
+        assert 'Qt.resolvedUrl("KanbanWindow.qml")' in actiondraw_qml
+        assert 'text: "Kanban Board..."' in menu_qml
+        assert "root.openKanbanWindow()" in menu_qml
+        assert 'title: "Kanban Board"' in kanban_qml
+        assert "setKanbanPlacement" in kanban_qml
+        assert "createTabAtKanbanPlacement" in kanban_qml
+        assert "projectManagerRef.removeTab" in kanban_qml
+        assert "Drag.active: cardDragHandler.active" in kanban_qml
+        assert "drop.acceptProposedAction()" in kanban_qml
+        assert "function dropTabAt(" in kanban_qml
+        assert "root.registerDropZone(sectionRoot)" in kanban_qml
+        assert "function beginCardDrag(" in kanban_qml
+        assert "projectManagerRef.openKanbanTab(tabIndex)" in kanban_qml
+        assert "function onKanbanBoardRequested()" in actiondraw_qml
+        assert "root.openKanbanWindow()" in actiondraw_qml
+        assert "function endCardDrag()" in kanban_qml
+        assert 'item.sectionTitle = "Ready"' in kanban_qml
+        assert 'item.targetStatus = "ready"' in kanban_qml
+        assert 'objectName: "kanbanTodoSearchField"' in kanban_qml
+        assert "root.todoSearchText" in kanban_qml
+        assert '"Ready"' in kanban_qml
+        assert "onPositionChanged" in kanban_qml
+        assert "preventStealing: true" in kanban_qml
+        assert "root.dragActive" in kanban_qml
+        assert "function inProgressSlotHeight(" in kanban_qml
+        assert "property real desiredHeight:" in kanban_qml
+        assert "root.inProgressSlotHeight(slotHour)" in kanban_qml
+        assert "cardsColumn.forceLayout" in kanban_qml
+        assert "wrapMode: Text.WordWrap" in kanban_qml
+        assert "maximumLineCount: 2" in kanban_qml
+        assert 'text: "Move"' not in kanban_qml
+        assert "function beginMoveMode(" not in kanban_qml
+        assert "placeMoveMode" not in kanban_qml
+        assert "Choose destination for " not in kanban_qml
+
+    def test_kanban_mouse_drag_drops_tab_into_target_column(self, app):
+        from task_model import TabModel
+
+        def find_visual_item(root, object_name, visible=None):
+            pending = [root.contentItem()]
+            while pending:
+                item = pending.pop(0)
+                if (
+                    item.objectName() == object_name
+                    and (visible is None or item.isVisible() == visible)
+                ):
+                    return item
+                pending.extend(item.childItems())
+            return None
+
+        model = TabModel()
+        model.addTab("Drag me")
+        engine = QQmlEngine()
+        component = QQmlComponent(engine, QUrl.fromLocalFile(str(QML_DIR / "KanbanWindow.qml")))
+        root = component.createWithInitialProperties({"tabModel": model})
+        assert root is not None, component.errorString()
+
+        try:
+            for _ in range(20):
+                app.processEvents()
+
+            card = find_visual_item(root, "kanbanCard_1", visible=True)
+            target = find_visual_item(root, "kanbanDrop_in_progress_10", visible=True)
+            assert isinstance(card, QQuickItem)
+            assert isinstance(target, QQuickItem)
+
+            start = card.mapToScene(QPointF(card.width() / 2, card.height() / 2)).toPoint()
+            end = target.mapToScene(QPointF(target.width() / 2, target.height() / 2)).toPoint()
+            QTest.mousePress(root, Qt.LeftButton, Qt.NoModifier, start)
+            for step in range(1, 8):
+                x = start.x() + (end.x() - start.x()) * step // 7
+                y = start.y() + (end.y() - start.y()) * step // 7
+                QTest.mouseMove(root, QPointF(x, y).toPoint(), 20)
+                app.processEvents()
+            QTest.mouseRelease(root, Qt.LeftButton, Qt.NoModifier, end)
+
+            for _ in range(5):
+                app.processEvents()
+
+            summary = model.getTabSummary(1)
+            assert summary["kanbanStatus"] == "in_progress"
+            assert summary["kanbanSlotHour"] == 10
+            moved_card = find_visual_item(root, "kanbanCard_1", visible=True)
+            assert moved_card is not card
+            assert moved_card.height() > 0
+        finally:
+            root.close()
+            root.deleteLater()
+            engine.deleteLater()
+
+    def test_kanban_in_progress_slot_expands_for_multiple_tabs(self, app):
+        from task_model import TabModel
+
+        def find_visual_item(root, object_name, visible=None):
+            pending = [root.contentItem()]
+            while pending:
+                item = pending.pop(0)
+                if (
+                    item.objectName() == object_name
+                    and (visible is None or item.isVisible() == visible)
+                ):
+                    return item
+                pending.extend(item.childItems())
+            return None
+
+        def find_visual_item_descendant(parent, object_name, visible=None):
+            pending = [parent]
+            while pending:
+                item = pending.pop(0)
+                if (
+                    item.objectName() == object_name
+                    and (visible is None or item.isVisible() == visible)
+                ):
+                    return item
+                pending.extend(item.childItems())
+            return None
+
+        def item_bounds_in(item, parent):
+            top_left = item.mapToItem(parent, QPointF(0, 0))
+            return (
+                top_left.x(),
+                top_left.y(),
+                top_left.x() + item.width(),
+                top_left.y() + item.height(),
+            )
+
+        model = TabModel()
+        model.renameTab(0, "First long scheduled tab title that should wrap instead of disappearing")
+        model.setKanbanPlacement(0, "in_progress", 10)
+        model.addTab("Second long scheduled tab title that should also remain readable")
+
+        engine = QQmlEngine()
+        component = QQmlComponent(engine, QUrl.fromLocalFile(str(QML_DIR / "KanbanWindow.qml")))
+        root = component.createWithInitialProperties({"tabModel": model})
+        assert root is not None, component.errorString()
+
+        try:
+            for _ in range(30):
+                app.processEvents()
+
+            slot = find_visual_item(root, "kanbanDrop_in_progress_10", visible=True)
+            first_card = find_visual_item(root, "kanbanCard_0", visible=True)
+            second_card = find_visual_item(root, "kanbanCard_1", visible=True)
+            assert isinstance(slot, QQuickItem)
+            assert isinstance(first_card, QQuickItem)
+            assert isinstance(second_card, QQuickItem)
+            assert slot.height() == 154
+
+            start = second_card.mapToScene(QPointF(second_card.width() / 2, second_card.height() / 2)).toPoint()
+            end = slot.mapToScene(QPointF(slot.width() / 2, slot.height() / 2)).toPoint()
+            QTest.mousePress(root, Qt.LeftButton, Qt.NoModifier, start)
+            for step in range(1, 8):
+                x = start.x() + (end.x() - start.x()) * step // 7
+                y = start.y() + (end.y() - start.y()) * step // 7
+                QTest.mouseMove(root, QPointF(x, y).toPoint(), 20)
+                app.processEvents()
+            QTest.mouseRelease(root, Qt.LeftButton, Qt.NoModifier, end)
+
+            for _ in range(30):
+                app.processEvents()
+
+            assert model.getTabSummary(1)["kanbanStatus"] == "in_progress"
+            assert model.getTabSummary(1)["kanbanSlotHour"] == 10
+            slot = find_visual_item(root, "kanbanDrop_in_progress_10", visible=True)
+            first_card = find_visual_item(root, "kanbanCard_0", visible=True)
+            second_card = find_visual_item(root, "kanbanCard_1", visible=True)
+            assert isinstance(slot, QQuickItem)
+            assert isinstance(first_card, QQuickItem)
+            assert isinstance(second_card, QQuickItem)
+            assert slot.height() > 154
+
+            first_card = find_visual_item_descendant(slot, "kanbanCard_0", visible=True)
+            second_card = find_visual_item_descendant(slot, "kanbanCard_1", visible=True)
+            assert isinstance(first_card, QQuickItem)
+            assert isinstance(second_card, QQuickItem)
+            first_bounds = item_bounds_in(first_card, slot)
+            second_bounds = item_bounds_in(second_card, slot)
+            assert first_bounds[1] >= 0
+            assert second_bounds[1] >= 0
+            assert first_bounds[3] <= slot.height()
+            assert second_bounds[3] <= slot.height()
+            assert first_bounds[3] <= second_bounds[1] or second_bounds[3] <= first_bounds[1]
+            assert first_card.height() >= 70
+            assert second_card.height() >= 70
+        finally:
+            root.close()
+            root.deleteLater()
+            engine.deleteLater()
+
+    def test_kanban_todo_search_filters_only_todo_cards(self, app):
+        from task_model import TabModel
+
+        def find_visual_item(root, object_name, visible=None):
+            pending = [root.contentItem()]
+            while pending:
+                item = pending.pop(0)
+                if (
+                    item.objectName() == object_name
+                    and (visible is None or item.isVisible() == visible)
+                ):
+                    return item
+                pending.extend(item.childItems())
+            return None
+
+        model = TabModel()
+        model.renameTab(0, "Alpha Todo")
+        model.addTab("Beta Todo")
+        model.addTab("Alpha Ready")
+        model.setKanbanPlacement(2, "ready", -1)
+        model.addTab("Alpha Doing")
+        model.setKanbanPlacement(3, "in_progress", 10)
+        engine = QQmlEngine()
+        component = QQmlComponent(engine, QUrl.fromLocalFile(str(QML_DIR / "KanbanWindow.qml")))
+        root = component.createWithInitialProperties({"tabModel": model})
+        assert root is not None, component.errorString()
+
+        try:
+            for _ in range(20):
+                app.processEvents()
+
+            search_field = find_visual_item(root, "kanbanTodoSearchField", visible=True)
+            assert isinstance(search_field, QQuickItem)
+
+            assert find_visual_item(root, "kanbanCard_0", visible=True) is not None
+            assert find_visual_item(root, "kanbanCard_1", visible=True) is not None
+            assert find_visual_item(root, "kanbanCard_2", visible=True) is not None
+            assert find_visual_item(root, "kanbanCard_3", visible=True) is not None
+
+            root.setProperty("todoSearchText", "alpha")
+            for _ in range(10):
+                app.processEvents()
+
+            assert find_visual_item(root, "kanbanCard_0", visible=True) is not None
+            assert find_visual_item(root, "kanbanCard_1", visible=True) is None
+            assert find_visual_item(root, "kanbanCard_2", visible=True) is not None
+            assert find_visual_item(root, "kanbanCard_3", visible=True) is not None
+
+            root.setProperty("todoSearchText", "missing")
+            for _ in range(10):
+                app.processEvents()
+
+            assert find_visual_item(root, "kanbanCard_0", visible=True) is None
+            assert find_visual_item(root, "kanbanCard_1", visible=True) is None
+            assert find_visual_item(root, "kanbanCard_2", visible=True) is not None
+            assert find_visual_item(root, "kanbanCard_3", visible=True) is not None
+        finally:
+            root.close()
+            root.deleteLater()
+            engine.deleteLater()
 
     def test_toolbar_does_not_expose_workspace_markdown_button(self):
         qml = (QML_DIR / "components" / "ToolbarRow.qml").read_text(encoding="utf-8")
@@ -5278,6 +5668,83 @@ class TestTabModelMoveTab:
         assert model.currentTabName == "Tab 3"
         assert changed_indices[-1] == 1
         assert changed_names[-1] == "Tab 3"
+
+
+class TestTabModelKanban:
+    """Tests for manual kanban placement metadata on project tabs."""
+
+    def test_kanban_defaults_and_roles(self, app):
+        from task_model import TabModel
+
+        model = TabModel()
+
+        assert model.data(model.index(0, 0), model.KanbanStatusRole) == "todo"
+        assert model.data(model.index(0, 0), model.KanbanSlotHourRole) == -1
+        summary = model.getTabSummary(0)
+        assert summary["kanbanStatus"] == "todo"
+        assert summary["kanbanSlotHour"] == -1
+
+    def test_set_kanban_placement_updates_status_and_slot(self, app):
+        from task_model import TabModel
+
+        model = TabModel()
+        changed = []
+        model.kanbanChanged.connect(lambda: changed.append(True))
+
+        assert model.setKanbanPlacement(0, "in_progress", 10) is True
+
+        assert model.getAllTabs()[0].kanban_status == "in_progress"
+        assert model.getAllTabs()[0].kanban_slot_hour == 10
+        assert changed == [True]
+
+    def test_set_kanban_placement_rejects_invalid_index(self, app):
+        from task_model import TabModel
+
+        model = TabModel()
+
+        assert model.setKanbanPlacement(99, "done", -1) is False
+        assert model.getAllTabs()[0].kanban_status == "todo"
+
+    def test_kanban_unscheduled_lanes_clear_slot_and_invalid_status_defaults_to_todo(self, app):
+        from task_model import TabModel
+
+        model = TabModel()
+
+        assert model.setKanbanPlacement(0, "in_progress", 12) is True
+        assert model.setKanbanPlacement(0, "ready", 12) is True
+        assert model.getTabSummary(0)["kanbanStatus"] == "ready"
+        assert model.getTabSummary(0)["kanbanSlotHour"] == -1
+
+        assert model.setKanbanPlacement(0, "in_progress", 12) is True
+        assert model.setKanbanPlacement(0, "done", 12) is True
+        assert model.getTabSummary(0)["kanbanStatus"] == "done"
+        assert model.getTabSummary(0)["kanbanSlotHour"] == -1
+
+        assert model.setKanbanPlacement(0, "blocked", 9) is True
+        assert model.getTabSummary(0)["kanbanStatus"] == "todo"
+        assert model.getTabSummary(0)["kanbanSlotHour"] == -1
+
+    def test_in_progress_rejects_out_of_range_slot(self, app):
+        from task_model import TabModel
+
+        model = TabModel()
+
+        assert model.setKanbanPlacement(0, "in_progress", 22) is True
+        assert model.getTabSummary(0)["kanbanStatus"] == "in_progress"
+        assert model.getTabSummary(0)["kanbanSlotHour"] == -1
+
+    def test_create_tab_at_kanban_placement(self, app):
+        from task_model import TabModel
+
+        model = TabModel()
+
+        created_index = model.createTabAtKanbanPlacement("Build board", "in_progress", 14)
+
+        assert created_index == 1
+        assert model.tabCount == 2
+        assert model.getTabSummary(1)["name"] == "Build board"
+        assert model.getTabSummary(1)["kanbanStatus"] == "in_progress"
+        assert model.getTabSummary(1)["kanbanSlotHour"] == 14
 
 
 class TestTabModelUpdateCurrentTabTasks:

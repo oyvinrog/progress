@@ -371,6 +371,12 @@ MenuBar {
             onTriggered: root.openPriorityPlotWindow()
         }
 
+        MenuItem {
+            text: "Kanban Board..."
+            enabled: root && root.openKanbanWindow
+            onTriggered: root.openKanbanWindow()
+        }
+
         MenuSeparator {}
 
         MenuItem {

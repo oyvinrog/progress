@@ -447,6 +447,8 @@ class Tab:
     color: str = ""
     pinned: bool = False
     goals: List[Dict[str, Any]] = field(default_factory=list)
+    kanban_status: str = "todo"
+    kanban_slot_hour: int = -1
 
 
 @dataclass
@@ -454,6 +456,7 @@ class NavigationSnapshot:
     """Represents a restorable drill-navigation context."""
     tab_index: int
     task_index: int = -1
+    view_kind: str = "diagram"
 
 
 class TaskModel(QAbstractListModel):
@@ -1477,12 +1480,15 @@ class TabModel(QAbstractListModel):
     IconRole = Qt.UserRole + 10
     ColorRole = Qt.UserRole + 11
     PinnedRole = Qt.UserRole + 12
+    KanbanStatusRole = Qt.UserRole + 13
+    KanbanSlotHourRole = Qt.UserRole + 14
 
     tabsChanged = Signal()
     currentTabChanged = Signal()
     currentTabIndexChanged = Signal()
     recentTabsChanged = Signal()
     goalsChanged = Signal()
+    kanbanChanged = Signal()
 
     def __init__(self):
         super().__init__()
@@ -1522,6 +1528,10 @@ class TabModel(QAbstractListModel):
             return tab.color
         if role == self.PinnedRole:
             return tab.pinned
+        if role == self.KanbanStatusRole:
+            return tab.kanban_status
+        if role == self.KanbanSlotHourRole:
+            return tab.kanban_slot_hour
         return None
 
     def roleNames(self) -> Dict[int, bytes]:  # type: ignore[override]
@@ -1538,7 +1548,28 @@ class TabModel(QAbstractListModel):
             self.IconRole: b"icon",
             self.ColorRole: b"color",
             self.PinnedRole: b"pinned",
+            self.KanbanStatusRole: b"kanbanStatus",
+            self.KanbanSlotHourRole: b"kanbanSlotHour",
         }
+
+    @staticmethod
+    def _normalizeKanbanStatus(status: str) -> str:
+        normalized = str(status or "").strip().lower()
+        if normalized in {"todo", "ready", "in_progress", "done"}:
+            return normalized
+        return "todo"
+
+    @staticmethod
+    def _normalizeKanbanSlotHour(status: str, slot_hour: int) -> int:
+        if status != "in_progress":
+            return -1
+        try:
+            hour = int(slot_hour)
+        except (TypeError, ValueError):
+            return -1
+        if 8 <= hour <= 17:
+            return hour
+        return -1
 
     @Property(int, notify=currentTabIndexChanged)
     def currentTabIndex(self) -> int:
@@ -1664,6 +1695,8 @@ class TabModel(QAbstractListModel):
             "icon": tab.icon,
             "color": tab.color,
             "pinned": tab.pinned,
+            "kanbanStatus": tab.kanban_status,
+            "kanbanSlotHour": tab.kanban_slot_hour,
         }
 
     def _tab_name_to_index_map(self) -> Dict[str, int]:
@@ -1812,6 +1845,14 @@ class TabModel(QAbstractListModel):
         self.tabsChanged.emit()
         self._emitRecentTabsChanged()
 
+    @Slot(str, str, int, result=int)
+    def createTabAtKanbanPlacement(self, name: str, status: str, slot_hour: int) -> int:
+        """Create a tab and place it on the kanban board."""
+        self.addTab(name)
+        created_index = len(self._tabs) - 1
+        self.setKanbanPlacement(created_index, status, slot_hour)
+        return created_index
+
     @Slot(int)
     def removeTab(self, index: int) -> None:
         """Remove a tab at the given index. Cannot remove last tab."""
@@ -1863,6 +1904,23 @@ class TabModel(QAbstractListModel):
         self.dataChanged.emit(model_index, model_index, [self.NameRole])
         if index == self._current_tab_index:
             self.currentTabChanged.emit()
+
+    @Slot(int, str, int, result=bool)
+    def setKanbanPlacement(self, index: int, status: str, slot_hour: int = -1) -> bool:
+        """Set the manual kanban placement for a tab."""
+        if index < 0 or index >= len(self._tabs):
+            return False
+        normalized_status = self._normalizeKanbanStatus(status)
+        normalized_slot = self._normalizeKanbanSlotHour(normalized_status, slot_hour)
+        tab = self._tabs[index]
+        if tab.kanban_status == normalized_status and tab.kanban_slot_hour == normalized_slot:
+            return True
+        tab.kanban_status = normalized_status
+        tab.kanban_slot_hour = normalized_slot
+        model_index = self.index(index, 0)
+        self.dataChanged.emit(model_index, model_index, [self.KanbanStatusRole, self.KanbanSlotHourRole])
+        self.kanbanChanged.emit()
+        return True
 
     @Slot(int, int)
     def setPriority(self, index: int, priority: int) -> None:
@@ -2110,6 +2168,11 @@ class TabModel(QAbstractListModel):
             tab.icon = str(getattr(tab, "icon", "") or "").strip()
             tab.color = self._normalizeTabColor(getattr(tab, "color", ""))
             tab.pinned = bool(getattr(tab, "pinned", False))
+            tab.kanban_status = self._normalizeKanbanStatus(getattr(tab, "kanban_status", "todo"))
+            tab.kanban_slot_hour = self._normalizeKanbanSlotHour(
+                tab.kanban_status,
+                getattr(tab, "kanban_slot_hour", -1),
+            )
         self.endResetModel()
 
         # Validate and set active tab index
@@ -2189,6 +2252,7 @@ class ProjectManager(QObject):
     testNotificationCompleted = Signal(bool, str, arguments=["success", "message"])
     canGoBackChanged = Signal()
     tabSwitched = Signal()  # Emitted when switching to a different tab
+    kanbanBoardRequested = Signal()
     taskDrillRequested = Signal(int, arguments=["taskIndex"])
     taskReminderDue = Signal(int, int, str, bool, arguments=["tabIndex", "taskIndex", "taskTitle", "sendNotification"])
     standaloneReminderDue = Signal(str, bool, arguments=["title", "sendNotification"])
@@ -2331,6 +2395,10 @@ class ProjectManager(QObject):
         )
 
     def _restoreNavigationSnapshot(self, snapshot: NavigationSnapshot) -> None:
+        if snapshot.view_kind == "kanban":
+            self.kanbanBoardRequested.emit()
+            return
+
         if self._tab_model is not None:
             if snapshot.tab_index < 0 or snapshot.tab_index >= self._tab_model.tabCount:
                 return
@@ -3145,6 +3213,8 @@ class ProjectManager(QObject):
                     "color": tab.color,
                     "pinned": tab.pinned,
                     "goals": tab.goals,
+                    "kanban_status": tab.kanban_status,
+                    "kanban_slot_hour": tab.kanban_slot_hour,
                 })
 
             return {
@@ -3659,6 +3729,11 @@ class ProjectManager(QObject):
                         color=tab_data.get("color", ""),
                         pinned=tab_data.get("pinned", False),
                         goals=tab_data.get("goals", []),
+                        kanban_status=TabModel._normalizeKanbanStatus(tab_data.get("kanban_status", "todo")),
+                        kanban_slot_hour=TabModel._normalizeKanbanSlotHour(
+                            TabModel._normalizeKanbanStatus(tab_data.get("kanban_status", "todo")),
+                            tab_data.get("kanban_slot_hour", -1),
+                        ),
                     ))
                 active_tab = project_data.get("active_tab", 0)
 
@@ -3746,6 +3821,17 @@ class ProjectManager(QObject):
         self.drillToTask(task_index)
 
     @Slot(int)
+    def openKanbanTab(self, tab_index: int) -> None:
+        """Open a tab from the kanban board and keep back navigation to kanban."""
+        if self._tab_model is None:
+            return
+        if tab_index < 0 or tab_index >= self._tab_model.tabCount:
+            return
+
+        self._pushNavigationSnapshot(NavigationSnapshot(tab_index=tab_index, view_kind="kanban"))
+        self.switchTab(tab_index)
+
+    @Slot(int)
     def drillToTab(self, task_index: int) -> None:
         """Switch to (or create) a tab for a task's subtasks."""
         if self._tab_model is None:
@@ -3753,9 +3839,38 @@ class ProjectManager(QObject):
         if task_index < 0 or task_index >= self._task_model.rowCount():
             return
 
+        target_index = self._findOrCreateDrillTab(task_index)
+        if target_index < 0:
+            return
+
+        if self._shouldCaptureNavigation(target_index):
+            self._pushNavigationSnapshot(self._currentNavigationSnapshot())
+        self.switchTab(target_index)
+
+    @Slot(int, result=int)
+    def addTaskToKanban(self, task_index: int) -> int:
+        """Create or find a task's drill tab and place it in the kanban Ready lane."""
+        if self._tab_model is None:
+            return -1
+        if task_index < 0 or task_index >= self._task_model.rowCount():
+            return -1
+
+        target_index = self._findOrCreateDrillTab(task_index)
+        if target_index < 0:
+            return -1
+        self._tab_model.setKanbanPlacement(target_index, "ready", -1)
+        return target_index
+
+    def _findOrCreateDrillTab(self, task_index: int) -> int:
+        """Return the tab backing a task drill target, creating it when needed."""
+        if self._tab_model is None:
+            return -1
+        if task_index < 0 or task_index >= self._task_model.rowCount():
+            return -1
+
         task_title = self._task_model.getTaskTitle(task_index).strip()
         if not task_title:
-            return
+            return -1
 
         target_index = -1
         for idx, tab in enumerate(self._tab_model.getAllTabs()):
@@ -3775,9 +3890,7 @@ class ProjectManager(QObject):
             target_index = self._tab_model.tabCount - 1
             self._tab_model.setTabData(target_index, subtasks_data, diagram_data)
 
-        if self._shouldCaptureNavigation(target_index):
-            self._pushNavigationSnapshot(self._currentNavigationSnapshot())
-        self.switchTab(target_index)
+        return target_index
 
     @Slot()
     def goBack(self) -> None:

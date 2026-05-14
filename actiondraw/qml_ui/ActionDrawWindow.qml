@@ -26,6 +26,7 @@ ApplicationWindow {
     property var mcpServerControllerRef: mcpServerController
     property var priorityPlotWindowRef: null
     property var hierarchyWindowRef: null
+    property var kanbanWindowRef: null
     property real hierarchyFocusZoom: 1.2
     property bool yubiKeyPromptVisible: false
     property string yubiKeyPromptText: "Touch your YubiKey to continue."
@@ -137,6 +138,37 @@ ApplicationWindow {
         priorityPlotWindowRef = win
         win.closing.connect(function() {
             priorityPlotWindowRef = null
+        })
+        win.show()
+        win.raise()
+        win.requestActivate()
+    }
+
+    function openKanbanWindow() {
+        if (!tabModelRef)
+            return
+        if (kanbanWindowRef) {
+            kanbanWindowRef.show()
+            kanbanWindowRef.raise()
+            kanbanWindowRef.requestActivate()
+            return
+        }
+        var component = Qt.createComponent(Qt.resolvedUrl("KanbanWindow.qml"))
+        if (component.status === Component.Error) {
+            console.log("Failed to load KanbanWindow:", component.errorString())
+            return
+        }
+        var win = component.createObject(root, {
+            "tabModel": tabModelRef,
+            "projectManager": projectManagerRef
+        })
+        if (!win) {
+            console.log("Failed to instantiate KanbanWindow")
+            return
+        }
+        kanbanWindowRef = win
+        win.closing.connect(function() {
+            kanbanWindowRef = null
         })
         win.show()
         win.raise()
@@ -1966,6 +1998,23 @@ ApplicationWindow {
                                 var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
                                 if (item && item.taskIndex >= 0 && projectManager)
                                     projectManager.drillToTab(item.taskIndex)
+                            }
+                        }
+                        MenuItem {
+                            id: addToKanbanMenuItem
+                            text: "Add to Kanban"
+                            icon.name: "view-list-details"
+                            visible: {
+                                if (!diagramModel || !projectManager || !tabModel || !diagramLayer.contextMenuItemId)
+                                    return false
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                return item && item.type === "task" && item.taskIndex >= 0
+                            }
+                            height: visible ? implicitHeight : 0
+                            onTriggered: {
+                                var item = diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId)
+                                if (item && item.taskIndex >= 0 && projectManager)
+                                    projectManager.addTaskToKanban(item.taskIndex)
                             }
                         }
                         MenuItem {
@@ -4689,6 +4738,9 @@ ApplicationWindow {
             root.refreshLinkingTabsPanel()
             root.refreshOverviewData()
             Qt.callLater(root.applyDefaultView)
+        }
+        function onKanbanBoardRequested() {
+            root.openKanbanWindow()
         }
         function onTaskDrillRequested(taskIndex) {
             root.showWindow()
