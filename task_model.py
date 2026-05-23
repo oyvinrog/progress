@@ -1958,13 +1958,22 @@ class TabModel(QAbstractListModel):
         normalized_status = self._normalizeKanbanStatus(status)
         if normalized_status == "todo":
             return False
+        try:
+            requested_slot = int(slot_hour)
+        except (TypeError, ValueError):
+            requested_slot = -1
         normalized_slot = self._normalizeKanbanSlotHour(normalized_status, slot_hour)
+        all_in_progress_slots = normalized_status == "in_progress" and requested_slot == -1
 
         changed_rows: List[int] = []
         for row, tab in enumerate(self._tabs):
             if tab.kanban_status != normalized_status:
                 continue
-            if normalized_status == "in_progress" and tab.kanban_slot_hour != normalized_slot:
+            if (
+                normalized_status == "in_progress"
+                and not all_in_progress_slots
+                and tab.kanban_slot_hour != normalized_slot
+            ):
                 continue
             tab.kanban_status = "todo"
             tab.kanban_slot_hour = -1
@@ -1979,7 +1988,12 @@ class TabModel(QAbstractListModel):
         normalized_status = self._normalizeKanbanStatus(status)
         if normalized_status == "todo":
             return False
+        try:
+            requested_slot = int(slot_hour)
+        except (TypeError, ValueError):
+            requested_slot = -1
         normalized_slot = self._normalizeKanbanSlotHour(normalized_status, slot_hour)
+        all_in_progress_slots = normalized_status == "in_progress" and requested_slot == -1
 
         if normalized_status == "ready":
             target_status = "todo"
@@ -1995,7 +2009,11 @@ class TabModel(QAbstractListModel):
         for row, tab in enumerate(self._tabs):
             if tab.kanban_status != normalized_status:
                 continue
-            if normalized_status == "in_progress" and tab.kanban_slot_hour != normalized_slot:
+            if (
+                normalized_status == "in_progress"
+                and not all_in_progress_slots
+                and tab.kanban_slot_hour != normalized_slot
+            ):
                 continue
             if tab.kanban_status == target_status and tab.kanban_slot_hour == target_slot:
                 continue

@@ -110,6 +110,19 @@ Window {
         )
     }
 
+    function inProgressCardCount() {
+        var revision = kanbanLayoutRevision
+        if (!tabModelRef || !tabModelRef.getTabSummary)
+            return 0
+        var count = 0
+        for (var i = 0; i < modelCount(); ++i) {
+            var summary = tabModelRef.getTabSummary(i)
+            if (summary && summary.kanbanStatus === "in_progress")
+                count += 1
+        }
+        return count
+    }
+
     function todoSearchHasMatches() {
         var query = todoSearchText.trim()
         if (query.length === 0 || !tabModelRef || !tabModelRef.getTabSummary)
@@ -726,11 +739,39 @@ Window {
                     anchors.margins: 10
                     spacing: 8
 
-                    Text {
-                        text: "In Progress"
-                        color: "#e8f4ff"
-                        font.pixelSize: 14
-                        font.bold: true
+                    RowLayout {
+                        Layout.fillWidth: true
+
+                        Text {
+                            text: "In Progress"
+                            color: "#e8f4ff"
+                            font.pixelSize: 14
+                            font.bold: true
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
+                        }
+
+                        Button {
+                            text: "Back"
+                            enabled: root.inProgressCardCount() > 0
+                            Layout.preferredWidth: 48
+                            Layout.preferredHeight: 28
+                            objectName: "kanbanInProgressMoveBackButton"
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Move all in-progress cards to Ready"
+                            onClicked: root.moveKanbanLaneBack("in_progress", -1)
+                        }
+
+                        Button {
+                            text: "Clear All"
+                            enabled: root.inProgressCardCount() > 0
+                            Layout.preferredWidth: 72
+                            Layout.preferredHeight: 28
+                            objectName: "kanbanInProgressClearAllButton"
+                            ToolTip.visible: hovered
+                            ToolTip.text: "Move all in-progress cards to Todo"
+                            onClicked: root.clearKanbanLane("in_progress", -1)
+                        }
                     }
 
                     ScrollView {
