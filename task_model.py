@@ -2636,6 +2636,7 @@ class ProjectManager(QObject):
         task_index: int,
         standalone_index: int,
         reminder_ts: float,
+        send_notification: bool,
         is_current_tab: bool,
         now: float,
     ) -> Dict[str, Any]:
@@ -2652,6 +2653,7 @@ class ProjectManager(QObject):
             "reminderText": datetime.fromtimestamp(reminder_ts).strftime("%Y-%m-%d %H:%M"),
             "secondsRemaining": seconds_remaining,
             "countdownText": _format_short_countdown(seconds_remaining),
+            "sendNotification": bool(send_notification),
             "isCurrentTab": is_current_tab,
         }
 
@@ -2706,6 +2708,7 @@ class ProjectManager(QObject):
                     task_index=-1,
                     standalone_index=reminder_index,
                     reminder_ts=reminder_ts,
+                    send_notification=bool(reminder.reminder_send_notification),
                     is_current_tab=False,
                     now=now,
                 )
@@ -2761,6 +2764,7 @@ class ProjectManager(QObject):
                         task_index=task_index,
                         standalone_index=-1,
                         reminder_ts=reminder_ts,
+                        send_notification=bool(task.get("reminder_send_notification", False)),
                         is_current_tab=tab_index == current_tab_index,
                         now=now,
                     )
@@ -2865,6 +2869,40 @@ class ProjectManager(QObject):
         task.pop("reminder_send_notification", None)
         self._emit_tab_summary_changed(tab_index)
 
+    @Slot(int, int, str, result=bool)
+    @Slot(int, int, str, bool, result=bool)
+    def setReminder(
+        self,
+        tab_index: int,
+        task_index: int,
+        reminder_at_str: str,
+        send_notification: bool = False,
+    ) -> bool:
+        """Set a reminder in the current tab or a background tab."""
+        tasks = self._get_cross_tab_tasks(tab_index)
+        if tasks is None:
+            return False
+        if task_index < 0 or task_index >= len(tasks):
+            return False
+        task = tasks[task_index]
+        if not isinstance(task, dict):
+            return False
+
+        if self._tab_model is None or tab_index == self._tab_model.currentTabIndex:
+            return bool(self._task_model.setReminderAt(task_index, reminder_at_str, send_notification))
+
+        reminder_at = _parse_local_datetime(reminder_at_str)
+        if reminder_at is None:
+            return False
+
+        task["reminder_at"] = reminder_at
+        if send_notification:
+            task["reminder_send_notification"] = True
+        else:
+            task.pop("reminder_send_notification", None)
+        self._emit_tab_summary_changed(tab_index)
+        return True
+
     @Slot(str, str, result=bool)
     @Slot(str, str, bool, result=bool)
     def addStandaloneReminder(
@@ -2890,6 +2928,34 @@ class ProjectManager(QObject):
             )
         )
         self._standalone_reminders.sort(key=lambda reminder: float(reminder.reminder_at))
+        return True
+
+    @Slot(int, str, str, result=bool)
+    @Slot(int, str, str, bool, result=bool)
+    def updateStandaloneReminder(
+        self,
+        reminder_index: int,
+        title: str,
+        reminder_at_str: str,
+        send_notification: bool = False,
+    ) -> bool:
+        """Update a project-wide standalone reminder by its current list index."""
+        if reminder_index < 0 or reminder_index >= len(self._standalone_reminders):
+            return False
+
+        normalized_title = str(title or "").strip()
+        if not normalized_title:
+            return False
+
+        reminder_at = _parse_local_datetime(reminder_at_str)
+        if reminder_at is None:
+            return False
+
+        reminder = self._standalone_reminders[reminder_index]
+        reminder.title = normalized_title
+        reminder.reminder_at = reminder_at
+        reminder.reminder_send_notification = bool(send_notification)
+        self._standalone_reminders.sort(key=lambda item: float(item.reminder_at))
         return True
 
     @Slot(int)

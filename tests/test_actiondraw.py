@@ -1171,7 +1171,14 @@ class TestCreateActionDrawWindow:
         assert 'function openStandaloneReminderDialog()' in dialogs_qml
         assert 'property bool standaloneMode: false' in dialogs_qml
         assert 'projectManager.addStandaloneReminder' in dialogs_qml
+        assert 'projectManager.updateStandaloneReminder' in dialogs_qml
+        assert 'projectManager.setReminder' in dialogs_qml
+        assert 'function openStandaloneReminderEditDialog' in dialogs_qml
+        assert 'function openTaskReminderEditDialog' in dialogs_qml
         assert 'text: "New Reminder"' in window_qml
+        assert 'text: "Edit"' in window_qml
+        assert 'dialogs.openStandaloneReminderEditDialog' in window_qml
+        assert 'dialogs.openTaskReminderEditDialog' in window_qml
         assert 'projectManager.clearStandaloneReminder' in window_qml
         assert 'visible: root.pendingReminderKind !== "standalone"' in window_qml
         assert 'text: "Renew"' in window_qml
@@ -4644,6 +4651,81 @@ class TestTaskReminders:
         project_manager.clearStandaloneReminder(0)
 
         assert project_manager.getActiveStandaloneReminders() == []
+
+    def test_project_manager_updates_standalone_reminder(self, app):
+        from datetime import datetime, timedelta
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        initial_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        updated_str = (datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
+        assert project_manager.addStandaloneReminder("Inbox review", initial_str) is True
+
+        assert project_manager.updateStandaloneReminder(0, "Deep work", updated_str, True) is True
+
+        reminders = project_manager.getActiveStandaloneReminders()
+        assert reminders[0]["title"] == "Deep work"
+        assert reminders[0]["reminderText"] == updated_str
+        assert reminders[0]["sendNotification"] is True
+
+    def test_project_manager_update_standalone_reminder_rejects_invalid_values(self, app):
+        from datetime import datetime, timedelta
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        reminder_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        assert project_manager.addStandaloneReminder("Inbox review", reminder_str) is True
+
+        assert project_manager.updateStandaloneReminder(1, "Deep work", reminder_str) is False
+        assert project_manager.updateStandaloneReminder(0, "", reminder_str) is False
+        assert project_manager.updateStandaloneReminder(0, "Deep work", "not-a-date") is False
+
+        reminders = project_manager.getActiveStandaloneReminders()
+        assert reminders[0]["title"] == "Inbox review"
+
+    def test_project_manager_sets_background_tab_reminder(self, app):
+        import time
+        from datetime import datetime, timedelta
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        task_model.addTask("Current Task", -1)
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        tab_model.addTab("Tab 2")
+        tab_model.setTabData(
+            1,
+            {
+                "tasks": [{
+                    "title": "Background Reminder",
+                    "completed": False,
+                    "time_spent": 0.0,
+                    "parent_index": -1,
+                    "indent_level": 0,
+                    "custom_estimate": None,
+                    "reminder_at": time.time() + 600,
+                }]
+            },
+            {"items": [], "edges": [], "strokes": [], "current_task_index": -1},
+        )
+
+        updated_str = (datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
+        assert project_manager.setReminder(1, 0, updated_str, True) is True
+
+        reminders = project_manager.getActiveReminders()
+        assert reminders[0]["taskTitle"] == "Background Reminder"
+        assert reminders[0]["reminderText"] == updated_str
+        assert reminders[0]["sendNotification"] is True
 
     def test_project_manager_emits_due_signal_for_standalone_reminder(self, app):
         from datetime import datetime, timedelta
