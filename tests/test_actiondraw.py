@@ -3357,6 +3357,15 @@ class TestActionDrawQmlTaskInteractions:
         assert 'title: "Kanban Board"' in kanban_qml
         assert "setKanbanPlacement" in kanban_qml
         assert "createTabAtKanbanPlacement" in kanban_qml
+        assert "postponeInProgressFromSlot" in kanban_qml
+        assert "clearKanbanLane" in kanban_qml
+        assert "moveKanbanLaneBack" in kanban_qml
+        assert 'text: "+1h"' in kanban_qml
+        assert 'text: "Back"' in kanban_qml
+        assert 'text: "Clear"' in kanban_qml
+        assert '"kanbanPostponeButton_"' in kanban_qml
+        assert '"kanbanMoveBackButton_"' in kanban_qml
+        assert '"kanbanClearButton_"' in kanban_qml
         assert "projectManagerRef.removeTab" in kanban_qml
         assert "Drag.active: cardDragHandler.active" in kanban_qml
         assert "drop.acceptProposedAction()" in kanban_qml
@@ -3596,6 +3605,42 @@ class TestActionDrawQmlTaskInteractions:
             assert find_visual_item(root, "kanbanCard_1", visible=True) is None
             assert find_visual_item(root, "kanbanCard_2", visible=True) is not None
             assert find_visual_item(root, "kanbanCard_3", visible=True) is not None
+        finally:
+            root.close()
+            root.deleteLater()
+            engine.deleteLater()
+
+    def test_kanban_postpone_button_enabled_for_non_final_time_slots(self, app):
+        from task_model import TabModel
+
+        def find_visual_item(root, object_name, visible=None):
+            pending = [root.contentItem()]
+            while pending:
+                item = pending.pop(0)
+                if (
+                    item.objectName() == object_name
+                    and (visible is None or item.isVisible() == visible)
+                ):
+                    return item
+                pending.extend(item.childItems())
+            return None
+
+        model = TabModel()
+        engine = QQmlEngine()
+        component = QQmlComponent(engine, QUrl.fromLocalFile(str(QML_DIR / "KanbanWindow.qml")))
+        root = component.createWithInitialProperties({"tabModel": model})
+        assert root is not None, component.errorString()
+
+        try:
+            for _ in range(20):
+                app.processEvents()
+
+            postpone_15 = find_visual_item(root, "kanbanPostponeButton_15", visible=True)
+            postpone_17 = find_visual_item(root, "kanbanPostponeButton_17", visible=True)
+            assert isinstance(postpone_15, QQuickItem)
+            assert isinstance(postpone_17, QQuickItem)
+            assert postpone_15.isEnabled()
+            assert not postpone_17.isEnabled()
         finally:
             root.close()
             root.deleteLater()
@@ -5827,6 +5872,82 @@ class TestTabModelKanban:
         assert model.getTabSummary(1)["name"] == "Build board"
         assert model.getTabSummary(1)["kanbanStatus"] == "in_progress"
         assert model.getTabSummary(1)["kanbanSlotHour"] == 14
+
+    def test_postpone_in_progress_from_slot_moves_later_visible_slots(self, app):
+        from task_model import TabModel
+
+        model = TabModel()
+        model.renameTab(0, "Early")
+        model.setKanbanPlacement(0, "in_progress", 14)
+        model.addTab("Fifteen")
+        model.setKanbanPlacement(1, "in_progress", 15)
+        model.addTab("Sixteen")
+        model.setKanbanPlacement(2, "in_progress", 16)
+        model.addTab("Seventeen")
+        model.setKanbanPlacement(3, "in_progress", 17)
+        changed = []
+        model.kanbanChanged.connect(lambda: changed.append(True))
+
+        assert model.postponeInProgressFromSlot(15) is True
+
+        assert model.getTabSummary(0)["kanbanSlotHour"] == 14
+        assert model.getTabSummary(1)["kanbanSlotHour"] == 16
+        assert model.getTabSummary(2)["kanbanSlotHour"] == 17
+        assert model.getTabSummary(3)["kanbanSlotHour"] == 17
+        assert changed == [True]
+
+    def test_clear_kanban_lane_moves_matching_cards_to_todo(self, app):
+        from task_model import TabModel
+
+        model = TabModel()
+        model.renameTab(0, "Ready")
+        model.setKanbanPlacement(0, "ready", -1)
+        model.addTab("Doing Fifteen")
+        model.setKanbanPlacement(1, "in_progress", 15)
+        model.addTab("Doing Sixteen")
+        model.setKanbanPlacement(2, "in_progress", 16)
+        model.addTab("Done")
+        model.setKanbanPlacement(3, "done", -1)
+
+        assert model.clearKanbanLane("in_progress", 15) is True
+        assert model.getTabSummary(1)["kanbanStatus"] == "todo"
+        assert model.getTabSummary(1)["kanbanSlotHour"] == -1
+        assert model.getTabSummary(2)["kanbanStatus"] == "in_progress"
+        assert model.getTabSummary(2)["kanbanSlotHour"] == 16
+
+        assert model.clearKanbanLane("ready", -1) is True
+        assert model.getTabSummary(0)["kanbanStatus"] == "todo"
+        assert model.clearKanbanLane("done", -1) is True
+        assert model.getTabSummary(3)["kanbanStatus"] == "todo"
+        assert model.clearKanbanLane("todo", -1) is False
+
+    def test_move_kanban_lane_back_maps_to_previous_workflow_step(self, app):
+        from task_model import TabModel
+
+        model = TabModel()
+        model.renameTab(0, "Ready")
+        model.setKanbanPlacement(0, "ready", -1)
+        model.addTab("Doing Fifteen")
+        model.setKanbanPlacement(1, "in_progress", 15)
+        model.addTab("Doing Sixteen")
+        model.setKanbanPlacement(2, "in_progress", 16)
+        model.addTab("Done")
+        model.setKanbanPlacement(3, "done", -1)
+
+        assert model.moveKanbanLaneBack("ready", -1) is True
+        assert model.getTabSummary(0)["kanbanStatus"] == "todo"
+        assert model.getTabSummary(0)["kanbanSlotHour"] == -1
+
+        assert model.moveKanbanLaneBack("in_progress", 15) is True
+        assert model.getTabSummary(1)["kanbanStatus"] == "ready"
+        assert model.getTabSummary(1)["kanbanSlotHour"] == -1
+        assert model.getTabSummary(2)["kanbanStatus"] == "in_progress"
+        assert model.getTabSummary(2)["kanbanSlotHour"] == 16
+
+        assert model.moveKanbanLaneBack("done", -1) is True
+        assert model.getTabSummary(3)["kanbanStatus"] == "in_progress"
+        assert model.getTabSummary(3)["kanbanSlotHour"] == 17
+        assert model.moveKanbanLaneBack("todo", -1) is False
 
 
 class TestTabModelUpdateCurrentTabTasks:

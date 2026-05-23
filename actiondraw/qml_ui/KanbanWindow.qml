@@ -132,6 +132,27 @@ Window {
         kanbanLayoutRevision += 1
     }
 
+    function postponeInProgressFromSlot(startHour) {
+        if (!tabModelRef || !tabModelRef.postponeInProgressFromSlot)
+            return
+        if (tabModelRef.postponeInProgressFromSlot(Number(startHour)))
+            kanbanLayoutRevision += 1
+    }
+
+    function clearKanbanLane(status, slotHour) {
+        if (!tabModelRef || !tabModelRef.clearKanbanLane)
+            return
+        if (tabModelRef.clearKanbanLane(status, Number(slotHour)))
+            kanbanLayoutRevision += 1
+    }
+
+    function moveKanbanLaneBack(status, slotHour) {
+        if (!tabModelRef || !tabModelRef.moveKanbanLaneBack)
+            return
+        if (tabModelRef.moveKanbanLaneBack(status, Number(slotHour)))
+            kanbanLayoutRevision += 1
+    }
+
     function registerDropZone(zone) {
         if (!zone || dropZones.indexOf(zone) >= 0)
             return
@@ -474,6 +495,13 @@ Window {
             property string targetStatus: "todo"
             property int targetSlotHour: -1
             property bool showTodoSearch: targetStatus === "todo"
+            property int visibleCardCount: root.kanbanLayoutRevision >= 0
+                ? root.sectionCardCount(targetStatus, targetSlotHour)
+                : 0
+            property bool canPostpone: targetStatus === "in_progress"
+                && targetSlotHour < 17
+            property bool canMoveBack: targetStatus !== "todo" && visibleCardCount > 0
+            property bool canClear: targetStatus !== "todo" && visibleCardCount > 0
             objectName: "kanbanDrop_" + targetStatus + "_" + targetSlotHour
 
             width: parent ? parent.width : 220
@@ -519,9 +547,47 @@ Window {
                     }
 
                     Button {
+                        text: "+1h"
+                        visible: sectionRoot.targetStatus === "in_progress"
+                        enabled: sectionRoot.canPostpone
+                        Layout.preferredWidth: 44
+                        Layout.preferredHeight: 28
+                        objectName: "kanbanPostponeButton_" + sectionRoot.targetSlotHour
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Postpone this slot and later slots"
+                        onClicked: root.postponeInProgressFromSlot(sectionRoot.targetSlotHour)
+                    }
+
+                    Button {
+                        text: "Back"
+                        visible: sectionRoot.targetStatus !== "todo"
+                        enabled: sectionRoot.canMoveBack
+                        Layout.preferredWidth: 48
+                        Layout.preferredHeight: 28
+                        objectName: "kanbanMoveBackButton_" + sectionRoot.targetStatus + "_" + sectionRoot.targetSlotHour
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Move all cards in this lane back one step"
+                        onClicked: root.moveKanbanLaneBack(sectionRoot.targetStatus, sectionRoot.targetSlotHour)
+                    }
+
+                    Button {
+                        text: "Clear"
+                        visible: sectionRoot.targetStatus !== "todo"
+                        enabled: sectionRoot.canClear
+                        Layout.preferredWidth: 48
+                        Layout.preferredHeight: 28
+                        objectName: "kanbanClearButton_" + sectionRoot.targetStatus + "_" + sectionRoot.targetSlotHour
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Move all cards in this lane to Todo"
+                        onClicked: root.clearKanbanLane(sectionRoot.targetStatus, sectionRoot.targetSlotHour)
+                    }
+
+                    Button {
                         text: "+"
                         Layout.preferredWidth: 32
                         Layout.preferredHeight: 28
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Create card in this lane"
                         onClicked: root.openCreateDialog(sectionRoot.targetStatus, sectionRoot.targetSlotHour)
                     }
                 }

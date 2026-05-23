@@ -1922,6 +1922,90 @@ class TabModel(QAbstractListModel):
         self.kanbanChanged.emit()
         return True
 
+    def _emitKanbanRowsChanged(self, rows: List[int]) -> None:
+        if not rows:
+            return
+        for row in sorted(set(rows)):
+            model_index = self.index(row, 0)
+            self.dataChanged.emit(model_index, model_index, [self.KanbanStatusRole, self.KanbanSlotHourRole])
+        self.kanbanChanged.emit()
+
+    @Slot(int, result=bool)
+    def postponeInProgressFromSlot(self, start_hour: int) -> bool:
+        """Move scheduled in-progress tabs at start_hour and later one visible slot later."""
+        try:
+            start = int(start_hour)
+        except (TypeError, ValueError):
+            return False
+        if start < 8 or start > 17:
+            return False
+
+        changed_rows: List[int] = []
+        for row, tab in enumerate(self._tabs):
+            if tab.kanban_status != "in_progress":
+                continue
+            if tab.kanban_slot_hour < start or tab.kanban_slot_hour >= 17:
+                continue
+            tab.kanban_slot_hour += 1
+            changed_rows.append(row)
+
+        self._emitKanbanRowsChanged(changed_rows)
+        return bool(changed_rows)
+
+    @Slot(str, int, result=bool)
+    def clearKanbanLane(self, status: str, slot_hour: int = -1) -> bool:
+        """Move all tabs in a kanban lane or time slot back to Todo."""
+        normalized_status = self._normalizeKanbanStatus(status)
+        if normalized_status == "todo":
+            return False
+        normalized_slot = self._normalizeKanbanSlotHour(normalized_status, slot_hour)
+
+        changed_rows: List[int] = []
+        for row, tab in enumerate(self._tabs):
+            if tab.kanban_status != normalized_status:
+                continue
+            if normalized_status == "in_progress" and tab.kanban_slot_hour != normalized_slot:
+                continue
+            tab.kanban_status = "todo"
+            tab.kanban_slot_hour = -1
+            changed_rows.append(row)
+
+        self._emitKanbanRowsChanged(changed_rows)
+        return bool(changed_rows)
+
+    @Slot(str, int, result=bool)
+    def moveKanbanLaneBack(self, status: str, slot_hour: int = -1) -> bool:
+        """Move all tabs in a lane one step earlier in the kanban workflow."""
+        normalized_status = self._normalizeKanbanStatus(status)
+        if normalized_status == "todo":
+            return False
+        normalized_slot = self._normalizeKanbanSlotHour(normalized_status, slot_hour)
+
+        if normalized_status == "ready":
+            target_status = "todo"
+            target_slot = -1
+        elif normalized_status == "in_progress":
+            target_status = "ready"
+            target_slot = -1
+        else:
+            target_status = "in_progress"
+            target_slot = 17
+
+        changed_rows: List[int] = []
+        for row, tab in enumerate(self._tabs):
+            if tab.kanban_status != normalized_status:
+                continue
+            if normalized_status == "in_progress" and tab.kanban_slot_hour != normalized_slot:
+                continue
+            if tab.kanban_status == target_status and tab.kanban_slot_hour == target_slot:
+                continue
+            tab.kanban_status = target_status
+            tab.kanban_slot_hour = target_slot
+            changed_rows.append(row)
+
+        self._emitKanbanRowsChanged(changed_rows)
+        return bool(changed_rows)
+
     @Slot(int, int)
     def setPriority(self, index: int, priority: int) -> None:
         """Set the priority for a tab (0 = none, 1-3 = priority levels)."""
