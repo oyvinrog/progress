@@ -110,35 +110,70 @@ Rectangle {
 
         delegate: Item {
             id: pointItem
-            width: 14
-            height: 14
+            width: isTopPriority ? 24 : 14
+            height: width
             visible: model.includeInPriorityPlot !== false
             property bool isSelected: index === root.selectedTabIndex
+            property bool isTopPriority: index >= 0 && index < 3
             property real pointTime: model.priorityTimeHours || 1.01
             property real pointValue: model.prioritySubjectiveValue || 0.0
             x: root.toX(pointTime) - width / 2
             y: root.toY(pointValue) - height / 2
+            z: isSelected ? 4 : (isTopPriority ? 3 : 2)
 
             Rectangle {
                 anchors.fill: parent
                 radius: width / 2
-                color: pointItem.isSelected ? "#7cd7ff" : "#54c6ff"
-                border.color: pointItem.isSelected ? "#ffffff" : "#d8f5ff"
+                color: {
+                    if (pointItem.isTopPriority)
+                        return pointItem.isSelected ? "#ffe79a" : "#ffd166"
+                    return pointItem.isSelected ? "#7cd7ff" : "#54c6ff"
+                }
+                border.color: pointItem.isSelected ? "#ffffff" : (pointItem.isTopPriority ? "#fff2bf" : "#d8f5ff")
                 border.width: dragArea.drag.active || pointItem.isSelected ? 2 : 1
             }
 
             Text {
+                anchors.centerIn: parent
+                visible: pointItem.isTopPriority
+                text: index + 1
+                color: "#15202a"
+                font.pixelSize: 13
+                font.bold: true
+            }
+
+            Rectangle {
+                id: pointLabel
+                visible: dragArea.containsMouse || dragArea.drag.active || pointItem.isSelected
                 anchors.bottom: parent.top
                 anchors.horizontalCenter: parent.horizontalCenter
-                anchors.bottomMargin: 4
-                text: model.name
-                color: "#d4ebfd"
-                font.pixelSize: 10
+                anchors.bottomMargin: 6
+                width: Math.min(labelText.implicitWidth + 12, 180)
+                height: labelText.implicitHeight + 6
+                radius: 5
+                color: "#183145"
+                border.color: "#76bee8"
+                border.width: 1
+                z: 5
+
+                Text {
+                    id: labelText
+                    anchors.fill: parent
+                    anchors.leftMargin: 6
+                    anchors.rightMargin: 6
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    text: model.name
+                    color: "#e7f4ff"
+                    font.pixelSize: 10
+                    elide: Text.ElideRight
+                }
             }
 
             MouseArea {
                 id: dragArea
                 anchors.fill: parent
+                hoverEnabled: true
                 cursorShape: Qt.OpenHandCursor
                 drag.target: pointItem
                 drag.minimumX: root.leftPadding - pointItem.width / 2
