@@ -1171,7 +1171,14 @@ class TestCreateActionDrawWindow:
         assert 'function openStandaloneReminderDialog()' in dialogs_qml
         assert 'property bool standaloneMode: false' in dialogs_qml
         assert 'projectManager.addStandaloneReminder' in dialogs_qml
+        assert 'projectManager.updateStandaloneReminder' in dialogs_qml
+        assert 'projectManager.setReminder' in dialogs_qml
+        assert 'function openStandaloneReminderEditDialog' in dialogs_qml
+        assert 'function openTaskReminderEditDialog' in dialogs_qml
         assert 'text: "New Reminder"' in window_qml
+        assert 'text: "Edit"' in window_qml
+        assert 'dialogs.openStandaloneReminderEditDialog' in window_qml
+        assert 'dialogs.openTaskReminderEditDialog' in window_qml
         assert 'projectManager.clearStandaloneReminder' in window_qml
         assert 'visible: root.pendingReminderKind !== "standalone"' in window_qml
         assert 'text: "Renew"' in window_qml
@@ -3350,6 +3357,18 @@ class TestActionDrawQmlTaskInteractions:
         assert 'title: "Kanban Board"' in kanban_qml
         assert "setKanbanPlacement" in kanban_qml
         assert "createTabAtKanbanPlacement" in kanban_qml
+        assert "postponeInProgressFromSlot" in kanban_qml
+        assert "clearKanbanLane" in kanban_qml
+        assert "moveKanbanLaneBack" in kanban_qml
+        assert 'text: "+1h"' in kanban_qml
+        assert 'text: "Back"' in kanban_qml
+        assert 'text: "Clear"' in kanban_qml
+        assert 'text: "Clear All"' in kanban_qml
+        assert '"kanbanPostponeButton_"' in kanban_qml
+        assert '"kanbanMoveBackButton_"' in kanban_qml
+        assert '"kanbanClearButton_"' in kanban_qml
+        assert '"kanbanInProgressMoveBackButton"' in kanban_qml
+        assert '"kanbanInProgressClearAllButton"' in kanban_qml
         assert "projectManagerRef.removeTab" in kanban_qml
         assert "Drag.active: cardDragHandler.active" in kanban_qml
         assert "drop.acceptProposedAction()" in kanban_qml
@@ -3589,6 +3608,55 @@ class TestActionDrawQmlTaskInteractions:
             assert find_visual_item(root, "kanbanCard_1", visible=True) is None
             assert find_visual_item(root, "kanbanCard_2", visible=True) is not None
             assert find_visual_item(root, "kanbanCard_3", visible=True) is not None
+        finally:
+            root.close()
+            root.deleteLater()
+            engine.deleteLater()
+
+    def test_kanban_postpone_button_enabled_for_non_final_time_slots(self, app):
+        from task_model import TabModel
+
+        def find_visual_item(root, object_name, visible=None):
+            pending = [root.contentItem()]
+            while pending:
+                item = pending.pop(0)
+                if (
+                    item.objectName() == object_name
+                    and (visible is None or item.isVisible() == visible)
+                ):
+                    return item
+                pending.extend(item.childItems())
+            return None
+
+        model = TabModel()
+        engine = QQmlEngine()
+        component = QQmlComponent(engine, QUrl.fromLocalFile(str(QML_DIR / "KanbanWindow.qml")))
+        root = component.createWithInitialProperties({"tabModel": model})
+        assert root is not None, component.errorString()
+
+        try:
+            for _ in range(20):
+                app.processEvents()
+
+            postpone_15 = find_visual_item(root, "kanbanPostponeButton_15", visible=True)
+            postpone_17 = find_visual_item(root, "kanbanPostponeButton_17", visible=True)
+            lane_back = find_visual_item(root, "kanbanInProgressMoveBackButton", visible=True)
+            lane_clear = find_visual_item(root, "kanbanInProgressClearAllButton", visible=True)
+            assert isinstance(postpone_15, QQuickItem)
+            assert isinstance(postpone_17, QQuickItem)
+            assert isinstance(lane_back, QQuickItem)
+            assert isinstance(lane_clear, QQuickItem)
+            assert postpone_15.isEnabled()
+            assert not postpone_17.isEnabled()
+            assert not lane_back.isEnabled()
+            assert not lane_clear.isEnabled()
+
+            model.setKanbanPlacement(0, "in_progress", 15)
+            for _ in range(10):
+                app.processEvents()
+
+            assert lane_back.isEnabled()
+            assert lane_clear.isEnabled()
         finally:
             root.close()
             root.deleteLater()
@@ -4644,6 +4712,81 @@ class TestTaskReminders:
         project_manager.clearStandaloneReminder(0)
 
         assert project_manager.getActiveStandaloneReminders() == []
+
+    def test_project_manager_updates_standalone_reminder(self, app):
+        from datetime import datetime, timedelta
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        initial_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        updated_str = (datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
+        assert project_manager.addStandaloneReminder("Inbox review", initial_str) is True
+
+        assert project_manager.updateStandaloneReminder(0, "Deep work", updated_str, True) is True
+
+        reminders = project_manager.getActiveStandaloneReminders()
+        assert reminders[0]["title"] == "Deep work"
+        assert reminders[0]["reminderText"] == updated_str
+        assert reminders[0]["sendNotification"] is True
+
+    def test_project_manager_update_standalone_reminder_rejects_invalid_values(self, app):
+        from datetime import datetime, timedelta
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        reminder_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
+        assert project_manager.addStandaloneReminder("Inbox review", reminder_str) is True
+
+        assert project_manager.updateStandaloneReminder(1, "Deep work", reminder_str) is False
+        assert project_manager.updateStandaloneReminder(0, "", reminder_str) is False
+        assert project_manager.updateStandaloneReminder(0, "Deep work", "not-a-date") is False
+
+        reminders = project_manager.getActiveStandaloneReminders()
+        assert reminders[0]["title"] == "Inbox review"
+
+    def test_project_manager_sets_background_tab_reminder(self, app):
+        import time
+        from datetime import datetime, timedelta
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        task_model.addTask("Current Task", -1)
+        diagram_model = DiagramModel(task_model=task_model)
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        tab_model.addTab("Tab 2")
+        tab_model.setTabData(
+            1,
+            {
+                "tasks": [{
+                    "title": "Background Reminder",
+                    "completed": False,
+                    "time_spent": 0.0,
+                    "parent_index": -1,
+                    "indent_level": 0,
+                    "custom_estimate": None,
+                    "reminder_at": time.time() + 600,
+                }]
+            },
+            {"items": [], "edges": [], "strokes": [], "current_task_index": -1},
+        )
+
+        updated_str = (datetime.now() + timedelta(hours=2)).strftime("%Y-%m-%d %H:%M")
+        assert project_manager.setReminder(1, 0, updated_str, True) is True
+
+        reminders = project_manager.getActiveReminders()
+        assert reminders[0]["taskTitle"] == "Background Reminder"
+        assert reminders[0]["reminderText"] == updated_str
+        assert reminders[0]["sendNotification"] is True
 
     def test_project_manager_emits_due_signal_for_standalone_reminder(self, app):
         from datetime import datetime, timedelta
@@ -5745,6 +5888,130 @@ class TestTabModelKanban:
         assert model.getTabSummary(1)["name"] == "Build board"
         assert model.getTabSummary(1)["kanbanStatus"] == "in_progress"
         assert model.getTabSummary(1)["kanbanSlotHour"] == 14
+
+    def test_postpone_in_progress_from_slot_moves_later_visible_slots(self, app):
+        from task_model import TabModel
+
+        model = TabModel()
+        model.renameTab(0, "Early")
+        model.setKanbanPlacement(0, "in_progress", 14)
+        model.addTab("Fifteen")
+        model.setKanbanPlacement(1, "in_progress", 15)
+        model.addTab("Sixteen")
+        model.setKanbanPlacement(2, "in_progress", 16)
+        model.addTab("Seventeen")
+        model.setKanbanPlacement(3, "in_progress", 17)
+        changed = []
+        model.kanbanChanged.connect(lambda: changed.append(True))
+
+        assert model.postponeInProgressFromSlot(15) is True
+
+        assert model.getTabSummary(0)["kanbanSlotHour"] == 14
+        assert model.getTabSummary(1)["kanbanSlotHour"] == 16
+        assert model.getTabSummary(2)["kanbanSlotHour"] == 17
+        assert model.getTabSummary(3)["kanbanSlotHour"] == 17
+        assert changed == [True]
+
+    def test_clear_kanban_lane_moves_matching_cards_to_todo(self, app):
+        from task_model import TabModel
+
+        model = TabModel()
+        model.renameTab(0, "Ready")
+        model.setKanbanPlacement(0, "ready", -1)
+        model.addTab("Doing Fifteen")
+        model.setKanbanPlacement(1, "in_progress", 15)
+        model.addTab("Doing Sixteen")
+        model.setKanbanPlacement(2, "in_progress", 16)
+        model.addTab("Done")
+        model.setKanbanPlacement(3, "done", -1)
+
+        assert model.clearKanbanLane("in_progress", 15) is True
+        assert model.getTabSummary(1)["kanbanStatus"] == "todo"
+        assert model.getTabSummary(1)["kanbanSlotHour"] == -1
+        assert model.getTabSummary(2)["kanbanStatus"] == "in_progress"
+        assert model.getTabSummary(2)["kanbanSlotHour"] == 16
+
+        assert model.clearKanbanLane("ready", -1) is True
+        assert model.getTabSummary(0)["kanbanStatus"] == "todo"
+        assert model.clearKanbanLane("done", -1) is True
+        assert model.getTabSummary(3)["kanbanStatus"] == "todo"
+        assert model.clearKanbanLane("todo", -1) is False
+
+    def test_move_kanban_lane_back_maps_to_previous_workflow_step(self, app):
+        from task_model import TabModel
+
+        model = TabModel()
+        model.renameTab(0, "Ready")
+        model.setKanbanPlacement(0, "ready", -1)
+        model.addTab("Doing Fifteen")
+        model.setKanbanPlacement(1, "in_progress", 15)
+        model.addTab("Doing Sixteen")
+        model.setKanbanPlacement(2, "in_progress", 16)
+        model.addTab("Done")
+        model.setKanbanPlacement(3, "done", -1)
+
+        assert model.moveKanbanLaneBack("ready", -1) is True
+        assert model.getTabSummary(0)["kanbanStatus"] == "todo"
+        assert model.getTabSummary(0)["kanbanSlotHour"] == -1
+
+        assert model.moveKanbanLaneBack("in_progress", 15) is True
+        assert model.getTabSummary(1)["kanbanStatus"] == "ready"
+        assert model.getTabSummary(1)["kanbanSlotHour"] == -1
+        assert model.getTabSummary(2)["kanbanStatus"] == "in_progress"
+        assert model.getTabSummary(2)["kanbanSlotHour"] == 16
+
+        assert model.moveKanbanLaneBack("done", -1) is True
+        assert model.getTabSummary(3)["kanbanStatus"] == "in_progress"
+        assert model.getTabSummary(3)["kanbanSlotHour"] == 17
+        assert model.moveKanbanLaneBack("todo", -1) is False
+
+    def test_clear_all_in_progress_moves_every_slot_to_todo(self, app):
+        from task_model import TabModel
+
+        model = TabModel()
+        model.renameTab(0, "Todo")
+        model.addTab("Ready")
+        model.setKanbanPlacement(1, "ready", -1)
+        model.addTab("Doing Nine")
+        model.setKanbanPlacement(2, "in_progress", 9)
+        model.addTab("Doing Fifteen")
+        model.setKanbanPlacement(3, "in_progress", 15)
+        model.addTab("Done")
+        model.setKanbanPlacement(4, "done", -1)
+
+        assert model.clearKanbanLane("in_progress", -1) is True
+
+        assert model.getTabSummary(0)["kanbanStatus"] == "todo"
+        assert model.getTabSummary(1)["kanbanStatus"] == "ready"
+        assert model.getTabSummary(2)["kanbanStatus"] == "todo"
+        assert model.getTabSummary(2)["kanbanSlotHour"] == -1
+        assert model.getTabSummary(3)["kanbanStatus"] == "todo"
+        assert model.getTabSummary(3)["kanbanSlotHour"] == -1
+        assert model.getTabSummary(4)["kanbanStatus"] == "done"
+
+    def test_move_all_in_progress_back_moves_every_slot_to_ready(self, app):
+        from task_model import TabModel
+
+        model = TabModel()
+        model.renameTab(0, "Todo")
+        model.addTab("Ready")
+        model.setKanbanPlacement(1, "ready", -1)
+        model.addTab("Doing Nine")
+        model.setKanbanPlacement(2, "in_progress", 9)
+        model.addTab("Doing Fifteen")
+        model.setKanbanPlacement(3, "in_progress", 15)
+        model.addTab("Done")
+        model.setKanbanPlacement(4, "done", -1)
+
+        assert model.moveKanbanLaneBack("in_progress", -1) is True
+
+        assert model.getTabSummary(0)["kanbanStatus"] == "todo"
+        assert model.getTabSummary(1)["kanbanStatus"] == "ready"
+        assert model.getTabSummary(2)["kanbanStatus"] == "ready"
+        assert model.getTabSummary(2)["kanbanSlotHour"] == -1
+        assert model.getTabSummary(3)["kanbanStatus"] == "ready"
+        assert model.getTabSummary(3)["kanbanSlotHour"] == -1
+        assert model.getTabSummary(4)["kanbanStatus"] == "done"
 
 
 class TestTabModelUpdateCurrentTabTasks:

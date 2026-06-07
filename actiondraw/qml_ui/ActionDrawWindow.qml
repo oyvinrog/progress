@@ -1372,7 +1372,7 @@ ApplicationWindow {
                             model: root.activeReminders
                             delegate: Rectangle {
                                 width: overviewColumn.width
-                                height: 40
+                                height: 44
                                 radius: 6
                                 color: "#2e261f"
                                 border.color: "#8d6948"
@@ -1418,6 +1418,29 @@ ApplicationWindow {
                                         onClicked: {
                                             if (projectManager && projectManager.openTabTask)
                                                 projectManager.openTabTask(Number(modelData.tabIndex), Number(modelData.taskIndex))
+                                        }
+                                    }
+
+                                    Button {
+                                        text: "Edit"
+                                        onClicked: {
+                                            if (!dialogs)
+                                                return
+                                            if (modelData.kind === "standalone" && dialogs.openStandaloneReminderEditDialog) {
+                                                dialogs.openStandaloneReminderEditDialog(
+                                                    Number(modelData.standaloneIndex),
+                                                    modelData.title || modelData.taskTitle,
+                                                    modelData.reminderText,
+                                                    modelData.sendNotification || false
+                                                )
+                                            } else if (dialogs.openTaskReminderEditDialog) {
+                                                dialogs.openTaskReminderEditDialog(
+                                                    Number(modelData.tabIndex),
+                                                    Number(modelData.taskIndex),
+                                                    modelData.reminderText,
+                                                    modelData.sendNotification || false
+                                                )
+                                            }
                                         }
                                     }
 

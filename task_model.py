@@ -1922,6 +1922,108 @@ class TabModel(QAbstractListModel):
         self.kanbanChanged.emit()
         return True
 
+    def _emitKanbanRowsChanged(self, rows: List[int]) -> None:
+        if not rows:
+            return
+        for row in sorted(set(rows)):
+            model_index = self.index(row, 0)
+            self.dataChanged.emit(model_index, model_index, [self.KanbanStatusRole, self.KanbanSlotHourRole])
+        self.kanbanChanged.emit()
+
+    @Slot(int, result=bool)
+    def postponeInProgressFromSlot(self, start_hour: int) -> bool:
+        """Move scheduled in-progress tabs at start_hour and later one visible slot later."""
+        try:
+            start = int(start_hour)
+        except (TypeError, ValueError):
+            return False
+        if start < 8 or start > 17:
+            return False
+
+        changed_rows: List[int] = []
+        for row, tab in enumerate(self._tabs):
+            if tab.kanban_status != "in_progress":
+                continue
+            if tab.kanban_slot_hour < start or tab.kanban_slot_hour >= 17:
+                continue
+            tab.kanban_slot_hour += 1
+            changed_rows.append(row)
+
+        self._emitKanbanRowsChanged(changed_rows)
+        return bool(changed_rows)
+
+    @Slot(str, int, result=bool)
+    def clearKanbanLane(self, status: str, slot_hour: int = -1) -> bool:
+        """Move all tabs in a kanban lane or time slot back to Todo."""
+        normalized_status = self._normalizeKanbanStatus(status)
+        if normalized_status == "todo":
+            return False
+        try:
+            requested_slot = int(slot_hour)
+        except (TypeError, ValueError):
+            requested_slot = -1
+        normalized_slot = self._normalizeKanbanSlotHour(normalized_status, slot_hour)
+        all_in_progress_slots = normalized_status == "in_progress" and requested_slot == -1
+
+        changed_rows: List[int] = []
+        for row, tab in enumerate(self._tabs):
+            if tab.kanban_status != normalized_status:
+                continue
+            if (
+                normalized_status == "in_progress"
+                and not all_in_progress_slots
+                and tab.kanban_slot_hour != normalized_slot
+            ):
+                continue
+            tab.kanban_status = "todo"
+            tab.kanban_slot_hour = -1
+            changed_rows.append(row)
+
+        self._emitKanbanRowsChanged(changed_rows)
+        return bool(changed_rows)
+
+    @Slot(str, int, result=bool)
+    def moveKanbanLaneBack(self, status: str, slot_hour: int = -1) -> bool:
+        """Move all tabs in a lane one step earlier in the kanban workflow."""
+        normalized_status = self._normalizeKanbanStatus(status)
+        if normalized_status == "todo":
+            return False
+        try:
+            requested_slot = int(slot_hour)
+        except (TypeError, ValueError):
+            requested_slot = -1
+        normalized_slot = self._normalizeKanbanSlotHour(normalized_status, slot_hour)
+        all_in_progress_slots = normalized_status == "in_progress" and requested_slot == -1
+
+        if normalized_status == "ready":
+            target_status = "todo"
+            target_slot = -1
+        elif normalized_status == "in_progress":
+            target_status = "ready"
+            target_slot = -1
+        else:
+            target_status = "in_progress"
+            target_slot = 17
+
+        changed_rows: List[int] = []
+        for row, tab in enumerate(self._tabs):
+            if tab.kanban_status != normalized_status:
+                continue
+            if (
+                normalized_status == "in_progress"
+                and not all_in_progress_slots
+                and tab.kanban_slot_hour != normalized_slot
+            ):
+                continue
+            if tab.kanban_status == target_status and tab.kanban_slot_hour == target_slot:
+                continue
+            tab.kanban_status = target_status
+            tab.kanban_slot_hour = target_slot
+            changed_rows.append(row)
+
+        self._emitKanbanRowsChanged(changed_rows)
+        return bool(changed_rows)
+
     @Slot(int, int)
     def setPriority(self, index: int, priority: int) -> None:
         """Set the priority for a tab (0 = none, 1-3 = priority levels)."""
@@ -2636,6 +2738,7 @@ class ProjectManager(QObject):
         task_index: int,
         standalone_index: int,
         reminder_ts: float,
+        send_notification: bool,
         is_current_tab: bool,
         now: float,
     ) -> Dict[str, Any]:
@@ -2652,6 +2755,7 @@ class ProjectManager(QObject):
             "reminderText": datetime.fromtimestamp(reminder_ts).strftime("%Y-%m-%d %H:%M"),
             "secondsRemaining": seconds_remaining,
             "countdownText": _format_short_countdown(seconds_remaining),
+            "sendNotification": bool(send_notification),
             "isCurrentTab": is_current_tab,
         }
 
@@ -2706,6 +2810,7 @@ class ProjectManager(QObject):
                     task_index=-1,
                     standalone_index=reminder_index,
                     reminder_ts=reminder_ts,
+                    send_notification=bool(reminder.reminder_send_notification),
                     is_current_tab=False,
                     now=now,
                 )
@@ -2761,6 +2866,7 @@ class ProjectManager(QObject):
                         task_index=task_index,
                         standalone_index=-1,
                         reminder_ts=reminder_ts,
+                        send_notification=bool(task.get("reminder_send_notification", False)),
                         is_current_tab=tab_index == current_tab_index,
                         now=now,
                     )
@@ -2865,6 +2971,40 @@ class ProjectManager(QObject):
         task.pop("reminder_send_notification", None)
         self._emit_tab_summary_changed(tab_index)
 
+    @Slot(int, int, str, result=bool)
+    @Slot(int, int, str, bool, result=bool)
+    def setReminder(
+        self,
+        tab_index: int,
+        task_index: int,
+        reminder_at_str: str,
+        send_notification: bool = False,
+    ) -> bool:
+        """Set a reminder in the current tab or a background tab."""
+        tasks = self._get_cross_tab_tasks(tab_index)
+        if tasks is None:
+            return False
+        if task_index < 0 or task_index >= len(tasks):
+            return False
+        task = tasks[task_index]
+        if not isinstance(task, dict):
+            return False
+
+        if self._tab_model is None or tab_index == self._tab_model.currentTabIndex:
+            return bool(self._task_model.setReminderAt(task_index, reminder_at_str, send_notification))
+
+        reminder_at = _parse_local_datetime(reminder_at_str)
+        if reminder_at is None:
+            return False
+
+        task["reminder_at"] = reminder_at
+        if send_notification:
+            task["reminder_send_notification"] = True
+        else:
+            task.pop("reminder_send_notification", None)
+        self._emit_tab_summary_changed(tab_index)
+        return True
+
     @Slot(str, str, result=bool)
     @Slot(str, str, bool, result=bool)
     def addStandaloneReminder(
@@ -2890,6 +3030,34 @@ class ProjectManager(QObject):
             )
         )
         self._standalone_reminders.sort(key=lambda reminder: float(reminder.reminder_at))
+        return True
+
+    @Slot(int, str, str, result=bool)
+    @Slot(int, str, str, bool, result=bool)
+    def updateStandaloneReminder(
+        self,
+        reminder_index: int,
+        title: str,
+        reminder_at_str: str,
+        send_notification: bool = False,
+    ) -> bool:
+        """Update a project-wide standalone reminder by its current list index."""
+        if reminder_index < 0 or reminder_index >= len(self._standalone_reminders):
+            return False
+
+        normalized_title = str(title or "").strip()
+        if not normalized_title:
+            return False
+
+        reminder_at = _parse_local_datetime(reminder_at_str)
+        if reminder_at is None:
+            return False
+
+        reminder = self._standalone_reminders[reminder_index]
+        reminder.title = normalized_title
+        reminder.reminder_at = reminder_at
+        reminder.reminder_send_notification = bool(send_notification)
+        self._standalone_reminders.sort(key=lambda item: float(item.reminder_at))
         return True
 
     @Slot(int)

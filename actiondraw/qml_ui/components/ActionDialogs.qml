@@ -201,11 +201,39 @@ Item {
 
     function openStandaloneReminderDialog() {
         reminderDialog.standaloneMode = true
+        reminderDialog.editStandaloneIndex = -1
+        reminderDialog.targetTabIndex = -1
         reminderDialog.taskIndex = -1
         reminderDialog.standaloneTitle = ""
         reminderDialog.dateValue = ""
         reminderDialog.timeValue = ""
         reminderDialog.sendNotification = false
+        reminderDialog.open()
+    }
+
+    function openStandaloneReminderEditDialog(reminderIndex, title, reminderAt, sendNotification) {
+        reminderDialog.standaloneMode = true
+        reminderDialog.editStandaloneIndex = Number(reminderIndex)
+        reminderDialog.targetTabIndex = -1
+        reminderDialog.taskIndex = -1
+        reminderDialog.standaloneTitle = title || ""
+        var parts = reminderDialog.parseReminderParts(reminderAt || "")
+        reminderDialog.dateValue = parts.date
+        reminderDialog.timeValue = parts.time
+        reminderDialog.sendNotification = sendNotification || false
+        reminderDialog.open()
+    }
+
+    function openTaskReminderEditDialog(tabIndex, taskIndex, reminderAt, sendNotification) {
+        reminderDialog.standaloneMode = false
+        reminderDialog.editStandaloneIndex = -1
+        reminderDialog.targetTabIndex = Number(tabIndex)
+        reminderDialog.taskIndex = Number(taskIndex)
+        reminderDialog.standaloneTitle = ""
+        var parts = reminderDialog.parseReminderParts(reminderAt || "")
+        reminderDialog.dateValue = parts.date
+        reminderDialog.timeValue = parts.time
+        reminderDialog.sendNotification = sendNotification || false
         reminderDialog.open()
     }
 
@@ -1499,9 +1527,11 @@ Item {
     Dialog {
         id: reminderDialog
         modal: true
-        title: "Set Reminder"
+        title: reminderDialog.editStandaloneIndex >= 0 || reminderDialog.targetTabIndex >= 0 ? "Edit Reminder" : "Set Reminder"
         width: 420
         property int taskIndex: -1
+        property int targetTabIndex: -1
+        property int editStandaloneIndex: -1
         property bool standaloneMode: false
         property string standaloneTitle: ""
         property string dateValue: ""
@@ -1559,7 +1589,9 @@ Item {
 
             Label {
                 text: reminderDialog.standaloneMode
-                    ? "Set a project-wide reminder not tied to any task."
+                    ? (reminderDialog.editStandaloneIndex >= 0
+                        ? "Edit this project-wide reminder."
+                        : "Set a project-wide reminder not tied to any task.")
                     : "Set a local date and time reminder."
                 color: "#8a93a5"
                 wrapMode: Text.WordWrap
@@ -1757,11 +1789,26 @@ Item {
                             root.showSaveNotification("Reminder title is required")
                         return
                     }
-                    var standaloneSaved = projectManager.addStandaloneReminder(
-                        reminderDialog.standaloneTitle,
-                        reminderValue,
-                        reminderDialog.sendNotification
-                    )
+                    var standaloneSaved = false
+                    if (reminderDialog.editStandaloneIndex >= 0) {
+                        if (!projectManager.updateStandaloneReminder) {
+                            if (root && root.showSaveNotification)
+                                root.showSaveNotification("Project reminder editing is unavailable")
+                            return
+                        }
+                        standaloneSaved = projectManager.updateStandaloneReminder(
+                            reminderDialog.editStandaloneIndex,
+                            reminderDialog.standaloneTitle,
+                            reminderValue,
+                            reminderDialog.sendNotification
+                        )
+                    } else {
+                        standaloneSaved = projectManager.addStandaloneReminder(
+                            reminderDialog.standaloneTitle,
+                            reminderValue,
+                            reminderDialog.sendNotification
+                        )
+                    }
                     if (!standaloneSaved) {
                         if (root && root.showSaveNotification)
                             root.showSaveNotification("Invalid reminder. Use YYYY-MM-DD and HH:MM")
@@ -1769,12 +1816,22 @@ Item {
                     }
                     if (root && root.refreshActiveReminders)
                         root.refreshActiveReminders()
-                } else if (diagramModel && reminderDialog.taskIndex >= 0) {
-                    var saved = diagramModel.setTaskReminderAt(
-                        reminderDialog.taskIndex,
-                        reminderValue,
-                        reminderDialog.sendNotification
-                    )
+                } else if (reminderDialog.taskIndex >= 0) {
+                    var saved = false
+                    if (reminderDialog.targetTabIndex >= 0 && projectManager && projectManager.setReminder) {
+                        saved = projectManager.setReminder(
+                            reminderDialog.targetTabIndex,
+                            reminderDialog.taskIndex,
+                            reminderValue,
+                            reminderDialog.sendNotification
+                        )
+                    } else if (diagramModel && diagramModel.setTaskReminderAt) {
+                        saved = diagramModel.setTaskReminderAt(
+                            reminderDialog.taskIndex,
+                            reminderValue,
+                            reminderDialog.sendNotification
+                        )
+                    }
                     if (!saved) {
                         if (root && root.showSaveNotification)
                             root.showSaveNotification("Invalid reminder. Use YYYY-MM-DD and HH:MM")
@@ -1790,6 +1847,8 @@ Item {
 
         onClosed: {
             reminderDialog.taskIndex = -1
+            reminderDialog.targetTabIndex = -1
+            reminderDialog.editStandaloneIndex = -1
             reminderDialog.standaloneMode = false
             reminderDialog.standaloneTitle = ""
             reminderDialog.dateValue = ""
@@ -1807,6 +1866,8 @@ Item {
             if (reminderContextMenu.taskIndex < 0)
                 return
             reminderDialog.standaloneMode = false
+            reminderDialog.editStandaloneIndex = -1
+            reminderDialog.targetTabIndex = -1
             reminderDialog.taskIndex = reminderContextMenu.taskIndex
             var parts = reminderDialog.parseReminderParts(reminderContextMenu.reminderAt)
             reminderDialog.dateValue = parts.date
