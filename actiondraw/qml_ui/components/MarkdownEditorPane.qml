@@ -163,7 +163,9 @@ Item {
             if (start > cursor) {
                 blocks.push({
                     kind: "text",
-                    text: chunk.slice(cursor, start)
+                    text: chunk.slice(cursor, start),
+                    start: startOffset + cursor,
+                    end: startOffset + start
                 })
             }
             var attrs = parseImageAttrs(match[3] || "")
@@ -182,7 +184,9 @@ Item {
         if (cursor < chunk.length) {
             blocks.push({
                 kind: "text",
-                text: chunk.slice(cursor)
+                text: chunk.slice(cursor),
+                start: startOffset + cursor,
+                end: endOffset
             })
         }
     }
@@ -274,6 +278,13 @@ Item {
             return
 
         var replacement = buildMarkdownImage(alt, url, width, height)
+        root.textValue = source.slice(0, start) + replacement + source.slice(end)
+    }
+
+    function updateTextAtRange(start, end, replacement) {
+        var source = normalizeLineBreaks(root.textValue)
+        if (start < 0 || end <= start || end > source.length)
+            return
         root.textValue = source.slice(0, start) + replacement + source.slice(end)
     }
 
@@ -403,6 +414,31 @@ Item {
                                                 textFormat: Text.RichText
                                                 wrapMode: Text.WordWrap
                                                 color: "#f5f6f8"
+
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    acceptedButtons: Qt.LeftButton
+
+                                                    onDoubleClicked: function(mouse) {
+                                                        if (!markdownPreviewFormatter
+                                                            || !markdownPreviewFormatter.toggleListItemAtPoint)
+                                                            return
+                                                        var original = String(modelData.text || "")
+                                                        var replacement = markdownPreviewFormatter.toggleListItemAtPoint(
+                                                            original,
+                                                            mouse.x,
+                                                            mouse.y,
+                                                            textPreview.width
+                                                        )
+                                                        if (replacement !== original) {
+                                                            root.updateTextAtRange(
+                                                                modelData.start,
+                                                                modelData.end,
+                                                                replacement
+                                                            )
+                                                        }
+                                                    }
+                                                }
                                             }
 
                                             Text {

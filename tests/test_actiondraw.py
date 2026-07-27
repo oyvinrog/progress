@@ -1163,6 +1163,9 @@ class TestCreateActionDrawWindow:
         assert 'textFormat: Text.RichText' in editor_pane_qml
         assert 'root.wrapCurrentSelection(root._tabHighlightStart, root._tabHighlightEnd)' in editor_pane_qml
         assert 'root.wrapCurrentSelection(root._taskHighlightStart, root._taskHighlightEnd)' in editor_pane_qml
+        assert 'markdownPreviewFormatter.toggleListItemAtPoint' in editor_pane_qml
+        assert 'onDoubleClicked: function(mouse)' in editor_pane_qml
+        assert 'textPreview.width' in editor_pane_qml
 
     def test_qml_contains_standalone_reminder_actions(self):
         dialogs_qml = (QML_DIR / "components" / "ActionDialogs.qml").read_text(encoding="utf-8")
