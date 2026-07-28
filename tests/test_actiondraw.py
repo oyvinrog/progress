@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 import time
 
 import pytest
@@ -1129,6 +1130,14 @@ class TestConnectAll:
 
 
 class TestCreateActionDrawWindow:
+    @pytest.mark.skipif(
+        sys.version_info[:2] == (3, 13),
+        reason=(
+            "PySide6 QML engine cyclic finalization can segfault on Python 3.13; "
+            "validate_actiondraw.py provides the equivalent window smoke test "
+            "in a dedicated process"
+        ),
+    )
     def test_create_window(self, app, diagram_model_with_task_model):
         engine = create_actiondraw_window(diagram_model_with_task_model, diagram_model_with_task_model._task_model)
         assert isinstance(engine, QQmlApplicationEngine)
