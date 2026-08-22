@@ -207,14 +207,6 @@ MenuBar {
         title: "Tools"
 
         MenuItem {
-            text: "Hierarchy Navigator..."
-            enabled: root && root.openHierarchyWindow
-            onTriggered: root.openHierarchyWindow()
-        }
-
-        MenuSeparator {}
-
-        MenuItem {
             text: "Priority Plot..."
             enabled: root && root.openPriorityPlotWindow
             onTriggered: root.openPriorityPlotWindow()
