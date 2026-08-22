@@ -10,6 +10,7 @@ from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtWidgets import QApplication
 
 from actiondraw.qml import QML_DIR
+from actiondraw.theme import configure_actiondraw_theme
 from task_model import Tab, TabModel
 
 
@@ -52,6 +53,7 @@ def main() -> int:
     app = QApplication.instance()
     if app is None:
         app = QApplication(sys.argv)
+    configure_actiondraw_theme(app)
 
     engine = QQmlApplicationEngine()
     tab_model = _build_demo_tab_model()

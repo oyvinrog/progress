@@ -23,17 +23,12 @@ ApplicationWindow {
     property var projectManagerRef: projectManager
     property var markdownNoteManagerRef: markdownNoteManager
     property var tabModelRef: tabModel
-    property var mcpServerControllerRef: mcpServerController
     property var priorityPlotWindowRef: null
-    property var hierarchyWindowRef: null
     property var kanbanWindowRef: null
-    property real hierarchyFocusZoom: 1.2
     property bool yubiKeyPromptVisible: false
     property string yubiKeyPromptText: "Touch your YubiKey to continue."
     property bool suppressClosePrompt: false
     property bool closeAfterSaveAsRequested: false
-    property string mcpCommandDialogTitle: ""
-    property string mcpCommandDialogText: ""
 
     property bool _itemTooltipVisible: false
     property string _itemTooltipText: ""
@@ -44,14 +39,11 @@ ApplicationWindow {
     menuBar: ActionMenuBar {
         root: root
         diagramModel: diagramModelRef
-        taskModel: taskModelRef
         projectManager: projectManagerRef
-        mcpServerController: mcpServerControllerRef
         edgeCanvas: edgeCanvas
         viewport: viewport
         saveDialog: dialogs.saveDialog
         loadDialog: dialogs.loadDialog
-        taskDialog: dialogs.taskDialog
         notificationSettingsDialog: dialogs.notificationSettingsDialog
     }
 
@@ -175,93 +167,6 @@ ApplicationWindow {
         win.requestActivate()
     }
 
-    function openHierarchyWindow(scopeTabIndex) {
-        if (!tabModelRef || !projectManagerRef)
-            return
-        var resolvedScope = -1
-        if (scopeTabIndex !== undefined && scopeTabIndex !== null) {
-            resolvedScope = Number(scopeTabIndex)
-        } else if (tabModelRef && tabModelRef.currentTabIndex !== undefined) {
-            resolvedScope = Number(tabModelRef.currentTabIndex)
-        }
-        if (hierarchyWindowRef) {
-            if (hierarchyWindowRef.setScopeTabIndex) {
-                hierarchyWindowRef.setScopeTabIndex(resolvedScope)
-            } else if (hierarchyWindowRef.scopeTabIndex !== undefined) {
-                hierarchyWindowRef.scopeTabIndex = resolvedScope
-            }
-            hierarchyWindowRef.show()
-            hierarchyWindowRef.raise()
-            hierarchyWindowRef.requestActivate()
-            return
-        }
-        var component = Qt.createComponent(Qt.resolvedUrl("HierarchyWindow.qml"))
-        if (component.status === Component.Error) {
-            console.log("Failed to load HierarchyWindow:", component.errorString())
-            return
-        }
-        var win = component.createObject(root, {
-            "tabModel": tabModelRef,
-            "projectManager": projectManagerRef,
-            "hostWindow": root,
-            "scopeTabIndex": resolvedScope
-        })
-        if (!win) {
-            console.log("Failed to instantiate HierarchyWindow")
-            return
-        }
-        hierarchyWindowRef = win
-        win.closing.connect(function() {
-            hierarchyWindowRef = null
-        })
-        win.show()
-        win.raise()
-        win.requestActivate()
-    }
-
-    function focusHierarchyTarget(tabIndex, taskIndex, itemId, closeNavigator) {
-        if (!projectManagerRef || !diagramModelRef)
-            return
-
-        var resolvedTabIndex = Number(tabIndex)
-        var resolvedTaskIndex = Number(taskIndex)
-        var resolvedItemId = itemId ? String(itemId) : ""
-        var shouldClose = (closeNavigator === undefined) ? true : !!closeNavigator
-
-        if (resolvedTaskIndex >= 0 && projectManagerRef.openTabTask) {
-            projectManagerRef.openTabTask(resolvedTabIndex, resolvedTaskIndex)
-        } else if (resolvedTabIndex >= 0 && projectManagerRef.switchTab) {
-            projectManagerRef.switchTab(resolvedTabIndex)
-        }
-
-        var applyFocus = function() {
-            root.setZoomDirect(root.hierarchyFocusZoom)
-
-            if (resolvedItemId.length > 0 && diagramModelRef.getItemSnapshot) {
-                var snapshot = diagramModelRef.getItemSnapshot(resolvedItemId)
-                if (snapshot && (snapshot.x || snapshot.x === 0) && (snapshot.y || snapshot.y === 0)) {
-                    var width = Number(snapshot.width || 0)
-                    var height = Number(snapshot.height || 0)
-                    root.centerOnPoint(snapshot.x + (width / 2), snapshot.y + (height / 2))
-                    return
-                }
-            }
-
-            if (resolvedTaskIndex >= 0) {
-                root.drillToTask(resolvedTaskIndex)
-                return
-            }
-            root.scrollToContent()
-        }
-
-        Qt.callLater(function() {
-            Qt.callLater(applyFocus)
-        })
-
-        if (shouldClose && hierarchyWindowRef)
-            hierarchyWindowRef.close()
-    }
-
     function drillToTask(taskIndex) {
         if (!diagramModel || taskIndex < 0)
             return
@@ -317,12 +222,6 @@ ApplicationWindow {
     function showErrorDialog(message) {
         errorDialog.messageText = message
         errorDialog.open()
-    }
-
-    function openMcpCommandDialog(title, command) {
-        mcpCommandDialogTitle = title
-        mcpCommandDialogText = command
-        mcpCommandDialog.open()
     }
 
     function showYubiKeyPrompt(message) {
@@ -1288,7 +1187,6 @@ ApplicationWindow {
             projectManager: projectManagerRef
             onTabDragMoved: root.updateTabDragHover
             onTabDragReleased: root.handleTabDragRelease
-            onAnalyzeHierarchy: function(tabIndex) { root.openHierarchyWindow(tabIndex) }
         }
 
         // Main content area (right side)
@@ -1763,6 +1661,7 @@ ApplicationWindow {
                 viewport: viewport
                 tabModel: tabModelRef
                 goalsDialog: dialogs.goalsDialog
+                assessmentDialog: dialogs.assessmentDialog
             }
 
             Rectangle {
@@ -4497,87 +4396,6 @@ ApplicationWindow {
                     color: "#f5f8fc"
                     font.pixelSize: 13
                 }
-            }
-        }
-    }
-
-    Dialog {
-        id: mcpCommandDialog
-        modal: true
-        title: root.mcpCommandDialogTitle
-        anchors.centerIn: parent
-        width: Math.min(root.width - 60, 760)
-
-        background: Rectangle {
-            radius: 10
-            color: "#0f1b27"
-            border.color: "#4f6780"
-            border.width: 1
-        }
-
-        contentItem: ColumnLayout {
-            spacing: 12
-
-            Label {
-                text: "Paste this command into your terminal to register the embedded ActionDraw MCP server."
-                color: "#d7e5f5"
-                wrapMode: Text.WordWrap
-                Layout.fillWidth: true
-            }
-
-            Rectangle {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 150
-                radius: 8
-                color: "#09131c"
-                border.color: "#31495f"
-                border.width: 1
-
-                ScrollView {
-                    anchors.fill: parent
-                    anchors.margins: 10
-                    clip: true
-
-                    TextArea {
-                        id: mcpCommandTextArea
-                        readOnly: true
-                        text: root.mcpCommandDialogText
-                        wrapMode: TextEdit.WrapAnywhere
-                        selectByMouse: true
-                        color: "#f5f8fc"
-                        selectionColor: "#3b82f6"
-                        selectedTextColor: "#f8fbff"
-                        font.family: "Monospace"
-                        font.pixelSize: 13
-                        background: null
-                    }
-                }
-            }
-        }
-
-        footer: RowLayout {
-            spacing: 8
-
-            Item {
-                Layout.fillWidth: true
-            }
-
-            Button {
-                text: "Copy"
-                onClicked: {
-                    if (mcpServerControllerRef && root.mcpCommandDialogText === mcpServerControllerRef.claudeAddCommand) {
-                        mcpServerControllerRef.copyClaudeAddCommand()
-                        root.showSaveNotification("Claude MCP command copied")
-                    } else if (mcpServerControllerRef && root.mcpCommandDialogText === mcpServerControllerRef.codexAddCommand) {
-                        mcpServerControllerRef.copyCodexAddCommand()
-                        root.showSaveNotification("Codex MCP command copied")
-                    }
-                }
-            }
-
-            Button {
-                text: "Close"
-                onClicked: mcpCommandDialog.close()
             }
         }
     }

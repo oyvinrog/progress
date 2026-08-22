@@ -1143,7 +1143,7 @@ class TestCreateActionDrawWindow:
         assert isinstance(engine, QQmlApplicationEngine)
         assert engine.rootObjects()
         assert getattr(engine, "_markdown_pdf_exporter", None) is not None
-        assert getattr(engine, "_mcp_server_controller", None) is not None
+        assert not hasattr(engine, "_mcp_server_controller")
 
     def test_markdown_pdf_actions_are_present_in_qml(self):
         note_editor_qml = (QML_DIR / "MarkdownNoteEditorWindow.qml").read_text(encoding="utf-8")
@@ -1157,13 +1157,8 @@ class TestCreateActionDrawWindow:
         assert 'text: "Save PDF..."' in dialogs_qml
         assert 'title: "Save Markdown PDF"' in dialogs_qml
         assert 'text: "Create Tab"' in editor_pane_qml
-        assert 'title: "MCP"' in action_menu_qml
-        assert 'title: "Claude"' in action_menu_qml
-        assert 'title: "Codex"' in action_menu_qml
-        assert 'text: "Show Add Command..."' in action_menu_qml
-        assert 'text: "Copy Add Command"' in action_menu_qml
-        assert 'text: "Paste this command into your terminal to register the embedded ActionDraw MCP server."' in window_qml
-        assert 'title: root.mcpCommandDialogTitle' in window_qml
+        assert "mcp" not in action_menu_qml.lower()
+        assert "mcp" not in window_qml.lower()
         assert 'property string _tabHighlightStart: "\\u2060"' in editor_pane_qml
         assert 'property string _taskHighlightStart: "\\u2062"' in editor_pane_qml
         assert 'persistentSelection: true' in editor_pane_qml
@@ -2216,6 +2211,12 @@ class TestMultiTabSupport:
         assert tab_model.currentTabName == "Main"
         assert task_model.rowCount() == 1
         assert diagram_model.count == 1
+        assert tab_model.getAssessment(0) == {
+            "problemUnderstanding": 1,
+            "outcomeUnderstanding": 1,
+            "ambitionRaised": False,
+        }
+        assert tab_model.getAssessmentLevel(0) == 0
 
     def test_load_v1_format_initializes_workspace_markdown(self, app, tmp_path):
         """Older projects gain a default ActionDraw-wide markdown workspace."""
@@ -2302,6 +2303,39 @@ class TestMultiTabSupport:
         project_manager2.switchTab(0)
         assert task_model2.rowCount() == 1
         assert diagram_model2.count == 1
+
+    def test_roundtrip_tab_assessments(self, app, tmp_path):
+        """Assessment answers remain independent and survive project persistence."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        tab_model.setAssessment(0, 8, 9, True)
+        tab_model.addTab("Second Tab")
+        tab_model.setAssessment(1, 4, 6, False)
+
+        project_file = tmp_path / "tab_assessments.progress"
+        project_manager.saveProject(str(project_file))
+
+        task_model2 = TaskModel()
+        diagram_model2 = DiagramModel()
+        tab_model2 = TabModel()
+        project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
+        project_manager2.loadProject(str(project_file))
+
+        assert tab_model2.getAssessment(0) == {
+            "problemUnderstanding": 8,
+            "outcomeUnderstanding": 9,
+            "ambitionRaised": True,
+        }
+        assert tab_model2.getAssessment(1) == {
+            "problemUnderstanding": 4,
+            "outcomeUnderstanding": 6,
+            "ambitionRaised": False,
+        }
 
     def test_roundtrip_workspace_markdown_tabs(self, app, tmp_path):
         """Project-wide markdown tabs survive save/load."""
@@ -2758,6 +2792,69 @@ class TestMultiTabSupport:
 
         tab_model.addTab("")  # Empty name gets default
         assert tab_model.tabCount == 3
+
+    def test_assessment_defaults_clamping_and_signal(self, tab_model):
+        """New assessments start sour and accept only valid rating values."""
+        changed = []
+        tab_model.assessmentChanged.connect(changed.append)
+
+        assert tab_model.getAssessmentLevel(0) == 0
+        tab_model.setAssessment(0, -5, 99, True)
+
+        assert tab_model.getAssessment(0) == {
+            "problemUnderstanding": 1,
+            "outcomeUnderstanding": 10,
+            "ambitionRaised": True,
+        }
+        assert changed == [0]
+
+    @pytest.mark.parametrize(
+        ("problem", "outcome", "ambition", "expected_level"),
+        [
+            (1, 1, False, 0),
+            (4, 4, False, 1),
+            (7, 7, False, 2),
+            (10, 10, False, 3),
+            (9, 9, True, 4),
+            (10, 10, True, 4),
+        ],
+    )
+    def test_assessment_smiley_thresholds(
+        self, tab_model, problem, outcome, ambition, expected_level
+    ):
+        tab_model.setAssessment(0, problem, outcome, ambition)
+        assert tab_model.getAssessmentLevel(0) == expected_level
+
+    def test_assessments_are_independent_per_tab(self, tab_model):
+        tab_model.setAssessment(0, 10, 10, True)
+        tab_model.addTab("Second")
+
+        assert tab_model.getAssessmentLevel(0) == 4
+        assert tab_model.getAssessmentLevel(1) == 0
+
+        tab_model.setAssessment(1, 7, 7, False)
+        assert tab_model.getAssessmentLevel(0) == 4
+        assert tab_model.getAssessmentLevel(1) == 2
+
+    def test_assessment_qml_wiring_and_copy(self):
+        toolbar_qml = (QML_DIR / "components" / "ToolbarRow.qml").read_text(encoding="utf-8")
+        dialogs_qml = (QML_DIR / "components" / "ActionDialogs.qml").read_text(encoding="utf-8")
+        smiley_qml = (QML_DIR / "components" / "AssessmentSmiley.qml").read_text(encoding="utf-8")
+        window_qml = load_actiondraw_qml()
+
+        assert toolbar_qml.index("id: goalsButton") < toolbar_qml.index("id: assessmentButton")
+        assert 'text: "Assessment"' in toolbar_qml
+        assert "AssessmentSmiley" in toolbar_qml
+        assert "assessmentDialog.open()" in toolbar_qml
+        assert 'title: "Readiness Assessment"' in dialogs_qml
+        assert "How well would you say you understand the problem?" in dialogs_qml
+        assert "How well would you say you understand the desired outcome?" in dialogs_qml
+        assert "Have you raised the ambition level" in dialogs_qml
+        assert "Don’t make it so ambitious" in dialogs_qml
+        assert "from: 1" in dialogs_qml and "to: 10" in dialogs_qml
+        assert "tabModel.setAssessment(" in dialogs_qml
+        assert "quadraticCurveTo" in smiley_qml
+        assert "assessmentDialog: dialogs.assessmentDialog" in window_qml
 
     def test_remove_tab(self, tab_model):
         """Removing a tab decreases count."""
@@ -5433,207 +5530,6 @@ class TestTabModelCompletion:
         )
 
         assert model.getTabsLinkingToCurrentTab() == []
-
-    def test_get_hierarchy_tree_includes_all_nodes(self, app):
-        from task_model import TabModel, Tab
-
-        model = TabModel()
-        model.setTabs(
-            [
-                Tab(
-                    name="Main",
-                    tasks={"tasks": [{"title": "API", "completed": False}]},
-                    diagram={
-                        "items": [
-                            {
-                                "id": "task_0",
-                                "item_type": "task",
-                                "text": "API",
-                                "task_index": 0,
-                            },
-                            {
-                                "id": "note_0",
-                                "item_type": "note",
-                                "text": "Ideas",
-                                "task_index": -1,
-                            },
-                        ],
-                        "edges": [],
-                        "strokes": [],
-                        "current_task_index": -1,
-                    },
-                ),
-                Tab(
-                    name="API",
-                    tasks={"tasks": [{"title": "Ship", "completed": False}]},
-                    diagram={"items": [], "edges": [], "strokes": [], "current_task_index": -1},
-                ),
-            ],
-            active_tab=0,
-        )
-
-        tree = model.getHierarchyTree()
-        assert len(tree) == 2
-        main = tree[0]
-        assert main["kind"] == "tab"
-        assert main["tabName"] == "Main"
-        assert len(main["children"]) == 2
-        assert main["children"][0]["itemId"] == "task_0"
-        assert main["children"][0]["hasLinkedSubtab"] is True
-        assert main["children"][0]["linkedTabName"] == "API"
-        assert main["children"][1]["itemId"] == "note_0"
-        assert main["children"][1]["hasLinkedSubtab"] is False
-
-    def test_get_hierarchy_tree_builds_recursive_subdiagram(self, app):
-        from task_model import TabModel, Tab
-
-        model = TabModel()
-        model.setTabs(
-            [
-                Tab(
-                    name="Main",
-                    tasks={"tasks": [{"title": "API", "completed": False}]},
-                    diagram={
-                        "items": [{"id": "task_main", "item_type": "task", "text": "API", "task_index": 0}],
-                        "edges": [],
-                        "strokes": [],
-                        "current_task_index": -1,
-                    },
-                ),
-                Tab(
-                    name="API",
-                    tasks={"tasks": [{"title": "DB", "completed": False}]},
-                    diagram={
-                        "items": [{"id": "task_api", "item_type": "task", "text": "DB", "task_index": 0}],
-                        "edges": [],
-                        "strokes": [],
-                        "current_task_index": -1,
-                    },
-                ),
-                Tab(
-                    name="DB",
-                    tasks={"tasks": []},
-                    diagram={"items": [], "edges": [], "strokes": [], "current_task_index": -1},
-                ),
-            ],
-            active_tab=0,
-        )
-
-        tree = model.getHierarchyTree()
-        main_link = tree[0]["children"][0]
-        assert len(main_link["children"]) == 1
-        api_tab = main_link["children"][0]
-        assert api_tab["kind"] == "tab"
-        assert api_tab["tabName"] == "API"
-        assert api_tab["children"][0]["linkedTabName"] == "DB"
-
-    def test_get_hierarchy_tree_marks_cycles(self, app):
-        from task_model import TabModel, Tab
-
-        model = TabModel()
-        model.setTabs(
-            [
-                Tab(
-                    name="Main",
-                    tasks={"tasks": [{"title": "API", "completed": False}]},
-                    diagram={
-                        "items": [{"id": "task_main", "item_type": "task", "text": "API", "task_index": 0}],
-                        "edges": [],
-                        "strokes": [],
-                        "current_task_index": -1,
-                    },
-                ),
-                Tab(
-                    name="API",
-                    tasks={"tasks": [{"title": "Main", "completed": False}]},
-                    diagram={
-                        "items": [{"id": "task_api", "item_type": "task", "text": "Main", "task_index": 0}],
-                        "edges": [],
-                        "strokes": [],
-                        "current_task_index": -1,
-                    },
-                ),
-            ],
-            active_tab=0,
-        )
-
-        tree = model.getHierarchyTree()
-        api_tab = tree[0]["children"][0]["children"][0]
-        cycle_entry = api_tab["children"][0]["children"][0]
-        assert cycle_entry["kind"] == "cycleRef"
-        assert cycle_entry["tabName"] == "Main"
-
-    def test_get_hierarchy_tree_with_root_index_returns_single_root(self, app):
-        from task_model import TabModel, Tab
-
-        model = TabModel()
-        model.setTabs(
-            [
-                Tab(
-                    name="Main",
-                    tasks={"tasks": [{"title": "API", "completed": False}]},
-                    diagram={
-                        "items": [{"id": "task_main", "item_type": "task", "text": "API", "task_index": 0}],
-                        "edges": [],
-                        "strokes": [],
-                        "current_task_index": -1,
-                    },
-                ),
-                Tab(
-                    name="API",
-                    tasks={"tasks": [{"title": "Deploy", "completed": False}]},
-                    diagram={"items": [], "edges": [], "strokes": [], "current_task_index": -1},
-                ),
-            ],
-            active_tab=1,
-        )
-
-        rooted = model.getHierarchyTree(1)
-        assert len(rooted) == 1
-        assert rooted[0]["kind"] == "tab"
-        assert rooted[0]["tabName"] == "API"
-
-    def test_get_hierarchy_tree_with_invalid_root_index_returns_empty(self, app):
-        from task_model import TabModel
-
-        model = TabModel()
-        assert model.getHierarchyTree(999) == []
-
-    def test_get_hierarchy_tree_hides_completed_task_nodes(self, app):
-        from task_model import TabModel, Tab
-
-        model = TabModel()
-        model.setTabs(
-            [
-                Tab(
-                    name="Main",
-                    tasks={
-                        "tasks": [
-                            {"title": "Done Task", "completed": True},
-                            {"title": "Next Task", "completed": False},
-                        ]
-                    },
-                    diagram={
-                        "items": [
-                            {"id": "task_done", "item_type": "task", "text": "Done Task", "task_index": 0},
-                            {"id": "task_next", "item_type": "task", "text": "Next Task", "task_index": 1},
-                            {"id": "note_0", "item_type": "note", "text": "Keep", "task_index": -1},
-                        ],
-                        "edges": [],
-                        "strokes": [],
-                        "current_task_index": -1,
-                    },
-                ),
-            ],
-            active_tab=0,
-        )
-
-        tree = model.getHierarchyTree(0)
-        assert len(tree) == 1
-        child_ids = [child.get("itemId") for child in tree[0]["children"]]
-        assert "task_done" not in child_ids
-        assert "task_next" in child_ids
-        assert "note_0" in child_ids
 
     def test_priority_plot_roles_exist(self, app):
         """Priority plot roles are exposed to QML."""

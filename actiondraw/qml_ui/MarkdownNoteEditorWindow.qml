@@ -545,6 +545,24 @@ ApplicationWindow {
                 if (diagramModel && diagramModel.createTaskFromMarkdownSelection)
                     diagramModel.createTaskFromMarkdownSelection(editorRoot.noteId, selectedText)
             }
+            onCreateTaskListRequested: function(selectedText) {
+                if (markdownNoteManager && markdownNoteManager.createTasksFromEditorList) {
+                    markdownNoteManager.createTasksFromEditorList(
+                        editorRoot.editorType,
+                        editorRoot.noteId,
+                        editorRoot.targetX,
+                        editorRoot.targetY,
+                        markdownEditor.textValue,
+                        selectedText
+                    )
+                    if (editorRoot.noteId.length === 0
+                        && editorRoot.editorType === "freetext"
+                        && markdownNoteManager.activeItemId
+                        && markdownNoteManager.activeItemId.length > 0) {
+                        editorRoot.noteId = markdownNoteManager.activeItemId
+                    }
+                }
+            }
             onCreateTabRequested: function(selectedText) {
                 if (markdownNoteManager && markdownNoteManager.createTabFromEditorSelection) {
                     markdownNoteManager.createTabFromEditorSelection(

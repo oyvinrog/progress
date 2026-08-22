@@ -9,7 +9,6 @@ Rectangle {
     property var projectManager
     property var onTabDragMoved
     property var onTabDragReleased
-    property var onAnalyzeHierarchy
     property int expandedWidth: 252
     property int collapsedWidth: 48
     readonly property var iconPresetValues: [
@@ -989,16 +988,6 @@ Rectangle {
             onTriggered: {
                 if (tabModel && tabModel.setTabColor)
                     tabModel.setTabColor(tabContextMenu.tabIndex, "")
-            }
-        }
-
-        MenuSeparator {}
-
-        MenuItem {
-            text: "Analyze Hierarchy..."
-            onTriggered: {
-                if (typeof sidebar.onAnalyzeHierarchy === "function")
-                    sidebar.onAnalyzeHierarchy(tabContextMenu.tabIndex)
             }
         }
 

@@ -6,30 +6,19 @@ MenuBar {
     id: menuBar
     property var root: null
     property var diagramModel: null
-    property var taskModel: null
     property var projectManager: null
-    property var mcpServerController: null
     property var edgeCanvas: null
     property var viewport: null
     property var saveDialog: null
     property var loadDialog: null
-    property var taskDialog: null
     property var notificationSettingsDialog: null
 
     function hasDiagramModel() {
         return diagramModel !== null && diagramModel !== undefined
     }
 
-    function hasTaskModel() {
-        return taskModel !== null && taskModel !== undefined
-    }
-
     function hasProjectManager() {
         return projectManager !== null && projectManager !== undefined
-    }
-
-    function hasMcpServerController() {
-        return mcpServerController !== null && mcpServerController !== undefined
     }
 
     function canPasteFromClipboard() {
@@ -40,12 +29,6 @@ MenuBar {
         if (typeof diagramModel.hasClipboardImage !== "function")
             return false
         return diagramModel.hasClipboardDiagram() || diagramModel.hasClipboardImage()
-    }
-
-    function canPasteImage() {
-        if (!hasDiagramModel() || typeof diagramModel.hasClipboardImage !== "function")
-            return false
-        return diagramModel.hasClipboardImage()
     }
 
     Menu {
@@ -186,78 +169,6 @@ MenuBar {
     }
 
     Menu {
-        title: "Insert"
-
-        MenuItem {
-            text: "Box"
-            onTriggered: root.addPresetAtCenter("box")
-        }
-
-        MenuItem {
-            text: "Database"
-            onTriggered: root.addPresetAtCenter("database")
-        }
-
-        MenuItem {
-            text: "Server"
-            onTriggered: root.addPresetAtCenter("server")
-        }
-
-        MenuItem {
-            text: "Cloud"
-            onTriggered: root.addPresetAtCenter("cloud")
-        }
-
-        MenuItem {
-            text: "Note"
-            onTriggered: root.addPresetAtCenter("note")
-        }
-
-        MenuItem {
-            text: "Obstacle"
-            onTriggered: root.addPresetAtCenter("obstacle")
-        }
-
-        MenuItem {
-            text: "Wish"
-            onTriggered: root.addPresetAtCenter("wish")
-        }
-
-        MenuSeparator {}
-
-        MenuItem {
-            text: "Paste Image from Clipboard"
-            enabled: canPasteImage()
-            onTriggered: {
-                if (diagramModel && diagramModel.hasClipboardImage()) {
-                    var center = root.diagramCenterPoint()
-                    diagramModel.pasteImageFromClipboard(center.x, center.y)
-                }
-            }
-        }
-
-        MenuSeparator {}
-
-        MenuItem {
-            text: "Task from List..."
-            enabled: hasTaskModel()
-            onTriggered: {
-                if (!taskModel) return
-                var center = root.diagramCenterPoint()
-                taskDialog.targetX = center.x
-                taskDialog.targetY = center.y
-                taskDialog.open()
-            }
-        }
-
-        MenuItem {
-            text: "New Task...\t\tCtrl+Enter"
-            enabled: hasDiagramModel()
-            onTriggered: root.addTaskOrConnectedTask()
-        }
-    }
-
-    Menu {
         title: "View"
 
         MenuItem {
@@ -294,76 +205,6 @@ MenuBar {
 
     Menu {
         title: "Tools"
-
-        MenuItem {
-            text: "Hierarchy Navigator..."
-            enabled: root && root.openHierarchyWindow
-            onTriggered: root.openHierarchyWindow()
-        }
-
-        MenuSeparator {}
-
-        Menu {
-            title: "MCP"
-            enabled: hasMcpServerController()
-
-            MenuItem {
-                text: hasMcpServerController() ? mcpServerController.statusText : "MCP server unavailable"
-                enabled: false
-            }
-
-            MenuSeparator {}
-
-            MenuItem {
-                text: "Start Server"
-                enabled: hasMcpServerController() && mcpServerController.status !== "running" && mcpServerController.status !== "starting"
-                onTriggered: mcpServerController.start()
-            }
-
-            MenuItem {
-                text: "Stop Server"
-                enabled: hasMcpServerController() && (mcpServerController.status === "running" || mcpServerController.status === "starting" || mcpServerController.status === "stopping")
-                onTriggered: mcpServerController.stop()
-            }
-
-            MenuSeparator {}
-
-            Menu {
-                title: "Claude"
-
-                MenuItem {
-                    text: "Show Add Command..."
-                    onTriggered: root.openMcpCommandDialog("Claude MCP Command", mcpServerController.claudeAddCommand)
-                }
-
-                MenuItem {
-                    text: "Copy Add Command"
-                    onTriggered: {
-                        if (mcpServerController.copyClaudeAddCommand())
-                            root.showSaveNotification("Claude MCP command copied")
-                    }
-                }
-            }
-
-            Menu {
-                title: "Codex"
-
-                MenuItem {
-                    text: "Show Add Command..."
-                    onTriggered: root.openMcpCommandDialog("Codex MCP Command", mcpServerController.codexAddCommand)
-                }
-
-                MenuItem {
-                    text: "Copy Add Command"
-                    onTriggered: {
-                        if (mcpServerController.copyCodexAddCommand())
-                            root.showSaveNotification("Codex MCP command copied")
-                    }
-                }
-            }
-        }
-
-        MenuSeparator {}
 
         MenuItem {
             text: "Priority Plot..."

@@ -272,6 +272,53 @@ class MarkdownNoteManager(QObject):
             self.taskCreated.emit(task_id)
         return task_id
 
+    @Slot(str, str, float, float, str, str, result="QVariantList")
+    def createTasksFromEditorList(
+        self,
+        editor_type: str,
+        item_id: str,
+        x: float,
+        y: float,
+        current_text: str,
+        selected_text: str,
+    ) -> list[str]:
+        """Create and announce a connected task chain from a Markdown list."""
+        if not selected_text:
+            return []
+
+        source_id = item_id or ""
+        if editor_type == "workspace" or editor_type == "tab":
+            if self._project_manager is None:
+                return []
+            create_tasks = getattr(self._project_manager, "createTasksFromWorkspaceMarkdownList", None)
+            if not callable(create_tasks):
+                return []
+            task_ids = list(create_tasks(selected_text, float(x), float(y)) or [])
+            for task_id in task_ids:
+                self.taskCreated.emit(task_id)
+            return task_ids
+
+        if editor_type == "freetext" and not source_id:
+            source_id = self._diagram_model.addPresetItemWithText(
+                "freetext",
+                float(x),
+                float(y),
+                current_text or "",
+            )
+            if not source_id:
+                return []
+            self._set_editor_state("freetext", source_id, float(x), float(y), True)
+        if not source_id:
+            return []
+
+        create_tasks = getattr(self._diagram_model, "createTasksFromMarkdownList", None)
+        if not callable(create_tasks):
+            return []
+        task_ids = list(create_tasks(source_id, selected_text) or [])
+        for task_id in task_ids:
+            self.taskCreated.emit(task_id)
+        return task_ids
+
     @Slot(str, str, float, float, str, str, result=int)
     def createTabFromEditorSelection(
         self,

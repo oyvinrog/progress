@@ -73,6 +73,18 @@ def test_pdf_export_keeps_runtime_dependencies_qt_only():
     assert "pandoc" not in pyproject
 
 
+def test_mcp_runtime_and_dependencies_are_removed():
+    dependency_manifests = (
+        Path("pyproject.toml").read_text(encoding="utf-8"),
+        Path("requirements.txt").read_text(encoding="utf-8"),
+        Path("requirements-dev.txt").read_text(encoding="utf-8"),
+    )
+    for manifest in dependency_manifests:
+        assert "mcp" not in manifest.lower()
+        assert "uvicorn" not in manifest.lower()
+    assert not Path("actiondraw/mcp_server.py").exists()
+
+
 def test_desktop_entry_uses_packaged_icon_name():
     desktop_entry = Path("packaging/actiondraw.desktop").read_text(encoding="utf-8")
     assert "Icon=actiondraw" in desktop_entry

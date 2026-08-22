@@ -18,7 +18,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import (
     QAbstractListModel,
@@ -447,6 +447,11 @@ class Tab:
     color: str = ""
     pinned: bool = False
     goals: List[Dict[str, Any]] = field(default_factory=list)
+    assessment: Dict[str, Any] = field(default_factory=lambda: {
+        "problemUnderstanding": 1,
+        "outcomeUnderstanding": 1,
+        "ambitionRaised": False,
+    })
     kanban_status: str = "todo"
     kanban_slot_hour: int = -1
 
@@ -1488,6 +1493,7 @@ class TabModel(QAbstractListModel):
     currentTabIndexChanged = Signal()
     recentTabsChanged = Signal()
     goalsChanged = Signal()
+    assessmentChanged = Signal(int)
     kanbanChanged = Signal()
 
     def __init__(self):
@@ -1570,6 +1576,42 @@ class TabModel(QAbstractListModel):
         if 8 <= hour <= 17:
             return hour
         return -1
+
+    @staticmethod
+    def _normalizeAssessment(assessment: Any) -> Dict[str, Any]:
+        source = assessment if isinstance(assessment, dict) else {}
+
+        def normalized_rating(key: str) -> int:
+            try:
+                value = int(round(float(source.get(key, 1))))
+            except (TypeError, ValueError):
+                value = 1
+            return max(1, min(10, value))
+
+        return {
+            "problemUnderstanding": normalized_rating("problemUnderstanding"),
+            "outcomeUnderstanding": normalized_rating("outcomeUnderstanding"),
+            "ambitionRaised": source.get("ambitionRaised") is True,
+        }
+
+    @staticmethod
+    def _assessmentLevel(assessment: Any) -> int:
+        normalized = TabModel._normalizeAssessment(assessment)
+        ambition_value = 10 if normalized["ambitionRaised"] else 1
+        score = (
+            normalized["problemUnderstanding"]
+            + normalized["outcomeUnderstanding"]
+            + ambition_value
+        ) / 3.0
+        if score < 3:
+            return 0
+        if score < 5:
+            return 1
+        if score < 7:
+            return 2
+        if score < 9:
+            return 3
+        return 4
 
     @Property(int, notify=currentTabIndexChanged)
     def currentTabIndex(self) -> int:
@@ -1698,134 +1740,6 @@ class TabModel(QAbstractListModel):
             "kanbanStatus": tab.kanban_status,
             "kanbanSlotHour": tab.kanban_slot_hour,
         }
-
-    def _tab_name_to_index_map(self) -> Dict[str, int]:
-        name_to_index: Dict[str, int] = {}
-        for idx, tab in enumerate(self._tabs):
-            name = str(getattr(tab, "name", "") or "").strip()
-            if not name or name in name_to_index:
-                continue
-            name_to_index[name] = idx
-        return name_to_index
-
-    def _extract_tab_tasks(self, tab: Tab) -> List[Dict[str, Any]]:
-        tasks_payload = tab.tasks if isinstance(tab.tasks, dict) else {}
-        tasks = tasks_payload.get("tasks", []) if isinstance(tasks_payload, dict) else []
-        if not isinstance(tasks, list):
-            return []
-        normalized: List[Dict[str, Any]] = []
-        for task in tasks:
-            normalized.append(task if isinstance(task, dict) else {})
-        return normalized
-
-    def _extract_tab_items(self, tab: Tab) -> List[Dict[str, Any]]:
-        diagram_payload = tab.diagram if isinstance(tab.diagram, dict) else {}
-        items = diagram_payload.get("items", []) if isinstance(diagram_payload, dict) else []
-        if not isinstance(items, list):
-            return []
-        return [item for item in items if isinstance(item, dict)]
-
-    def _build_hierarchy_tab_node(
-        self,
-        tab_index: int,
-        name_to_index: Dict[str, int],
-        path_tab_indices: Set[int],
-    ) -> Dict[str, Any]:
-        if tab_index < 0 or tab_index >= len(self._tabs):
-            return {}
-
-        tab = self._tabs[tab_index]
-        tab_path = set(path_tab_indices)
-        tab_path.add(tab_index)
-
-        tasks = self._extract_tab_tasks(tab)
-        items = self._extract_tab_items(tab)
-
-        children: List[Dict[str, Any]] = []
-        for item in items:
-            item_id = str(item.get("id", ""))
-            item_type = str(item.get("item_type", ""))
-            item_text = str(item.get("text", ""))
-            try:
-                task_index = int(item.get("task_index", -1))
-            except (TypeError, ValueError):
-                task_index = -1
-
-            # Navigator should hide completed tasks.
-            if item_type == "task" and 0 <= task_index < len(tasks):
-                if bool(tasks[task_index].get("completed", False)):
-                    continue
-
-            linked_tab_index = -1
-            linked_tab_name = ""
-            if 0 <= task_index < len(tasks):
-                task_title = str(tasks[task_index].get("title", "")).strip()
-                linked_tab_index = name_to_index.get(task_title, -1)
-                if linked_tab_index >= 0:
-                    linked_tab_name = str(self._tabs[linked_tab_index].name)
-
-            item_node: Dict[str, Any] = {
-                "kind": "diagramNode",
-                "itemId": item_id,
-                "itemType": item_type,
-                "text": item_text,
-                "taskIndex": task_index,
-                "sourceTabIndex": tab_index,
-                "sourceTabName": tab.name,
-                "linkedTabIndex": linked_tab_index,
-                "linkedTabName": linked_tab_name,
-                "hasLinkedSubtab": linked_tab_index >= 0,
-                "children": [],
-            }
-
-            if linked_tab_index >= 0:
-                if linked_tab_index in tab_path:
-                    item_node["children"] = [{
-                        "kind": "cycleRef",
-                        "tabIndex": linked_tab_index,
-                        "tabName": linked_tab_name,
-                    }]
-                else:
-                    linked_node = self._build_hierarchy_tab_node(linked_tab_index, name_to_index, tab_path)
-                    if linked_node:
-                        item_node["children"] = [linked_node]
-
-            children.append(item_node)
-
-        return {
-            "kind": "tab",
-            "tabIndex": tab_index,
-            "tabName": tab.name,
-            "completionPercent": self._calculateTabCompletion(tab),
-            "activeTaskTitle": self._getActiveTaskTitle(tab),
-            "children": children,
-        }
-
-    @Slot(result=list)
-    @Slot(int, result=list)
-    def getHierarchyTree(self, root_tab_index: int = -1) -> List[Dict[str, Any]]:
-        """Return recursive linked-subdiagram hierarchy.
-
-        Args:
-            root_tab_index: Optional tab index to use as a single hierarchy root.
-                If negative, all tabs are returned as top-level roots.
-        """
-        name_to_index = self._tab_name_to_index_map()
-        hierarchy: List[Dict[str, Any]] = []
-
-        if root_tab_index >= 0:
-            if root_tab_index >= len(self._tabs):
-                return []
-            node = self._build_hierarchy_tab_node(root_tab_index, name_to_index, set())
-            if node:
-                hierarchy.append(node)
-            return hierarchy
-
-        for index in range(len(self._tabs)):
-            node = self._build_hierarchy_tab_node(index, name_to_index, set())
-            if node:
-                hierarchy.append(node)
-        return hierarchy
 
     @Slot(str)
     def addTab(self, name: str = "") -> None:
@@ -2119,6 +2033,41 @@ class TabModel(QAbstractListModel):
         goals.pop(goal_index)
         self.goalsChanged.emit()
 
+    @Slot(int, result="QVariant")
+    def getAssessment(self, index: int):
+        """Return normalized readiness-assessment answers for a tab."""
+        if index < 0 or index >= len(self._tabs):
+            return self._normalizeAssessment(None)
+        return dict(self._normalizeAssessment(self._tabs[index].assessment))
+
+    @Slot(int, result=int)
+    def getAssessmentLevel(self, index: int) -> int:
+        """Return the tab's readiness expression level from 0 (sour) to 4."""
+        if index < 0 or index >= len(self._tabs):
+            return 0
+        return self._assessmentLevel(self._tabs[index].assessment)
+
+    @Slot(int, int, int, bool)
+    def setAssessment(
+        self,
+        index: int,
+        problem_understanding: int,
+        outcome_understanding: int,
+        ambition_raised: bool,
+    ) -> None:
+        """Update a tab's readiness assessment and notify the QML controls."""
+        if index < 0 or index >= len(self._tabs):
+            return
+        normalized = self._normalizeAssessment({
+            "problemUnderstanding": problem_understanding,
+            "outcomeUnderstanding": outcome_understanding,
+            "ambitionRaised": ambition_raised,
+        })
+        if self._normalizeAssessment(self._tabs[index].assessment) == normalized:
+            return
+        self._tabs[index].assessment = normalized
+        self.assessmentChanged.emit(index)
+
     def _computePriorityScore(self, value: float, time_hours: float) -> float:
         return compute_priority_score(value, time_hours)
 
@@ -2270,6 +2219,7 @@ class TabModel(QAbstractListModel):
             tab.icon = str(getattr(tab, "icon", "") or "").strip()
             tab.color = self._normalizeTabColor(getattr(tab, "color", ""))
             tab.pinned = bool(getattr(tab, "pinned", False))
+            tab.assessment = self._normalizeAssessment(getattr(tab, "assessment", None))
             tab.kanban_status = self._normalizeKanbanStatus(getattr(tab, "kanban_status", "todo"))
             tab.kanban_slot_hour = self._normalizeKanbanSlotHour(
                 tab.kanban_status,
@@ -3305,6 +3255,19 @@ class ProjectManager(QObject):
             return ""
         return str(add_task_from_text(text, float(x), float(y)) or "")
 
+    @Slot(str, float, float, result="QVariantList")
+    def createTasksFromWorkspaceMarkdownList(
+        self,
+        selected_text: str,
+        x: float,
+        y: float,
+    ) -> List[str]:
+        """Create a task chain from workspace or tab Markdown."""
+        create_tasks = getattr(self._diagram_model, "createTasksFromMarkdownListAtPosition", None)
+        if not callable(create_tasks):
+            return []
+        return list(create_tasks(selected_text, float(x), float(y)) or [])
+
     @Slot(str, result=int)
     def createTabFromMarkdownSelection(self, selected_text: str) -> int:
         """Create and switch to a project tab from selected markdown text."""
@@ -3381,6 +3344,7 @@ class ProjectManager(QObject):
                     "color": tab.color,
                     "pinned": tab.pinned,
                     "goals": tab.goals,
+                    "assessment": TabModel._normalizeAssessment(tab.assessment),
                     "kanban_status": tab.kanban_status,
                     "kanban_slot_hour": tab.kanban_slot_hour,
                 })
@@ -3897,6 +3861,7 @@ class ProjectManager(QObject):
                         color=tab_data.get("color", ""),
                         pinned=tab_data.get("pinned", False),
                         goals=tab_data.get("goals", []),
+                        assessment=TabModel._normalizeAssessment(tab_data.get("assessment")),
                         kanban_status=TabModel._normalizeKanbanStatus(tab_data.get("kanban_status", "todo")),
                         kanban_slot_hour=TabModel._normalizeKanbanSlotHour(
                             TabModel._normalizeKanbanStatus(tab_data.get("kanban_status", "todo")),

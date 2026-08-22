@@ -30,6 +30,7 @@ from .constants import ITEM_PRESETS
 from .drawing import DrawingMixin
 from .layout import LayoutMixin
 from .markdown_note_tabs import first_tab_text, normalize_editor_tabs
+from .markdown_task_list import parse_markdown_task_list
 from .types import DiagramEdge, DiagramItem, DiagramItemType, DrawingPoint, DrawingStroke
 
 
@@ -565,6 +566,66 @@ class DiagramModel(
             return ""
         self.addEdge(attach_from_id, new_id)
         return new_id
+
+    def _create_task_chain(
+        self,
+        titles: List[str],
+        x: float,
+        y: float,
+        attach_from_id: str = "",
+    ) -> List[str]:
+        """Create horizontally spaced task nodes and connect them in order."""
+        if not self._task_model or not titles:
+            return []
+
+        created_ids: List[str] = []
+        previous_id = attach_from_id
+        next_x = float(x)
+        next_y = float(y)
+        for title in titles:
+            new_id = self.addTaskFromText(title, next_x, next_y)
+            if not new_id:
+                break
+            created_ids.append(new_id)
+            if previous_id:
+                self.addEdge(previous_id, new_id)
+            previous_id = new_id
+
+            new_item = self.getItem(new_id)
+            if new_item is not None:
+                next_x = new_item.x + new_item.width + 100.0
+                next_y = new_item.y
+        return created_ids
+
+    @Slot(str, str, result="QVariantList")
+    def createTasksFromMarkdownList(self, source_id: str, selected_text: str) -> List[str]:
+        """Create a task chain from a selected plain Markdown dash list."""
+        titles = parse_markdown_task_list(selected_text)
+        if not titles:
+            return []
+
+        attach_from_id = self._find_task_chain_tail(source_id)
+        if not attach_from_id:
+            return []
+        attach_item = self.getItem(attach_from_id)
+        if attach_item is None:
+            return []
+
+        x = attach_item.x + attach_item.width + 100.0
+        return self._create_task_chain(titles, x, attach_item.y, attach_from_id)
+
+    @Slot(str, float, float, result="QVariantList")
+    def createTasksFromMarkdownListAtPosition(
+        self,
+        selected_text: str,
+        x: float,
+        y: float,
+    ) -> List[str]:
+        """Create an unattached task chain at the requested diagram position."""
+        titles = parse_markdown_task_list(selected_text)
+        if not titles:
+            return []
+        return self._create_task_chain(titles, float(x), float(y))
 
     @Slot(int, float, float, result=str)
     def addTask(self, task_index: int, x: float, y: float) -> str:
