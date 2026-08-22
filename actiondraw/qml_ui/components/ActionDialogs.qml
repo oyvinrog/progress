@@ -41,6 +41,7 @@ Item {
     property alias folderDialog: folderDialog
     property alias clipboardPasteDialog: clipboardPasteDialog
     property alias goalsDialog: goalsDialog
+    property alias assessmentDialog: assessmentDialog
     property bool anyDialogVisible: (
         addDialog.visible
         || boxDialog.visible
@@ -60,6 +61,7 @@ Item {
         || saveDialog.visible
         || loadDialog.visible
         || goalsDialog.visible
+        || assessmentDialog.visible
     )
 
     anchors.fill: parent
@@ -2749,5 +2751,232 @@ Item {
         }
 
         onRejected: goalsDialog.close()
+    }
+
+    Dialog {
+        id: assessmentDialog
+        modal: true
+        title: "Readiness Assessment"
+        anchors.centerIn: parent
+        width: 580
+
+        property bool loadingAnswers: false
+
+        function calculatedLevel() {
+            var ambitionValue = yesRadio.checked ? 10 : 1
+            var score = (problemSlider.value + outcomeSlider.value + ambitionValue) / 3
+            if (score < 3) return 0
+            if (score < 5) return 1
+            if (score < 7) return 2
+            if (score < 9) return 3
+            return 4
+        }
+
+        function loadAnswers() {
+            if (!tabModel || tabModel.currentTabIndex < 0)
+                return
+            var assessment = tabModel.getAssessment(tabModel.currentTabIndex)
+            loadingAnswers = true
+            problemSlider.value = assessment.problemUnderstanding
+            outcomeSlider.value = assessment.outcomeUnderstanding
+            yesRadio.checked = assessment.ambitionRaised
+            noRadio.checked = !assessment.ambitionRaised
+            loadingAnswers = false
+        }
+
+        function saveAnswers() {
+            if (loadingAnswers || !tabModel || tabModel.currentTabIndex < 0)
+                return
+            tabModel.setAssessment(
+                tabModel.currentTabIndex,
+                Math.round(problemSlider.value),
+                Math.round(outcomeSlider.value),
+                yesRadio.checked
+            )
+        }
+
+        onOpened: loadAnswers()
+
+        Connections {
+            target: tabModel
+            enabled: tabModel !== null
+            function onCurrentTabChanged() {
+                if (assessmentDialog.visible)
+                    assessmentDialog.loadAnswers()
+            }
+        }
+
+        contentItem: ColumnLayout {
+            width: 540
+            spacing: 16
+
+            AssessmentSmiley {
+                Layout.alignment: Qt.AlignHCenter
+                Layout.preferredWidth: 86
+                Layout.preferredHeight: 86
+                level: assessmentDialog.calculatedLevel()
+            }
+
+            Label {
+                Layout.fillWidth: true
+                text: "How well would you say you understand the problem?"
+                color: "#f5f6f8"
+                font.pixelSize: 14
+                font.bold: true
+                wrapMode: Text.WordWrap
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 12
+
+                Slider {
+                    id: problemSlider
+                    Layout.fillWidth: true
+                    from: 1
+                    to: 10
+                    value: 1
+                    stepSize: 1
+                    snapMode: Slider.SnapAlways
+                    onValueChanged: assessmentDialog.saveAnswers()
+                }
+
+                Label {
+                    Layout.preferredWidth: 26
+                    text: Math.round(problemSlider.value)
+                    color: "#f4c95d"
+                    font.pixelSize: 16
+                    font.bold: true
+                    horizontalAlignment: Text.AlignHCenter
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Label {
+                    Layout.fillWidth: true
+                    text: "1 — I don’t know what to do or where to start."
+                    color: "#8fa3b7"
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: "10 — I could do it from memory."
+                    color: "#8fa3b7"
+                    font.pixelSize: 11
+                    horizontalAlignment: Text.AlignRight
+                    wrapMode: Text.WordWrap
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 1
+                color: "#384458"
+            }
+
+            Label {
+                Layout.fillWidth: true
+                text: "How well would you say you understand the desired outcome?"
+                color: "#f5f6f8"
+                font.pixelSize: 14
+                font.bold: true
+                wrapMode: Text.WordWrap
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 12
+
+                Slider {
+                    id: outcomeSlider
+                    Layout.fillWidth: true
+                    from: 1
+                    to: 10
+                    value: 1
+                    stepSize: 1
+                    snapMode: Slider.SnapAlways
+                    onValueChanged: assessmentDialog.saveAnswers()
+                }
+
+                Label {
+                    Layout.preferredWidth: 26
+                    text: Math.round(outcomeSlider.value)
+                    color: "#f4c95d"
+                    font.pixelSize: 16
+                    font.bold: true
+                    horizontalAlignment: Text.AlignHCenter
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Label {
+                    Layout.fillWidth: true
+                    text: "1 — I don’t know where I need to end up."
+                    color: "#8fa3b7"
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
+                }
+                Label {
+                    Layout.fillWidth: true
+                    text: "10 — I know exactly what the finished result should be."
+                    color: "#8fa3b7"
+                    font.pixelSize: 11
+                    horizontalAlignment: Text.AlignRight
+                    wrapMode: Text.WordWrap
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 1
+                color: "#384458"
+            }
+
+            Label {
+                Layout.fillWidth: true
+                text: "Have you raised the ambition level of what you want to accomplish?"
+                color: "#f5f6f8"
+                font.pixelSize: 14
+                font.bold: true
+                wrapMode: Text.WordWrap
+            }
+
+            ButtonGroup { id: ambitionGroup }
+
+            RowLayout {
+                spacing: 18
+                RadioButton {
+                    id: yesRadio
+                    text: "Yes"
+                    ButtonGroup.group: ambitionGroup
+                    onClicked: assessmentDialog.saveAnswers()
+                }
+                RadioButton {
+                    id: noRadio
+                    text: "No"
+                    checked: true
+                    ButtonGroup.group: ambitionGroup
+                    onClicked: assessmentDialog.saveAnswers()
+                }
+            }
+
+            Label {
+                Layout.fillWidth: true
+                text: "Important: Don’t make it so ambitious that it becomes impossible to complete."
+                color: "#f4c95d"
+                font.pixelSize: 12
+                font.italic: true
+                wrapMode: Text.WordWrap
+            }
+        }
+
+        footer: DialogButtonBox {
+            standardButtons: DialogButtonBox.Close
+        }
+
+        onRejected: assessmentDialog.close()
     }
 }

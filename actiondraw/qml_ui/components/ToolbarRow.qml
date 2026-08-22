@@ -10,6 +10,28 @@ Rectangle {
     property var viewport: null
     property var tabModel: null
     property var goalsDialog: null
+    property var assessmentDialog: null
+    property int currentAssessmentLevel: 0
+
+    function refreshAssessmentLevel() {
+        if (tabModel && tabModel.currentTabIndex >= 0)
+            currentAssessmentLevel = tabModel.getAssessmentLevel(tabModel.currentTabIndex)
+        else
+            currentAssessmentLevel = 0
+    }
+
+    Component.onCompleted: refreshAssessmentLevel()
+
+    Connections {
+        target: toolbar.tabModel
+        enabled: toolbar.tabModel !== null
+        function onCurrentTabChanged() { toolbar.refreshAssessmentLevel() }
+        function onCurrentTabIndexChanged() { toolbar.refreshAssessmentLevel() }
+        function onAssessmentChanged(tabIndex) {
+            if (tabIndex === toolbar.tabModel.currentTabIndex)
+                toolbar.refreshAssessmentLevel()
+        }
+    }
 
     Layout.fillWidth: true
     implicitHeight: 48
@@ -107,6 +129,38 @@ Rectangle {
             onClicked: {
                 if (goalsDialog)
                     goalsDialog.open()
+            }
+        }
+
+        Button {
+            id: assessmentButton
+            flat: true
+            padding: 8
+
+            contentItem: RowLayout {
+                spacing: 6
+                AssessmentSmiley {
+                    Layout.preferredWidth: 22
+                    Layout.preferredHeight: 22
+                    level: toolbar.currentAssessmentLevel
+                }
+                Text {
+                    text: "Assessment"
+                    color: "#d6e2ee"
+                    font.pixelSize: 12
+                    font.bold: true
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+            background: Rectangle {
+                radius: 8
+                color: assessmentButton.hovered ? "#26394b" : "#1c2e3e"
+                border.color: "#355069"
+                border.width: 1
+            }
+            onClicked: {
+                if (assessmentDialog)
+                    assessmentDialog.open()
             }
         }
 

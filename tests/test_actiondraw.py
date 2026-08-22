@@ -2211,6 +2211,12 @@ class TestMultiTabSupport:
         assert tab_model.currentTabName == "Main"
         assert task_model.rowCount() == 1
         assert diagram_model.count == 1
+        assert tab_model.getAssessment(0) == {
+            "problemUnderstanding": 1,
+            "outcomeUnderstanding": 1,
+            "ambitionRaised": False,
+        }
+        assert tab_model.getAssessmentLevel(0) == 0
 
     def test_load_v1_format_initializes_workspace_markdown(self, app, tmp_path):
         """Older projects gain a default ActionDraw-wide markdown workspace."""
@@ -2297,6 +2303,39 @@ class TestMultiTabSupport:
         project_manager2.switchTab(0)
         assert task_model2.rowCount() == 1
         assert diagram_model2.count == 1
+
+    def test_roundtrip_tab_assessments(self, app, tmp_path):
+        """Assessment answers remain independent and survive project persistence."""
+        from task_model import TaskModel, ProjectManager, TabModel
+
+        task_model = TaskModel()
+        diagram_model = DiagramModel()
+        tab_model = TabModel()
+        project_manager = ProjectManager(task_model, diagram_model, tab_model)
+
+        tab_model.setAssessment(0, 8, 9, True)
+        tab_model.addTab("Second Tab")
+        tab_model.setAssessment(1, 4, 6, False)
+
+        project_file = tmp_path / "tab_assessments.progress"
+        project_manager.saveProject(str(project_file))
+
+        task_model2 = TaskModel()
+        diagram_model2 = DiagramModel()
+        tab_model2 = TabModel()
+        project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
+        project_manager2.loadProject(str(project_file))
+
+        assert tab_model2.getAssessment(0) == {
+            "problemUnderstanding": 8,
+            "outcomeUnderstanding": 9,
+            "ambitionRaised": True,
+        }
+        assert tab_model2.getAssessment(1) == {
+            "problemUnderstanding": 4,
+            "outcomeUnderstanding": 6,
+            "ambitionRaised": False,
+        }
 
     def test_roundtrip_workspace_markdown_tabs(self, app, tmp_path):
         """Project-wide markdown tabs survive save/load."""
@@ -2753,6 +2792,69 @@ class TestMultiTabSupport:
 
         tab_model.addTab("")  # Empty name gets default
         assert tab_model.tabCount == 3
+
+    def test_assessment_defaults_clamping_and_signal(self, tab_model):
+        """New assessments start sour and accept only valid rating values."""
+        changed = []
+        tab_model.assessmentChanged.connect(changed.append)
+
+        assert tab_model.getAssessmentLevel(0) == 0
+        tab_model.setAssessment(0, -5, 99, True)
+
+        assert tab_model.getAssessment(0) == {
+            "problemUnderstanding": 1,
+            "outcomeUnderstanding": 10,
+            "ambitionRaised": True,
+        }
+        assert changed == [0]
+
+    @pytest.mark.parametrize(
+        ("problem", "outcome", "ambition", "expected_level"),
+        [
+            (1, 1, False, 0),
+            (4, 4, False, 1),
+            (7, 7, False, 2),
+            (10, 10, False, 3),
+            (9, 9, True, 4),
+            (10, 10, True, 4),
+        ],
+    )
+    def test_assessment_smiley_thresholds(
+        self, tab_model, problem, outcome, ambition, expected_level
+    ):
+        tab_model.setAssessment(0, problem, outcome, ambition)
+        assert tab_model.getAssessmentLevel(0) == expected_level
+
+    def test_assessments_are_independent_per_tab(self, tab_model):
+        tab_model.setAssessment(0, 10, 10, True)
+        tab_model.addTab("Second")
+
+        assert tab_model.getAssessmentLevel(0) == 4
+        assert tab_model.getAssessmentLevel(1) == 0
+
+        tab_model.setAssessment(1, 7, 7, False)
+        assert tab_model.getAssessmentLevel(0) == 4
+        assert tab_model.getAssessmentLevel(1) == 2
+
+    def test_assessment_qml_wiring_and_copy(self):
+        toolbar_qml = (QML_DIR / "components" / "ToolbarRow.qml").read_text(encoding="utf-8")
+        dialogs_qml = (QML_DIR / "components" / "ActionDialogs.qml").read_text(encoding="utf-8")
+        smiley_qml = (QML_DIR / "components" / "AssessmentSmiley.qml").read_text(encoding="utf-8")
+        window_qml = load_actiondraw_qml()
+
+        assert toolbar_qml.index("id: goalsButton") < toolbar_qml.index("id: assessmentButton")
+        assert 'text: "Assessment"' in toolbar_qml
+        assert "AssessmentSmiley" in toolbar_qml
+        assert "assessmentDialog.open()" in toolbar_qml
+        assert 'title: "Readiness Assessment"' in dialogs_qml
+        assert "How well would you say you understand the problem?" in dialogs_qml
+        assert "How well would you say you understand the desired outcome?" in dialogs_qml
+        assert "Have you raised the ambition level" in dialogs_qml
+        assert "Don’t make it so ambitious" in dialogs_qml
+        assert "from: 1" in dialogs_qml and "to: 10" in dialogs_qml
+        assert "tabModel.setAssessment(" in dialogs_qml
+        assert "quadraticCurveTo" in smiley_qml
+        assert "assessmentDialog: dialogs.assessmentDialog" in window_qml
 
     def test_remove_tab(self, tab_model):
         """Removing a tab decreases count."""

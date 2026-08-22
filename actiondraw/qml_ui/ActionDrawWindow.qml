@@ -1753,6 +1753,7 @@ ApplicationWindow {
                 viewport: viewport
                 tabModel: tabModelRef
                 goalsDialog: dialogs.goalsDialog
+                assessmentDialog: dialogs.assessmentDialog
             }
 
             Rectangle {

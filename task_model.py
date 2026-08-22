@@ -447,6 +447,11 @@ class Tab:
     color: str = ""
     pinned: bool = False
     goals: List[Dict[str, Any]] = field(default_factory=list)
+    assessment: Dict[str, Any] = field(default_factory=lambda: {
+        "problemUnderstanding": 1,
+        "outcomeUnderstanding": 1,
+        "ambitionRaised": False,
+    })
     kanban_status: str = "todo"
     kanban_slot_hour: int = -1
 
@@ -1488,6 +1493,7 @@ class TabModel(QAbstractListModel):
     currentTabIndexChanged = Signal()
     recentTabsChanged = Signal()
     goalsChanged = Signal()
+    assessmentChanged = Signal(int)
     kanbanChanged = Signal()
 
     def __init__(self):
@@ -1570,6 +1576,42 @@ class TabModel(QAbstractListModel):
         if 8 <= hour <= 17:
             return hour
         return -1
+
+    @staticmethod
+    def _normalizeAssessment(assessment: Any) -> Dict[str, Any]:
+        source = assessment if isinstance(assessment, dict) else {}
+
+        def normalized_rating(key: str) -> int:
+            try:
+                value = int(round(float(source.get(key, 1))))
+            except (TypeError, ValueError):
+                value = 1
+            return max(1, min(10, value))
+
+        return {
+            "problemUnderstanding": normalized_rating("problemUnderstanding"),
+            "outcomeUnderstanding": normalized_rating("outcomeUnderstanding"),
+            "ambitionRaised": source.get("ambitionRaised") is True,
+        }
+
+    @staticmethod
+    def _assessmentLevel(assessment: Any) -> int:
+        normalized = TabModel._normalizeAssessment(assessment)
+        ambition_value = 10 if normalized["ambitionRaised"] else 1
+        score = (
+            normalized["problemUnderstanding"]
+            + normalized["outcomeUnderstanding"]
+            + ambition_value
+        ) / 3.0
+        if score < 3:
+            return 0
+        if score < 5:
+            return 1
+        if score < 7:
+            return 2
+        if score < 9:
+            return 3
+        return 4
 
     @Property(int, notify=currentTabIndexChanged)
     def currentTabIndex(self) -> int:
@@ -2119,6 +2161,41 @@ class TabModel(QAbstractListModel):
         goals.pop(goal_index)
         self.goalsChanged.emit()
 
+    @Slot(int, result="QVariant")
+    def getAssessment(self, index: int):
+        """Return normalized readiness-assessment answers for a tab."""
+        if index < 0 or index >= len(self._tabs):
+            return self._normalizeAssessment(None)
+        return dict(self._normalizeAssessment(self._tabs[index].assessment))
+
+    @Slot(int, result=int)
+    def getAssessmentLevel(self, index: int) -> int:
+        """Return the tab's readiness expression level from 0 (sour) to 4."""
+        if index < 0 or index >= len(self._tabs):
+            return 0
+        return self._assessmentLevel(self._tabs[index].assessment)
+
+    @Slot(int, int, int, bool)
+    def setAssessment(
+        self,
+        index: int,
+        problem_understanding: int,
+        outcome_understanding: int,
+        ambition_raised: bool,
+    ) -> None:
+        """Update a tab's readiness assessment and notify the QML controls."""
+        if index < 0 or index >= len(self._tabs):
+            return
+        normalized = self._normalizeAssessment({
+            "problemUnderstanding": problem_understanding,
+            "outcomeUnderstanding": outcome_understanding,
+            "ambitionRaised": ambition_raised,
+        })
+        if self._normalizeAssessment(self._tabs[index].assessment) == normalized:
+            return
+        self._tabs[index].assessment = normalized
+        self.assessmentChanged.emit(index)
+
     def _computePriorityScore(self, value: float, time_hours: float) -> float:
         return compute_priority_score(value, time_hours)
 
@@ -2270,6 +2347,7 @@ class TabModel(QAbstractListModel):
             tab.icon = str(getattr(tab, "icon", "") or "").strip()
             tab.color = self._normalizeTabColor(getattr(tab, "color", ""))
             tab.pinned = bool(getattr(tab, "pinned", False))
+            tab.assessment = self._normalizeAssessment(getattr(tab, "assessment", None))
             tab.kanban_status = self._normalizeKanbanStatus(getattr(tab, "kanban_status", "todo"))
             tab.kanban_slot_hour = self._normalizeKanbanSlotHour(
                 tab.kanban_status,
@@ -3394,6 +3472,7 @@ class ProjectManager(QObject):
                     "color": tab.color,
                     "pinned": tab.pinned,
                     "goals": tab.goals,
+                    "assessment": TabModel._normalizeAssessment(tab.assessment),
                     "kanban_status": tab.kanban_status,
                     "kanban_slot_hour": tab.kanban_slot_hour,
                 })
@@ -3910,6 +3989,7 @@ class ProjectManager(QObject):
                         color=tab_data.get("color", ""),
                         pinned=tab_data.get("pinned", False),
                         goals=tab_data.get("goals", []),
+                        assessment=TabModel._normalizeAssessment(tab_data.get("assessment")),
                         kanban_status=TabModel._normalizeKanbanStatus(tab_data.get("kanban_status", "todo")),
                         kanban_slot_hour=TabModel._normalizeKanbanSlotHour(
                             TabModel._normalizeKanbanStatus(tab_data.get("kanban_status", "todo")),
