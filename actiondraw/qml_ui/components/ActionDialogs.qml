@@ -2758,7 +2758,39 @@ Item {
         modal: true
         title: "Readiness Assessment"
         anchors.centerIn: parent
-        width: 580
+        width: 680
+
+        background: Rectangle {
+            radius: 8
+            color: "#f4f7fa"
+            border.color: "#8798a8"
+            border.width: 1
+        }
+
+        header: Rectangle {
+            implicitHeight: 52
+            color: "#dfe7ee"
+            radius: 8
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: parent.radius
+                color: parent.color
+            }
+
+            Label {
+                anchors.fill: parent
+                anchors.leftMargin: 20
+                anchors.rightMargin: 20
+                text: assessmentDialog.title
+                color: "#0b1722"
+                font.pixelSize: 18
+                font.bold: true
+                verticalAlignment: Text.AlignVCenter
+            }
+        }
 
         property bool loadingAnswers: false
 
@@ -2807,8 +2839,8 @@ Item {
         }
 
         contentItem: ColumnLayout {
-            width: 540
-            spacing: 16
+            width: 640
+            spacing: 18
 
             AssessmentSmiley {
                 Layout.alignment: Qt.AlignHCenter
@@ -2820,8 +2852,8 @@ Item {
             Label {
                 Layout.fillWidth: true
                 text: "How well would you say you understand the problem?"
-                color: "#f5f6f8"
-                font.pixelSize: 14
+                color: "#0b1722"
+                font.pixelSize: 16
                 font.bold: true
                 wrapMode: Text.WordWrap
             }
@@ -2844,8 +2876,8 @@ Item {
                 Label {
                     Layout.preferredWidth: 26
                     text: Math.round(problemSlider.value)
-                    color: "#f4c95d"
-                    font.pixelSize: 16
+                    color: "#6b4800"
+                    font.pixelSize: 19
                     font.bold: true
                     horizontalAlignment: Text.AlignHCenter
                 }
@@ -2853,34 +2885,54 @@ Item {
 
             RowLayout {
                 Layout.fillWidth: true
-                Label {
+                spacing: 12
+
+                Rectangle {
                     Layout.fillWidth: true
-                    text: "1 — I don’t know what to do or where to start."
-                    color: "#8fa3b7"
-                    font.pixelSize: 11
-                    wrapMode: Text.WordWrap
+                    Layout.preferredHeight: 58
+                    radius: 6
+                    color: "#ffffff"
+                    border.color: "#8798a8"
+                    Label {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        text: "1 — I don’t know what to do or where to start."
+                        color: "#17232e"
+                        font.pixelSize: 13
+                        verticalAlignment: Text.AlignVCenter
+                        wrapMode: Text.WordWrap
+                    }
                 }
-                Label {
+
+                Rectangle {
                     Layout.fillWidth: true
-                    text: "10 — I could do it from memory."
-                    color: "#8fa3b7"
-                    font.pixelSize: 11
-                    horizontalAlignment: Text.AlignRight
-                    wrapMode: Text.WordWrap
+                    Layout.preferredHeight: 58
+                    radius: 6
+                    color: "#ffffff"
+                    border.color: "#8798a8"
+                    Label {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        text: "10 — I could do it from memory."
+                        color: "#17232e"
+                        font.pixelSize: 13
+                        verticalAlignment: Text.AlignVCenter
+                        wrapMode: Text.WordWrap
+                    }
                 }
             }
 
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 1
-                color: "#384458"
+                color: "#9cabb8"
             }
 
             Label {
                 Layout.fillWidth: true
                 text: "How well would you say you understand the desired outcome?"
-                color: "#f5f6f8"
-                font.pixelSize: 14
+                color: "#0b1722"
+                font.pixelSize: 16
                 font.bold: true
                 wrapMode: Text.WordWrap
             }
@@ -2903,8 +2955,8 @@ Item {
                 Label {
                     Layout.preferredWidth: 26
                     text: Math.round(outcomeSlider.value)
-                    color: "#f4c95d"
-                    font.pixelSize: 16
+                    color: "#6b4800"
+                    font.pixelSize: 19
                     font.bold: true
                     horizontalAlignment: Text.AlignHCenter
                 }
@@ -2912,34 +2964,54 @@ Item {
 
             RowLayout {
                 Layout.fillWidth: true
-                Label {
+                spacing: 12
+
+                Rectangle {
                     Layout.fillWidth: true
-                    text: "1 — I don’t know where I need to end up."
-                    color: "#8fa3b7"
-                    font.pixelSize: 11
-                    wrapMode: Text.WordWrap
+                    Layout.preferredHeight: 58
+                    radius: 6
+                    color: "#ffffff"
+                    border.color: "#8798a8"
+                    Label {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        text: "1 — I don’t know where I need to end up."
+                        color: "#17232e"
+                        font.pixelSize: 13
+                        verticalAlignment: Text.AlignVCenter
+                        wrapMode: Text.WordWrap
+                    }
                 }
-                Label {
+
+                Rectangle {
                     Layout.fillWidth: true
-                    text: "10 — I know exactly what the finished result should be."
-                    color: "#8fa3b7"
-                    font.pixelSize: 11
-                    horizontalAlignment: Text.AlignRight
-                    wrapMode: Text.WordWrap
+                    Layout.preferredHeight: 58
+                    radius: 6
+                    color: "#ffffff"
+                    border.color: "#8798a8"
+                    Label {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        text: "10 — I know exactly what the finished result should be."
+                        color: "#17232e"
+                        font.pixelSize: 13
+                        verticalAlignment: Text.AlignVCenter
+                        wrapMode: Text.WordWrap
+                    }
                 }
             }
 
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 1
-                color: "#384458"
+                color: "#9cabb8"
             }
 
             Label {
                 Layout.fillWidth: true
                 text: "Have you raised the ambition level of what you want to accomplish?"
-                color: "#f5f6f8"
-                font.pixelSize: 14
+                color: "#0b1722"
+                font.pixelSize: 16
                 font.bold: true
                 wrapMode: Text.WordWrap
             }
@@ -2952,6 +3024,14 @@ Item {
                     id: yesRadio
                     text: "Yes"
                     ButtonGroup.group: ambitionGroup
+                    contentItem: Text {
+                        text: yesRadio.text
+                        color: "#0b1722"
+                        font.pixelSize: 15
+                        font.bold: true
+                        leftPadding: yesRadio.indicator.width + yesRadio.spacing
+                        verticalAlignment: Text.AlignVCenter
+                    }
                     onClicked: assessmentDialog.saveAnswers()
                 }
                 RadioButton {
@@ -2959,22 +3039,44 @@ Item {
                     text: "No"
                     checked: true
                     ButtonGroup.group: ambitionGroup
+                    contentItem: Text {
+                        text: noRadio.text
+                        color: "#0b1722"
+                        font.pixelSize: 15
+                        font.bold: true
+                        leftPadding: noRadio.indicator.width + noRadio.spacing
+                        verticalAlignment: Text.AlignVCenter
+                    }
                     onClicked: assessmentDialog.saveAnswers()
                 }
             }
 
-            Label {
+            Rectangle {
                 Layout.fillWidth: true
-                text: "Important: Don’t make it so ambitious that it becomes impossible to complete."
-                color: "#f4c95d"
-                font.pixelSize: 12
-                font.italic: true
-                wrapMode: Text.WordWrap
+                Layout.preferredHeight: warningLabel.implicitHeight + 20
+                radius: 6
+                color: "#fff1c2"
+                border.color: "#8a6500"
+
+                Label {
+                    id: warningLabel
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    text: "Important: Don’t make it so ambitious that it becomes impossible to complete."
+                    color: "#3d2c00"
+                    font.pixelSize: 14
+                    font.bold: true
+                    verticalAlignment: Text.AlignVCenter
+                    wrapMode: Text.WordWrap
+                }
             }
         }
 
         footer: DialogButtonBox {
             standardButtons: DialogButtonBox.Close
+            background: Rectangle {
+                color: "#dfe7ee"
+            }
         }
 
         onRejected: assessmentDialog.close()
