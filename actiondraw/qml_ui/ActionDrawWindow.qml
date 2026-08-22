@@ -41,13 +41,11 @@ ApplicationWindow {
     menuBar: ActionMenuBar {
         root: root
         diagramModel: diagramModelRef
-        taskModel: taskModelRef
         projectManager: projectManagerRef
         edgeCanvas: edgeCanvas
         viewport: viewport
         saveDialog: dialogs.saveDialog
         loadDialog: dialogs.loadDialog
-        taskDialog: dialogs.taskDialog
         notificationSettingsDialog: dialogs.notificationSettingsDialog
     }
 
