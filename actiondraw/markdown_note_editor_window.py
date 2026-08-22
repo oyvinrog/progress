@@ -11,6 +11,7 @@ from .markdown_preview_formatter import MarkdownPreviewFormatter
 from .markdown_pdf_exporter import MarkdownPdfExporter
 from .markdown_syntax_highlighter import MarkdownHighlighterBridge
 from .qml import MARKDOWN_NOTE_EDITOR_QML_PATH, QML_DIR
+from .theme import configure_actiondraw_theme
 
 
 class MarkdownNoteEditor(QObject):
@@ -22,6 +23,7 @@ class MarkdownNoteEditor(QObject):
 
     def __init__(self, diagram_model=None, markdown_note_manager=None) -> None:
         super().__init__()
+        configure_actiondraw_theme()
         self._engine = QQmlApplicationEngine()
         self._engine.addImportPath(str(QML_DIR))
         self._diagram_model = diagram_model

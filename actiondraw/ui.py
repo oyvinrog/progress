@@ -15,6 +15,7 @@ from .markdown_pdf_exporter import MarkdownPdfExporter
 from .markdown_syntax_highlighter import MarkdownHighlighterBridge
 from .mcp_server import ActionDrawMcpServerController
 from .qml import ACTIONDRAW_QML_PATH, QML_DIR
+from .theme import configure_actiondraw_theme
 
 
 def create_actiondraw_window(
@@ -29,6 +30,7 @@ def create_actiondraw_window(
     """Create and return a QQmlApplicationEngine hosting the ActionDraw UI."""
     from .markdown_note_manager import MarkdownNoteManager
 
+    configure_actiondraw_theme()
     engine = QQmlApplicationEngine()
     if markdown_note_manager is None:
         markdown_note_manager = MarkdownNoteManager(diagram_model, project_manager)

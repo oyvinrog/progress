@@ -3305,6 +3305,19 @@ class ProjectManager(QObject):
             return ""
         return str(add_task_from_text(text, float(x), float(y)) or "")
 
+    @Slot(str, float, float, result="QVariantList")
+    def createTasksFromWorkspaceMarkdownList(
+        self,
+        selected_text: str,
+        x: float,
+        y: float,
+    ) -> List[str]:
+        """Create a task chain from workspace or tab Markdown."""
+        create_tasks = getattr(self._diagram_model, "createTasksFromMarkdownListAtPosition", None)
+        if not callable(create_tasks):
+            return []
+        return list(create_tasks(selected_text, float(x), float(y)) or [])
+
     @Slot(str, result=int)
     def createTabFromMarkdownSelection(self, selected_text: str) -> int:
         """Create and switch to a project tab from selected markdown text."""

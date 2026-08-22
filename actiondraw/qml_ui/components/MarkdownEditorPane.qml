@@ -22,6 +22,7 @@ Item {
     property string _taskHighlightEnd: "\u2063"
 
     signal createTaskRequested(string selectedText)
+    signal createTaskListRequested(string selectedText)
     signal createTabRequested(string selectedText)
 
     function currentSelectedText() {
@@ -111,6 +112,48 @@ Item {
         var selected = selectedTextNormalized()
         if (selected.length > 0)
             _cachedSelectionText = selected
+    }
+
+    function dashTaskListItems(value) {
+        var source = stripHighlightMarkers(normalizeLineBreaks(value))
+        var lines = source.split("\n")
+        var items = []
+        for (var i = 0; i < lines.length; ++i) {
+            var line = lines[i]
+            if (line.trim().length === 0)
+                continue
+            var match = line.match(/^[ \t]*-[ \t]+(.*?)[ \t]*$/)
+            if (!match)
+                return []
+            var title = String(match[1] || "").trim()
+            if (title.length === 0 || /^\[[ xX]\](?:[ \t]+|$)/.test(title))
+                return []
+            items.push(title)
+        }
+        return items.length >= 2 ? items : []
+    }
+
+    function highlightCurrentTaskListSelection() {
+        var range = currentSelectionRange()
+        if (range.start < 0 || range.end <= range.start)
+            return
+        var selected = stripHighlightMarkers(editor.text.slice(range.start, range.end))
+        var lines = normalizeLineBreaks(selected).split("\n")
+        for (var i = 0; i < lines.length; ++i) {
+            if (lines[i].trim().length === 0)
+                continue
+            var match = lines[i].match(/^([ \t]*-[ \t]+)(.*?)([ \t]*)$/)
+            if (!match)
+                return
+            var title = String(match[2] || "").trim()
+            lines[i] = match[1] + root._taskHighlightStart + title
+                + root._taskHighlightEnd + match[3]
+        }
+        var highlighted = lines.join("\n")
+        editor.remove(range.start, range.end)
+        editor.insert(range.start, highlighted)
+        editor.select(range.start, range.start + highlighted.length)
+        root.refreshSelectionCache()
     }
 
     function handlePasteFromClipboard() {
@@ -617,6 +660,21 @@ Item {
                         editor.selectedTextColor = "#000000"
                         root.wrapCurrentSelection(root._tabHighlightStart, root._tabHighlightEnd)
                         root.createTabRequested(selected)
+                    }
+                }
+            }
+
+            Button {
+                text: "Create Tasks from List"
+                visible: root.allowCreateTask
+                enabled: root.dashTaskListItems(root.currentSelectedText()).length >= 2
+                onClicked: {
+                    var selected = root.currentSelectedText()
+                    if (root.dashTaskListItems(selected).length >= 2) {
+                        editor.selectionColor = "#facc15"
+                        editor.selectedTextColor = "#000000"
+                        root.highlightCurrentTaskListSelection()
+                        root.createTaskListRequested(selected)
                     }
                 }
             }
