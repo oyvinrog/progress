@@ -25,6 +25,7 @@ ApplicationWindow {
     property var tabModelRef: tabModel
     property var priorityPlotWindowRef: null
     property var kanbanWindowRef: null
+    property var actionPaintWindowRef: null
     property bool yubiKeyPromptVisible: false
     property string yubiKeyPromptText: "Touch your YubiKey to continue."
     property bool suppressClosePrompt: false
@@ -162,6 +163,38 @@ ApplicationWindow {
         win.closing.connect(function() {
             kanbanWindowRef = null
         })
+        win.show()
+        win.raise()
+        win.requestActivate()
+    }
+
+    function actionPaintImportPosition() {
+        return root.viewportPointToDiagram(viewport.width / 2, viewport.height / 2)
+    }
+
+    function openActionPaintWindow() {
+        if (actionPaintWindowRef) {
+            actionPaintWindowRef.show()
+            actionPaintWindowRef.raise()
+            actionPaintWindowRef.requestActivate()
+            return
+        }
+        var component = Qt.createComponent(Qt.resolvedUrl("ActionPaintWindow.qml"))
+        if (component.status === Component.Error) {
+            console.log("Failed to load ActionPaintWindow:", component.errorString())
+            return
+        }
+        var win = component.createObject(root, {
+            "paintModel": actionPaintModel,
+            "diagramModelRef": diagramModelRef,
+            "hostRoot": root
+        })
+        if (!win) {
+            console.log("Failed to instantiate ActionPaintWindow")
+            return
+        }
+        actionPaintWindowRef = win
+        win.closing.connect(function() { actionPaintWindowRef = null })
         win.show()
         win.raise()
         win.requestActivate()

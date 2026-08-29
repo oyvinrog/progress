@@ -12,6 +12,7 @@ RUNTIME_ROOT_MODULES = {
 }
 
 DEV_ROOT_MODULES = {
+    "actionpaint",
     "bump_version",
     "run_actiondraw",
     "validate_actiondraw",

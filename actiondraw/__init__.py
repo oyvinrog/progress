@@ -6,6 +6,7 @@ connections between items works reliably when dragging across the canvas.
 
 from .constants import CLIPBOARD_MIME_TYPE, ITEM_PRESETS
 from .model import DiagramModel
+from .actionpaint import ActionPaintModel
 from .qml import ACTIONDRAW_QML
 from .types import (
     DiagramEdge,
@@ -18,6 +19,7 @@ from .ui import create_actiondraw_window, main
 
 __all__ = [
     "ACTIONDRAW_QML",
+    "ActionPaintModel",
     "CLIPBOARD_MIME_TYPE",
     "DiagramEdge",
     "DiagramItem",

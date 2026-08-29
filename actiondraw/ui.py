@@ -15,6 +15,7 @@ from .markdown_pdf_exporter import MarkdownPdfExporter
 from .markdown_syntax_highlighter import MarkdownHighlighterBridge
 from .qml import ACTIONDRAW_QML_PATH, QML_DIR
 from .theme import configure_actiondraw_theme
+from .actionpaint import ActionPaintModel
 
 
 def create_actiondraw_window(
@@ -34,6 +35,7 @@ def create_actiondraw_window(
         markdown_note_manager = MarkdownNoteManager(diagram_model, project_manager)
     if markdown_image_paster is None:
         markdown_image_paster = MarkdownImagePaster()
+    action_paint_model = ActionPaintModel(tab_model=tab_model)
     markdown_preview_formatter = MarkdownPreviewFormatter()
     markdown_pdf_exporter = MarkdownPdfExporter(markdown_image_paster)
     markdown_highlighter_bridge = MarkdownHighlighterBridge()
@@ -46,11 +48,13 @@ def create_actiondraw_window(
     engine.rootContext().setContextProperty("markdownPdfExporter", markdown_pdf_exporter)
     engine.rootContext().setContextProperty("markdownHighlighterBridge", markdown_highlighter_bridge)
     engine.rootContext().setContextProperty("tabModel", tab_model)
+    engine.rootContext().setContextProperty("actionPaintModel", action_paint_model)
     engine._markdown_note_manager = markdown_note_manager
     engine._markdown_image_paster = markdown_image_paster
     engine._markdown_preview_formatter = markdown_preview_formatter
     engine._markdown_pdf_exporter = markdown_pdf_exporter
     engine._markdown_highlighter_bridge = markdown_highlighter_bridge
+    engine._action_paint_model = action_paint_model
     engine.addImportPath(str(QML_DIR))
     engine.load(QUrl.fromLocalFile(str(ACTIONDRAW_QML_PATH)))
     return engine
