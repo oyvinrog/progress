@@ -44,6 +44,30 @@ Window {
         statusText = ""
     }
 
+    function toolCursorShape() {
+        if (root.activeTool === "select")
+            return Qt.ArrowCursor
+        if (root.activeTool === "text")
+            return Qt.IBeamCursor
+        if (root.activeTool === "action")
+            return Qt.PointingHandCursor
+        return Qt.CrossCursor
+    }
+
+    function toolCursorGlyph() {
+        if (root.activeTool === "pencil")
+            return "✎"
+        if (root.activeTool === "line")
+            return "╱"
+        if (root.activeTool === "rectangle")
+            return "▭"
+        if (root.activeTool === "eraser")
+            return "⌫"
+        if (root.activeTool === "action")
+            return "+"
+        return ""
+    }
+
     function openNewAction(x, y) {
         pendingActionX = x
         pendingActionY = y
@@ -281,7 +305,7 @@ Window {
                             acceptedButtons: Qt.LeftButton
                             preventStealing: true
                             hoverEnabled: true
-                            cursorShape: root.activeTool === "select" ? Qt.ArrowCursor : Qt.CrossCursor
+                            cursorShape: root.toolCursorShape()
                             onPressed: function(mouse) {
                                 if (!paintModel)
                                     return
@@ -315,6 +339,29 @@ Window {
                                     paintModel.endErase()
                                 else
                                     paintModel.endDrawing()
+                            }
+                        }
+
+                        Rectangle {
+                            id: toolCursorBadge
+                            x: Math.min(paintSurface.width - width, drawingMouse.mouseX + 14)
+                            y: Math.min(paintSurface.height - height, drawingMouse.mouseY + 14)
+                            width: 25
+                            height: 25
+                            radius: 6
+                            z: 30
+                            visible: drawingMouse.containsMouse && root.toolCursorGlyph().length > 0
+                            color: "#eaf3f8"
+                            border.color: "#35566b"
+                            border.width: 1
+                            opacity: 0.92
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: root.toolCursorGlyph()
+                                color: "#173040"
+                                font.pixelSize: 16
+                                font.bold: true
                             }
                         }
 

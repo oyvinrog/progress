@@ -183,6 +183,9 @@ def test_actionpaint_qml_and_toolbar_are_wired():
     assert "paintModel.addText" in paint_qml
     assert "paintModel.eraseAt" in paint_qml
     assert "sequences: [StandardKey.Undo]" in paint_qml
+    assert "function toolCursorShape()" in paint_qml
+    assert "Qt.IBeamCursor" in paint_qml
+    assert "id: toolCursorBadge" in paint_qml
     assert "paintModel.moveAction" in paint_qml
     assert "preventStealing: true" in paint_qml
     assert "function updateCanvasInteraction()" in paint_qml
@@ -191,7 +194,7 @@ def test_actionpaint_qml_and_toolbar_are_wired():
 
 
 def test_integrated_actionpaint_window_opens(app):
-    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtCore import QObject, QPoint, QPointF, Qt
     from PySide6.QtTest import QTest
 
     task_model = TaskModel()
@@ -206,6 +209,11 @@ def test_integrated_actionpaint_window_opens(app):
     paint_window = root.property("actionPaintWindowRef")
     assert paint_window is not None
     assert paint_window.property("hostRoot") == root
+    drawing_mouse = paint_window.findChild(QObject, "actionPaintDrawingMouse")
+    assert drawing_mouse is not None
+    paint_window.setProperty("activeTool", "text")
+    app.processEvents()
+    assert drawing_mouse.property("cursorShape") == Qt.IBeamCursor
     paint_window.setProperty("activeTool", "pencil")
     QTest.mousePress(paint_window, Qt.LeftButton, Qt.NoModifier, QPoint(120, 160))
     QTest.mouseMove(paint_window, QPoint(150, 180), 5)
