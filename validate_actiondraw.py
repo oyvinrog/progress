@@ -14,6 +14,7 @@ Usage:
 
 import sys
 import ast
+import os
 import subprocess
 from pathlib import Path
 
@@ -25,6 +26,7 @@ RUNTIME_ROOT_MODULES = {
 }
 
 DEV_ROOT_MODULES = {
+    "actionpaint",
     "bump_version",
     "run_actiondraw",
     "validate_actiondraw",
@@ -262,7 +264,9 @@ def check_packaging_manifest():
 def check_actiondraw_smoke():
     """Run a smoke test for `python -m actiondraw` without entering the event loop."""
     cmd = [sys.executable, "-m", "actiondraw", "--smoke"]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    smoke_env = os.environ.copy()
+    smoke_env["QT_QPA_PLATFORM"] = "offscreen"
+    result = subprocess.run(cmd, capture_output=True, text=True, env=smoke_env)
 
     if result.returncode == 0:
         print("✓ ActionDraw smoke test passed")
@@ -290,8 +294,10 @@ def main():
     
     files_to_check = [
         'actiondraw/__init__.py',
+        'actiondraw/actionpaint.py',
         'actiondraw/model.py',
         'actiondraw/qml.py',
+        'actionpaint.py',
         'task_model.py',
         'tests/test_actiondraw.py',
     ]

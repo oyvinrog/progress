@@ -454,6 +454,9 @@ class Tab:
     })
     kanban_status: str = "todo"
     kanban_slot_hour: int = -1
+    action_paint: Dict[str, Any] = field(default_factory=lambda: {
+        "elements": [], "actions": [], "last_imported_signature": ""
+    })
 
 
 @dataclass
@@ -2205,6 +2208,9 @@ class TabModel(QAbstractListModel):
         self.beginResetModel()
         self._tabs = tabs if tabs else [Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})]
         for tab in self._tabs:
+            from actiondraw.actionpaint import normalize_action_paint_state
+
+            tab.action_paint = normalize_action_paint_state(getattr(tab, "action_paint", None))
             tab.markdown_tabs = normalize_editor_tabs(getattr(tab, "markdown_tabs", []), fallback_text="")
             tab.priority_time_hours = clamp_time_hours(getattr(tab, "priority_time_hours", 1.01))
             tab.priority_subjective_value = clamp_subjective_value(getattr(tab, "priority_subjective_value", 1.0))
@@ -3334,6 +3340,7 @@ class ProjectManager(QObject):
                     "name": tab.name,
                     "tasks": current_tasks if index == current_tab_index else tab.tasks,
                     "diagram": current_diagram if index == current_tab_index else tab.diagram,
+                    "action_paint": copy.deepcopy(getattr(tab, "action_paint", {})),
                     "markdown_tabs": normalize_editor_tabs(tab.markdown_tabs, fallback_text=""),
                     "priority": tab.priority,
                     "priority_time_hours": tab.priority_time_hours,
@@ -3363,6 +3370,7 @@ class ProjectManager(QObject):
                 "name": "Main",
                 "tasks": self._task_model.to_dict(),
                 "diagram": self._diagram_model.to_dict(),
+                "action_paint": {"elements": [], "actions": [], "last_imported_signature": ""},
             }],
             "active_tab": 0,
             "workspace_markdown_tabs": normalize_editor_tabs(self._workspace_markdown_tabs, fallback_text=""),
@@ -3851,6 +3859,7 @@ class ProjectManager(QObject):
                         name=tab_data.get("name", "Tab"),
                         tasks=tab_data.get("tasks", {"tasks": []}),
                         diagram=tab_data.get("diagram", {"items": [], "edges": [], "strokes": []}),
+                        action_paint=tab_data.get("action_paint", {}),
                         markdown_tabs=normalize_editor_tabs(tab_data.get("markdown_tabs"), fallback_text=""),
                         priority=tab_data.get("priority", 0),
                         priority_time_hours=tab_data.get("priority_time_hours", 1.01),

@@ -133,6 +133,31 @@ Rectangle {
         }
 
         Button {
+            id: actionPaintButton
+            text: "▣ Action Paint"
+            flat: true
+            padding: 8
+            contentItem: Text {
+                text: actionPaintButton.text
+                color: "#d6e2ee"
+                font.pixelSize: 12
+                font.bold: true
+                horizontalAlignment: Text.AlignHCenter
+                verticalAlignment: Text.AlignVCenter
+            }
+            background: Rectangle {
+                radius: 8
+                color: actionPaintButton.hovered ? "#26394b" : "#1c2e3e"
+                border.color: "#5a7b8f"
+                border.width: 1
+            }
+            onClicked: {
+                if (root && root.openActionPaintWindow)
+                    root.openActionPaintWindow()
+            }
+        }
+
+        Button {
             id: assessmentButton
             flat: true
             padding: 8

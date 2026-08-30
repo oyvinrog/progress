@@ -597,6 +597,14 @@ class DiagramModel(
                 next_y = new_item.y
         return created_ids
 
+    @Slot("QVariantList", float, float, result="QVariantList")
+    def createTaskChainAtPosition(self, titles: List[str], x: float, y: float) -> List[str]:
+        """Create top-level task nodes connected in the supplied display order."""
+        normalized = [str(title).strip() for title in titles]
+        if not normalized or any(not title for title in normalized):
+            return []
+        return self._create_task_chain(normalized, float(x), float(y))
+
     @Slot(str, str, result="QVariantList")
     def createTasksFromMarkdownList(self, source_id: str, selected_text: str) -> List[str]:
         """Create a task chain from a selected plain Markdown dash list."""

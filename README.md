@@ -25,6 +25,7 @@ pip install actiondraw
 - **Priority scoring** — rank tasks by impact and effort with an integrated priority plot
 - **Obstacle & wish planning** — dedicated shapes for blockers and goals
 - **Free drawing** — sketch and annotate directly on the canvas
+- **Action Paint** — sketch a scene, place and reorder numbered actions, then add them to the diagram as a connected task chain
 - **Paste images** — drop external graphics right onto the diagram
 - **Encrypted storage** — your data is protected with Argon2id key derivation, with optional YubiKey challenge-response
 
