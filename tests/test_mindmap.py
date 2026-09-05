@@ -1,9 +1,10 @@
 """Global mindmap integration, persistence and real QML interaction tests."""
+import copy
 import json
 import uuid
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent, QObject, QPoint, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QMetaObject, QObject, QPoint, Qt
 from PySide6.QtTest import QTest
 
 from actiondraw.model import DiagramModel
@@ -26,6 +27,158 @@ def thought(controller, text='Secret thought', note='Secret note'):
     controller.addThought(False)
     controller.editSelected(text, note)
     return controller.selectedId
+
+
+def test_delete_linked_branch_restores_complete_tabs_and_preserves_survivor(project):
+    pm, tabs, tasks, diagram = project
+    tabs.addTab('Delete A')
+    tabs.addTab('Delete B')
+    pm.switchTab(1)
+    tasks.addTask('Saved task')
+    box = diagram.addBox(10, 20)
+    # Materialize the editor's default note tabs before comparing saved content.
+    diagram.from_dict(diagram.to_dict())
+    deleted = tabs.getCurrentTabData()
+    deleted.markdown_tabs = [{'name': 'Notes', 'text': 'Keep this text'}]
+    deleted.goals = [{'title': 'A goal'}]
+    deleted.icon = 'star'
+    deleted.pinned = True
+    deleted.kanban_status = 'ready'
+    deleted.priority = 3
+    pm.showMindmap()
+    m = pm.mindmap
+    a, b = [next(key for key, value in m.links.items() if value == tab.id)
+            for tab in tabs.getAllTabs()[1:]]
+    m.select(a)
+    child = thought(m, 'Nested note')
+    m.toggleCompleted()
+    m.moveNode(b, child, 'child')
+    m.select(a)
+    m.select(b, 'toggle')  # An overlapping selection deletes each tab just once.
+    m.cutSelected()
+    before_map = m.to_dict()
+    expected_tabs = copy.deepcopy(tabs.getAllTabs())
+    m.deleteSelected()
+    assert [tab.id for tab in tabs.getAllTabs()] == [expected_tabs[0].id]
+    assert not m.canPaste and not m.cutNodeIds
+    assert pm.mindmapVisible and m.selectedId == m.map.root.id
+    assert m.map.find(a) is None and m.map.find(b) is None
+    assert tasks.rowCount() == 0
+    assert box not in {item['id'] for item in diagram.to_dict()['items']}
+    tasks.addTask('Unrelated later edit')
+    m.undo()
+    assert m.to_dict() == before_map
+    assert [tab.id for tab in tabs.getAllTabs()] == [tab.id for tab in expected_tabs]
+    assert tabs.getAllTabs()[1:] == expected_tabs[1:]
+    assert tabs.getAllTabs()[0].tasks['tasks'][0]['title'] == 'Unrelated later edit'
+    assert tabs.getCurrentTabData().id == deleted.id
+    assert tasks.to_dict()['tasks'][0]['title'] == 'Saved task'
+    assert box in {item['id'] for item in diagram.to_dict()['items']}
+    m.redo()
+    assert tabs.tabCount == 1
+    assert tasks.to_dict()['tasks'][0]['title'] == 'Unrelated later edit'
+    m.undo()
+    assert tabs.getAllTabs()[1:] == expected_tabs[1:]
+
+
+def test_linked_deletion_last_tab_and_redo_are_atomic(project):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    tabs.addTab('Survivor')
+    first = next(iter(m.links))
+    m.select(first)
+    m.deleteSelected()
+    m.undo()
+    tabs.removeTab(1)  # Redo would now delete the last remaining tab.
+    before = m.to_dict()
+    errors = []
+    m.errorOccurred.connect(errors.append)
+    m.redo()
+    assert errors and 'at least one tab' in errors[-1]
+    assert m.to_dict() == before and tabs.tabCount == 1 and m.canRedo
+    m.select(first)
+    m.deleteSelected()
+    assert m.to_dict() == before and tabs.tabCount == 1
+
+
+def test_linked_deletion_persists_and_load_clears_tab_history(project, tmp_path, monkeypatch):
+    pm, tabs, _, _ = project
+    credentials = EncryptionCredentials(passphrase='mindmap-delete-test')
+    monkeypatch.setattr(pm, '_prompt_encryption_credentials', lambda *a: credentials)
+    tabs.addTab('Removed tab')
+    removed_id = tabs.getAllTabs()[1].id
+    m = pm.mindmap
+    node_id = next(key for key, value in m.links.items() if value == removed_id)
+    m.select(node_id)
+    m.deleteSelected()
+    path = tmp_path / 'deleted.progress'
+    assert pm.saveProject(str(path))
+    payload = decrypt_project_data(json.loads(path.read_text()), credentials)
+    assert removed_id not in {tab['id'] for tab in payload['tabs']}
+    assert node_id not in payload['mindmap']['tab_links']
+    pm.loadProject(str(path))
+    assert tabs.tabCount == 1 and m.map.find(node_id) is None
+    assert not m.canUndo and not m.canRedo
+
+
+def test_redo_removing_current_scope_returns_to_project_map(project):
+    pm, tabs, _, _ = project
+    tabs.addTab('Keep')
+    m = pm.mindmap
+    first = next(iter(m.links))
+    m.select(first)
+    m.deleteSelected()
+    m.undo()
+    pm.showTabMindmap()
+    assert m.tabScoped
+    m.redo()
+    assert not m.tabScoped and pm.mindmapVisible
+    assert m.view_root is m.map.root and m.selectedId == m.map.root.id
+
+
+def test_qml_linked_delete_updates_sidebar_and_boards(project, app):
+    pm, tabs, tasks, diagram = project
+    name = 'Tab removed from every view'
+    tabs.addTab(name)
+    tab_id = tabs.getAllTabs()[1].id
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    QMetaObject.invokeMethod(window, 'openPriorityPlotWindow')
+    QMetaObject.invokeMethod(window, 'openKanbanWindow')
+    plot = window.property('priorityPlotWindowRef')
+    board = window.property('kanbanWindowRef')
+    pm.showMindmap()
+
+    def contains(item, property_name):
+        return (item.property(property_name) == name
+                or any(contains(child, property_name) for child in item.childItems()))
+
+    try:
+        QTest.qWait(100)
+        assert contains(window.contentItem(), 'dragTabName')
+        assert contains(plot.contentItem(), 'text')
+        assert contains(board.contentItem(), 'text')
+        node_id = next(key for key, value in pm.mindmap.links.items() if value == tab_id)
+        pm.mindmap.select(node_id)
+        pm.mindmap.deleteSelected()
+        QTest.qWait(100)
+        assert not contains(window.contentItem(), 'dragTabName')
+        assert not contains(plot.contentItem(), 'text')
+        assert not contains(board.contentItem(), 'text')
+        pm.mindmap.undo()
+        QTest.qWait(100)
+        assert contains(window.contentItem(), 'dragTabName')
+        assert contains(plot.contentItem(), 'text')
+        assert contains(board.contentItem(), 'text')
+    finally:
+        plot.close()
+        board.close()
+        plot.deleteLater()
+        board.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        window.close()
+        engine.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
 
 def test_create_tab_preserves_thought_branch_and_history(project):

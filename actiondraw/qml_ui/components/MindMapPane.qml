@@ -349,7 +349,7 @@ FocusScope {
         MenuItem { text: "Fold / Unfold"; onTriggered: pane.controller.toggleFold() }
         MenuItem { text: "Branch on left"; onTriggered: pane.controller.setSide("left") }
         MenuItem { text: "Branch on right"; onTriggered: pane.controller.setSide("right") }
-        MenuItem { text: "Delete thought branch"; onTriggered: pane.controller.deleteSelected() }
+        MenuItem { text: "Delete branch"; onTriggered: pane.controller.deleteSelected() }
     }
     Dialog {
         id: editor

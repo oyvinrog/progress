@@ -1,5 +1,6 @@
 """Project-owned mindmap with stable tab references and a QML-facing editor API."""
 import copy
+import weakref
 from types import SimpleNamespace
 
 from PySide6.QtCore import QObject, Property, Signal, Slot
@@ -34,10 +35,22 @@ class MindMapController(QObject):
         self._undo = []
         self._redo = []
         self._creating_tab = False
+        self._changing_tabs = False
+        self.exchange_tabs = None
         if tab_model is not None:
             tab_model.tabsChanged.connect(self.reconcile)
             tab_model.dataChanged.connect(self.reconcile)
         self.reconcile()
+
+    @property
+    def exchange_tabs(self):
+        return self._tab_history_handler() if self._tab_history_handler else None
+
+    @exchange_tabs.setter
+    def exchange_tabs(self, handler):
+        # A bound ProjectManager method would otherwise keep both QObjects alive
+        # in a Python cycle after their QML engine has been destroyed.
+        self._tab_history_handler = weakref.WeakMethod(handler) if handler else None
 
     @property
     def view_root(self):
@@ -82,7 +95,7 @@ class MindMapController(QObject):
         self._commit(mutate)
 
     def reconcile(self, *args):
-        if self._creating_tab:
+        if self._creating_tab or self._changing_tabs:
             return
         tabs = self._tabs.getAllTabs() if self._tabs is not None else []
         live = {tab.id: tab for tab in tabs}
@@ -361,7 +374,7 @@ class MindMapController(QObject):
             self.select(min(ranked)[-1], 'add' if extend else 'replace')
         self.revealNode.emit(self._selected)
 
-    def _commit(self, mutation):
+    def _commit(self, mutation, tab_state=None):
         before = self.to_dict()
         selected = self._selection_state()
         try:
@@ -376,7 +389,7 @@ class MindMapController(QObject):
             self.changed.emit()
             return False
         if self.to_dict() != before:
-            self._undo.append((before, selected))
+            self._undo.append((before, selected, tab_state))
             self._redo.clear()
         self.sceneChanged.emit()
         self.changed.emit()
@@ -415,15 +428,31 @@ class MindMapController(QObject):
         roots = self._branch_roots(self._selected_ids)
         if not roots or self.view_root in roots:
             return
-        if any(n.id in self.links for node in roots for n in node.walk()):
-            self.errorOccurred.emit('This branch contains tabs. Move the tabs out before deleting it.')
-            return
+        removed_ids = {n.id for node in roots for n in node.walk()}
+        tab_ids = {self.links[key] for key in removed_ids if key in self.links}
+        tab_state = None
+        if tab_ids:
+            if self.exchange_tabs is None:
+                self.errorOccurred.emit('Tab deletion requires a project manager.')
+                return
+            self._changing_tabs = True
+            try:
+                tab_state = self.exchange_tabs({'ids': tab_ids, 'tabs': []})
+            except ValueError as exc:
+                self.errorOccurred.emit(str(exc))
+                return
+            finally:
+                self._changing_tabs = False
         def mutate():
             self._set_selection([roots[0].parent.id])
+            for key in removed_ids:
+                self.links.pop(key, None)
             for node in roots:
                 node.remove()
-        if self._commit(mutate):
+        if self._commit(mutate, tab_state):
             self._cut_ids = [key for key in self._cut_ids if self.map.find(key)]
+            self._view_selections = {key: value for key, value in self._view_selections.items()
+                                     if key not in tab_ids}
             self.changed.emit()
 
     @Slot(str, str, str)
@@ -509,12 +538,29 @@ class MindMapController(QObject):
     def _restore(self, source, destination):
         if not source:
             return
-        destination.append((copy.deepcopy(self.to_dict()), self._selection_state()))
-        payload, selection = source.pop()
+        payload, selection, tab_state = source[-1]
+        inverse = None
+        if tab_state is not None:
+            self._changing_tabs = True
+            try:
+                inverse = self.exchange_tabs(tab_state)
+            except ValueError as exc:
+                self.errorOccurred.emit(str(exc))
+                return
+            finally:
+                self._changing_tabs = False
+        destination.append((copy.deepcopy(self.to_dict()), self._selection_state(), inverse))
+        source.pop()
         self._restore_selection(selection)
         self._cut_ids = []
         self.map, self.links = self.decode(payload)
         self._completed = set(payload.get('completed', []))
+        if tab_state is not None:
+            live = {tab.id for tab in self._tabs.getAllTabs()}
+            self._view_selections = {key: value for key, value in self._view_selections.items()
+                                     if key is None or key in live}
+            if self._scope_tab is not None and self._scope_tab not in live:
+                self.set_scope()
         self.reconcile()
 
     @Slot()

@@ -2207,6 +2207,20 @@ class TabModel(QAbstractListModel):
         """Get all tabs."""
         return self._tabs
 
+    def restoreMindmapTabs(self, tabs: List[Tab], active_tab: int) -> None:
+        """Publish a mindmap history transaction without normalizing existing tabs."""
+        recent_ids = [self._tabs[index].id for index in self._recent_tab_indices]
+        self.beginResetModel()
+        self._tabs = tabs
+        self._current_tab_index = active_tab
+        self._recent_tab_indices = [index for tab_id in recent_ids
+                                    for index, tab in enumerate(tabs) if tab.id == tab_id]
+        self.endResetModel()
+        self.tabsChanged.emit()
+        self.currentTabIndexChanged.emit()
+        self.currentTabChanged.emit()
+        self._emitRecentTabsChanged()
+
     def setTabs(self, tabs: List[Tab], active_tab: int = 0) -> None:
         """Replace all tabs with new data."""
         self.beginResetModel()
@@ -2380,6 +2394,7 @@ class ProjectManager(QObject):
         self._workspace_markdown_tabs = normalize_editor_tabs([], fallback_text="")
         self._mindmap_visible = False
         self.mindmap = MindMapController(self._tab_model, self)
+        self.mindmap.exchange_tabs = self._exchangeMindmapTabs
         self.mindmap.tabActivated.connect(self.openMindmapTab)
         self.mindmap.errorOccurred.connect(self.errorOccurred)
         self._last_saved_snapshot = self._serialize_project_payload(self._build_project_data())
@@ -4214,6 +4229,35 @@ class ProjectManager(QObject):
             self.reloadCurrentTab()
         else:
             self.tabSwitched.emit()
+
+    def _exchangeMindmapTabs(self, state):
+        """Exchange only tabs owned by a mindmap history entry, returning its inverse."""
+        model = self._tab_model
+        ids = set(state['ids'])
+        tabs = model.getAllTabs()
+        surviving = [tab for tab in tabs if tab.id not in ids]
+        if not surviving and not state['tabs']:
+            raise ValueError('Cannot delete this branch: at least one tab must remain.')
+        self._saveCurrentTabState()
+        current_id = model.getCurrentTabData().id
+        inverse = {'ids': ids,
+                   'tabs': [(index, copy.deepcopy(tab)) for index, tab in enumerate(tabs)
+                            if tab.id in ids],
+                   'active': current_id}
+        for index, tab in sorted(state['tabs'], key=lambda entry: entry[0]):
+            surviving.insert(min(index, len(surviving)), copy.deepcopy(tab))
+        active_id = state.get('active', current_id)
+        active = next((index for index, tab in enumerate(surviving) if tab.id == active_id),
+                      min(model.currentTabIndex, len(surviving) - 1))
+        model.restoreMindmapTabs(surviving, active)
+        tab = model.getCurrentTabData()
+        if tab.id != current_id:
+            tasks, diagram = copy.deepcopy((tab.tasks, tab.diagram))
+            self._task_model.from_dict(tasks)
+            self._diagram_model.from_dict(diagram)
+        self.currentTabMarkdownTabsChanged.emit()
+        self.tabSwitched.emit()
+        return inverse
 
     @Slot()
     def reloadCurrentTab(self) -> None:
