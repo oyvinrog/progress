@@ -112,3 +112,11 @@ def test_build_deb_script_installs_icons():
     assert 'mkdir -p "$PKG_ROOT/usr/share/icons/hicolor/512x512/apps"' in script
     assert 'cp packaging/icons/hicolor/256x256/apps/actiondraw.png "$PKG_ROOT/usr/share/icons/hicolor/256x256/apps/"' in script
     assert 'cp packaging/icons/hicolor/512x512/apps/actiondraw.png "$PKG_ROOT/usr/share/icons/hicolor/512x512/apps/"' in script
+
+
+def test_bundled_pyplane_and_mindmap_resources_are_packaged():
+    pyproject = Path("pyproject.toml").read_text()
+    assert '"actiondraw._vendor.pyplane"' in pyproject
+    assert '"LICENSE", "UPSTREAM.md"' in pyproject
+    assert Path("actiondraw/_vendor/pyplane/LICENSE").is_file()
+    assert Path("actiondraw/qml_ui/components/MindMapPane.qml").is_file()

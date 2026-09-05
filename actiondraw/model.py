@@ -76,6 +76,8 @@ class DiagramModel(
     TextTabIndexRole = Qt.UserRole + 32
 
     itemsChanged = Signal()
+    textFitRequested = Signal(str)
+    diagramAboutToLoad = Signal()
     edgesChanged = Signal()
     drawingChanged = Signal()
     drawingModeChanged = Signal()
@@ -145,6 +147,7 @@ class DiagramModel(
         self._items.append(item)
         self.endInsertRows()
         self.itemsChanged.emit()
+        self.textFitRequested.emit(item.id)
 
     def _dimensions_for_connected_kind(self, item_kind: str) -> tuple[float, float]:
         kind = (item_kind or "").strip().lower()
@@ -680,6 +683,7 @@ class DiagramModel(
             if item.id == item_id:
                 if item.text == text:
                     return
+                old_text = self._visible_node_text(item)
                 item.text = text
                 if item.text_tabs:
                     item.text_tabs = normalize_editor_tabs(item.text_tabs, fallback_text=text)
@@ -690,12 +694,15 @@ class DiagramModel(
                     index,
                     [
                         self.TextRole,
+                        self.TextTabsRole,
                         self.LinkedSubtabCompletionRole,
                         self.LinkedSubtabActiveActionRole,
                         self.HasLinkedSubtabRole,
                     ],
                 )
                 self.itemsChanged.emit()
+                if self._visible_node_text(item) != old_text:
+                    self.textFitRequested.emit(item.id)
                 return
 
     @Slot(str, result="QVariantList")
@@ -741,6 +748,7 @@ class DiagramModel(
                     index = self.index(row, 0)
                     self.dataChanged.emit(index, index, [self.TextRole, self.NoteMarkdownRole])
                     self.itemsChanged.emit()
+                    self.textFitRequested.emit(item.id)
                     return
                 if item.note_markdown == markdown:
                     return
@@ -811,6 +819,7 @@ class DiagramModel(
                 continue
 
             editor_key = str(editor_type or "").strip().lower()
+            old_text = self._visible_node_text(item)
             roles: List[int] = []
             if editor_key == "obstacle":
                 normalized = normalize_editor_tabs(tabs, fallback_text=item.obstacle_markdown)
@@ -845,7 +854,14 @@ class DiagramModel(
             index = self.index(row, 0)
             self.dataChanged.emit(index, index, roles)
             self.itemsChanged.emit()
+            if self._visible_node_text(item) != old_text:
+                self.textFitRequested.emit(item.id)
             return
+
+    def _visible_node_text(self, item: DiagramItem) -> str:
+        if item.item_type == DiagramItemType.FREETEXT and item.text_tabs:
+            return item.text_tabs[self._clamp_text_tab_index(item)]["text"]
+        return item.text
 
     @Slot(str, result=bool)
     def openChatGpt(self, item_id: str) -> bool:
@@ -947,6 +963,7 @@ class DiagramModel(
                 index = self.index(row, 0)
                 self.dataChanged.emit(index, index, [self.TextRole])
                 self.itemsChanged.emit()
+                self.textFitRequested.emit(item.id)
                 # Sync to task model if this is a task item
                 if item.task_index >= 0 and self._task_model is not None:
                     self._renaming_in_progress = True
@@ -968,6 +985,7 @@ class DiagramModel(
                 item.text = new_title
                 index = self.index(row, 0)
                 self.dataChanged.emit(index, index, [self.TextRole])
+                self.textFitRequested.emit(item.id)
         self.itemsChanged.emit()
 
     @Slot(int, bool)
@@ -1340,6 +1358,34 @@ class DiagramModel(
                 self.itemsChanged.emit()
                 return
 
+    @Slot(str, float, float, result=bool)
+    def fitItemText(self, item_id: str, width: float, height: float) -> bool:
+        """Apply a view's measured text size without shrinking or crowding nodes.
+
+        Only the normal drawing requests fitting. Other views and file loading
+        retain their geometry. Existing manual sizes above the caps are preserved.
+        """
+        item = self.getItem(item_id)
+        if item is None or item.item_type == DiagramItemType.IMAGE:
+            return False
+        if not math.isfinite(width) or not math.isfinite(height):
+            return False
+        width = max(item.width, min(320.0, math.ceil(width)))
+        height = max(item.height, min(220.0, math.ceil(height)))
+        if width == item.width and height == item.height:
+            return False
+        if any(
+            other.id != item.id
+            and self._rectangles_overlap(
+                item.x, item.y, width, height,
+                other.x, other.y, other.width, other.height,
+            )
+            for other in self._items
+        ):
+            return False
+        self.resizeItem(item_id, width, height)
+        return True
+
     @Slot(str, float, float)
     def resizeItem(self, item_id: str, width: float, height: float) -> None:
         new_width = max(40.0, width)
@@ -1675,6 +1721,7 @@ class DiagramModel(
                     ],
                 )
                 self.itemsChanged.emit()
+                self.textFitRequested.emit(item.id)
                 break
 
     @Slot(str, float, float, result=str)
@@ -2146,6 +2193,7 @@ class DiagramModel(
         Args:
             data: Dictionary containing diagram data (from to_dict).
         """
+        self.diagramAboutToLoad.emit()
         # Set current task index up front so new items render with correct state.
         self._current_task_index = int(data.get("current_task_index", -1))
 

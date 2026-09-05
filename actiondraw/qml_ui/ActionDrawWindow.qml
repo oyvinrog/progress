@@ -18,6 +18,56 @@ ApplicationWindow {
         return "ActionDraw - " + tabName
     }
 
+    property int textFitGeneration: 0
+
+    function fitNodeText(itemId) {
+        for (var i = 0; i < nodeRepeater.count; ++i) {
+            var node = nodeRepeater.itemAt(i)
+            if (node && node.itemId === itemId) {
+                node.fitText()
+                return
+            }
+        }
+    }
+
+    function showNodeText(itemId, text, richText) {
+        tooltipDelayTimer.stop()
+        root._itemTooltipVisible = false
+        nodeTextPreview.itemId = itemId
+        nodeTextPreview.fullText = text
+        nodeTextPreview.richText = richText
+        nodeTextPreview.open()
+    }
+
+    NodeTextPreview {
+        id: nodeTextPreview
+        parent: Overlay.overlay
+    }
+
+    Connections {
+        target: diagramModel
+        function onTextFitRequested(itemId) {
+            var generation = root.textFitGeneration
+            Qt.callLater(function() {
+                if (generation === root.textFitGeneration)
+                    root.fitNodeText(itemId)
+            })
+        }
+        function onDiagramAboutToLoad() {
+            root.textFitGeneration += 1
+            nodeTextPreview.close()
+        }
+        function onRowsAboutToBeRemoved(parent, first, last) {
+            if (!nodeTextPreview.visible)
+                return
+            for (var row = first; row <= last; ++row) {
+                var node = nodeRepeater.itemAt(row)
+                if (node && node.itemId === nodeTextPreview.itemId)
+                    nodeTextPreview.close()
+            }
+        }
+    }
+
     property var diagramModelRef: diagramModel
     property var taskModelRef: taskModel
     property var projectManagerRef: projectManager
@@ -507,6 +557,7 @@ ApplicationWindow {
     property bool contractPopupBusy: false
     property var activeReminders: []
     property var activeContracts: []
+    readonly property bool mindmapOpen: projectManagerRef ? projectManagerRef.mindmapVisible : false
     property bool reminderOverviewExpanded: false
     property bool reminderOverviewTouched: false
     property bool contractOverviewExpanded: true
@@ -520,6 +571,7 @@ ApplicationWindow {
         sequence: "Alt+Left"
         enabled: projectManager !== null
             && projectManager.canGoBack
+            && !nodeTextPreview.visible
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
             && !contractPopup.visible
@@ -535,13 +587,13 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Ctrl+C"
-        enabled: diagramModel !== null
+        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
         onActivated: root.copySelectionToClipboard()
     }
 
     Shortcut {
         sequence: "Ctrl+V"
-        enabled: diagramModel !== null
+        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
         onActivated: {
             root.pasteFromClipboard()
         }
@@ -549,7 +601,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "F2"
-        enabled: diagramModel !== null || tabModelRef !== null
+        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null || tabModelRef !== null)
         onActivated: {
             if (root.selectedItemId && root.selectedItemId.length > 0) {
                 root.renameSelectedItem()
@@ -561,49 +613,49 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Ctrl+Return"
-        enabled: diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen)
+        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen))
         onActivated: root.addTaskOrConnectedTask()
     }
 
     Shortcut {
         sequence: "Ctrl+-"
-        enabled: diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen)
+        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen))
         onActivated: root.addTaskOrConnectedTaskBackward()
     }
 
     Shortcut {
         sequence: "Ctrl+Minus"
-        enabled: diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen)
+        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen))
         onActivated: root.addTaskOrConnectedTaskBackward()
     }
 
     Shortcut {
         sequence: "Ctrl+M"
-        enabled: diagramModel !== null
+        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
         onActivated: root.openMarkdownNoteForSelection()
     }
 
     Shortcut {
         sequence: "Ctrl+Alt+M"
-        enabled: diagramModel !== null
+        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
         onActivated: root.openTabMarkdownHub()
     }
 
     Shortcut {
         sequence: "Ctrl+Shift+M"
-        enabled: diagramModel !== null
+        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
         onActivated: root.openWorkspaceMarkdownHub()
     }
 
     Shortcut {
         sequence: "Ctrl+N"
-        enabled: diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen)
+        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen))
         onActivated: root.addConnectedNote()
     }
 
     Shortcut {
         sequence: "Ctrl+K"
-        enabled: tabModelRef !== null
+        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (tabModelRef !== null)
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
             && !contractPopup.visible
@@ -616,7 +668,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Delete"
-        enabled: diagramModel !== null
+        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
@@ -626,7 +678,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Left"
-        enabled: diagramModel !== null
+        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
@@ -636,7 +688,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Right"
-        enabled: diagramModel !== null
+        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
@@ -646,7 +698,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Up"
-        enabled: diagramModel !== null
+        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
@@ -656,7 +708,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Down"
-        enabled: diagramModel !== null
+        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
@@ -1222,11 +1274,29 @@ ApplicationWindow {
             onTabDragReleased: root.handleTabDragRelease
         }
 
+        MindMapPane {
+            id: mindmapPane
+            objectName: "mindmapPane"
+            onCanvasRequested: root.projectManagerRef.showTabCanvas()
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            visible: root.mindmapOpen
+            controller: typeof mindmapController !== "undefined" ? mindmapController : null
+        }
+
         // Main content area (right side)
         ColumnLayout {
+            visible: !root.mindmapOpen
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 14
+
+            Button {
+                objectName: "tabMindmapSwitch"
+                text: "Mindmap"
+                visible: !!root.projectManagerRef
+                onClicked: root.projectManagerRef.showTabMindmap()
+            }
 
             Rectangle {
                 Layout.fillWidth: true
@@ -1909,6 +1979,16 @@ ApplicationWindow {
                         id: itemContextMenu
 
                         MenuItem {
+                            text: "Fit text"
+                            visible: {
+                                var item = diagramModel ? diagramModel.getItemSnapshot(diagramLayer.contextMenuItemId) : null
+                                return item && item.type !== undefined && item.type !== "image"
+                            }
+                            height: visible ? implicitHeight : 0
+                            onTriggered: root.fitNodeText(diagramLayer.contextMenuItemId)
+                        }
+
+                        MenuItem {
                             id: renameNoteMenuItem
                             text: "Rename Label..."
                             icon.name: "edit-rename"
@@ -2516,10 +2596,21 @@ ApplicationWindow {
                     }
 
                     Repeater {
+                        id: nodeRepeater
                         model: diagramModel
 
                         Rectangle {
                             id: itemRect
+                            objectName: "diagramNode_" + itemId
+                            function fitText() {
+                                if (itemType === "image" || resizing)
+                                    return
+                                var label = itemType === "freetext" ? freeTextLabel
+                                    : itemType === "obstacle" ? obstacleLabel
+                                    : itemType === "wish" ? wishLabel : itemLabel
+                                var size = label.fittedSize(model.width, model.height)
+                                diagramModel.fitItemText(itemId, size.width, size.height)
+                            }
                             property string itemId: model.itemId
                             property string itemType: model.itemType
                             property int taskIndex: model.taskIndex
@@ -3815,7 +3906,7 @@ ApplicationWindow {
                                 }
                             }
 
-                            Text {
+                            NodeText {
                                 id: itemLabel
                                 visible: itemRect.itemType !== "freetext" && itemRect.itemType !== "obstacle" && itemRect.itemType !== "wish" && itemRect.itemType !== "image"
                                 anchors.left: parent.left
@@ -3838,24 +3929,24 @@ ApplicationWindow {
                                         return itemRect.selected || itemRect.hovered
                                     return diagramModel.count <= 80 || itemRect.selected || itemRect.hovered
                                 }
-                                text: (itemLabel.useMarkdown && markdownPreviewFormatter && markdownPreviewFormatter.markdownToDisplayHtml)
-                                    ? markdownPreviewFormatter.markdownToDisplayHtml(model.text)
-                                    : model.text
+                                measurementFormat: itemRect.itemType !== "task" ? Text.RichText : Text.PlainText
+                                measurementText: !visible ? "" : measurementFormat === Text.RichText && markdownPreviewFormatter
+                                    ? markdownPreviewFormatter.markdownToDisplayHtml(model.text) : model.text
+                                text: itemLabel.useMarkdown ? measurementText : model.text
+                                backgroundColor: itemRect.color
+                                onReadMore: root.showNodeText(itemRect.itemId, measurementText, measurementFormat === Text.RichText)
                                 color: itemRect.isTask && itemRect.taskCompleted ? "#c9d7ce" : model.textColor
-                                wrapMode: Text.WordWrap
                                 horizontalAlignment: Text.AlignHCenter
                                 verticalAlignment: Text.AlignVCenter
                                 textFormat: itemLabel.useMarkdown ? Text.RichText : Text.PlainText
                                 font.pixelSize: 14
                                 font.bold: itemRect.itemType === "task"
                                 font.strikeout: itemRect.isTask && itemRect.taskCompleted
-                                maximumLineCount: itemLabel.useMarkdown ? 1000 : Math.max(1, Math.floor(height / (font.pixelSize * 1.3)))
-                                elide: itemLabel.useMarkdown ? Text.ElideNone : Text.ElideRight
-                                clip: true
 
                             }
 
-                            Text {
+                            NodeText {
+                                id: obstacleLabel
                                 visible: itemRect.itemType === "obstacle"
                                 anchors.right: parent.right
                                 anchors.bottom: parent.bottom
@@ -3864,21 +3955,20 @@ ApplicationWindow {
                                 anchors.left: parent.left
                                 anchors.leftMargin: 28
                                 text: model.text
+                                backgroundColor: itemRect.color
+                                onReadMore: root.showNodeText(itemRect.itemId, measurementText, measurementFormat === Text.RichText)
                                 color: model.textColor
-                                wrapMode: Text.WordWrap
                                 horizontalAlignment: Text.AlignLeft
                                 verticalAlignment: Text.AlignBottom
                                 textFormat: Text.PlainText
                                 font.pixelSize: 12
                                 font.bold: true
                                 height: parent.height - (anchors.bottomMargin + 12)
-                                maximumLineCount: Math.max(1, Math.floor(height / (font.pixelSize * 1.3)))
-                                elide: Text.ElideRight
-                                clip: true
 
                             }
 
-                            Text {
+                            NodeText {
+                                id: wishLabel
                                 visible: itemRect.itemType === "wish"
                                 anchors.left: parent.left
                                 anchors.right: parent.right
@@ -3887,21 +3977,19 @@ ApplicationWindow {
                                 anchors.rightMargin: 8
                                 anchors.bottomMargin: 8
                                 text: model.text
+                                backgroundColor: itemRect.color
+                                onReadMore: root.showNodeText(itemRect.itemId, measurementText, measurementFormat === Text.RichText)
                                 color: model.textColor
-                                wrapMode: Text.WordWrap
                                 horizontalAlignment: Text.AlignHCenter
                                 verticalAlignment: Text.AlignBottom
                                 textFormat: Text.PlainText
                                 font.pixelSize: 12
                                 font.bold: true
                                 height: parent.height - (anchors.bottomMargin + 12)
-                                maximumLineCount: Math.max(1, Math.floor(height / (font.pixelSize * 1.3)))
-                                elide: Text.ElideRight
-                                clip: true
 
                             }
 
-                            Text {
+                            NodeText {
                                 id: freeTextLabel
                                 visible: itemRect.itemType === "freetext"
                                 anchors.fill: parent
@@ -3920,18 +4008,17 @@ ApplicationWindow {
                                         return itemRect.selected || itemRect.hovered
                                     return diagramModel.count <= 80 || itemRect.selected || itemRect.hovered
                                 }
-                                text: (freeTextLabel.useMarkdown && markdownPreviewFormatter && markdownPreviewFormatter.markdownToDisplayHtml)
-                                    ? markdownPreviewFormatter.markdownToDisplayHtml(itemRect.freeTextDisplayText)
-                                    : itemRect.freeTextDisplayText
+                                measurementFormat: true ? Text.RichText : Text.PlainText
+                                measurementText: !visible ? "" : measurementFormat === Text.RichText && markdownPreviewFormatter
+                                    ? markdownPreviewFormatter.markdownToDisplayHtml(itemRect.freeTextDisplayText) : itemRect.freeTextDisplayText
+                                text: freeTextLabel.useMarkdown ? measurementText : itemRect.freeTextDisplayText
+                                backgroundColor: itemRect.color
+                                onReadMore: root.showNodeText(itemRect.itemId, measurementText, measurementFormat === Text.RichText)
                                 color: model.textColor
-                                wrapMode: Text.Wrap
                                 horizontalAlignment: Text.AlignLeft
                                 verticalAlignment: Text.AlignTop
                                 textFormat: freeTextLabel.useMarkdown ? Text.RichText : Text.PlainText
                                 font.pixelSize: 13
-                                maximumLineCount: freeTextLabel.useMarkdown ? 1000 : Math.max(1, Math.floor(height / (font.pixelSize * 1.35)))
-                                elide: freeTextLabel.useMarkdown ? Text.ElideNone : Text.ElideRight
-                                clip: true
 
                             }
 
@@ -4868,7 +4955,7 @@ ApplicationWindow {
 
     Rectangle {
         id: itemFloatingTooltip
-        visible: root._itemTooltipVisible && root._itemTooltipText.length > 0
+        visible: root._itemTooltipVisible && root._itemTooltipText.length > 0 && !nodeTextPreview.visible
         x: Math.max(4, Math.min(root._itemTooltipX, root.width - width - 4))
         y: {
             var below = root._itemTooltipY
