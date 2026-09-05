@@ -6,7 +6,7 @@ from PySide6.QtCore import QObject, Property, Signal, Slot
 from PySide6.QtGui import QFont, QFontMetricsF
 
 from ._vendor.pyplane.model import MindMap
-from ._vendor.pyplane.layout import layout
+from ._vendor.pyplane.layout import assigned_sides, layout
 from ._vendor.pyplane.mm import dumps, loads
 
 
@@ -450,6 +450,61 @@ class MindMapController(QObject):
         node = self.map.find(self._selected)
         if node and node.parent is self.view_root and side in ('left', 'right'):
             self._commit(lambda: setattr(node, 'side', side))
+
+    def _reorder_context(self, node_id):
+        node = self.map.find(node_id)
+        boxes = self._layout()
+        if node is self.view_root or node not in boxes or node.parent is None:
+            return None, [], boxes
+        sides = assigned_sides(SimpleNamespace(root=self.view_root))
+        siblings = [n for n in node.parent.children
+                    if n in boxes and sides.get(n) == sides.get(node)]
+        return node, siblings, boxes
+
+    @Slot(str, int, result=bool)
+    def canReorderNode(self, node_id, direction):
+        node, siblings, _ = self._reorder_context(node_id)
+        return (node is not None and direction in (-1, 1)
+                and 0 <= siblings.index(node) + direction < len(siblings))
+
+    def _reorder(self, node, siblings, index):
+        old_index = siblings.index(node)
+        if index == old_index:
+            return
+        target = siblings[index]
+        sides = assigned_sides(SimpleNamespace(root=self.view_root))
+
+        def mutate():
+            # Freeze the current root-branch sides before order changes can
+            # influence the layout's automatic balancing.
+            for branch in self.view_root.children:
+                branch.side = sides[branch]
+            parent = node.parent
+            insertion = parent.children.index(target) + (index > old_index)
+            if parent.children.index(node) < insertion:
+                insertion -= 1
+            node.move_to(parent, insertion)
+            self._set_selection([node.id])
+
+        if self._commit(mutate):
+            self.revealNode.emit(node.id)
+
+    @Slot(str, int)
+    def reorderNode(self, node_id, direction):
+        node, siblings, _ = self._reorder_context(node_id)
+        if node is None or direction not in (-1, 1):
+            return
+        index = siblings.index(node) + direction
+        if 0 <= index < len(siblings):
+            self._reorder(node, siblings, index)
+
+    @Slot(str, float)
+    def reorderNodeAt(self, node_id, center_y):
+        node, siblings, boxes = self._reorder_context(node_id)
+        if node is None:
+            return
+        index = sum(boxes[n].center_y < center_y for n in siblings if n is not node)
+        self._reorder(node, siblings, index)
 
     def _restore(self, source, destination):
         if not source:

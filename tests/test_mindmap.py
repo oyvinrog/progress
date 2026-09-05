@@ -183,6 +183,208 @@ def test_reordering_and_tab_label_readonly(project):
     assert m.selectedNode['note'] == 'Tab reasoning'
 
 
+def test_sibling_reorder_preserves_branch_and_history(project):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    tab_node = m.map.find(next(iter(m.links)))
+    a, b, c = [tab_node.add_child(text) for text in ('A', 'B', 'C')]
+    child = b.add_child('Child', note='Keep this')
+    b.folded = True
+    m.select(b.id)
+    m.toggleCompleted()
+    before = m.to_dict()
+    history = len(m._undo)
+    m.reorderNodeAt(b.id, -10000)
+    assert [n.id for n in tab_node.children] == [b.id, a.id, c.id]
+    assert len(m._undo) == history + 1
+    assert m.map.find(child.id).parent.id == b.id
+    assert b.folded and b.id in m._completed
+    assert m.links[tab_node.id] == tabs.getAllTabs()[0].id
+    assert pm.hasUnsavedChanges()
+    after = m.to_dict()
+    m.undo()
+    assert m.to_dict() == before
+    m.redo()
+    assert m.to_dict() == after
+    m.load(after)
+    assert m.to_dict() == after
+    m.reorderNodeAt(b.id, 10000)
+    assert [n.id for n in m.map.find(tab_node.id).children] == [a.id, c.id, b.id]
+    m.reorderNode(b.id, -1)
+    assert [n.id for n in m.map.find(tab_node.id).children] == [a.id, b.id, c.id]
+
+
+def test_reorder_boundaries_and_scope(project):
+    m = project[0].mindmap
+    tab_id = next(iter(m.links))
+    tab = m.map.find(tab_id)
+    a = tab.add_child('A', side='right')
+    b = tab.add_child('B', side='right')
+    outside = m.map.root.add_child('Outside')
+    m.set_scope(m.links[tab_id])
+    before = m.to_dict()
+    for node_id, direction in [(a.id, -1), (b.id, 1), (tab_id, 1), (outside.id, -1), ('missing', 1)]:
+        assert not m.canReorderNode(node_id, direction)
+        m.reorderNode(node_id, direction)
+        if node_id in (tab_id, outside.id, 'missing'):
+            m.reorderNodeAt(node_id, 10000)
+    m.reorderNodeAt(a.id, m._layout()[a].center_y)
+    assert m.to_dict() == before and not m.canUndo
+    assert m.canReorderNode(a.id, 1)
+    m.reorderNode(a.id, 1)
+    assert tab.children == [b, a]
+    assert a.parent is tab and b.parent is tab
+
+
+def test_reorder_keeps_automatic_and_explicit_sides(project):
+    from actiondraw._vendor.pyplane.layout import assigned_sides
+    m = project[0].mindmap
+    for i in range(7):
+        m.map.root.add_child(str(i))
+    m.map.root.children[-1].side = 'left'
+    sides = assigned_sides(m.map)
+    before_sides = {n.id: side for n, side in sides.items()}
+    for side in ('left', 'right'):
+        siblings = [n for n in m.map.root.children if sides[n] == side]
+        source = siblings[-1]
+        m.reorderNodeAt(source.id, -10000)
+        actual = [n for n in m.map.root.children if n.side == side]
+        assert actual == [source] + siblings[:-1]
+        assert {n.id: s for n, s in assigned_sides(m.map).items()} == before_sides
+
+
+@pytest.mark.parametrize('zoom,pan', [(1.0, 0), (0.55, 35)])
+def test_qml_ctrl_drag_reorder_and_context_target(project, app, zoom, pan):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    parent = m.map.find(next(iter(m.links)))
+    siblings = [parent.add_child(text) for text in ('A', 'B', 'C')]
+    a, b, c = siblings
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+    pane = window.findChild(QObject, 'mindmapPane')
+    pane.setProperty('zoom', zoom)
+    pane.setProperty('panX', pan - m._layout()[a].x * zoom)
+    pane.setProperty('panY', pan)
+    QTest.qWait(30)
+
+    def find_item(item, name):
+        if item.objectName() == name:
+            return item
+        for child in item.childItems():
+            found = find_item(child, name)
+            if found is not None:
+                return found
+        return None
+
+    def center(node_id):
+        item = find_item(window.contentItem(), 'mindmapNode_' + node_id)
+        return item.mapToScene(item.boundingRect().center()).toPoint()
+
+    start = center(c.id)
+    destination = center(a.id) - QPoint(0, 35)
+    QTest.mousePress(window, Qt.LeftButton, Qt.ControlModifier, start)
+    QTest.mouseMove(window, start - QPoint(0, 15), 30)
+    QTest.mouseMove(window, destination, 30)
+    QTest.mouseRelease(window, Qt.LeftButton, Qt.ControlModifier, destination)
+    QTest.qWait(50)
+    assert parent.children == [c, a, b]
+    assert c.parent is parent and pm.mindmapVisible
+    assert m.selectedIds == [c.id]
+    # Ctrl+click still toggles, without moving anything.
+    QTest.mouseClick(window, Qt.LeftButton, Qt.ControlModifier, center(a.id))
+    assert set(m.selectedIds) == {c.id, a.id}
+    assert m.selectedId == a.id
+    # Right-click an already-selected node which is not the primary selection.
+    QTest.mouseClick(window, Qt.RightButton, Qt.NoModifier, center(c.id))
+    QTest.qWait(30)
+    menu = window.findChild(QObject, 'mindmapNodeMenu')
+    up = window.findChild(QObject, 'mindmapMoveUp')
+    down = window.findChild(QObject, 'mindmapMoveDown')
+    assert menu.property('targetNodeId') == c.id
+    assert not up.property('enabled') and down.property('enabled')
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                     down.mapToScene(down.boundingRect().center()).toPoint())
+    QTest.qWait(50)
+    assert parent.children == [a, c, b]
+    assert m.selectedId == c.id
+    # A downward drag ignores horizontal movement and can finish in empty space.
+    start = center(a.id)
+    destination = center(b.id) + QPoint(35, 35)
+    QTest.mousePress(window, Qt.LeftButton, Qt.ControlModifier, start)
+    QTest.mouseMove(window, start + QPoint(0, 15), 30)
+    QTest.mouseMove(window, destination, 30)
+    QTest.mouseRelease(window, Qt.LeftButton, Qt.ControlModifier, destination)
+    QTest.qWait(50)
+    assert parent.children == [c, b, a]
+    # Losing the mouse grab cancels the drag and restores layout bindings.
+    before = m.to_dict()
+    start = center(a.id)
+    QTest.mousePress(window, Qt.LeftButton, Qt.ControlModifier, start)
+    QTest.mouseMove(window, start - QPoint(0, 15), 30)
+    QTest.mouseMove(window, start - QPoint(0, 70), 30)
+    item = find_item(window.contentItem(), 'mindmapNode_' + a.id)
+    area = find_item(item, 'mindmapNodeMouse_' + a.id)
+    assert item.y() != m._layout()[a].y
+    area.ungrabMouse()
+    QTest.mouseRelease(window, Qt.LeftButton, Qt.ControlModifier, start - QPoint(0, 70))
+    QTest.qWait(30)
+    assert m.to_dict() == before
+    assert item.y() == m._layout()[a].y
+    # A subsequent relayout must still update the cancelled delegate.
+    m.reorderNode(a.id, -1)
+    QTest.qWait(30)
+    item = find_item(window.contentItem(), 'mindmapNode_' + a.id)
+    assert item.y() == m._layout()[a].y
+    window.close()
+
+
+def test_qml_ctrl_arrows_reorder_and_editor_isolation(project, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    parent = m.map.find(next(iter(m.links)))
+    a, b, c = [parent.add_child(text) for text in ('A', 'B', 'C')]
+    parent_id = parent.id
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+    m.select(b.id)
+
+    def order():
+        return [n.id for n in m.map.find(parent_id).children]
+
+    QTest.keyClick(window, Qt.Key_Up, Qt.ControlModifier)
+    assert order() == [b.id, a.id, c.id] and m.selectedId == b.id
+    before = m.to_dict()
+    QTest.keyClick(window, Qt.Key_Up, Qt.ControlModifier)
+    assert m.to_dict() == before  # Already first: no change.
+    QTest.keyClick(window, Qt.Key_Down, Qt.ControlModifier)
+    assert order() == [a.id, b.id, c.id] and m.selectedId == b.id
+    QTest.keyClick(window, Qt.Key_Z, Qt.ControlModifier)
+    assert order() == [b.id, a.id, c.id]
+    QTest.keyClick(window, Qt.Key_Y, Qt.ControlModifier)
+    assert order() == [a.id, b.id, c.id]
+    QTest.keyClick(window, Qt.Key_Down)
+    assert order() == [a.id, b.id, c.id] and m.selectedId == c.id
+    QTest.keyClick(window, Qt.Key_Up)
+    assert order() == [a.id, b.id, c.id] and m.selectedId == b.id
+    QTest.keyClick(window, Qt.Key_F2)
+    QTest.qWait(30)
+    editor = window.findChild(QObject, 'mindmapNodeEditor')
+    assert editor.property('visible')
+    before = m.to_dict()
+    QTest.keyClick(window, Qt.Key_Up, Qt.ControlModifier)
+    QTest.keyClick(window, Qt.Key_Down, Qt.ControlModifier)
+    assert m.to_dict() == before
+    QTest.keyClick(window, Qt.Key_Escape)
+    window.close()
+
+
 def test_encrypted_roundtrip_dirty_and_scrub(project, tmp_path, monkeypatch):
     pm, tabs, _, _ = project
     credentials = EncryptionCredentials(passphrase='mindmap-test-passphrase')

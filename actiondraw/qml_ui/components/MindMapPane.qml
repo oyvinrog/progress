@@ -136,7 +136,7 @@ FocusScope {
             Layout.fillWidth: true
             text: pane.controller && pane.controller.canPaste
                 ? "Branches cut: click a destination and press Ctrl+V to move them beneath it · Escape cancels"
-                : "Ctrl+click toggles selection · Shift+click selects a range · Ctrl+X / Ctrl+V moves branches · F4 completes · Arrows navigate · Tab adds a child · Ctrl+Enter opens a tab"
+                : "Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+X / Ctrl+V moves branches · F4 completes · Arrows navigate · Tab adds a child · Ctrl+Enter opens a tab"
             wrapMode: Text.WordWrap
             color: "#a9bfd1"
         }
@@ -230,19 +230,35 @@ FocusScope {
                         }
                         MouseArea {
                             id: nodeMouse
+                            objectName: "mindmapNodeMouse_" + nodeItem.modelData.id
                             anchors.fill: parent
                             acceptedButtons: Qt.LeftButton | Qt.RightButton
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
                             drag.target: pressedButtons === Qt.LeftButton ? nodeItem : null
+                            drag.axis: reorderDrag ? Drag.YAxis : Drag.XAndYAxis
                             property bool wasDragged: false
-                            onPressed: {
+                            property bool reorderDrag: false
+                            function restorePosition() {
+                                nodeItem.x = Qt.binding(function() { return nodeItem.modelData.x })
+                                nodeItem.y = Qt.binding(function() { return nodeItem.modelData.y })
+                            }
+                            onPressed: function(mouse) {
                                 pane.forceActiveFocus()
                                 wasDragged = false
+                                reorderDrag = mouse.button === Qt.LeftButton && !!(mouse.modifiers & Qt.ControlModifier)
                             }
                             onPositionChanged: if (drag.active) wasDragged = true
+                            onCanceled: { restorePosition(); wasDragged = true; reorderDrag = false }
                             onReleased: function(mouse) {
                                 if (!wasDragged) return
+                                if (reorderDrag) {
+                                    var reorderId = nodeItem.modelData.id
+                                    var centerY = nodeItem.y + nodeItem.height / 2
+                                    restorePosition()
+                                    Qt.callLater(pane.controller.reorderNodeAt, reorderId, centerY)
+                                    return
+                                }
                                 var point = nodeItem.mapToItem(world, mouse.x, mouse.y)
                                 var nodes = pane.controller.nodes
                                 var targetId = "", placement = "child"
@@ -257,8 +273,7 @@ FocusScope {
                                     }
                                 }
                                 var sourceId = nodeItem.modelData.id
-                                nodeItem.x = Qt.binding(function() { return nodeItem.modelData.x })
-                                nodeItem.y = Qt.binding(function() { return nodeItem.modelData.y })
+                                restorePosition()
                                 if (targetId) Qt.callLater(pane.controller.moveNode, sourceId, targetId, placement)
                             }
                             onClicked: function(mouse) {
@@ -267,6 +282,7 @@ FocusScope {
                                 var tab = nodeItem.modelData.isTab
                                 if (mouse.button === Qt.RightButton) {
                                     if (!nodeItem.selected) pane.controller.select(nodeId)
+                                    nodeMenu.targetNodeId = nodeId
                                     nodeMenu.popup()
                                 } else if (mouse.modifiers & Qt.ControlModifier) {
                                     pane.controller.select(nodeId, "toggle")
@@ -297,6 +313,27 @@ FocusScope {
     onPanYChanged: edges.requestPaint()
     Menu {
         id: nodeMenu
+        objectName: "mindmapNodeMenu"
+        property string targetNodeId: ""
+        property bool canMoveUp: false
+        property bool canMoveDown: false
+        onAboutToShow: {
+            canMoveUp = pane.controller.canReorderNode(targetNodeId, -1)
+            canMoveDown = pane.controller.canReorderNode(targetNodeId, 1)
+        }
+        MenuItem {
+            objectName: "mindmapMoveUp"
+            text: "Move up"
+            enabled: nodeMenu.canMoveUp
+            onTriggered: { pane.controller.reorderNode(nodeMenu.targetNodeId, -1); pane.forceActiveFocus() }
+        }
+        MenuItem {
+            objectName: "mindmapMoveDown"
+            text: "Move down"
+            enabled: nodeMenu.canMoveDown
+            onTriggered: { pane.controller.reorderNode(nodeMenu.targetNodeId, 1); pane.forceActiveFocus() }
+        }
+        MenuSeparator {}
         MenuItem { text: "Cut branches"; enabled: pane.controller && pane.controller.canCut; onTriggered: pane.controller.cutSelected() }
         MenuItem { text: "Paste beneath selected node"; enabled: pane.controller && pane.controller.canPaste; onTriggered: pane.controller.pasteSelected() }
         MenuSeparator {}
@@ -364,6 +401,8 @@ FocusScope {
     Shortcut { sequence: "Right"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.navigate("right") }
     Shortcut { sequence: "Up"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.navigate("up") }
     Shortcut { sequence: "Down"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.navigate("down") }
+    Shortcut { sequence: "Ctrl+Up"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.reorderNode(pane.controller.selectedId, -1) }
+    Shortcut { sequence: "Ctrl+Down"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.reorderNode(pane.controller.selectedId, 1) }
     Shortcut { sequences: ["Ctrl+Return", "Ctrl+Enter"]; enabled: pane.shortcutsEnabled; onActivated: pane.controller.activate(pane.controller.selectedId) }
     Shortcut { sequence: "Return"; enabled: pane.shortcutsEnabled; onActivated: pane.addThought(true) }
     Shortcut { sequence: "F4"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.toggleCompleted() }
