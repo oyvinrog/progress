@@ -6,6 +6,7 @@ independent use by actiondraw.
 """
 
 import copy
+import uuid
 import json
 import math
 import os
@@ -53,6 +54,7 @@ from actiondraw.priorityplot.model import (
     clamp_time_hours,
     compute_priority_score,
 )
+from actiondraw.mindmap import MindMapController
 from actiondraw.markdown_note_tabs import normalize_editor_tabs
 
 
@@ -457,6 +459,8 @@ class Tab:
     action_paint: Dict[str, Any] = field(default_factory=lambda: {
         "elements": [], "actions": [], "last_imported_signature": ""
     })
+
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
 
 @dataclass
@@ -2310,6 +2314,7 @@ class ProjectManager(QObject):
     testNotificationCompleted = Signal(bool, str, arguments=["success", "message"])
     canGoBackChanged = Signal()
     tabSwitched = Signal()  # Emitted when switching to a different tab
+    mindmapVisibleChanged = Signal()
     kanbanBoardRequested = Signal()
     taskDrillRequested = Signal(int, arguments=["taskIndex"])
     taskReminderDue = Signal(int, int, str, bool, arguments=["tabIndex", "taskIndex", "taskTitle", "sendNotification"])
@@ -2373,6 +2378,10 @@ class ProjectManager(QObject):
         self._cached_key_material: Optional[DerivedKeyMaterial] = None
         self._cached_encryption_file_path: str = ""
         self._workspace_markdown_tabs = normalize_editor_tabs([], fallback_text="")
+        self._mindmap_visible = False
+        self.mindmap = MindMapController(self._tab_model, self)
+        self.mindmap.tabActivated.connect(self.openMindmapTab)
+        self.mindmap.errorOccurred.connect(self.errorOccurred)
         self._last_saved_snapshot = self._serialize_project_payload(self._build_project_data())
 
     def scrubProjectData(self) -> None:
@@ -2403,11 +2412,38 @@ class ProjectManager(QObject):
         if self._tab_model is not None:
             self._tab_model.clear()
 
+        self.mindmap.load()
+        self._setMindmapVisible(False)
+
         # Clear navigation history.
         self._navigation_back_stack.clear()
 
         # Force GC to reclaim the now-unreferenced objects promptly.
         gc.collect()
+
+    @Property(bool, notify=mindmapVisibleChanged)
+    def mindmapVisible(self) -> bool:
+        return self._mindmap_visible
+
+    def _setMindmapVisible(self, visible: bool) -> None:
+        if self._mindmap_visible != visible:
+            self._mindmap_visible = visible
+            self.mindmapVisibleChanged.emit()
+
+    @Slot()
+    def showMindmap(self) -> None:
+        self._saveCurrentTabState()
+        self._setMindmapVisible(True)
+
+    @Slot(str)
+    def openMindmapTab(self, tab_id: str) -> None:
+        if self._tab_model is None:
+            return
+        for index, tab in enumerate(self._tab_model.getAllTabs()):
+            if tab.id == tab_id:
+                self._pushNavigationSnapshot(NavigationSnapshot(index, view_kind="mindmap"))
+                self.switchTab(index)
+                return
 
     @Property(bool, notify=canGoBackChanged)
     def canGoBack(self) -> bool:
@@ -2424,7 +2460,8 @@ class ProjectManager(QObject):
         current_task_index = getattr(self._diagram_model, "currentTaskIndex", -1)
         if isinstance(current_task_index, int) and current_task_index >= 0:
             task_index = current_task_index
-        return NavigationSnapshot(tab_index=tab_index, task_index=task_index)
+        return NavigationSnapshot(tab_index=tab_index, task_index=task_index,
+                                  view_kind="mindmap" if self._mindmap_visible else "diagram")
 
     def _pushNavigationSnapshot(self, snapshot: NavigationSnapshot) -> None:
         if self._restoring_navigation:
@@ -2453,6 +2490,9 @@ class ProjectManager(QObject):
         )
 
     def _restoreNavigationSnapshot(self, snapshot: NavigationSnapshot) -> None:
+        if snapshot.view_kind == "mindmap":
+            self.showMindmap()
+            return
         if snapshot.view_kind == "kanban":
             self.kanbanBoardRequested.emit()
             return
@@ -3337,6 +3377,7 @@ class ProjectManager(QObject):
             current_diagram = self._diagram_model.to_dict()
             for index, tab in enumerate(self._tab_model.getAllTabs()):
                 tabs_data.append({
+                    "id": tab.id,
                     "name": tab.name,
                     "tasks": current_tasks if index == current_tab_index else tab.tasks,
                     "diagram": current_diagram if index == current_tab_index else tab.diagram,
@@ -3361,6 +3402,7 @@ class ProjectManager(QObject):
                 "tabs": tabs_data,
                 "active_tab": current_tab_index,
                 "workspace_markdown_tabs": normalize_editor_tabs(self._workspace_markdown_tabs, fallback_text=""),
+                "mindmap": self.mindmap.to_dict(),
                 "standalone_reminders": self._serialize_standalone_reminders(),
             }
 
@@ -3374,6 +3416,7 @@ class ProjectManager(QObject):
             }],
             "active_tab": 0,
             "workspace_markdown_tabs": normalize_editor_tabs(self._workspace_markdown_tabs, fallback_text=""),
+            "mindmap": self.mindmap.to_dict(),
             "standalone_reminders": self._serialize_standalone_reminders(),
         }
 
@@ -3842,6 +3885,8 @@ class ProjectManager(QObject):
                     yubikey_slot=credentials.yubikey_slot,
                 )
 
+            if "mindmap" in project_data:
+                MindMapController.decode(project_data["mindmap"])
             version = project_data.get("version", "1.0")
             active_tab = 0
 
@@ -3856,6 +3901,7 @@ class ProjectManager(QObject):
                 tabs = []
                 for tab_data in tabs_data:
                     tabs.append(Tab(
+                        id=tab_data.get("id") or str(uuid.uuid4()),
                         name=tab_data.get("name", "Tab"),
                         tasks=tab_data.get("tasks", {"tasks": []}),
                         diagram=tab_data.get("diagram", {"items": [], "edges": [], "strokes": []}),
@@ -3883,6 +3929,16 @@ class ProjectManager(QObject):
                 if not tabs:
                     tabs = [Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})]
 
+            seen_tab_ids = set()
+            for tab in tabs:
+                try:
+                    uuid.UUID(tab.id)
+                except (ValueError, TypeError, AttributeError) as exc:
+                    raise ValueError("Invalid tab ID") from exc
+                if tab.id in seen_tab_ids:
+                    raise ValueError("Duplicate tab ID")
+                seen_tab_ids.add(tab.id)
+
             self._workspace_markdown_tabs = normalize_editor_tabs(
                 project_data.get("workspace_markdown_tabs"),
                 fallback_text="",
@@ -3898,6 +3954,9 @@ class ProjectManager(QObject):
             # Update tab model if available
             if self._tab_model is not None:
                 self._tab_model.setTabs(tabs, active_tab)
+
+            self.mindmap.load(project_data.get("mindmap"))
+            self._setMindmapVisible(False)
 
             # Load the active tab's data into the models
             active_tab_data = tabs[active_tab]
@@ -3920,7 +3979,7 @@ class ProjectManager(QObject):
             error_msg = f"Failed to load project: {e}"
             self.errorOccurred.emit(error_msg)
             print(error_msg)
-        except (KeyError, TypeError) as e:
+        except (KeyError, TypeError, ValueError) as e:
             error_msg = f"Corrupted project file: {e}"
             self.errorOccurred.emit(error_msg)
             print(error_msg)
@@ -4044,7 +4103,7 @@ class ProjectManager(QObject):
             was_enabled = bool(self._navigation_back_stack)
             snapshot = self._navigation_back_stack.pop()
             self._emitCanGoBackChanged(was_enabled)
-            if self._tab_model is not None:
+            if self._tab_model is not None and snapshot.view_kind != "mindmap":
                 if snapshot.tab_index < 0 or snapshot.tab_index >= self._tab_model.tabCount:
                     continue
             self._restoring_navigation = True
@@ -4084,6 +4143,10 @@ class ProjectManager(QObject):
         """
         if self._tab_model is None:
             return
+
+        if index < 0 or index >= self._tab_model.tabCount:
+            return
+        self._setMindmapVisible(False)
 
         # Save current tab state
         self._saveCurrentTabState()

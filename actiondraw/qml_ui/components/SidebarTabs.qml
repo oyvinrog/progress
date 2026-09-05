@@ -202,6 +202,15 @@ Rectangle {
         anchors.margins: sidebar.isExpanded ? 10 : 6
         spacing: 8
 
+        Button {
+            Layout.fillWidth: true
+            text: sidebar.isExpanded ? "Mindmap" : "◎"
+            highlighted: sidebar.projectManager ? sidebar.projectManager.mindmapVisible : false
+            onClicked: if (sidebar.projectManager) sidebar.projectManager.showMindmap()
+            ToolTip.visible: hovered
+            ToolTip.text: "Global project mindmap"
+        }
+
         Rectangle {
             id: headerBox
             Layout.fillWidth: true

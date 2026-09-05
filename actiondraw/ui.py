@@ -49,6 +49,7 @@ def create_actiondraw_window(
     engine.rootContext().setContextProperty("markdownHighlighterBridge", markdown_highlighter_bridge)
     engine.rootContext().setContextProperty("tabModel", tab_model)
     engine.rootContext().setContextProperty("actionPaintModel", action_paint_model)
+    engine.rootContext().setContextProperty("mindmapController", project_manager.mindmap if project_manager else None)
     engine._markdown_note_manager = markdown_note_manager
     engine._markdown_image_paster = markdown_image_paster
     engine._markdown_preview_formatter = markdown_preview_formatter

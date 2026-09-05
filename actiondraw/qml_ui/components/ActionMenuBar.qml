@@ -115,6 +115,7 @@ MenuBar {
 
     Menu {
         title: "Edit"
+        enabled: !root.mindmapOpen
 
         MenuItem {
             text: "Copy\t\t\tCtrl+C"
@@ -170,6 +171,7 @@ MenuBar {
 
     Menu {
         title: "View"
+        enabled: !root.mindmapOpen
 
         MenuItem {
             text: "Show Grid"
@@ -222,12 +224,13 @@ MenuBar {
 
         MenuItem {
             text: "Connect All Items"
+            enabled: !root.mindmapOpen
             onTriggered: diagramModel && diagramModel.connectAllItems()
         }
 
         Menu {
             title: "Arrange Diagram"
-            enabled: hasDiagramModel() && diagramModel.count > 0
+            enabled: !root.mindmapOpen && hasDiagramModel() && diagramModel.count > 0
 
             MenuItem {
                 text: "Grid Layout"
@@ -254,6 +257,7 @@ MenuBar {
 
         MenuItem {
             id: drawingModeMenuItem
+            enabled: !root.mindmapOpen
             text: diagramModel && diagramModel.drawingMode ? "Exit Drawing Mode" : "Drawing Mode"
             checkable: true
             checked: !!(hasDiagramModel() && diagramModel.drawingMode)

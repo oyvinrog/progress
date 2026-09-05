@@ -49,8 +49,9 @@ actiondraw = "actiondraw:main"
 priorityplot = "actiondraw.priorityplot.app:main"
 
 [tool.setuptools]
-packages = ["actiondraw", "actiondraw.priorityplot"]
+packages = ["actiondraw", "actiondraw.priorityplot", "actiondraw._vendor", "actiondraw._vendor.pyplane"]
 py-modules = ["task_model", "markdown_note_editor", "progress_crypto", "eff_diceware"]
 
 [tool.setuptools.package-data]
 actiondraw = ["qml_ui/**/*.qml"]
+"actiondraw._vendor.pyplane" = ["LICENSE", "UPSTREAM.md"]

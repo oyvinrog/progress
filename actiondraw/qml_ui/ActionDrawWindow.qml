@@ -507,6 +507,7 @@ ApplicationWindow {
     property bool contractPopupBusy: false
     property var activeReminders: []
     property var activeContracts: []
+    readonly property bool mindmapOpen: projectManagerRef ? projectManagerRef.mindmapVisible : false
     property bool reminderOverviewExpanded: false
     property bool reminderOverviewTouched: false
     property bool contractOverviewExpanded: true
@@ -535,13 +536,13 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Ctrl+C"
-        enabled: diagramModel !== null
+        enabled: !root.mindmapOpen && (diagramModel !== null)
         onActivated: root.copySelectionToClipboard()
     }
 
     Shortcut {
         sequence: "Ctrl+V"
-        enabled: diagramModel !== null
+        enabled: !root.mindmapOpen && (diagramModel !== null)
         onActivated: {
             root.pasteFromClipboard()
         }
@@ -549,7 +550,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "F2"
-        enabled: diagramModel !== null || tabModelRef !== null
+        enabled: !root.mindmapOpen && (diagramModel !== null || tabModelRef !== null)
         onActivated: {
             if (root.selectedItemId && root.selectedItemId.length > 0) {
                 root.renameSelectedItem()
@@ -561,49 +562,49 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Ctrl+Return"
-        enabled: diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen)
+        enabled: !root.mindmapOpen && (diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen))
         onActivated: root.addTaskOrConnectedTask()
     }
 
     Shortcut {
         sequence: "Ctrl+-"
-        enabled: diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen)
+        enabled: !root.mindmapOpen && (diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen))
         onActivated: root.addTaskOrConnectedTaskBackward()
     }
 
     Shortcut {
         sequence: "Ctrl+Minus"
-        enabled: diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen)
+        enabled: !root.mindmapOpen && (diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen))
         onActivated: root.addTaskOrConnectedTaskBackward()
     }
 
     Shortcut {
         sequence: "Ctrl+M"
-        enabled: diagramModel !== null
+        enabled: !root.mindmapOpen && (diagramModel !== null)
         onActivated: root.openMarkdownNoteForSelection()
     }
 
     Shortcut {
         sequence: "Ctrl+Alt+M"
-        enabled: diagramModel !== null
+        enabled: !root.mindmapOpen && (diagramModel !== null)
         onActivated: root.openTabMarkdownHub()
     }
 
     Shortcut {
         sequence: "Ctrl+Shift+M"
-        enabled: diagramModel !== null
+        enabled: !root.mindmapOpen && (diagramModel !== null)
         onActivated: root.openWorkspaceMarkdownHub()
     }
 
     Shortcut {
         sequence: "Ctrl+N"
-        enabled: diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen)
+        enabled: !root.mindmapOpen && (diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen))
         onActivated: root.addConnectedNote()
     }
 
     Shortcut {
         sequence: "Ctrl+K"
-        enabled: tabModelRef !== null
+        enabled: !root.mindmapOpen && (tabModelRef !== null)
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
             && !contractPopup.visible
@@ -616,7 +617,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Delete"
-        enabled: diagramModel !== null
+        enabled: !root.mindmapOpen && (diagramModel !== null)
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
@@ -626,7 +627,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Left"
-        enabled: diagramModel !== null
+        enabled: !root.mindmapOpen && (diagramModel !== null)
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
@@ -636,7 +637,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Right"
-        enabled: diagramModel !== null
+        enabled: !root.mindmapOpen && (diagramModel !== null)
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
@@ -646,7 +647,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Up"
-        enabled: diagramModel !== null
+        enabled: !root.mindmapOpen && (diagramModel !== null)
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
@@ -656,7 +657,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Down"
-        enabled: diagramModel !== null
+        enabled: !root.mindmapOpen && (diagramModel !== null)
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
@@ -1222,8 +1223,18 @@ ApplicationWindow {
             onTabDragReleased: root.handleTabDragRelease
         }
 
+        MindMapPane {
+            id: mindmapPane
+            objectName: "mindmapPane"
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            visible: root.mindmapOpen
+            controller: typeof mindmapController !== "undefined" ? mindmapController : null
+        }
+
         // Main content area (right side)
         ColumnLayout {
+            visible: !root.mindmapOpen
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 14
