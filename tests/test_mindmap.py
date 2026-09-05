@@ -234,6 +234,40 @@ def test_qml_click_drag_back_and_shortcut_isolation(project, app):
     assert pm.mindmapVisible
     assert pane.property('zoom') == 0.55 and pane.property('panX') == 35.0
     assert m.selectedId == node_id
+    # Keyboard selection does not drill; Tab adds a thought beneath a tab.
+    QTest.keyClick(window, Qt.Key_Left)
+    assert m.selectedId == first_node and pm.mindmapVisible
+    QTest.keyClick(window, Qt.Key_Tab)
+    created = m.selectedId
+    assert m.map.find(created).parent.id == first_node
+    assert created not in m.links
+    editor = window.findChild(QObject, 'mindmapNodeEditor')
+    assert editor.property('visible')
+    QTest.keyClick(window, Qt.Key_Left)
+    QTest.keyClick(window, Qt.Key_Return, Qt.ControlModifier)
+    assert m.selectedId == created and pm.mindmapVisible
+    QTest.keyClick(window, Qt.Key_Escape)
+    QTest.qWait(50)
+    assert not editor.property('visible')
+    # Navigation pans the selected node back into view without changing zoom.
+    m.select(m.map.root.id)
+    pane.setProperty('panX', -2000.0)
+    pane.setProperty('panY', -2000.0)
+    QTest.keyClick(window, Qt.Key_Right)
+    assert m.selectedId == first_node
+    viewport = window.findChild(QObject, 'mindmapViewport')
+    selected_item = find_item(window.contentItem(), 'mindmapNode_' + first_node)
+    selected_center = selected_item.mapToItem(viewport, selected_item.boundingRect().center())
+    assert 0 < selected_center.x() < viewport.width()
+    assert 0 < selected_center.y() < viewport.height()
+    assert pane.property('zoom') == 0.55
+    QTest.keyClick(window, Qt.Key_Return, Qt.ControlModifier)
+    assert not pm.mindmapVisible and tabs.getCurrentTabData().id == m.links[first_node]
+    pm.goBack()
+    QTest.qWait(30)
+    # Ctrl+click selects a tab for adding thoughts; ordinary clicks still drill.
+    QTest.mouseClick(window, Qt.LeftButton, Qt.ControlModifier, center(first_node))
+    assert pm.mindmapVisible and m.selectedId == first_node
     # Map Delete cannot remove a selected diagram item.
     item_id = diagram.addBox(0, 0)
     window.setProperty('selectedItemId', item_id)
@@ -260,3 +294,44 @@ def test_notes_preserve_whitespace_in_save_and_history(project):
     m.editSelected("Notes", "other")
     m.undo()
     assert m.map.find(node_id).note == text
+
+
+def test_keyboard_navigation_directions_and_folded_nodes(project):
+    pm = project[0]
+    m = pm.mindmap
+    tab = m.map.find(next(iter(m.links)))
+    tab.side = 'right'
+    upper = tab.add_child('Upper')
+    lower = tab.add_child('Lower')
+    left = m.map.root.add_child('Left', side='left')
+    m.reconcile()
+    payload = m.to_dict()
+    activated, revealed = [], []
+    m.tabActivated.connect(activated.append)
+    m.revealNode.connect(revealed.append)
+    m.select(m.map.root.id)
+    m.navigate('left')
+    assert m.selectedId == left.id
+    m.navigate('right')
+    assert m.selectedId == m.map.root.id
+    m.navigate('right')
+    assert m.selectedId == tab.id
+    m.navigate('right')
+    assert m.selectedId == upper.id
+    m.navigate('down')
+    assert m.selectedId == lower.id
+    m.navigate('up')
+    assert m.selectedId == upper.id
+    m.navigate('left')
+    assert m.selectedId == tab.id
+    assert not activated and revealed[-1] == tab.id
+    assert m.to_dict() == payload and not m.canUndo
+    m.toggleFold()
+    m.navigate('right')
+    assert m.selectedId == tab.id
+    # A selection hidden by a folded ancestor returns to that visible ancestor.
+    m.select(lower.id)
+    m.navigate('down')
+    assert m.selectedId == tab.id
+    m.navigate('invalid')
+    assert m.selectedId == tab.id

@@ -55,9 +55,12 @@ Configure `ntfy` in the app under `Tools > Notification Settings...`. Environmen
 
 Choose **Mindmap** above the sidebar tabs. Drag nodes onto another node to nest
 them, or onto its top/bottom edge to reorder. Right-click a tab node to add
-thoughts or edit notes; a normal click opens the tab. Use Alt+Left to return.
+thoughts or edit notes; a normal click opens the tab. Ctrl+click selects a tab
+without opening it. Use Alt+Left to return.
 
-In the map, Tab adds a child, Enter adds a sibling, F2 edits, Space folds,
+In the map, arrow keys select nearby visible nodes and keep them on screen.
+Tab adds a child to the selected node (including tabs), Ctrl+Enter opens the
+selected tab, Enter adds a sibling, F2 edits, Space folds,
 and Ctrl+Z / Ctrl+Y undo and redo. Use the mouse wheel to zoom and drag the
 background to pan. Deleting a project tab keeps its map node as a thought.
 

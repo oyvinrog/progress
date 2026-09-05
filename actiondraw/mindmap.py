@@ -14,6 +14,7 @@ class MindMapController(QObject):
     sceneChanged = Signal()
     resetView = Signal()
     tabActivated = Signal(str)
+    revealNode = Signal(str)
     errorOccurred = Signal(str)
 
     def __init__(self, tab_model=None, parent=None):
@@ -135,6 +136,38 @@ class MindMapController(QObject):
             self._selected = node_id
             self.changed.emit()
 
+    @Slot(str)
+    def navigate(self, direction):
+        """Select the nearest visible node in a direction, as in PyPlane's editor."""
+        if direction not in ('left', 'right', 'up', 'down'):
+            return
+        boxes = self._layout()
+        current = self.map.find(self._selected)
+        while current is not None and current not in boxes:
+            current = current.parent
+        current = current or self.map.root
+        if current.id != self._selected:
+            self.select(current.id)
+            self.revealNode.emit(current.id)
+            return
+        origin = boxes[current]
+        ranked = []
+        for node, box in boxes.items():
+            dx = box.x + box.width / 2 - origin.x - origin.width / 2
+            dy = box.center_y - origin.center_y
+            primary, perpendicular = {
+                'left': (-dx, abs(dy)), 'right': (dx, abs(dy)),
+                'up': (-dy, abs(dx)), 'down': (dy, abs(dx)),
+            }[direction]
+            if primary <= 1.0:
+                continue
+            reading_order = box.center_y if direction in ('left', 'right') else box.x
+            ranked.append((primary + perpendicular * 0.35, perpendicular / primary,
+                           reading_order, node.id))
+        if ranked:
+            self.select(min(ranked)[-1])
+        self.revealNode.emit(self._selected)
+
     def _commit(self, mutation):
         before = self.to_dict()
         selected = self._selected
@@ -162,6 +195,7 @@ class MindMapController(QObject):
             parent.folded = False
             self._selected = parent.add_child('New thought').id
         self._commit(mutate)
+        self.revealNode.emit(self._selected)
 
     @Slot(str, str)
     def editSelected(self, text, note):

@@ -28,6 +28,25 @@ FocusScope {
         initialized = true
     }
     function zoomBy(factor) { zoom = Math.max(0.2, Math.min(4, zoom * factor)) }
+    function revealNode(nodeId) {
+        if (!visible || !controller) return
+        var nodes = controller.nodes
+        for (var i = 0; i < nodes.length; ++i) {
+            var n = nodes[i]
+            if (n.id !== nodeId) continue
+            var left = viewport.width / 2 + panX + n.x * zoom
+            var top = viewport.height / 2 + panY + n.y * zoom
+            var width = n.width * zoom, height = n.height * zoom
+            var margin = 24
+            if (width > viewport.width - margin * 2) panX += (viewport.width - width) / 2 - left
+            else if (left < margin) panX += margin - left
+            else if (left + width > viewport.width - margin) panX += viewport.width - margin - left - width
+            if (height > viewport.height - margin * 2) panY += (viewport.height - height) / 2 - top
+            else if (top < margin) panY += margin - top
+            else if (top + height > viewport.height - margin) panY += viewport.height - margin - top - height
+            return
+        }
+    }
     function editNode() {
         if (!controller) return
         var node = controller.selectedNode
@@ -47,6 +66,7 @@ FocusScope {
     Connections {
         target: pane.controller
         function onSceneChanged() { edges.requestPaint() }
+        function onRevealNode(nodeId) { pane.revealNode(nodeId) }
         function onResetView() {
             pane.initialized = false
             pane.zoom = 1; pane.panX = 0; pane.panY = 0
@@ -63,8 +83,13 @@ FocusScope {
         Flow {
             Layout.fillWidth: true
             spacing: 5
-            Button { text: "Add thought"; onClicked: pane.addThought(false) }
+            Button { text: "Add child"; onClicked: pane.addThought(false) }
             Button { text: "Sibling"; onClicked: pane.addThought(true) }
+            Button {
+                text: "Open tab"
+                enabled: pane.controller && pane.controller.selectedNode.isTab === true
+                onClicked: pane.controller.activate(pane.controller.selectedId)
+            }
             Button { text: "Edit / Notes"; onClicked: pane.editNode() }
             Button { text: "Fold"; onClicked: pane.controller.toggleFold() }
             Button { text: "Delete"; onClicked: pane.controller.deleteSelected() }
@@ -76,7 +101,7 @@ FocusScope {
         }
         Label {
             Layout.fillWidth: true
-            text: "Click a tab to open it · Right-click for thoughts and notes · Drag onto a node to nest, or its top/bottom edge to reorder"
+            text: "Arrows select · Tab adds a child · Ctrl+Enter opens a tab · Ctrl+click selects a tab; click opens it · Drag to nest or reorder"
             wrapMode: Text.WordWrap
             color: "#a9bfd1"
         }
@@ -205,7 +230,7 @@ FocusScope {
                                 var tab = nodeItem.modelData.isTab
                                 pane.controller.select(nodeId)
                                 if (mouse.button === Qt.RightButton) nodeMenu.popup()
-                                else if (tab) pane.controller.activate(nodeId)
+                                else if (tab && !(mouse.modifiers & Qt.ControlModifier)) pane.controller.activate(nodeId)
                             }
                             onDoubleClicked: if (!nodeItem.modelData.isTab) pane.editNode()
                             ToolTip {
@@ -225,7 +250,7 @@ FocusScope {
     onPanYChanged: edges.requestPaint()
     Menu {
         id: nodeMenu
-        MenuItem { text: "Add thought"; onTriggered: pane.addThought(false) }
+        MenuItem { text: "Add child"; onTriggered: pane.addThought(false) }
         MenuItem { text: "Add sibling"; onTriggered: pane.addThought(true) }
         MenuItem { text: "Edit / Notes"; onTriggered: pane.editNode() }
         MenuItem { text: "Fold / Unfold"; onTriggered: pane.controller.toggleFold() }
@@ -235,6 +260,7 @@ FocusScope {
     }
     Dialog {
         id: editor
+        objectName: "mindmapNodeEditor"
         title: "Thought and notes"
         modal: true
         anchors.centerIn: parent
@@ -258,6 +284,11 @@ FocusScope {
         onRejected: { titleField.text = ""; noteField.text = ""; pane.forceActiveFocus() }
     }
     Shortcut { sequence: "Tab"; enabled: pane.shortcutsEnabled; onActivated: pane.addThought(false) }
+    Shortcut { sequence: "Left"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.navigate("left") }
+    Shortcut { sequence: "Right"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.navigate("right") }
+    Shortcut { sequence: "Up"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.navigate("up") }
+    Shortcut { sequence: "Down"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.navigate("down") }
+    Shortcut { sequences: ["Ctrl+Return", "Ctrl+Enter"]; enabled: pane.shortcutsEnabled; onActivated: pane.controller.activate(pane.controller.selectedId) }
     Shortcut { sequence: "Return"; enabled: pane.shortcutsEnabled; onActivated: pane.addThought(true) }
     Shortcut { sequence: "F2"; enabled: pane.shortcutsEnabled; onActivated: pane.editNode() }
     Shortcut { sequence: "Delete"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.deleteSelected() }
