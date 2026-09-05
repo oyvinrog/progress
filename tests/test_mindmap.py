@@ -243,6 +243,28 @@ def test_qml_click_drag_back_and_shortcut_isolation(project, app):
     assert created not in m.links
     editor = window.findChild(QObject, 'mindmapNodeEditor')
     assert editor.property('visible')
+    title = window.findChild(QObject, 'mindmapNodeTitle')
+    assert title.property('selectedText') == 'New thought'
+    node_count = len(list(m.map.walk()))
+    for character in 'first idea':
+        QTest.keyClick(window, Qt.Key(ord(character.upper())))
+    QTest.keyClick(window, Qt.Key_Return)
+    assert not editor.property('visible')
+    assert m.map.find(created).text == 'first idea'
+    assert len(list(m.map.walk())) == node_count
+    # Focus returns to the map for immediately creating and naming the next sibling.
+    QTest.keyClick(window, Qt.Key_Return)
+    created = m.selectedId
+    assert editor.property('visible')
+    assert m.map.find(created).parent.id == first_node
+    assert title.property('selectedText') == 'New thought'
+    for character in 'second idea':
+        QTest.keyClick(window, Qt.Key(ord(character.upper())))
+    QTest.keyClick(window, Qt.Key_Enter)
+    assert not editor.property('visible')
+    assert m.map.find(created).text == 'second idea'
+    assert len(list(m.map.walk())) == node_count + 1
+    QTest.keyClick(window, Qt.Key_F2)
     QTest.keyClick(window, Qt.Key_Left)
     QTest.keyClick(window, Qt.Key_Return, Qt.ControlModifier)
     assert m.selectedId == created and pm.mindmapVisible

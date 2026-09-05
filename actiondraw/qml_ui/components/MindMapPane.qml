@@ -268,14 +268,27 @@ FocusScope {
         standardButtons: Dialog.Ok | Dialog.Cancel
         ColumnLayout {
             anchors.fill: parent
-            TextField { id: titleField; Layout.fillWidth: true; placeholderText: "Thought" }
+            TextField {
+                id: titleField
+                objectName: "mindmapNodeTitle"
+                Layout.fillWidth: true
+                placeholderText: "Thought"
+                onAccepted: editor.accept()
+            }
             ScrollView {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 220
                 TextArea { id: noteField; placeholderText: "Notes"; wrapMode: TextEdit.Wrap }
             }
         }
-        onOpened: { if (titleField.readOnly) noteField.forceActiveFocus(); else titleField.forceActiveFocus() }
+        onOpened: {
+            if (titleField.readOnly) {
+                noteField.forceActiveFocus()
+            } else {
+                titleField.forceActiveFocus()
+                titleField.selectAll()
+            }
+        }
         onAccepted: {
             pane.controller.editSelected(titleField.text, noteField.text)
             titleField.text = ""; noteField.text = ""
