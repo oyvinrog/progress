@@ -28,12 +28,15 @@ class MindMapController(QObject):
         self._cut_ids = []
         self._undo = []
         self._redo = []
+        self._creating_tab = False
         if tab_model is not None:
             tab_model.tabsChanged.connect(self.reconcile)
             tab_model.dataChanged.connect(self.reconcile)
         self.reconcile()
 
     def reconcile(self, *args):
+        if self._creating_tab:
+            return
         tabs = self._tabs.getAllTabs() if self._tabs is not None else []
         live = {tab.id: tab for tab in tabs}
         nodes = {node.id: node for node in self.map.walk()}
@@ -151,6 +154,40 @@ class MindMapController(QObject):
     @Property(bool, notify=changed)
     def canPaste(self):
         return bool(self._cut_ids)
+
+    @Property(bool, notify=changed)
+    def canCreateTab(self):
+        node = self.map.find(self._selected)
+        return (self._tabs is not None and len(self._selected_ids) == 1
+                and node is not None and node is not self.map.root
+                and node.id not in self.links)
+
+    @Slot()
+    def createTabFromSelected(self):
+        """Promote a thought in place, retaining its branch and notes.
+
+        Mindmap undo restores the thought, but never deletes project tabs: the
+        created tab is reconciled back into the map as a separate root child.
+        """
+        if not self.canCreateTab:
+            return
+        node = self.map.find(self._selected)
+        # addTab emits tabsChanged synchronously. Defer reconciliation until the
+        # new tab is linked here, otherwise it would get a duplicate root node.
+        self._creating_tab = True
+        try:
+            self._tabs.addTab(node.text)
+        finally:
+            self._creating_tab = False
+        tab = self._tabs.getAllTabs()[-1]
+
+        def mutate():
+            self.links[node.id] = tab.id
+            node.text = tab.name
+
+        self._commit(mutate)
+        self.reconcile()
+        self.revealNode.emit(node.id)
 
     def _set_selection(self, ids, primary=None):
         self._selected_ids = list(dict.fromkeys(ids))

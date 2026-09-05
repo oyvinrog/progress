@@ -28,6 +28,88 @@ def thought(controller, text='Secret thought', note='Secret note'):
     return controller.selectedId
 
 
+def test_create_tab_preserves_thought_branch_and_history(project):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    parent = thought(m, 'Parent')
+    node_id = thought(m, 'New workspace', 'Keep these notes')
+    child = thought(m, 'Child')
+    m.select(node_id)
+    m.toggleFold()
+    count = len(list(m.map.walk()))
+    tab_count = tabs.tabCount
+    current_tab = tabs.getCurrentTabData().id
+    pm.showMindmap()
+    assert m.canCreateTab
+    m.createTabFromSelected()
+    created = tabs.getAllTabs()[-1]
+    assert tabs.tabCount == tab_count + 1
+    assert created.name == 'New workspace'
+    assert created.tasks == {'tasks': []}
+    assert m.links[node_id] == created.id
+    assert len(list(m.map.walk())) == count  # No automatic duplicate root node.
+    assert m.map.find(node_id).parent.id == parent
+    assert m.map.find(node_id).note == 'Keep these notes'
+    assert m.map.find(child).parent.id == node_id
+    assert m.map.find(node_id).folded
+    assert m.selectedId == node_id and m.selectedNode['isTab']
+    assert not m.canCreateTab
+    assert pm.mindmapVisible and tabs.getCurrentTabData().id == current_tab
+    assert pm.hasUnsavedChanges()
+    m.undo()
+    assert node_id not in m.links and m.canCreateTab
+    assert tabs.tabCount == tab_count + 1  # Undo must not destroy project data.
+    assert list(m.links.values()).count(created.id) == 1
+    m.redo()
+    assert m.links[node_id] == created.id
+    assert len(list(m.map.walk())) == count
+    payload = m.to_dict()
+    m.load(payload)
+    assert m.to_dict() == payload
+    tabs.renameTab(tab_count, 'Renamed workspace')
+    assert m.map.find(node_id).text == 'Renamed workspace'
+    m.activate(node_id)
+    assert tabs.getCurrentTabData().id == created.id
+    assert not pm.mindmapVisible
+
+
+def test_create_tab_requires_one_unlinked_nonroot_node(project):
+    m = project[0].mindmap
+    tabs = project[1]
+    count = tabs.tabCount
+    assert not m.canCreateTab
+    m.createTabFromSelected()
+    m.select(next(iter(m.links)))
+    assert not m.canCreateTab
+    m.createTabFromSelected()
+    first = thought(m, 'First')
+    second = thought(m, 'Second')
+    m.select(first, 'add')
+    assert not m.canCreateTab
+    m.createTabFromSelected()
+    assert tabs.tabCount == count
+    m.select(second)
+    m.createTabFromSelected()
+    m.createTabFromSelected()
+    assert tabs.tabCount == count + 1
+    standalone = MindMapController()
+    thought(standalone)
+    assert not standalone.canCreateTab
+    standalone.createTabFromSelected()
+
+
+@pytest.mark.parametrize('title', ['', '  Main  '])
+def test_create_tab_uses_normal_tab_naming(project, title):
+    m, tabs = project[0].mindmap, project[1]
+    node_id = thought(m, title)
+    m.createTabFromSelected()
+    created = tabs.getAllTabs()[-1]
+    assert created.name == (title.strip() or f'Tab {tabs.tabCount}')
+    assert m.map.find(node_id).text == created.name
+    assert m.links[node_id] == created.id
+    assert len(set(m.links.values())) == tabs.tabCount
+
+
 def test_tab_identity_reconciliation_and_history(project):
     pm, tabs, _, _ = project
     m = pm.mindmap
@@ -299,6 +381,22 @@ def test_qml_click_drag_back_and_shortcut_isolation(project, app):
     QTest.keyClick(window, Qt.Key_Delete)
     assert m.map.find(deletable) is None
     assert diagram.rowCount() == count
+    # Convert the selected thought with the actual toolbar control, staying in
+    # the map until Open tab (or ordinary activation) is explicitly used.
+    create_button = window.findChild(QObject, 'mindmapCreateTab')
+    m.select(m.map.root.id)
+    assert not create_button.property('enabled')
+    convertible = thought(m, 'Created from mindmap')
+    QTest.qWait(30)
+    assert create_button.property('enabled')
+    tab_count = tabs.tabCount
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                     create_button.mapToScene(create_button.boundingRect().center()).toPoint())
+    QTest.qWait(30)
+    assert tabs.tabCount == tab_count + 1
+    assert m.selectedId == convertible and m.selectedNode['isTab']
+    assert pm.mindmapVisible
+    assert not create_button.property('enabled')
     pm.scrubProjectData()
     QTest.qWait(30)
     assert not warnings, warnings

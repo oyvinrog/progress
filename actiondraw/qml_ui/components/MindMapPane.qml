@@ -86,6 +86,12 @@ FocusScope {
             Button { text: "Add child"; onClicked: pane.addThought(false) }
             Button { text: "Sibling"; onClicked: pane.addThought(true) }
             Button {
+                objectName: "mindmapCreateTab"
+                text: "Create tab"
+                enabled: pane.controller && pane.controller.canCreateTab
+                onClicked: { pane.controller.createTabFromSelected(); pane.forceActiveFocus() }
+            }
+            Button {
                 text: "Open tab"
                 enabled: pane.controller && pane.controller.selectedNode.isTab === true
                 onClicked: pane.controller.activate(pane.controller.selectedId)
@@ -272,6 +278,11 @@ FocusScope {
         MenuItem { text: "Add child"; onTriggered: pane.addThought(false) }
         MenuItem { text: "Add sibling"; onTriggered: pane.addThought(true) }
         MenuItem { text: "Edit / Notes"; onTriggered: pane.editNode() }
+        MenuItem {
+            text: "Create tab"
+            enabled: pane.controller && pane.controller.canCreateTab
+            onTriggered: { pane.controller.createTabFromSelected(); pane.forceActiveFocus() }
+        }
         MenuItem { text: "Fold / Unfold"; onTriggered: pane.controller.toggleFold() }
         MenuItem { text: "Branch on left"; onTriggered: pane.controller.setSide("left") }
         MenuItem { text: "Branch on right"; onTriggered: pane.controller.setSide("right") }
