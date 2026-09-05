@@ -3,7 +3,7 @@ import json
 import uuid
 
 import pytest
-from PySide6.QtCore import QObject, QPoint, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QObject, QPoint, Qt
 from PySide6.QtTest import QTest
 
 from actiondraw.model import DiagramModel
@@ -288,6 +288,7 @@ def test_qml_click_drag_back_and_shortcut_isolation(project, app):
     pm.goBack()
     QTest.qWait(30)
     # Ctrl+click selects a tab for adding thoughts; ordinary clicks still drill.
+    m.select(m.map.root.id)
     QTest.mouseClick(window, Qt.LeftButton, Qt.ControlModifier, center(first_node))
     assert pm.mindmapVisible and m.selectedId == first_node
     # Map Delete cannot remove a selected diagram item.
@@ -303,6 +304,7 @@ def test_qml_click_drag_back_and_shortcut_isolation(project, app):
     assert not warnings, warnings
     window.close()
     engine.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
 
 def test_notes_preserve_whitespace_in_save_and_history(project):
@@ -357,3 +359,190 @@ def test_keyboard_navigation_directions_and_folded_nodes(project):
     assert m.selectedId == tab.id
     m.navigate('invalid')
     assert m.selectedId == tab.id
+
+
+def test_multi_cut_paste_preserves_branches_tab_links_and_history(project):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    root = m.map.root
+    tab = m.map.find(next(iter(m.links)))
+    parent = root.add_child('Branch')
+    child = parent.add_child('Nested', note='Keep this note')
+    target = root.add_child('Destination')
+    target.folded = True
+    m.reconcile()
+    m.select(parent.id)
+    m.select(child.id, 'toggle')
+    m.select(tab.id, 'toggle')
+    selected = set(m.selectedIds)
+    before = m.to_dict()
+    m.cutSelected()
+    assert m.canPaste and set(m.cutNodeIds) == selected
+    assert m.to_dict() == before  # Pending cut never removes unsaved content.
+    m.select(target.id)
+    m.pasteSelected()
+    assert not m.canPaste
+    assert [node.id for node in target.children] == [tab.id, parent.id]
+    assert child.parent is parent and child.note == 'Keep this note'
+    assert not target.folded and len(m.links) == tabs.tabCount
+    assert set(m.selectedIds) == {tab.id, parent.id}
+    after = m.to_dict()
+    m.undo()
+    assert m.to_dict() == before
+    assert m.selectedIds == [target.id]
+    m.redo()
+    assert m.to_dict() == after
+    assert set(m.selectedIds) == {tab.id, parent.id}
+
+
+def test_multi_paste_rejects_cycles_without_partial_moves(project):
+    m = project[0].mindmap
+    a = m.map.root.add_child('A')
+    descendant = a.add_child('Inside A')
+    b = m.map.root.add_child('B')
+    m.reconcile()
+    m.select(b.id)
+    m.select(a.id, 'toggle')
+    m.cutSelected()
+    before = m.to_dict()
+    errors = []
+    m.errorOccurred.connect(errors.append)
+    for destination in (a, descendant):
+        m.select(destination.id)
+        m.pasteSelected()
+        assert errors and m.to_dict() == before and m.canPaste
+    m.cancelCut()
+    assert not m.canPaste and not m.cutNodeIds
+    m.select(m.map.root.id)
+    assert not m.canCut
+    m.cutSelected()
+    assert not m.canPaste
+    m.select(a.id, 'toggle')
+    assert m.selectedIds == [a.id] and m.canCut
+
+
+def test_pending_cut_tracks_tab_changes_and_clears_on_scrub(project):
+    pm, tabs, _, _ = project
+    tabs.addTab('Delete this tab')
+    m = pm.mindmap
+    node_id = next(key for key, value in m.links.items() if value == tabs.getAllTabs()[1].id)
+    m.select(node_id)
+    m.cutSelected()
+    tabs.renameTab(1, 'Renamed')
+    assert m.map.find(node_id).text == 'Renamed'
+    tabs.removeTab(1)
+    assert node_id not in m.links and m.canPaste
+    m.select(m.map.root.id)
+    m.pasteSelected()
+    assert m.map.find(node_id).text == 'Renamed'
+    m.cutSelected()
+    pm.scrubProjectData()
+    assert not m.canPaste and not m.cutNodeIds
+    assert m.selectedIds == [m.map.root.id]
+    assert 'Renamed' not in str(m.to_dict())
+
+
+def test_multiselection_toggle_range_and_keyboard_extension(project):
+    m = project[0].mindmap
+    a = m.map.root.add_child('A', side='right')
+    hidden = a.add_child('Hidden')
+    a.folded = True
+    b = m.map.root.add_child('B', side='right')
+    c = m.map.root.add_child('C', side='right')
+    m.reconcile()
+    m.select(a.id)
+    m.select(c.id, 'range')
+    assert m.selectedIds == [a.id, b.id, c.id]
+    assert hidden.id not in m.selectedIds
+    m.select(b.id, 'toggle')
+    assert set(m.selectedIds) == {a.id, c.id}
+    m.select(c.id, 'toggle')
+    m.select(a.id, 'toggle')
+    assert not m.selectedIds and not m.canCut
+    m.select(a.id)
+    before = m.to_dict()
+    m.navigate('down', True)
+    assert set(m.selectedIds) == {a.id, b.id}
+    assert m.to_dict() == before
+
+
+def test_multi_delete_is_atomic_and_undo_restores_selection(project):
+    m = project[0].mindmap
+    a = m.map.root.add_child('A')
+    child = a.add_child('Child')
+    b = m.map.root.add_child('B')
+    m.reconcile()
+    m.select(a.id)
+    m.select(child.id, 'toggle')
+    m.select(b.id, 'toggle')
+    before = m.to_dict()
+    selected = m.selectedIds
+    m.deleteSelected()
+    assert m.map.find(a.id) is None and m.map.find(b.id) is None
+    m.undo()
+    assert m.to_dict() == before and m.selectedIds == selected
+    m.select(next(iter(m.links)), 'toggle')
+    m.deleteSelected()
+    assert m.to_dict() == before
+
+
+def test_qml_multi_selection_cut_and_paste(project, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    tab_id = next(iter(m.links))
+    m.map.find(tab_id).side = 'left'
+    a, b, c = [m.map.root.add_child(label, side='right') for label in ('A', 'B', 'C')]
+    m.reconcile()
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    warnings = []
+    engine.warnings.connect(lambda messages: warnings.extend(message.toString() for message in messages))
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+
+    def item_for(node_id):
+        def find(item):
+            if item.objectName() == 'mindmapNode_' + node_id:
+                return item
+            for child in item.childItems():
+                found = find(child)
+                if found is not None:
+                    return found
+            return None
+        return find(window.contentItem())
+
+    def click(node_id, modifier=Qt.NoModifier):
+        item = item_for(node_id)
+        QTest.mouseClick(window, Qt.LeftButton, modifier,
+                         item.mapToScene(item.boundingRect().center()).toPoint())
+
+    try:
+        click(a.id, Qt.ControlModifier)
+        click(b.id, Qt.ControlModifier)
+        assert set(m.selectedIds) == {a.id, b.id}
+        click(c.id, Qt.ShiftModifier)
+        assert set(m.selectedIds) == {b.id, c.id}
+        click(a.id, Qt.ControlModifier)
+        assert all(item_for(node.id).property('selected') for node in (a, b, c))
+        QTest.keyClick(window, Qt.Key_X, Qt.ControlModifier)
+        assert m.canPaste and item_for(a.id).opacity() < 1
+        click(tab_id)
+        assert pm.mindmapVisible and m.selectedId == tab_id
+        QTest.keyClick(window, Qt.Key_V, Qt.ControlModifier)
+        assert not m.canPaste
+        assert [node.id for node in m.map.find(tab_id).children] == [a.id, b.id, c.id]
+        QTest.keyClick(window, Qt.Key_Z, Qt.ControlModifier)
+        assert all(m.map.find(node.id).parent is m.map.root for node in (a, b, c))
+        QTest.keyClick(window, Qt.Key_Y, Qt.ControlModifier)
+        assert all(m.map.find(node.id).parent.id == tab_id for node in (a, b, c))
+        QTest.keyClick(window, Qt.Key_X, Qt.ControlModifier)
+        QTest.keyClick(window, Qt.Key_Escape)
+        assert not m.canPaste
+        assert not warnings, warnings
+    finally:
+        pm.scrubProjectData()
+        QTest.qWait(30)
+        window.close()
+        engine.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)

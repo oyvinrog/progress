@@ -92,6 +92,8 @@ FocusScope {
             }
             Button { text: "Edit / Notes"; onClicked: pane.editNode() }
             Button { text: "Fold"; onClicked: pane.controller.toggleFold() }
+            Button { text: "Cut"; enabled: pane.controller && pane.controller.canCut; onClicked: pane.controller.cutSelected() }
+            Button { text: "Paste"; enabled: pane.controller && pane.controller.canPaste; onClicked: pane.controller.pasteSelected() }
             Button { text: "Delete"; onClicked: pane.controller.deleteSelected() }
             Button { text: "Undo"; enabled: pane.controller && pane.controller.canUndo; onClicked: pane.controller.undo() }
             Button { text: "Redo"; enabled: pane.controller && pane.controller.canRedo; onClicked: pane.controller.redo() }
@@ -101,7 +103,9 @@ FocusScope {
         }
         Label {
             Layout.fillWidth: true
-            text: "Arrows select · Tab adds a child · Ctrl+Enter opens a tab · Ctrl+click selects a tab; click opens it · Drag to nest or reorder"
+            text: pane.controller && pane.controller.canPaste
+                ? "Branches cut: click a destination and press Ctrl+V to move them beneath it · Escape cancels"
+                : "Ctrl+click toggles selection · Shift+click selects a range · Ctrl+X / Ctrl+V moves branches · Arrows navigate · Tab adds a child · Ctrl+Enter opens a tab"
             wrapMode: Text.WordWrap
             color: "#a9bfd1"
         }
@@ -175,8 +179,10 @@ FocusScope {
                         width: modelData.width; height: modelData.height
                         radius: 8
                         color: modelData.isTab ? "#254d6c" : "#223442"
-                        border.width: pane.controller.selectedId === modelData.id ? 2 : 1
-                        border.color: pane.controller.selectedId === modelData.id ? "#a5d9ff" : "#557b98"
+                        readonly property bool selected: pane.controller.selectedIds.indexOf(modelData.id) >= 0
+                        opacity: pane.controller.cutNodeIds.indexOf(modelData.id) >= 0 ? 0.45 : 1
+                        border.width: selected ? 2 : 1
+                        border.color: selected ? "#a5d9ff" : "#557b98"
                         Text {
                             anchors.fill: parent
                             anchors.leftMargin: 9; anchors.rightMargin: 18
@@ -228,11 +234,21 @@ FocusScope {
                                 if (wasDragged) return
                                 var nodeId = nodeItem.modelData.id
                                 var tab = nodeItem.modelData.isTab
-                                pane.controller.select(nodeId)
-                                if (mouse.button === Qt.RightButton) nodeMenu.popup()
-                                else if (tab && !(mouse.modifiers & Qt.ControlModifier)) pane.controller.activate(nodeId)
+                                if (mouse.button === Qt.RightButton) {
+                                    if (!nodeItem.selected) pane.controller.select(nodeId)
+                                    nodeMenu.popup()
+                                } else if (mouse.modifiers & Qt.ControlModifier) {
+                                    pane.controller.select(nodeId, "toggle")
+                                } else if (mouse.modifiers & Qt.ShiftModifier) {
+                                    pane.controller.select(nodeId, "range")
+                                } else {
+                                    pane.controller.select(nodeId)
+                                    if (tab && !pane.controller.canPaste) pane.controller.activate(nodeId)
+                                }
                             }
-                            onDoubleClicked: if (!nodeItem.modelData.isTab) pane.editNode()
+                            onDoubleClicked: function(mouse) {
+                                if (!nodeItem.modelData.isTab && !(mouse.modifiers & (Qt.ControlModifier | Qt.ShiftModifier))) pane.editNode()
+                            }
                             ToolTip {
                                 y: nodeItem.height + 8
                                 delay: 800
@@ -250,6 +266,9 @@ FocusScope {
     onPanYChanged: edges.requestPaint()
     Menu {
         id: nodeMenu
+        MenuItem { text: "Cut branches"; enabled: pane.controller && pane.controller.canCut; onTriggered: pane.controller.cutSelected() }
+        MenuItem { text: "Paste beneath selected node"; enabled: pane.controller && pane.controller.canPaste; onTriggered: pane.controller.pasteSelected() }
+        MenuSeparator {}
         MenuItem { text: "Add child"; onTriggered: pane.addThought(false) }
         MenuItem { text: "Add sibling"; onTriggered: pane.addThought(true) }
         MenuItem { text: "Edit / Notes"; onTriggered: pane.editNode() }
@@ -296,6 +315,13 @@ FocusScope {
         }
         onRejected: { titleField.text = ""; noteField.text = ""; pane.forceActiveFocus() }
     }
+    Shortcut { sequence: "Ctrl+X"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.cutSelected() }
+    Shortcut { sequence: "Ctrl+V"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.pasteSelected() }
+    Shortcut { sequence: "Escape"; enabled: pane.shortcutsEnabled && pane.controller.canPaste; onActivated: pane.controller.cancelCut() }
+    Shortcut { sequence: "Shift+Left"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.navigate("left", true) }
+    Shortcut { sequence: "Shift+Right"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.navigate("right", true) }
+    Shortcut { sequence: "Shift+Up"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.navigate("up", true) }
+    Shortcut { sequence: "Shift+Down"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.navigate("down", true) }
     Shortcut { sequence: "Tab"; enabled: pane.shortcutsEnabled; onActivated: pane.addThought(false) }
     Shortcut { sequence: "Left"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.navigate("left") }
     Shortcut { sequence: "Right"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.navigate("right") }

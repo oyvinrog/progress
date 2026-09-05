@@ -55,8 +55,8 @@ Configure `ntfy` in the app under `Tools > Notification Settings...`. Environmen
 
 Choose **Mindmap** above the sidebar tabs. Drag nodes onto another node to nest
 them, or onto its top/bottom edge to reorder. Right-click a tab node to add
-thoughts or edit notes; a normal click opens the tab. Ctrl+click selects a tab
-without opening it. Use Alt+Left to return.
+thoughts or edit notes; a normal click opens the tab. Ctrl+click toggles nodes in the selection without opening tabs; Shift+click
+selects a range, and Shift+arrow keys extend the selection. Use Alt+Left to return.
 
 In the map, arrow keys select nearby visible nodes and keep them on screen.
 Tab adds a child to the selected node (including tabs), Ctrl+Enter opens the
@@ -66,3 +66,9 @@ background to pan. Deleting a project tab keeps its map node as a thought.
 
 The mindmap reuses the MIT-licensed [PyPlane](https://github.com/oyvinrog/pyplane)
 core, bundled with its license and source revision.
+
+To move several branches, select them and press Ctrl+X, select a destination,
+then press Ctrl+V. Cut branches stay dimmed in place until pasted; Escape
+cancels the cut. Clicking a tab while a cut is pending selects it as the
+destination. The move preserves tab links and descendants and can be undone
+with Ctrl+Z. Cut selections are local to the current project.

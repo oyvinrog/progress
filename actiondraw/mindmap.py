@@ -23,6 +23,9 @@ class MindMapController(QObject):
         self.map = MindMap('Project')
         self.links = {}
         self._selected = self.map.root.id
+        self._selected_ids = [self._selected]
+        self._selection_anchor = self._selected
+        self._cut_ids = []
         self._undo = []
         self._redo = []
         if tab_model is not None:
@@ -44,8 +47,10 @@ class MindMapController(QObject):
         for tab in tabs:
             if tab.id not in seen:
                 self.links[self.map.root.add_child(tab.name).id] = tab.id
-        if self.map.find(self._selected) is None:
-            self._selected = self.map.root.id
+        self._selected_ids = [key for key in self._selected_ids if key in nodes]
+        if self._selected and self._selected not in nodes:
+            self._set_selection(self._selected_ids or [self.map.root.id])
+        self._cut_ids = [key for key in self._cut_ids if key in nodes]
         self.sceneChanged.emit()
         self.changed.emit()
 
@@ -79,7 +84,8 @@ class MindMapController(QObject):
         self.map, self.links = self.decode(payload) if payload is not None else (MindMap('Project'), {})
         self._undo.clear()
         self._redo.clear()
-        self._selected = self.map.root.id
+        self._set_selection([self.map.root.id])
+        self._cut_ids = []
         self.reconcile()
         self.resetView.emit()
 
@@ -130,14 +136,103 @@ class MindMapController(QObject):
     def canRedo(self):
         return bool(self._redo)
 
-    @Slot(str)
-    def select(self, node_id):
-        if self.map.find(node_id):
-            self._selected = node_id
-            self.changed.emit()
+    @Property('QStringList', notify=changed)
+    def selectedIds(self):
+        return list(self._selected_ids)
+
+    @Property('QStringList', notify=changed)
+    def cutNodeIds(self):
+        return [child.id for node in self._branch_roots(self._cut_ids) for child in node.walk()]
+
+    @Property(bool, notify=changed)
+    def canCut(self):
+        return bool(self._selected_ids) and self.map.root.id not in self._selected_ids
+
+    @Property(bool, notify=changed)
+    def canPaste(self):
+        return bool(self._cut_ids)
+
+    def _set_selection(self, ids, primary=None):
+        self._selected_ids = list(dict.fromkeys(ids))
+        # The initial root selection must not prevent Ctrl+clicking movable branches.
+        if len(self._selected_ids) > 1 and self.map.root.id in self._selected_ids:
+            self._selected_ids.remove(self.map.root.id)
+        self._selected = primary if primary in self._selected_ids else next(iter(self._selected_ids), '')
+        self._selection_anchor = self._selected
+
+    def _selection_state(self):
+        return self._selected, list(self._selected_ids), self._selection_anchor
+
+    def _restore_selection(self, state):
+        self._selected, self._selected_ids, self._selection_anchor = state
 
     @Slot(str)
-    def navigate(self, direction):
+    @Slot(str, str)
+    def select(self, node_id, mode='replace'):
+        if self.map.find(node_id) is None:
+            return
+        anchor = self._selection_anchor
+        if mode == 'toggle':
+            ids = list(self._selected_ids)
+            if node_id in ids:
+                ids.remove(node_id)
+            else:
+                ids.append(node_id)
+            self._set_selection(ids, node_id)
+        elif mode == 'range':
+            visible = self._layout()
+            order = [node.id for node in self.map.walk() if node in visible]
+            if anchor in order and node_id in order:
+                start, end = sorted((order.index(anchor), order.index(node_id)))
+                self._set_selection(order[start:end + 1], node_id)
+                self._selection_anchor = anchor
+            else:
+                self._set_selection([node_id])
+        elif mode == 'add':
+            self._set_selection(self._selected_ids + [node_id], node_id)
+            self._selection_anchor = anchor
+        else:
+            self._set_selection([node_id])
+        self.changed.emit()
+
+    def _branch_roots(self, ids):
+        selected = set(ids)
+        return [node for node in self.map.walk() if node.id in selected
+                and not any(parent.id in selected for parent in node.ancestors())]
+
+    @Slot()
+    def cutSelected(self):
+        if not self.canCut:
+            return
+        self._cut_ids = [node.id for node in self._branch_roots(self._selected_ids)]
+        self.changed.emit()
+
+    @Slot()
+    def cancelCut(self):
+        self._cut_ids = []
+        self.changed.emit()
+
+    @Slot()
+    def pasteSelected(self):
+        target = self.map.find(self._selected)
+        roots = self._branch_roots(self._cut_ids)
+        if target is None or not roots:
+            return
+        if any(node is target or node in target.ancestors() for node in roots):
+            self.errorOccurred.emit('Choose a destination outside the cut branches.')
+            return
+        def mutate():
+            for node in roots:
+                node.move_to(target)
+            target.folded = False
+            self._set_selection([node.id for node in roots])
+        if self._commit(mutate):
+            self.cancelCut()
+            self.revealNode.emit(self._selected)
+
+    @Slot(str)
+    @Slot(str, bool)
+    def navigate(self, direction, extend=False):
         """Select the nearest visible node in a direction, as in PyPlane's editor."""
         if direction not in ('left', 'right', 'up', 'down'):
             return
@@ -147,7 +242,7 @@ class MindMapController(QObject):
             current = current.parent
         current = current or self.map.root
         if current.id != self._selected:
-            self.select(current.id)
+            self.select(current.id, 'add' if extend else 'replace')
             self.revealNode.emit(current.id)
             return
         origin = boxes[current]
@@ -165,26 +260,27 @@ class MindMapController(QObject):
             ranked.append((primary + perpendicular * 0.35, perpendicular / primary,
                            reading_order, node.id))
         if ranked:
-            self.select(min(ranked)[-1])
+            self.select(min(ranked)[-1], 'add' if extend else 'replace')
         self.revealNode.emit(self._selected)
 
     def _commit(self, mutation):
         before = self.to_dict()
-        selected = self._selected
+        selected = self._selection_state()
         try:
             mutation()
             self.map.validate()
         except (ValueError, IndexError) as exc:
             self.map, self.links = self.decode(before)
-            self._selected = selected
+            self._restore_selection(selected)
             self.errorOccurred.emit(str(exc))
             self.changed.emit()
-            return
+            return False
         if self.to_dict() != before:
             self._undo.append((before, selected))
             self._redo.clear()
         self.sceneChanged.emit()
         self.changed.emit()
+        return True
 
     @Slot(bool)
     def addThought(self, sibling=False):
@@ -193,7 +289,7 @@ class MindMapController(QObject):
             parent = parent.parent
         def mutate():
             parent.folded = False
-            self._selected = parent.add_child('New thought').id
+            self._set_selection([parent.add_child('New thought').id])
         self._commit(mutate)
         self.revealNode.emit(self._selected)
 
@@ -216,16 +312,19 @@ class MindMapController(QObject):
 
     @Slot()
     def deleteSelected(self):
-        node = self.map.find(self._selected)
-        if node is None or node.parent is None:
+        roots = self._branch_roots(self._selected_ids)
+        if not roots or self.map.root in roots:
             return
-        if any(n.id in self.links for n in node.walk()):
+        if any(n.id in self.links for node in roots for n in node.walk()):
             self.errorOccurred.emit('This branch contains tabs. Move the tabs out before deleting it.')
             return
         def mutate():
-            self._selected = node.parent.id
-            node.remove()
-        self._commit(mutate)
+            self._set_selection([roots[0].parent.id])
+            for node in roots:
+                node.remove()
+        if self._commit(mutate):
+            self._cut_ids = [key for key in self._cut_ids if self.map.find(key)]
+            self.changed.emit()
 
     @Slot(str, str, str)
     def moveNode(self, node_id, target_id, placement):
@@ -241,7 +340,7 @@ class MindMapController(QObject):
                     index -= 1
             node.move_to(parent, index)
             parent.folded = False
-            self._selected = node.id
+            self._set_selection([node.id])
         self._commit(mutate)
 
     @Slot(str)
@@ -253,8 +352,10 @@ class MindMapController(QObject):
     def _restore(self, source, destination):
         if not source:
             return
-        destination.append((copy.deepcopy(self.to_dict()), self._selected))
-        payload, self._selected = source.pop()
+        destination.append((copy.deepcopy(self.to_dict()), self._selection_state()))
+        payload, selection = source.pop()
+        self._restore_selection(selection)
+        self._cut_ids = []
         self.map, self.links = self.decode(payload)
         self.reconcile()
 
