@@ -5,11 +5,13 @@ import QtQuick.Layouts 1.15
 
 FocusScope {
     id: pane
+    signal canvasRequested()
     property var controller
     property real zoom: 1
     property real panX: 0
     property real panY: 0
     property bool initialized: false
+    property var viewPositions: ({})
     readonly property bool shortcutsEnabled: visible && activeFocus && !editor.visible && !nodeMenu.visible
 
     function fitMap() {
@@ -67,7 +69,18 @@ FocusScope {
         target: pane.controller
         function onSceneChanged() { edges.requestPaint() }
         function onRevealNode(nodeId) { pane.revealNode(nodeId) }
+        function onScopeChanging(oldScope, newScope) {
+            pane.viewPositions[oldScope] = { zoom: pane.zoom, x: pane.panX, y: pane.panY, initialized: pane.initialized }
+            var saved = pane.viewPositions[newScope]
+            pane.zoom = saved ? saved.zoom : 1
+            pane.panX = saved ? saved.x : 0
+            pane.panY = saved ? saved.y : 0
+            pane.initialized = saved ? saved.initialized : false
+            editor.close()
+            if (!pane.initialized) Qt.callLater(function() { if (pane.visible) pane.fitMap() })
+        }
         function onResetView() {
+            pane.viewPositions = ({})
             pane.initialized = false
             pane.zoom = 1; pane.panX = 0; pane.panY = 0
             editor.close()
@@ -83,6 +96,18 @@ FocusScope {
         Flow {
             Layout.fillWidth: true
             spacing: 5
+            Button {
+                objectName: "tabMindmapCanvas"
+                text: "Canvas"
+                visible: pane.controller && pane.controller.tabScoped
+                onClicked: pane.canvasRequested()
+            }
+            Button {
+                objectName: "mindmapComplete"
+                text: "Complete"
+                enabled: pane.controller && pane.controller.selectedIds.length > 0
+                onClicked: { pane.controller.toggleCompleted(); pane.forceActiveFocus() }
+            }
             Button { text: "Add child"; onClicked: pane.addThought(false) }
             Button { text: "Sibling"; onClicked: pane.addThought(true) }
             Button {
@@ -111,7 +136,7 @@ FocusScope {
             Layout.fillWidth: true
             text: pane.controller && pane.controller.canPaste
                 ? "Branches cut: click a destination and press Ctrl+V to move them beneath it · Escape cancels"
-                : "Ctrl+click toggles selection · Shift+click selects a range · Ctrl+X / Ctrl+V moves branches · Arrows navigate · Tab adds a child · Ctrl+Enter opens a tab"
+                : "Ctrl+click toggles selection · Shift+click selects a range · Ctrl+X / Ctrl+V moves branches · F4 completes · Arrows navigate · Tab adds a child · Ctrl+Enter opens a tab"
             wrapMode: Text.WordWrap
             color: "#a9bfd1"
         }
@@ -193,7 +218,7 @@ FocusScope {
                             anchors.fill: parent
                             anchors.leftMargin: 9; anchors.rightMargin: 18
                             verticalAlignment: Text.AlignVCenter
-                            text: (nodeItem.modelData.isTab ? "▣ " : "") + nodeItem.modelData.text
+                            text: (nodeItem.modelData.completed ? "✓ " : "") + (nodeItem.modelData.isTab ? "▣ " : "") + nodeItem.modelData.text
                             font.pixelSize: 14
                             color: "#e5f0fa"; elide: Text.ElideRight
                         }
@@ -249,7 +274,7 @@ FocusScope {
                                     pane.controller.select(nodeId, "range")
                                 } else {
                                     pane.controller.select(nodeId)
-                                    if (tab && !pane.controller.canPaste) pane.controller.activate(nodeId)
+                                    if (tab && !(pane.controller.tabScoped && nodeItem.modelData.isViewRoot) && !pane.controller.canPaste) pane.controller.activate(nodeId)
                                 }
                             }
                             onDoubleClicked: function(mouse) {
@@ -283,6 +308,7 @@ FocusScope {
             enabled: pane.controller && pane.controller.canCreateTab
             onTriggered: { pane.controller.createTabFromSelected(); pane.forceActiveFocus() }
         }
+        MenuItem { text: "Complete"; enabled: pane.controller && pane.controller.selectedIds.length > 0; onTriggered: pane.controller.toggleCompleted() }
         MenuItem { text: "Fold / Unfold"; onTriggered: pane.controller.toggleFold() }
         MenuItem { text: "Branch on left"; onTriggered: pane.controller.setSide("left") }
         MenuItem { text: "Branch on right"; onTriggered: pane.controller.setSide("right") }
@@ -340,6 +366,7 @@ FocusScope {
     Shortcut { sequence: "Down"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.navigate("down") }
     Shortcut { sequences: ["Ctrl+Return", "Ctrl+Enter"]; enabled: pane.shortcutsEnabled; onActivated: pane.controller.activate(pane.controller.selectedId) }
     Shortcut { sequence: "Return"; enabled: pane.shortcutsEnabled; onActivated: pane.addThought(true) }
+    Shortcut { sequence: "F4"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.toggleCompleted() }
     Shortcut { sequence: "F2"; enabled: pane.shortcutsEnabled; onActivated: pane.editNode() }
     Shortcut { sequence: "Delete"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.deleteSelected() }
     Shortcut { sequence: "Space"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.toggleFold() }

@@ -70,7 +70,7 @@ def test_create_tab_preserves_thought_branch_and_history(project):
     assert m.map.find(node_id).text == 'Renamed workspace'
     m.activate(node_id)
     assert tabs.getCurrentTabData().id == created.id
-    assert not pm.mindmapVisible
+    assert pm.mindmapVisible and m.view_root.id == node_id
 
 
 def test_create_tab_requires_one_unlinked_nonroot_node(project):
@@ -126,7 +126,7 @@ def test_tab_identity_reconciliation_and_history(project):
     pm.showMindmap()
     m.activate(first_node)
     assert tabs.getCurrentTabData().id == first
-    assert not pm.mindmapVisible
+    assert pm.mindmapVisible and m.view_root.id == first_node
     pm.goBack()
     assert pm.mindmapVisible
     tabs.removeTab(1)
@@ -187,7 +187,10 @@ def test_encrypted_roundtrip_dirty_and_scrub(project, tmp_path, monkeypatch):
     pm, tabs, _, _ = project
     credentials = EncryptionCredentials(passphrase='mindmap-test-passphrase')
     monkeypatch.setattr(pm, '_prompt_encryption_credentials', lambda *a: credentials)
+    tab_root = next(iter(pm.mindmap.links))
+    pm.mindmap.select(tab_root)
     node_id = thought(pm.mindmap)
+    pm.mindmap.toggleCompleted()
     pm.mindmap.select(pm.mindmap.map.root.id)
     pm.mindmap.toggleFold()
     tab_id = tabs.getAllTabs()[0].id
@@ -200,13 +203,14 @@ def test_encrypted_roundtrip_dirty_and_scrub(project, tmp_path, monkeypatch):
     payload = decrypt_project_data(envelope, credentials)
     assert payload['tabs'][0]['id'] == tab_id
     assert 'Secret thought' in payload['mindmap']['xml']
+    assert payload['mindmap']['completed'] == [node_id]
     expected = pm.mindmap.to_dict()
     pm.loadProject(str(path))
     assert pm.mindmap.to_dict() == expected
     assert pm.mindmap.map.find(node_id).note == 'Secret note'
     assert tabs.getAllTabs()[0].id == tab_id
     assert not pm.hasUnsavedChanges()
-    assert not pm.mindmapVisible
+    assert pm.mindmapVisible and pm.mindmap.view_root.id == tab_root
     pm.mindmap.select(node_id)
     pm.mindmap.editSelected('Changed', 'Changed note')
     assert pm.hasUnsavedChanges()
@@ -214,6 +218,8 @@ def test_encrypted_roundtrip_dirty_and_scrub(project, tmp_path, monkeypatch):
     assert not pm.hasUnsavedChanges()
     pm.scrubProjectData()
     assert 'Secret' not in str(pm.mindmap.to_dict())
+    assert pm.mindmap.to_dict()['completed'] == []
+    assert not pm.mindmap._view_selections
     assert not pm.mindmap.canUndo and not pm.mindmap.canRedo
     assert pm.mindmap.selectedId == pm.mindmap.map.root.id
 
@@ -366,7 +372,7 @@ def test_qml_click_drag_back_and_shortcut_isolation(project, app):
     assert 0 < selected_center.y() < viewport.height()
     assert pane.property('zoom') == 0.55
     QTest.keyClick(window, Qt.Key_Return, Qt.ControlModifier)
-    assert not pm.mindmapVisible and tabs.getCurrentTabData().id == m.links[first_node]
+    assert pm.mindmapVisible and m.tabScoped and tabs.getCurrentTabData().id == m.links[first_node]
     pm.goBack()
     QTest.qWait(30)
     # Ctrl+click selects a tab for adding thoughts; ordinary clicks still drill.
@@ -644,3 +650,157 @@ def test_qml_multi_selection_cut_and_paste(project, app):
         window.close()
         engine.deleteLater()
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+
+def test_tab_scope_shared_edits_and_boundaries(project):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    tab_root = next(iter(m.links))
+    m.select(tab_root)
+    child = thought(m, 'Child')
+    descendant = thought(m, 'Descendant')
+    m.select(m.map.root.id)
+    outside = thought(m, 'Outside')
+    pm.switchTab(0)
+    assert pm.mindmapVisible and m.view_root.id == tab_root
+    assert {n['id'] for n in m.nodes} == {tab_root, child, descendant}
+    m.select(outside)
+    assert m.selectedId == tab_root
+    before = m.to_dict()
+    m.moveNode(tab_root, child, 'child')
+    m.moveNode(child, outside, 'child')
+    m.deleteSelected()
+    m.cutSelected()
+    m.activate(tab_root)
+    assert m.to_dict() == before and not m.canPaste and not pm.canGoBack
+    m.addThought(True)  # A sibling of the view root becomes its child.
+    added = m.selectedId
+    assert m.map.find(added).parent.id == tab_root
+    m.editSelected('Local edit', 'Local note')
+    m.setSide('left')
+    decoded, _ = m.decode(m.to_dict())
+    assert decoded.find(added).side == 'left'
+    m.toggleCompleted()
+    pm.showMindmap()
+    assert m.map.find(added).text == 'Local edit'
+    m.select(added)
+    assert m.selectedNode['completed']
+    m.undo()
+    assert not m.selectedNode['completed']
+    m.redo()
+    m.editSelected('Global edit', 'Updated note')
+    pm.showTabMindmap()
+    m.select(added)
+    assert m.selectedNode['text'] == 'Global edit'
+    assert m.selectedNode['note'] == 'Updated note'
+    assert m.selectedNode['completed']
+    m.deleteSelected()
+    assert added not in m.to_dict()['completed']
+    m.undo()
+    assert added in m.to_dict()['completed']
+    tabs.renameTab(0, 'Renamed')
+    assert m.view_root.text == 'Renamed'
+
+
+def test_tab_views_nested_navigation_and_canvas(project):
+    pm, tabs, _, diagram = project
+    item_id = diagram.addBox(10, 20)
+    m = pm.mindmap
+    first = next(iter(m.links))
+    tabs.addTab('Nested')
+    second = next(k for k, v in m.links.items() if v == tabs.getAllTabs()[1].id)
+    m.moveNode(second, first, 'child')
+    m.select(second)
+    child = thought(m)
+    pm.showMindmap()
+    m.activate(first)
+    assert m.view_root.id == first
+    m.activate(second)
+    assert m.view_root.id == second and pm.mindmapVisible
+    pm.goBack()
+    assert m.view_root.id == first and pm.mindmapVisible
+    pm.goBack()
+    assert not m.tabScoped and pm.mindmapVisible
+    pm.switchTab(0)
+    pm.showTabCanvas()
+    assert not pm.mindmapVisible
+    assert any(item['id'] == item_id for item in diagram.to_dict()['items'])
+    pm.showTabMindmap()
+    assert m.view_root.id == first
+    pm.switchTab(1)
+    m.select(child)
+    m.deleteSelected()
+    assert pm.mindmapVisible and m.view_root.id == second
+    pm.switchTab(0)
+    pm.switchTab(1)
+    assert not pm.mindmapVisible
+    pm.showTabMindmap()
+    assert {n['id'] for n in m.nodes} == {second}
+    pm.removeTab(1)
+    assert m.view_root.id == first
+    assert m.map.find(second) is not None and second not in m.links
+
+
+def test_completion_selection_legacy_and_validation(project):
+    m = project[0].mindmap
+    parent = thought(m)
+    child = thought(m)
+    m.select(parent)
+    m.toggleCompleted()
+    assert m.to_dict()['completed'] == [parent]
+    m.select(child, 'add')
+    m.toggleCompleted()
+    assert set(m.to_dict()['completed']) == {parent, child}
+    m.toggleCompleted()
+    assert not m.to_dict()['completed']
+    m.undo()
+    assert set(m.to_dict()['completed']) == {parent, child}
+    payload = m.to_dict()
+    m.load(payload)
+    assert m.to_dict() == payload
+    for invalid in (None, {}, ['missing'], [parent, parent], [1], [[]]):
+        with pytest.raises(ValueError, match='completion'):
+            m.decode(dict(payload, completed=invalid))
+    del payload['completed']
+    m.load(payload)
+    assert not any(n['completed'] for n in m.nodes)
+
+
+def test_qml_tab_switch_completion_and_editor_focus(project, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    root_id = next(iter(m.links))
+    m.select(root_id)
+    child = thought(m)
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    warnings = []
+    engine.warnings.connect(lambda messages: warnings.extend(x.toString() for x in messages))
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.switchTab(0)
+    QTest.qWait(100)
+    pane = window.findChild(QObject, 'mindmapPane')
+    m.select(child)
+    pane.forceActiveFocus()
+    QTest.keyClick(window, Qt.Key_F4)
+    assert m.selectedNode['completed']
+    button = window.findChild(QObject, 'mindmapComplete')
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                     button.mapToScene(button.boundingRect().center()).toPoint())
+    assert not m.selectedNode['completed']
+    QTest.keyClick(window, Qt.Key_F2)
+    QTest.keyClick(window, Qt.Key_F4)
+    assert not m.selectedNode['completed']
+    QTest.keyClick(window, Qt.Key_Escape)
+    canvas = window.findChild(QObject, 'tabMindmapCanvas')
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                     canvas.mapToScene(canvas.boundingRect().center()).toPoint())
+    assert not pm.mindmapVisible
+    switch = window.findChild(QObject, 'tabMindmapSwitch')
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                     switch.mapToScene(switch.boundingRect().center()).toPoint())
+    assert pm.mindmapVisible and m.view_root.id == root_id
+    assert not warnings
+    window.close()
+    engine.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)

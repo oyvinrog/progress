@@ -2433,7 +2433,27 @@ class ProjectManager(QObject):
     @Slot()
     def showMindmap(self) -> None:
         self._saveCurrentTabState()
+        self.mindmap.set_scope()
         self._setMindmapVisible(True)
+
+    @Slot()
+    def showTabMindmap(self) -> None:
+        if self._tab_model is None:
+            return
+        self._saveCurrentTabState()
+        self.mindmap.set_scope(self._tab_model.getCurrentTabData().id)
+        self._setMindmapVisible(True)
+
+    @Slot()
+    def showTabCanvas(self) -> None:
+        self._setMindmapVisible(False)
+
+    def _defaultTabView(self) -> None:
+        tab = self._tab_model.getCurrentTabData()
+        node = next((self.mindmap.map.find(key) for key, value in self.mindmap.links.items()
+                     if value == tab.id), None)
+        self.mindmap.set_scope(tab.id)
+        self._setMindmapVisible(bool(node and node.children))
 
     @Slot(str)
     def openMindmapTab(self, tab_id: str) -> None:
@@ -2441,7 +2461,7 @@ class ProjectManager(QObject):
             return
         for index, tab in enumerate(self._tab_model.getAllTabs()):
             if tab.id == tab_id:
-                self._pushNavigationSnapshot(NavigationSnapshot(index, view_kind="mindmap"))
+                self._pushNavigationSnapshot(self._currentNavigationSnapshot())
                 self.switchTab(index)
                 return
 
@@ -2461,7 +2481,8 @@ class ProjectManager(QObject):
         if isinstance(current_task_index, int) and current_task_index >= 0:
             task_index = current_task_index
         return NavigationSnapshot(tab_index=tab_index, task_index=task_index,
-                                  view_kind="mindmap" if self._mindmap_visible else "diagram")
+                                  view_kind=("tab_mindmap" if self.mindmap.tabScoped else "mindmap")
+                                  if self._mindmap_visible else "diagram")
 
     def _pushNavigationSnapshot(self, snapshot: NavigationSnapshot) -> None:
         if self._restoring_navigation:
@@ -2501,6 +2522,10 @@ class ProjectManager(QObject):
             if snapshot.tab_index < 0 or snapshot.tab_index >= self._tab_model.tabCount:
                 return
             self.switchTab(snapshot.tab_index)
+            if snapshot.view_kind == "tab_mindmap":
+                self.showTabMindmap()
+                return
+            self.showTabCanvas()
 
         focus_task = getattr(self._diagram_model, "focusTask", None)
         if (
@@ -3956,7 +3981,10 @@ class ProjectManager(QObject):
                 self._tab_model.setTabs(tabs, active_tab)
 
             self.mindmap.load(project_data.get("mindmap"))
-            self._setMindmapVisible(False)
+            if self._tab_model is not None:
+                self._defaultTabView()
+            else:
+                self._setMindmapVisible(False)
 
             # Load the active tab's data into the models
             active_tab_data = tabs[active_tab]
@@ -4019,6 +4047,7 @@ class ProjectManager(QObject):
                 return
             if self._tab_model.currentTabIndex != tab_index:
                 self.switchTab(tab_index)
+        self.showTabCanvas()
         self.drillToTask(task_index)
 
     @Slot(int)
@@ -4159,6 +4188,7 @@ class ProjectManager(QObject):
         self._task_model.from_dict(tab_data.tasks)
         self._diagram_model.from_dict(tab_data.diagram)
 
+        self._defaultTabView()
         self.currentTabMarkdownTabsChanged.emit()
         self.tabSwitched.emit()
 
@@ -4199,5 +4229,6 @@ class ProjectManager(QObject):
         self._task_model.from_dict(tab_data.tasks)
         self._diagram_model.from_dict(tab_data.diagram)
 
+        self._defaultTabView()
         self.currentTabMarkdownTabsChanged.emit()
         self.tabSwitched.emit()

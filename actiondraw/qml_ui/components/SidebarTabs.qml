@@ -205,7 +205,8 @@ Rectangle {
         Button {
             Layout.fillWidth: true
             text: sidebar.isExpanded ? "Mindmap" : "◎"
-            highlighted: sidebar.projectManager ? sidebar.projectManager.mindmapVisible : false
+            highlighted: sidebar.projectManager && sidebar.projectManager.mindmapVisible
+                         && typeof mindmapController !== "undefined" && !mindmapController.tabScoped
             onClicked: if (sidebar.projectManager) sidebar.projectManager.showMindmap()
             ToolTip.visible: hovered
             ToolTip.text: "Global project mindmap"

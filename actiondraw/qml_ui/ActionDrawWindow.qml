@@ -1277,6 +1277,7 @@ ApplicationWindow {
         MindMapPane {
             id: mindmapPane
             objectName: "mindmapPane"
+            onCanvasRequested: root.projectManagerRef.showTabCanvas()
             Layout.fillWidth: true
             Layout.fillHeight: true
             visible: root.mindmapOpen
@@ -1289,6 +1290,13 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 14
+
+            Button {
+                objectName: "tabMindmapSwitch"
+                text: "Mindmap"
+                visible: !!root.projectManagerRef
+                onClicked: root.projectManagerRef.showTabMindmap()
+            }
 
             Rectangle {
                 Layout.fillWidth: true

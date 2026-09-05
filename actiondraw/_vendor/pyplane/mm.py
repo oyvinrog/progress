@@ -164,7 +164,8 @@ def _build_node(node: Node, *, is_root: bool = False, is_root_child: bool = Fals
     _set_or_remove(element, "MODIFIED", node.modified)
     _set_or_remove(element, "FOLDED", "true" if node.folded else None)
     _set_or_remove(element, "LINK", node.link)
-    position = node.side if is_root_child and node.side is not None else None
+    # Nested branches can be roots of a tab-scoped editor view.
+    position = node.side if not is_root else None
     _set_or_remove(element, "POSITION", position)
     _set_or_remove(element, "COLOR", node.style.color)
     _set_or_remove(element, "BACKGROUND_COLOR", node.style.background_color)

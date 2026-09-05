@@ -60,9 +60,20 @@ selects a range, and Shift+arrow keys extend the selection. Use Alt+Left to retu
 
 In the map, arrow keys select nearby visible nodes and keep them on screen.
 Tab adds a child to the selected node (including tabs), Ctrl+Enter opens the
-selected tab, Enter adds a sibling, F2 edits, Space folds,
+selected tab, Enter adds a sibling, F2 edits, Space folds, F4 toggles completion,
 and Ctrl+Z / Ctrl+Y undo and redo. Use the mouse wheel to zoom and drag the
 background to pan. Deleting a project tab keeps its map node as a thought.
+
+Tabs with child nodes open in a mindmap showing their branch. Use **Canvas**
+to return to the tab's canvas and **Mindmap** to view or start its branch.
+The sidebar **Mindmap** opens the full project map. Both views edit the same
+nodes, so changes and undo/redo are shared. The tab view's root stays in place;
+open nested tab nodes to view their branches and use Alt+Left to return.
+
+Use **Complete** in the toolbar or right-click menu, or press **F4**, to mark
+selected nodes with a ✓. If all selected nodes are already complete, this clears
+their marks. Descendants and canvas tasks are unaffected. Marks are saved with
+the project.
 
 The mindmap reuses the MIT-licensed [PyPlane](https://github.com/oyvinrog/pyplane)
 core, bundled with its license and source revision.
