@@ -197,7 +197,7 @@ FocusScope {
                                 var sourceId = nodeItem.modelData.id
                                 nodeItem.x = Qt.binding(function() { return nodeItem.modelData.x })
                                 nodeItem.y = Qt.binding(function() { return nodeItem.modelData.y })
-                                if (targetId) pane.controller.moveNode(sourceId, targetId, placement)
+                                if (targetId) Qt.callLater(pane.controller.moveNode, sourceId, targetId, placement)
                             }
                             onClicked: function(mouse) {
                                 if (wasDragged) return
@@ -208,9 +208,12 @@ FocusScope {
                                 else if (tab) pane.controller.activate(nodeId)
                             }
                             onDoubleClicked: if (!nodeItem.modelData.isTab) pane.editNode()
-                            ToolTip.delay: 800
-                            ToolTip.visible: containsMouse && !pressed
-                            ToolTip.text: nodeItem.modelData.text + (nodeItem.modelData.note ? "\n\n" + nodeItem.modelData.note : "")
+                            ToolTip {
+                                y: nodeItem.height + 8
+                                delay: 800
+                                visible: nodeMouse.containsMouse && !nodeMouse.pressed
+                                text: nodeItem.modelData.text + (nodeItem.modelData.note ? "\n\n" + nodeItem.modelData.note : "")
+                            }
                         }
                     }
                 }

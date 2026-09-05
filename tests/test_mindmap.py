@@ -223,6 +223,8 @@ def test_qml_click_drag_back_and_shortcut_isolation(project, app):
     pane.setProperty('zoom', 0.55)
     pane.setProperty('panX', 35.0)
     QTest.qWait(30)
+    QTest.mouseMove(window, center(node_id))
+    QTest.qWait(900)  # A visible tooltip must not intercept tab activation.
     QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, center(node_id))
     QTest.qWait(30)
     assert not pm.mindmapVisible
@@ -236,8 +238,9 @@ def test_qml_click_drag_back_and_shortcut_isolation(project, app):
     item_id = diagram.addBox(0, 0)
     window.setProperty('selectedItemId', item_id)
     count = diagram.rowCount()
-    thought(m, "Delete me")
+    deletable = thought(m, "Delete me")
     QTest.keyClick(window, Qt.Key_Delete)
+    assert m.map.find(deletable) is None
     assert diagram.rowCount() == count
     pm.scrubProjectData()
     QTest.qWait(30)
