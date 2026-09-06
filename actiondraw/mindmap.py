@@ -174,24 +174,49 @@ class MindMapController(QObject):
                 'isTab': node.id in self.links, 'folded': node.folded,
                 'isViewRoot': node is self.view_root, 'completed': node.id in self._completed}
 
-    def _layout(self):
+    def _priority_data(self):
+        """Project-wide midrank thirds, independent of the visible branch."""
+        all_tabs = self._tabs.getAllTabs() if self._tabs is not None else []
+        tabs = sorted((tab for tab in all_tabs if tab.include_in_priority_plot),
+                      key=lambda tab: tab.priority_score)
+        result = {}
+        start = 0
+        while start < len(tabs):
+            end = start + 1
+            score = tabs[start].priority_score
+            while end < len(tabs) and tabs[end].priority_score == score:
+                end += 1
+            percentile = (start + end) / (2 * len(tabs))
+            level = 1 if percentile < 1 / 3 else 3 if percentile >= 2 / 3 else 2
+            for tab in tabs[start:end]:
+                result[tab.id] = {'priorityScore': score, 'priorityLevel': level}
+            start = end
+        return result
+
+    def _layout(self, priorities=None):
+        if priorities is None:
+            priorities = self._priority_data()
         font = QFont()
         font.setPixelSize(14)
         metrics = QFontMetricsF(font)
         sizes = {}
         for node in self.view_root.walk():
             padding = 74.0 if node.id in self._completed else 52.0
+            if self.links.get(node.id) in priorities:
+                padding += 30.0
             sizes[node] = (max(110.0, min(380.0, metrics.horizontalAdvance(node.text) + padding)), 40.0)
         # Layout only needs a root; keep the canonical tree's parent links intact.
         return layout(SimpleNamespace(root=self.view_root), sizes)
 
     @Property('QVariantList', notify=sceneChanged)
     def nodes(self):
+        priorities = self._priority_data()
         return [{'id': n.id, 'text': n.text, 'note': n.note or '', 'x': b.x, 'y': b.y,
                  'width': b.width, 'height': b.height, 'isTab': n.id in self.links,
                  'folded': n.folded, 'hasChildren': bool(n.children),
-                 'isViewRoot': n is self.view_root, 'completed': n.id in self._completed}
-                for n, b in self._layout().items()]
+                 'isViewRoot': n is self.view_root, 'completed': n.id in self._completed,
+                 **priorities.get(self.links.get(n.id), {'priorityScore': None, 'priorityLevel': 0})}
+                for n, b in self._layout(priorities).items()]
 
     @Property('QVariantList', notify=sceneChanged)
     def edges(self):

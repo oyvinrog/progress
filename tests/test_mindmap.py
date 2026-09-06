@@ -1,11 +1,13 @@
 """Global mindmap integration, persistence and real QML interaction tests."""
 import copy
 import json
+import math
 import uuid
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, QMetaObject, QObject, QPoint, Qt
 from PySide6.QtTest import QTest
+from PySide6.QtQml import QQmlProperty
 
 from actiondraw.model import DiagramModel
 from actiondraw.mindmap import MindMapController
@@ -27,6 +29,126 @@ def thought(controller, text='Secret thought', note='Secret note'):
     controller.addThought(False)
     controller.editSelected(text, note)
     return controller.selectedId
+
+
+def priority_tasks(tabs, values):
+    while len(tabs.getAllTabs()) < len(values):
+        tabs.addTab('Priority task ' + str(len(tabs.getAllTabs())))
+    ids = [tab.id for tab in tabs.getAllTabs()]
+    for tab_id, value in zip(ids, values):
+        index = next(i for i, tab in enumerate(tabs.getAllTabs()) if tab.id == tab_id)
+        tabs.setPriorityPoint(index, math.e, value)
+    return ids
+
+
+@pytest.mark.parametrize('values,levels', [
+    ([0, 1, 2, 3, 4, 5], [1, 1, 2, 2, 3, 3]),
+    ([0, 0, 0, 1, 2, 3], [1, 1, 1, 2, 3, 3]),
+    ([1, 1, 1, 1], [2, 2, 2, 2]),
+    ([0], [2]),
+    ([0, 5], [1, 3]),
+])
+def test_mindmap_priority_ranks(project, values, levels):
+    pm, tabs, _, _ = project
+    ids = priority_tasks(tabs, values)
+    nodes = {pm.mindmap.links[n['id']]: n for n in pm.mindmap.nodes if n['isTab']}
+    assert [nodes[key]['priorityLevel'] for key in ids] == levels
+    assert [nodes[key]['priorityScore'] for key in ids] == pytest.approx(values)
+
+
+def test_mindmap_priority_scope_exclusion_and_updates(project):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    ids = priority_tasks(tabs, [0, 3, 6])
+    linked = {tab_id: node_id for node_id, tab_id in m.links.items()}
+    root = linked[ids[0]]
+    m.moveNode(linked[ids[1]], root, 'child')
+    m.select(root)
+    note = thought(m)
+    before = {n['id']: n['priorityLevel'] for n in m.nodes}
+    assert before[note] == before[m.map.root.id] == 0
+    m.set_scope(ids[0])
+    assert all(n['priorityLevel'] == before[n['id']] for n in m.nodes)
+    m.select(root)
+    m.toggleFold()
+    assert m.nodes[0]['priorityLevel'] == before[root]
+    m.toggleFold()
+    saved = m.to_dict()
+    notifications = []
+    m.sceneChanged.connect(lambda: notifications.append(True))
+    index = next(i for i, tab in enumerate(tabs.getAllTabs()) if tab.id == ids[0])
+    tabs.setPriorityPoint(index, math.e, 9)
+    assert notifications
+    assert next(n for n in m.nodes if n['id'] == root)['priorityLevel'] == 3
+    assert tabs.getAllTabs()[0].id == ids[0]
+    notifications.clear()
+    tabs.setPriorityPoint(0, math.e, 10)  # Same ordering still refreshes the scene.
+    assert notifications
+    assert next(n for n in m.nodes if n['id'] == root)['priorityScore'] == pytest.approx(10)
+    tabs.setIncludeInPriorityPlot(0, False)
+    node = next(n for n in m.nodes if n['id'] == root)
+    assert node['priorityLevel'] == 0 and node['priorityScore'] is None
+    assert m.to_dict() == saved
+
+
+def test_qml_mindmap_priority_rendering(project, app):
+    pm, tabs, tasks, diagram = project
+    ids = priority_tasks(tabs, [0, 3, 6])
+    m = pm.mindmap
+    linked = {tab_id: node_id for node_id, tab_id in m.links.items()}
+    high = linked[ids[2]]
+    m.map.find(high).note = 'Keep this note'
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    warnings = []
+    engine.warnings.connect(lambda messages: warnings.extend(message.toString() for message in messages))
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+
+    def find(item, name):
+        if item.objectName() == name:
+            return item
+        for child in item.childItems():
+            found = find(child, name)
+            if found is not None:
+                return found
+
+    try:
+        for tab_id, level, color in zip(ids, [1, 2, 3], ['#2b3e4c', '#294f6b', '#246594']):
+            node_id = linked[tab_id]
+            node = find(window.contentItem(), 'mindmapNode_' + node_id)
+            assert node.property('color').name() == color
+            bars = find(node, 'mindmapPriority_' + node_id)
+            assert bars.isVisible() and bars.property('level') == level
+            filled = [child for child in bars.childItems()
+                      if child.property('color') is not None and child.property('color').alpha() > 0]
+            assert len(filled) == level
+        m.select(high)
+        QTest.qWait(20)
+        node = find(window.contentItem(), 'mindmapNode_' + high)
+        assert node.property('selected')
+        assert QQmlProperty.read(node, 'border.width') == 2
+        assert QQmlProperty.read(node, 'border.color').name() == '#a5d9ff'
+        tooltip = node.findChild(QObject, 'mindmapTooltip_' + high)
+        assert 'Relative priority: Higher · Score: 6.00' in tooltip.property('text')
+        assert m.map.find(high).text in tooltip.property('text')
+        assert 'Keep this note' in tooltip.property('text')
+        m.toggleCompleted()
+        m.cutSelected()
+        QTest.qWait(20)
+        node = find(window.contentItem(), 'mindmapNode_' + high)
+        assert node.opacity() == pytest.approx(0.45)
+        assert any(str(child.property('text')).startswith('✓ ') for child in node.childItems())
+        index = next(i for i, tab in enumerate(tabs.getAllTabs()) if tab.id == ids[2])
+        tabs.setIncludeInPriorityPlot(index, False)
+        QTest.qWait(20)
+        node = find(window.contentItem(), 'mindmapNode_' + high)
+        assert node.property('color').name() == '#254d6c'
+        assert not find(node, 'mindmapPriority_' + high).isVisible()
+        assert not warnings
+    finally:
+        window.close()
 
 
 def test_delete_linked_branch_restores_complete_tabs_and_preserves_survivor(project):

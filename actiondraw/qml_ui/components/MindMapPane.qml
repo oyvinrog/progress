@@ -14,6 +14,32 @@ FocusScope {
     property var viewPositions: ({})
     readonly property bool shortcutsEnabled: visible && activeFocus && !editor.visible && !nodeMenu.visible
 
+    function priorityColor(level) {
+        return level === 3 ? "#246594" : level === 2 ? "#294f6b" : "#2b3e4c"
+    }
+    function priorityLabel(level) {
+        return level === 3 ? "Higher" : level === 2 ? "Middle" : "Lower"
+    }
+    component PriorityBars: Row {
+        id: priorityBars
+        property int level: 0
+        spacing: 2
+        width: 22
+        height: 14
+        Repeater {
+            model: 3
+            Rectangle {
+                required property int index
+                width: 6
+                height: 6 + index * 4
+                y: 14 - height
+                color: index < priorityBars.level ? "#e5f0fa" : "transparent"
+                border.color: "#a9bfd1"
+                radius: 1
+            }
+        }
+    }
+
     function fitMap() {
         if (!controller || viewport.width <= 0 || viewport.height <= 0) return
         var nodes = controller.nodes
@@ -140,6 +166,28 @@ FocusScope {
             wrapMode: Text.WordWrap
             color: "#a9bfd1"
         }
+        Flow {
+            Layout.fillWidth: true
+            spacing: 12
+            Label { text: "Relative priority:"; color: "#a9bfd1" }
+            Repeater {
+                model: 3
+                delegate: Rectangle {
+                    required property int index
+                    width: legendContent.width + 12
+                    height: 24
+                    radius: 4
+                    color: pane.priorityColor(index + 1)
+                    Row {
+                        id: legendContent
+                        anchors.centerIn: parent
+                        spacing: 6
+                        PriorityBars { level: index + 1; anchors.verticalCenter: parent.verticalCenter }
+                        Label { text: pane.priorityLabel(index + 1); color: "#e5f0fa" }
+                    }
+                }
+            }
+        }
         Item {
             id: viewport
             objectName: "mindmapViewport"
@@ -209,18 +257,26 @@ FocusScope {
                         x: modelData.x; y: modelData.y
                         width: modelData.width; height: modelData.height
                         radius: 8
-                        color: modelData.isTab ? "#254d6c" : "#223442"
+                        color: modelData.priorityLevel > 0 ? pane.priorityColor(modelData.priorityLevel)
+                              : modelData.isTab ? "#254d6c" : "#223442"
                         readonly property bool selected: pane.controller.selectedIds.indexOf(modelData.id) >= 0
                         opacity: pane.controller.cutNodeIds.indexOf(modelData.id) >= 0 ? 0.45 : 1
                         border.width: selected ? 2 : 1
                         border.color: selected ? "#a5d9ff" : "#557b98"
                         Text {
                             anchors.fill: parent
-                            anchors.leftMargin: 9; anchors.rightMargin: 18
+                            anchors.leftMargin: 9; anchors.rightMargin: nodeItem.modelData.priorityLevel > 0 ? 48 : 18
                             verticalAlignment: Text.AlignVCenter
                             text: (nodeItem.modelData.completed ? "✓ " : "") + (nodeItem.modelData.isTab ? "▣ " : "") + nodeItem.modelData.text
                             font.pixelSize: 14
                             color: "#e5f0fa"; elide: Text.ElideRight
+                        }
+                        PriorityBars {
+                            objectName: "mindmapPriority_" + nodeItem.modelData.id
+                            anchors.right: parent.right; anchors.rightMargin: 20
+                            anchors.verticalCenter: parent.verticalCenter
+                            level: nodeItem.modelData.priorityLevel
+                            visible: level > 0
                         }
                         Text {
                             anchors.right: parent.right; anchors.rightMargin: 5
@@ -297,10 +353,15 @@ FocusScope {
                                 if (!nodeItem.modelData.isTab && !(mouse.modifiers & (Qt.ControlModifier | Qt.ShiftModifier))) pane.editNode()
                             }
                             ToolTip {
+                                objectName: "mindmapTooltip_" + nodeItem.modelData.id
                                 y: nodeItem.height + 8
                                 delay: 800
                                 visible: nodeMouse.containsMouse && !nodeMouse.pressed
-                                text: nodeItem.modelData.text + (nodeItem.modelData.note ? "\n\n" + nodeItem.modelData.note : "")
+                                text: nodeItem.modelData.text
+                                      + (nodeItem.modelData.priorityLevel > 0
+                                         ? "\nRelative priority: " + pane.priorityLabel(nodeItem.modelData.priorityLevel)
+                                           + " · Score: " + nodeItem.modelData.priorityScore.toFixed(2) : "")
+                                      + (nodeItem.modelData.note ? "\n\n" + nodeItem.modelData.note : "")
                             }
                         }
                     }

@@ -70,6 +70,13 @@ The sidebar **Mindmap** opens the full project map. Both views edit the same
 nodes, so changes and undo/redo are shared. The tab view's root stays in place;
 open nested tab nodes to view their branches and use Alt+Left to return.
 
+Task nodes use three blue shades and one, two, or three filled bars to show
+lower, middle, or higher relative priority from the priority plot's calculated
+score. Levels compare all included project tabs, so opening or folding a branch
+does not change the scale. Tied scores share a level; a single task or all-equal
+scores use the middle level. Hover over a task for its score. Notes and tabs
+excluded from the priority plot have no priority indicator.
+
 Use **Complete** in the toolbar or right-click menu, or press **F4**, to mark
 selected nodes with a ✓. If all selected nodes are already complete, this clears
 their marks. Descendants and canvas tasks are unaffected. Marks are saved with
