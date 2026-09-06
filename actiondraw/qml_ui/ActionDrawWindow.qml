@@ -319,13 +319,14 @@ ApplicationWindow {
     }
 
     function showNextReminderAlert() {
-        if (root.reminderPopupBusy)
+        if (root.reminderPopupBusy || dialogs.reminderDialog.visible)
             return
         if (!root.reminderQueue || root.reminderQueue.length === 0)
             return
         root.reminderPopupBusy = true
         var nextReminder = root.reminderQueue.shift()
         root.pendingReminderKind = nextReminder.kind || "task"
+        root.pendingReminderNodeId = nextReminder.nodeId || ""
         root.pendingReminderTabIndex = nextReminder.tabIndex
         root.pendingReminderTaskIndex = nextReminder.taskIndex
         root.pendingReminderStandaloneIndex = nextReminder.standaloneIndex !== undefined ? nextReminder.standaloneIndex : -1
@@ -334,8 +335,9 @@ ApplicationWindow {
         reminderPopup.open()
     }
 
-    function showReminderAlert(tabIndex, taskIndex, taskTitle, kind, standaloneIndex, sendNotification) {
+    function showReminderAlert(tabIndex, taskIndex, taskTitle, kind, standaloneIndex, sendNotification, nodeId) {
         var reminder = {
+            nodeId: nodeId || "",
             kind: kind && kind.length > 0 ? kind : "task",
             tabIndex: tabIndex,
             taskIndex: taskIndex,
@@ -351,6 +353,11 @@ ApplicationWindow {
     function openReminderRenewDialog() {
         if (!dialogs || !dialogs.reminderDialog)
             return
+        if (root.pendingReminderKind === "mindmap") {
+            dialogs.openMindmapReminderDialog(root.pendingReminderNodeId, "", root.pendingReminderSendNotification)
+            return
+        }
+        dialogs.reminderDialog.targetTabIndex = root.pendingReminderTabIndex
         dialogs.reminderDialog.dateValue = ""
         dialogs.reminderDialog.timeValue = ""
         dialogs.reminderDialog.sendNotification = root.pendingReminderSendNotification
@@ -540,6 +547,8 @@ ApplicationWindow {
     property real pendingEdgeDropY: 0
     property string selectedItemId: ""
     property string lastCreatedTaskId: ""
+    readonly property var actionDialogsRef: dialogs
+    property string pendingReminderNodeId: ""
     property int pendingReminderTabIndex: 0
     property int pendingReminderTaskIndex: -1
     property int pendingReminderStandaloneIndex: -1
@@ -1274,6 +1283,18 @@ ApplicationWindow {
             onTabDragReleased: root.handleTabDragRelease
         }
 
+        ColumnLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: 10
+
+            ReminderOverview {
+                Layout.fillWidth: true
+                windowRoot: root
+                projectManager: root.projectManagerRef
+                dialogs: root.actionDialogsRef
+            }
+
         MindMapPane {
             id: mindmapPane
             objectName: "mindmapPane"
@@ -1282,6 +1303,12 @@ ApplicationWindow {
             Layout.fillHeight: true
             visible: root.mindmapOpen
             controller: typeof mindmapController !== "undefined" ? mindmapController : null
+            reminderDialogOpen: dialogs.reminderDialog.visible || reminderPopup.visible
+            onReminderRequested: function(nodeId) {
+                var data = controller.reminderData(nodeId)
+                dialogs.openMindmapReminderDialog(nodeId, data.reminderAt, data.reminderSendNotification)
+            }
+            onClearReminderRequested: function(nodeId) { projectManager.clearMindmapReminder(nodeId) }
         }
 
         // Main content area (right side)
@@ -1300,9 +1327,7 @@ ApplicationWindow {
 
             Rectangle {
                 Layout.fillWidth: true
-                visible: !!projectManager
-                    || (root.activeReminders && root.activeReminders.length > 0)
-                    || (root.activeContracts && root.activeContracts.length > 0)
+                visible: root.activeContracts && root.activeContracts.length > 0
                 radius: 10
                 color: "#18232d"
                 border.color: "#3a5266"
@@ -1314,153 +1339,6 @@ ApplicationWindow {
                     anchors.fill: parent
                     anchors.margins: 8
                     spacing: 8
-
-                    Rectangle {
-                        width: overviewColumn.width
-                        height: reminderHeaderRow.implicitHeight + 12
-                        radius: 8
-                        color: "#21313d"
-                        border.color: "#3b566a"
-                        border.width: 1
-                        visible: projectManager !== null
-
-                        RowLayout {
-                            id: reminderHeaderRow
-                            anchors.fill: parent
-                            anchors.leftMargin: 10
-                            anchors.rightMargin: 10
-                            spacing: 10
-
-                            Text {
-                                text: "Waiting Reminders"
-                                color: "#ffe4c7"
-                                font.pixelSize: 12
-                                font.bold: true
-                            }
-
-                            Text {
-                                text: (root.activeReminders ? root.activeReminders.length : 0) + " pending"
-                                color: "#d6a66b"
-                                font.pixelSize: 10
-                                font.bold: true
-                            }
-
-                            Item {
-                                Layout.fillWidth: true
-                            }
-
-                            Button {
-                                text: "New Reminder"
-                                onClicked: dialogs.openStandaloneReminderDialog()
-                            }
-
-                            Button {
-                                text: root.reminderOverviewExpanded ? "Roll Up" : "Roll Down"
-                                onClicked: {
-                                    root.reminderOverviewExpanded = !root.reminderOverviewExpanded
-                                    root.reminderOverviewTouched = true
-                                }
-                            }
-                        }
-                    }
-
-                    Column {
-                        width: overviewColumn.width
-                        spacing: 6
-                        visible: root.activeReminders && root.activeReminders.length > 0 && root.reminderOverviewExpanded
-
-                        Repeater {
-                            model: root.activeReminders
-                            delegate: Rectangle {
-                                width: overviewColumn.width
-                                height: 44
-                                radius: 6
-                                color: "#2e261f"
-                                border.color: "#8d6948"
-                                border.width: 1
-
-                                RowLayout {
-                                    anchors.fill: parent
-                                    anchors.leftMargin: 8
-                                    anchors.rightMargin: 8
-                                    spacing: 8
-
-                                    Column {
-                                        Layout.fillWidth: true
-                                        spacing: 1
-
-                                        Text {
-                                            text: "[" + modelData.tabName + "] " + (modelData.title || modelData.taskTitle)
-                                            color: "#fff7ef"
-                                            font.pixelSize: 11
-                                            font.bold: true
-                                            elide: Text.ElideRight
-                                        }
-
-                                        Text {
-                                            text: "Due in " + (modelData.countdownText || "0:00")
-                                            color: "#ffe3a8"
-                                            font.pixelSize: 10
-                                            font.bold: true
-                                            elide: Text.ElideRight
-                                        }
-
-                                        Text {
-                                            text: "Remind at " + modelData.reminderText
-                                            color: "#f1c892"
-                                            font.pixelSize: 10
-                                            elide: Text.ElideRight
-                                        }
-                                    }
-
-                                    Button {
-                                        text: "Open Task"
-                                        visible: modelData.kind !== "standalone"
-                                        onClicked: {
-                                            if (projectManager && projectManager.openTabTask)
-                                                projectManager.openTabTask(Number(modelData.tabIndex), Number(modelData.taskIndex))
-                                        }
-                                    }
-
-                                    Button {
-                                        text: "Edit"
-                                        onClicked: {
-                                            if (!dialogs)
-                                                return
-                                            if (modelData.kind === "standalone" && dialogs.openStandaloneReminderEditDialog) {
-                                                dialogs.openStandaloneReminderEditDialog(
-                                                    Number(modelData.standaloneIndex),
-                                                    modelData.title || modelData.taskTitle,
-                                                    modelData.reminderText,
-                                                    modelData.sendNotification || false
-                                                )
-                                            } else if (dialogs.openTaskReminderEditDialog) {
-                                                dialogs.openTaskReminderEditDialog(
-                                                    Number(modelData.tabIndex),
-                                                    Number(modelData.taskIndex),
-                                                    modelData.reminderText,
-                                                    modelData.sendNotification || false
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    Button {
-                                        text: "Clear"
-                                        onClicked: {
-                                            if (modelData.kind === "standalone" && projectManager && projectManager.clearStandaloneReminder) {
-                                                projectManager.clearStandaloneReminder(Number(modelData.standaloneIndex))
-                                                root.refreshActiveReminders()
-                                            } else if (projectManager && projectManager.clearReminder) {
-                                                projectManager.clearReminder(Number(modelData.tabIndex), Number(modelData.taskIndex))
-                                                root.refreshActiveReminders()
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
 
                     Rectangle {
                         width: overviewColumn.width
@@ -4405,6 +4283,7 @@ ApplicationWindow {
             }
         }
         }  // Close main content ColumnLayout
+        }  // Close shared content ColumnLayout
     }  // Close outer RowLayout
 
     Rectangle {
@@ -4522,6 +4401,7 @@ ApplicationWindow {
 
     Popup {
         id: reminderPopup
+        objectName: "reminderDuePopup"
         modal: false
         focus: true
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
@@ -4567,13 +4447,17 @@ ApplicationWindow {
                 spacing: 8
 
                 Button {
-                    text: "Open Task"
+                    text: root.pendingReminderKind === "mindmap" ? "Open Node" : "Open Task"
                     visible: root.pendingReminderKind !== "standalone"
                     onClicked: {
                         var tabIndex = root.pendingReminderTabIndex
                         var taskIndex = root.pendingReminderTaskIndex
+                        var kind = root.pendingReminderKind
+                        var nodeId = root.pendingReminderNodeId
                         reminderPopup.close()
-                        if (projectManager && projectManager.openReminderTask) {
+                        if (kind === "mindmap") {
+                            projectManager.openMindmapReminder(nodeId)
+                        } else if (projectManager && projectManager.openReminderTask) {
                             projectManager.openReminderTask(tabIndex, taskIndex)
                         } else {
                             root.drillToTask(taskIndex)
@@ -4582,10 +4466,11 @@ ApplicationWindow {
                 }
 
                 Button {
+                    objectName: "renewDueReminder"
                     text: "Renew"
                     onClicked: {
+                        root.openReminderRenewDialog()
                         reminderPopup.close()
-                        Qt.callLater(root.openReminderRenewDialog)
                     }
                 }
 
@@ -4683,6 +4568,11 @@ ApplicationWindow {
     }
 
     Connections {
+        target: typeof mindmapController !== "undefined" ? mindmapController : null
+        function onChanged() { root.refreshActiveReminders() }
+    }
+
+    Connections {
         target: projectManager
         enabled: projectManager !== null
         function onSaveCompleted(filePath) {
@@ -4734,6 +4624,11 @@ ApplicationWindow {
             root.showWindow()
             root.refreshActiveReminders()
             root.showReminderAlert(tabIndex, taskIndex, taskTitle, "task", -1, sendNotification)
+        }
+        function onMindmapReminderDue(nodeId, title, sendNotification) {
+            root.showWindow()
+            root.refreshActiveReminders()
+            root.showReminderAlert(-1, -1, title, "mindmap", -1, sendNotification, nodeId)
         }
         function onStandaloneReminderDue(title, sendNotification) {
             root.showWindow()

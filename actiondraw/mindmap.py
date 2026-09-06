@@ -1,6 +1,8 @@
 """Project-owned mindmap with stable tab references and a QML-facing editor API."""
 import copy
+import math
 import weakref
+from datetime import datetime
 from types import SimpleNamespace
 
 from PySide6.QtCore import QObject, Property, Signal, Slot
@@ -26,6 +28,7 @@ class MindMapController(QObject):
         self.map = MindMap('Project')
         self.links = {}
         self._completed = set()
+        self.reminders = {}
         self._scope_tab = None
         self._view_selections = {}
         self._selected = self.map.root.id
@@ -92,6 +95,8 @@ class MindMapController(QObject):
                 self._completed.difference_update(ids)
             else:
                 self._completed.update(ids)
+                for node_id in ids:
+                    self.reminders.pop(node_id, None)
         self._commit(mutate)
 
     def reconcile(self, *args):
@@ -111,6 +116,7 @@ class MindMapController(QObject):
             if tab.id not in seen:
                 self.links[self.map.root.add_child(tab.name).id] = tab.id
         self._completed.intersection_update(nodes)
+        self.reminders = {key: value for key, value in self.reminders.items() if key in nodes}
         self._selected_ids = [key for key in self._selected_ids if self._in_scope(self.map.find(key))]
         if not self._selected_ids or self._selected not in self._selected_ids:
             self._set_selection(self._selected_ids or [self.view_root.id])
@@ -120,7 +126,8 @@ class MindMapController(QObject):
 
     def to_dict(self):
         return {'version': 1, 'xml': dumps(self.map).decode('utf-8'),
-                'tab_links': dict(self.links), 'completed': sorted(self._completed)}
+                'tab_links': dict(self.links), 'completed': sorted(self._completed),
+                'reminders': copy.deepcopy(self.reminders)}
 
     @staticmethod
     def decode(payload):
@@ -147,11 +154,27 @@ class MindMapController(QObject):
                 or any(not isinstance(key, str) or mindmap.find(key) is None for key in completed)
                 or len(set(completed)) != len(completed)):
             raise ValueError('Malformed mindmap completion data')
+        reminders = payload.get('reminders', {})
+        if not isinstance(reminders, dict):
+            raise ValueError('Malformed mindmap reminders')
+        for node_id, reminder in reminders.items():
+            if (not isinstance(node_id, str) or mindmap.find(node_id) is None
+                    or not isinstance(reminder, dict)
+                    or type(reminder.get('at')) not in (int, float)
+                    or type(reminder.get('send_notification')) is not bool):
+                raise ValueError('Malformed mindmap reminder')
+            try:
+                if not math.isfinite(reminder['at']):
+                    raise ValueError('Non-finite reminder date')
+                datetime.fromtimestamp(reminder['at'])
+            except (ValueError, OverflowError, OSError) as exc:
+                raise ValueError('Malformed mindmap reminder date') from exc
         return mindmap, dict(links)
 
     def load(self, payload=None):
         self.map, self.links = self.decode(payload) if payload is not None else (MindMap('Project'), {})
         self._completed = set((payload or {}).get('completed', []))
+        self.reminders = copy.deepcopy((payload or {}).get('reminders', {}))
         self._scope_tab = None
         self._view_selections.clear()
         self._undo.clear()
@@ -172,7 +195,51 @@ class MindMapController(QObject):
             return {}
         return {'id': node.id, 'text': node.text, 'note': node.note or '',
                 'isTab': node.id in self.links, 'folded': node.folded,
-                'isViewRoot': node is self.view_root, 'completed': node.id in self._completed}
+                'isViewRoot': node is self.view_root, 'completed': node.id in self._completed,
+                **self.reminderData(node.id)}
+
+    @Slot(str, result='QVariantMap')
+    def reminderData(self, node_id):
+        reminder = self.reminders.get(node_id)
+        return {'reminderActive': reminder is not None,
+                'reminderAt': datetime.fromtimestamp(reminder['at']).strftime('%Y-%m-%d %H:%M') if reminder else '',
+                'reminderSendNotification': reminder['send_notification'] if reminder else False}
+
+    def set_reminder(self, node_id, timestamp, send_notification=False):
+        if self.map.find(node_id) is None:
+            return False
+        return self._commit(lambda: self.reminders.update({
+            node_id: {'at': timestamp, 'send_notification': bool(send_notification)}}))
+
+    @Slot(str)
+    def clearReminder(self, node_id):
+        if node_id in self.reminders:
+            self._commit(lambda: self.reminders.pop(node_id, None))
+
+    def consume_reminder(self, node_id):
+        """Delivery is not undoable; scrub this schedule from both history stacks."""
+        reminder = self.reminders.pop(node_id, None)
+        if reminder is None:
+            return
+        for payload, _, _ in self._undo + self._redo:
+            saved = payload.get('reminders', {})
+            if saved.get(node_id) == reminder:
+                saved.pop(node_id)
+        self.sceneChanged.emit()
+        self.changed.emit()
+
+    def reveal_reminder(self, node_id):
+        node = self.map.find(node_id)
+        if node is None:
+            return False
+        if not self._in_scope(node):
+            self.set_scope()
+        for ancestor in node.ancestors():
+            ancestor.folded = False
+        self.select(node_id)
+        self.sceneChanged.emit()
+        self.revealNode.emit(node_id)
+        return True
 
     def _priority_data(self):
         """Project-wide midrank thirds, independent of the visible branch."""
@@ -204,7 +271,10 @@ class MindMapController(QObject):
             padding = 74.0 if node.id in self._completed else 52.0
             if self.links.get(node.id) in priorities:
                 padding += 30.0
-            sizes[node] = (max(110.0, min(380.0, metrics.horizontalAdvance(node.text) + padding)), 40.0)
+            width = max(110.0, min(380.0, metrics.horizontalAdvance(node.text) + padding))
+            if node.id in self.reminders:
+                width = max(width, 210.0)
+            sizes[node] = (width, 64.0 if node.id in self.reminders else 40.0)
         # Layout only needs a root; keep the canonical tree's parent links intact.
         return layout(SimpleNamespace(root=self.view_root), sizes)
 
@@ -215,6 +285,7 @@ class MindMapController(QObject):
                  'width': b.width, 'height': b.height, 'isTab': n.id in self.links,
                  'folded': n.folded, 'hasChildren': bool(n.children),
                  'isViewRoot': n is self.view_root, 'completed': n.id in self._completed,
+                 **self.reminderData(n.id),
                  **priorities.get(self.links.get(n.id), {'priorityScore': None, 'priorityLevel': 0})}
                 for n, b in self._layout(priorities).items()]
 
@@ -405,10 +476,13 @@ class MindMapController(QObject):
         try:
             mutation()
             self.map.validate()
-            self._completed.intersection_update(n.id for n in self.map.walk())
+            live = {n.id for n in self.map.walk()}
+            self._completed.intersection_update(live)
+            self.reminders = {key: value for key, value in self.reminders.items() if key in live}
         except (ValueError, IndexError) as exc:
             self.map, self.links = self.decode(before)
             self._completed = set(before.get('completed', []))
+            self.reminders = copy.deepcopy(before.get('reminders', {}))
             self._restore_selection(selected)
             self.errorOccurred.emit(str(exc))
             self.changed.emit()
@@ -580,6 +654,7 @@ class MindMapController(QObject):
         self._cut_ids = []
         self.map, self.links = self.decode(payload)
         self._completed = set(payload.get('completed', []))
+        self.reminders = copy.deepcopy(payload.get('reminders', {}))
         if tab_state is not None:
             live = {tab.id for tab in self._tabs.getAllTabs()}
             self._view_selections = {key: value for key, value in self._view_selections.items()

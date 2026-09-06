@@ -6,13 +6,16 @@ import QtQuick.Layouts 1.15
 FocusScope {
     id: pane
     signal canvasRequested()
+    signal reminderRequested(string nodeId)
+    signal clearReminderRequested(string nodeId)
+    property bool reminderDialogOpen: false
     property var controller
     property real zoom: 1
     property real panX: 0
     property real panY: 0
     property bool initialized: false
     property var viewPositions: ({})
-    readonly property bool shortcutsEnabled: visible && activeFocus && !editor.visible && !nodeMenu.visible
+    readonly property bool shortcutsEnabled: visible && activeFocus && !editor.visible && !nodeMenu.visible && !reminderDialogOpen
 
     function priorityColor(level) {
         return level === 3 ? "#246594" : level === 2 ? "#294f6b" : "#2b3e4c"
@@ -147,6 +150,12 @@ FocusScope {
                 enabled: pane.controller && pane.controller.selectedNode.isTab === true
                 onClicked: pane.controller.activate(pane.controller.selectedId)
             }
+            Button {
+                objectName: "mindmapReminder"
+                text: "Reminder"
+                enabled: pane.controller && pane.controller.selectedIds.length === 1
+                onClicked: pane.reminderRequested(pane.controller.selectedId)
+            }
             Button { text: "Edit / Notes"; onClicked: pane.editNode() }
             Button { text: "Fold"; onClicked: pane.controller.toggleFold() }
             Button { text: "Cut"; enabled: pane.controller && pane.controller.canCut; onClicked: pane.controller.cutSelected() }
@@ -265,6 +274,7 @@ FocusScope {
                         border.color: selected ? "#a5d9ff" : "#557b98"
                         Text {
                             anchors.fill: parent
+                            anchors.bottomMargin: nodeItem.modelData.reminderActive ? 28 : 0
                             anchors.leftMargin: 9; anchors.rightMargin: nodeItem.modelData.priorityLevel > 0 ? 48 : 18
                             verticalAlignment: Text.AlignVCenter
                             text: (nodeItem.modelData.completed ? "✓ " : "") + (nodeItem.modelData.isTab ? "▣ " : "") + nodeItem.modelData.text
@@ -275,12 +285,14 @@ FocusScope {
                             objectName: "mindmapPriority_" + nodeItem.modelData.id
                             anchors.right: parent.right; anchors.rightMargin: 20
                             anchors.verticalCenter: parent.verticalCenter
+                            anchors.verticalCenterOffset: nodeItem.modelData.reminderActive ? -14 : 0
                             level: nodeItem.modelData.priorityLevel
                             visible: level > 0
                         }
                         Text {
                             anchors.right: parent.right; anchors.rightMargin: 5
                             anchors.verticalCenter: parent.verticalCenter
+                            anchors.verticalCenterOffset: nodeItem.modelData.reminderActive ? -14 : 0
                             text: nodeItem.modelData.hasChildren ? (nodeItem.modelData.folded ? "+" : "−") : ""
                             color: "#a5d9ff"
                         }
@@ -364,6 +376,34 @@ FocusScope {
                                       + (nodeItem.modelData.note ? "\n\n" + nodeItem.modelData.note : "")
                             }
                         }
+                        Rectangle {
+                            objectName: "mindmapReminderBadge_" + nodeItem.modelData.id
+                            visible: nodeItem.modelData.reminderActive
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 4
+                            height: 22
+                            radius: 4
+                            color: "#a94f0b"
+                            border.color: "#f4a64f"
+                            Text {
+                                anchors.centerIn: parent
+                                text: "\uD83D\uDD14 " + nodeItem.modelData.reminderAt
+                                color: "#fff4e4"
+                                font.pixelSize: 12
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    pane.controller.select(nodeItem.modelData.id)
+                                    nodeMenu.targetNodeId = nodeItem.modelData.id
+                                    nodeMenu.popup()
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -376,12 +416,26 @@ FocusScope {
         id: nodeMenu
         objectName: "mindmapNodeMenu"
         property string targetNodeId: ""
+        property var reminderData: ({})
         property bool canMoveUp: false
         property bool canMoveDown: false
         onAboutToShow: {
+            reminderData = pane.controller.reminderData(targetNodeId)
             canMoveUp = pane.controller.canReorderNode(targetNodeId, -1)
             canMoveDown = pane.controller.canReorderNode(targetNodeId, 1)
         }
+        MenuItem {
+            objectName: "mindmapSetReminder"
+            text: nodeMenu.reminderData.reminderActive ? "Update Reminder" : "Set Reminder"
+            onTriggered: pane.reminderRequested(nodeMenu.targetNodeId)
+        }
+        MenuItem {
+            objectName: "mindmapClearReminder"
+            text: "Clear Reminder"
+            visible: !!nodeMenu.reminderData.reminderActive
+            onTriggered: pane.clearReminderRequested(nodeMenu.targetNodeId)
+        }
+        MenuSeparator {}
         MenuItem {
             objectName: "mindmapMoveUp"
             text: "Move up"

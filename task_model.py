@@ -2332,6 +2332,7 @@ class ProjectManager(QObject):
     kanbanBoardRequested = Signal()
     taskDrillRequested = Signal(int, arguments=["taskIndex"])
     taskReminderDue = Signal(int, int, str, bool, arguments=["tabIndex", "taskIndex", "taskTitle", "sendNotification"])
+    mindmapReminderDue = Signal(str, str, bool, arguments=["nodeId", "title", "sendNotification"])
     standaloneReminderDue = Signal(str, bool, arguments=["title", "sendNotification"])
     taskContractBreached = Signal(
         int,
@@ -2628,9 +2629,10 @@ class ProjectManager(QObject):
         self._standalone_reminders.sort(key=lambda reminder: float(reminder.reminder_at))
 
     def _processReminderTimers(self) -> None:
-        """Process reminder timers for background tabs and standalone reminders."""
+        """Process reminders for background tabs, the project, and mindmap nodes."""
         self._checkBackgroundTabReminders()
         self._checkStandaloneReminders()
+        self._checkMindmapReminders()
 
     def _onCurrentTabReminderDue(self, task_index: int, task_title: str, send_notification: bool) -> None:
         tab_index = self._tab_model.currentTabIndex if self._tab_model is not None else 0
@@ -2731,6 +2733,41 @@ class ProjectManager(QObject):
                 )
 
         if sent_notification:
+            self._save_after_reminder()
+
+    @Slot(str, str, result=bool)
+    @Slot(str, str, bool, result=bool)
+    def setMindmapReminder(self, node_id: str, reminder_at_str: str, send_notification: bool = False) -> bool:
+        timestamp = _parse_local_datetime(reminder_at_str)
+        if timestamp is None:
+            return False
+        return self.mindmap.set_reminder(node_id, timestamp, send_notification)
+
+    @Slot(str)
+    def clearMindmapReminder(self, node_id: str) -> None:
+        self.mindmap.clearReminder(node_id)
+
+    @Slot(str)
+    def openMindmapReminder(self, node_id: str) -> None:
+        if self.mindmap.map.find(node_id) is None:
+            return
+        self._saveCurrentTabState()
+        self._setMindmapVisible(True)
+        self.mindmap.reveal_reminder(node_id)
+
+    def _checkMindmapReminders(self) -> None:
+        now = time.time()
+        due = [(node_id, reminder.copy()) for node_id, reminder in self.mindmap.reminders.items()
+               if reminder['at'] <= now]
+        for node_id, reminder in due:
+            node = self.mindmap.map.find(node_id)
+            self.mindmap.consume_reminder(node_id)
+            if node is None:
+                continue
+            if reminder['send_notification']:
+                self._publishReminderNotification(0, node.text, scope_label="Mindmap")
+            self.mindmapReminderDue.emit(node_id, node.text, reminder['send_notification'])
+        if due:
             self._save_after_reminder()
 
     def _checkStandaloneReminders(self) -> None:
@@ -2908,6 +2945,16 @@ class ProjectManager(QObject):
                     )
                 )
 
+        for node_id, reminder in self.mindmap.reminders.items():
+            node = self.mindmap.map.find(node_id)
+            if node is None or reminder['at'] <= now:
+                continue
+            entry = self._build_active_reminder_payload(
+                kind="mindmap", title=node.text, tab_index=-1, tab_name="Mindmap",
+                task_index=-1, standalone_index=-1, reminder_ts=reminder['at'],
+                send_notification=reminder['send_notification'], is_current_tab=False, now=now)
+            entry['nodeId'] = node_id
+            reminders.append(entry)
         reminders.extend(self.getActiveStandaloneReminders())
         reminders.sort(key=lambda entry: float(entry.get("reminderAt", 0.0)))
         return reminders
