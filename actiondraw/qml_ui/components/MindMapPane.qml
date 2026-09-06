@@ -6,13 +6,42 @@ import QtQuick.Layouts 1.15
 FocusScope {
     id: pane
     signal canvasRequested()
+    signal reminderRequested(string nodeId)
+    signal clearReminderRequested(string nodeId)
+    property bool reminderDialogOpen: false
     property var controller
     property real zoom: 1
     property real panX: 0
     property real panY: 0
     property bool initialized: false
     property var viewPositions: ({})
-    readonly property bool shortcutsEnabled: visible && activeFocus && !editor.visible && !nodeMenu.visible
+    readonly property bool shortcutsEnabled: visible && activeFocus && !editor.visible && !nodeMenu.visible && !reminderDialogOpen
+
+    function priorityColor(level) {
+        return level === 3 ? "#246594" : level === 2 ? "#294f6b" : "#2b3e4c"
+    }
+    function priorityLabel(level) {
+        return level === 3 ? "Higher" : level === 2 ? "Middle" : "Lower"
+    }
+    component PriorityBars: Row {
+        id: priorityBars
+        property int level: 0
+        spacing: 2
+        width: 22
+        height: 14
+        Repeater {
+            model: 3
+            Rectangle {
+                required property int index
+                width: 6
+                height: 6 + index * 4
+                y: 14 - height
+                color: index < priorityBars.level ? "#e5f0fa" : "transparent"
+                border.color: "#a9bfd1"
+                radius: 1
+            }
+        }
+    }
 
     function fitMap() {
         if (!controller || viewport.width <= 0 || viewport.height <= 0) return
@@ -121,6 +150,12 @@ FocusScope {
                 enabled: pane.controller && pane.controller.selectedNode.isTab === true
                 onClicked: pane.controller.activate(pane.controller.selectedId)
             }
+            Button {
+                objectName: "mindmapReminder"
+                text: "Reminder"
+                enabled: pane.controller && pane.controller.selectedIds.length === 1
+                onClicked: pane.reminderRequested(pane.controller.selectedId)
+            }
             Button { text: "Edit / Notes"; onClicked: pane.editNode() }
             Button { text: "Fold"; onClicked: pane.controller.toggleFold() }
             Button { text: "Cut"; enabled: pane.controller && pane.controller.canCut; onClicked: pane.controller.cutSelected() }
@@ -139,6 +174,28 @@ FocusScope {
                 : "Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+X / Ctrl+V moves branches · F4 completes · Arrows navigate · Tab adds a child · Ctrl+Enter opens a tab"
             wrapMode: Text.WordWrap
             color: "#a9bfd1"
+        }
+        Flow {
+            Layout.fillWidth: true
+            spacing: 12
+            Label { text: "Relative priority:"; color: "#a9bfd1" }
+            Repeater {
+                model: 3
+                delegate: Rectangle {
+                    required property int index
+                    width: legendContent.width + 12
+                    height: 24
+                    radius: 4
+                    color: pane.priorityColor(index + 1)
+                    Row {
+                        id: legendContent
+                        anchors.centerIn: parent
+                        spacing: 6
+                        PriorityBars { level: index + 1; anchors.verticalCenter: parent.verticalCenter }
+                        Label { text: pane.priorityLabel(index + 1); color: "#e5f0fa" }
+                    }
+                }
+            }
         }
         Item {
             id: viewport
@@ -209,22 +266,33 @@ FocusScope {
                         x: modelData.x; y: modelData.y
                         width: modelData.width; height: modelData.height
                         radius: 8
-                        color: modelData.isTab ? "#254d6c" : "#223442"
+                        color: modelData.priorityLevel > 0 ? pane.priorityColor(modelData.priorityLevel)
+                              : modelData.isTab ? "#254d6c" : "#223442"
                         readonly property bool selected: pane.controller.selectedIds.indexOf(modelData.id) >= 0
                         opacity: pane.controller.cutNodeIds.indexOf(modelData.id) >= 0 ? 0.45 : 1
                         border.width: selected ? 2 : 1
                         border.color: selected ? "#a5d9ff" : "#557b98"
                         Text {
                             anchors.fill: parent
-                            anchors.leftMargin: 9; anchors.rightMargin: 18
+                            anchors.bottomMargin: nodeItem.modelData.reminderActive ? 28 : 0
+                            anchors.leftMargin: 9; anchors.rightMargin: nodeItem.modelData.priorityLevel > 0 ? 48 : 18
                             verticalAlignment: Text.AlignVCenter
                             text: (nodeItem.modelData.completed ? "✓ " : "") + (nodeItem.modelData.isTab ? "▣ " : "") + nodeItem.modelData.text
                             font.pixelSize: 14
                             color: "#e5f0fa"; elide: Text.ElideRight
                         }
+                        PriorityBars {
+                            objectName: "mindmapPriority_" + nodeItem.modelData.id
+                            anchors.right: parent.right; anchors.rightMargin: 20
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.verticalCenterOffset: nodeItem.modelData.reminderActive ? -14 : 0
+                            level: nodeItem.modelData.priorityLevel
+                            visible: level > 0
+                        }
                         Text {
                             anchors.right: parent.right; anchors.rightMargin: 5
                             anchors.verticalCenter: parent.verticalCenter
+                            anchors.verticalCenterOffset: nodeItem.modelData.reminderActive ? -14 : 0
                             text: nodeItem.modelData.hasChildren ? (nodeItem.modelData.folded ? "+" : "−") : ""
                             color: "#a5d9ff"
                         }
@@ -297,10 +365,43 @@ FocusScope {
                                 if (!nodeItem.modelData.isTab && !(mouse.modifiers & (Qt.ControlModifier | Qt.ShiftModifier))) pane.editNode()
                             }
                             ToolTip {
+                                objectName: "mindmapTooltip_" + nodeItem.modelData.id
                                 y: nodeItem.height + 8
                                 delay: 800
                                 visible: nodeMouse.containsMouse && !nodeMouse.pressed
-                                text: nodeItem.modelData.text + (nodeItem.modelData.note ? "\n\n" + nodeItem.modelData.note : "")
+                                text: nodeItem.modelData.text
+                                      + (nodeItem.modelData.priorityLevel > 0
+                                         ? "\nRelative priority: " + pane.priorityLabel(nodeItem.modelData.priorityLevel)
+                                           + " · Score: " + nodeItem.modelData.priorityScore.toFixed(2) : "")
+                                      + (nodeItem.modelData.note ? "\n\n" + nodeItem.modelData.note : "")
+                            }
+                        }
+                        Rectangle {
+                            objectName: "mindmapReminderBadge_" + nodeItem.modelData.id
+                            visible: nodeItem.modelData.reminderActive
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 4
+                            height: 22
+                            radius: 4
+                            color: "#a94f0b"
+                            border.color: "#f4a64f"
+                            Text {
+                                anchors.centerIn: parent
+                                text: "\uD83D\uDD14 " + nodeItem.modelData.reminderAt
+                                color: "#fff4e4"
+                                font.pixelSize: 12
+                            }
+                            MouseArea {
+                                anchors.fill: parent
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    pane.controller.select(nodeItem.modelData.id)
+                                    nodeMenu.targetNodeId = nodeItem.modelData.id
+                                    nodeMenu.popup()
+                                }
                             }
                         }
                     }
@@ -315,12 +416,26 @@ FocusScope {
         id: nodeMenu
         objectName: "mindmapNodeMenu"
         property string targetNodeId: ""
+        property var reminderData: ({})
         property bool canMoveUp: false
         property bool canMoveDown: false
         onAboutToShow: {
+            reminderData = pane.controller.reminderData(targetNodeId)
             canMoveUp = pane.controller.canReorderNode(targetNodeId, -1)
             canMoveDown = pane.controller.canReorderNode(targetNodeId, 1)
         }
+        MenuItem {
+            objectName: "mindmapSetReminder"
+            text: nodeMenu.reminderData.reminderActive ? "Update Reminder" : "Set Reminder"
+            onTriggered: pane.reminderRequested(nodeMenu.targetNodeId)
+        }
+        MenuItem {
+            objectName: "mindmapClearReminder"
+            text: "Clear Reminder"
+            visible: !!nodeMenu.reminderData.reminderActive
+            onTriggered: pane.clearReminderRequested(nodeMenu.targetNodeId)
+        }
+        MenuSeparator {}
         MenuItem {
             objectName: "mindmapMoveUp"
             text: "Move up"
@@ -349,7 +464,7 @@ FocusScope {
         MenuItem { text: "Fold / Unfold"; onTriggered: pane.controller.toggleFold() }
         MenuItem { text: "Branch on left"; onTriggered: pane.controller.setSide("left") }
         MenuItem { text: "Branch on right"; onTriggered: pane.controller.setSide("right") }
-        MenuItem { text: "Delete thought branch"; onTriggered: pane.controller.deleteSelected() }
+        MenuItem { text: "Delete branch"; onTriggered: pane.controller.deleteSelected() }
     }
     Dialog {
         id: editor

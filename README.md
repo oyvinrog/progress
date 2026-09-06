@@ -70,10 +70,28 @@ The sidebar **Mindmap** opens the full project map. Both views edit the same
 nodes, so changes and undo/redo are shared. The tab view's root stays in place;
 open nested tab nodes to view their branches and use Alt+Left to return.
 
+Task nodes use three blue shades and one, two, or three filled bars to show
+lower, middle, or higher relative priority from the priority plot's calculated
+score. Levels compare all included project tabs, so opening or folding a branch
+does not change the scale. Tied scores share a level; a single task or all-equal
+scores use the middle level. Hover over a task for its score. Notes and tabs
+excluded from the priority plot have no priority indicator.
+
 Use **Complete** in the toolbar or right-click menu, or press **F4**, to mark
 selected nodes with a ✓. If all selected nodes are already complete, this clears
 their marks. Descendants and canvas tasks are unaffected. Marks are saved with
 the project.
+
+Select a single node and choose **Reminder**, or right-click it to set, update,
+or clear a reminder. Every node supports its own reminder, including tab nodes
+and the project root. Use the same date/time presets and optional notifications
+as canvas tasks. An orange bell and date appear beneath the node title.
+
+**Waiting Reminders** stays visible above both the canvas and mindmap. Use
+**Open Node** to reveal a reminder's node, including inside folded branches.
+Completing or deleting a node cancels its reminder; undo restores it. Reminders
+that have already fired stay cleared through undo/redo; use **Renew** in the due
+alert to schedule another one.
 
 The mindmap reuses the MIT-licensed [PyPlane](https://github.com/oyvinrog/pyplane)
 core, bundled with its license and source revision.

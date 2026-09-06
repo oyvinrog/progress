@@ -1182,25 +1182,29 @@ class TestCreateActionDrawWindow:
         assert 'projectManager.setReminder' in dialogs_qml
         assert 'function openStandaloneReminderEditDialog' in dialogs_qml
         assert 'function openTaskReminderEditDialog' in dialogs_qml
-        assert 'text: "New Reminder"' in window_qml
-        assert 'text: "Edit"' in window_qml
-        assert 'dialogs.openStandaloneReminderEditDialog' in window_qml
-        assert 'dialogs.openTaskReminderEditDialog' in window_qml
-        assert 'projectManager.clearStandaloneReminder' in window_qml
+        overview_qml = (QML_DIR / "components" / "ReminderOverview.qml").read_text(encoding="utf-8")
+        assert 'ReminderOverview {' in window_qml
+        assert 'text: "New Reminder"' in overview_qml
+        assert 'text: "Edit"' in overview_qml
+        assert 'dialogs.openStandaloneReminderEditDialog' in overview_qml
+        assert 'dialogs.openTaskReminderEditDialog' in overview_qml
+        assert 'clearStandaloneReminder(Number(data.standaloneIndex))' in overview_qml
         assert 'visible: root.pendingReminderKind !== "standalone"' in window_qml
         assert 'text: "Renew"' in window_qml
         assert 'function openReminderRenewDialog()' in window_qml
         assert 'dialogs.reminderDialog.sendNotification = root.pendingReminderSendNotification' in window_qml
         assert 'dialogs.reminderDialog.standaloneTitle = root.pendingReminderTaskTitle || ""' in window_qml
-        assert 'Qt.callLater(root.openReminderRenewDialog)' in window_qml
-        assert 'text: "Open Task"' in window_qml
+        assert 'root.openReminderRenewDialog()' in window_qml
+        assert '? "Open Node" : "Open Task"' in window_qml
         assert 'text: "Dismiss"' in window_qml
 
     def test_qml_active_reminders_show_countdown_and_absolute_time(self):
         window_qml = (QML_DIR / "ActionDrawWindow.qml").read_text(encoding="utf-8")
 
-        assert 'text: "Due in " + (modelData.countdownText || "0:00")' in window_qml
-        assert 'text: "Remind at " + modelData.reminderText' in window_qml
+        overview_qml = (QML_DIR / "components" / "ReminderOverview.qml").read_text(encoding="utf-8")
+        assert 'ReminderOverview {' in window_qml
+        assert 'text: "Due in " + (reminderRow.modelData.countdownText || "0:00")' in overview_qml
+        assert 'text: "Remind at " + reminderRow.modelData.reminderText' in overview_qml
 
 
 class TestMarkdownTabClipboard:

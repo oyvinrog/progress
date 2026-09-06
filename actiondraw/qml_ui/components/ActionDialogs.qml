@@ -226,6 +226,19 @@ Item {
         reminderDialog.open()
     }
 
+    function openMindmapReminderDialog(nodeId, reminderAt, sendNotification) {
+        reminderDialog.standaloneMode = false
+        reminderDialog.editStandaloneIndex = -1
+        reminderDialog.targetTabIndex = -1
+        reminderDialog.taskIndex = -1
+        reminderDialog.nodeId = nodeId
+        var parts = reminderDialog.parseReminderParts(reminderAt || "")
+        reminderDialog.dateValue = parts.date
+        reminderDialog.timeValue = parts.time
+        reminderDialog.sendNotification = sendNotification || false
+        reminderDialog.open()
+    }
+
     function openTaskReminderEditDialog(tabIndex, taskIndex, reminderAt, sendNotification) {
         reminderDialog.standaloneMode = false
         reminderDialog.editStandaloneIndex = -1
@@ -1528,8 +1541,10 @@ Item {
 
     Dialog {
         id: reminderDialog
+        objectName: "reminderDialog"
+        property string nodeId: ""
         modal: true
-        title: reminderDialog.editStandaloneIndex >= 0 || reminderDialog.targetTabIndex >= 0 ? "Edit Reminder" : "Set Reminder"
+        title: reminderDialog.editStandaloneIndex >= 0 || reminderDialog.targetTabIndex >= 0 || (reminderDialog.nodeId.length > 0 && reminderDialog.dateValue.length > 0) ? "Edit Reminder" : "Set Reminder"
         width: 420
         property int taskIndex: -1
         property int targetTabIndex: -1
@@ -1780,7 +1795,14 @@ Item {
             }
             var reminderValue = reminderDialog.dateValue.trim() + " " + reminderDialog.timeValue.trim()
             if (reminderDialog.dateValue.trim().length > 0 && reminderDialog.timeValue.trim().length > 0) {
-                if (reminderDialog.standaloneMode) {
+                if (reminderDialog.nodeId.length > 0) {
+                    if (!projectManager.setMindmapReminder(reminderDialog.nodeId, reminderValue, reminderDialog.sendNotification)) {
+                        if (root && root.showSaveNotification)
+                            root.showSaveNotification("Unable to save reminder. Check the date and that the node still exists.")
+                        return
+                    }
+                    root.refreshActiveReminders()
+                } else if (reminderDialog.standaloneMode) {
                     if (!projectManager || !projectManager.addStandaloneReminder) {
                         if (root && root.showSaveNotification)
                             root.showSaveNotification("Project reminders are unavailable")
@@ -1848,6 +1870,8 @@ Item {
         onRejected: reminderDialog.close()
 
         onClosed: {
+            Qt.callLater(root.showNextReminderAlert)
+            reminderDialog.nodeId = ""
             reminderDialog.taskIndex = -1
             reminderDialog.targetTabIndex = -1
             reminderDialog.editStandaloneIndex = -1

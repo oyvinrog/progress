@@ -1,10 +1,13 @@
 """Global mindmap integration, persistence and real QML interaction tests."""
+import copy
 import json
+import math
 import uuid
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent, QObject, QPoint, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QMetaObject, QObject, QPoint, Qt
 from PySide6.QtTest import QTest
+from PySide6.QtQml import QQmlProperty
 
 from actiondraw.model import DiagramModel
 from actiondraw.mindmap import MindMapController
@@ -26,6 +29,278 @@ def thought(controller, text='Secret thought', note='Secret note'):
     controller.addThought(False)
     controller.editSelected(text, note)
     return controller.selectedId
+
+
+def priority_tasks(tabs, values):
+    while len(tabs.getAllTabs()) < len(values):
+        tabs.addTab('Priority task ' + str(len(tabs.getAllTabs())))
+    ids = [tab.id for tab in tabs.getAllTabs()]
+    for tab_id, value in zip(ids, values):
+        index = next(i for i, tab in enumerate(tabs.getAllTabs()) if tab.id == tab_id)
+        tabs.setPriorityPoint(index, math.e, value)
+    return ids
+
+
+@pytest.mark.parametrize('values,levels', [
+    ([0, 1, 2, 3, 4, 5], [1, 1, 2, 2, 3, 3]),
+    ([0, 0, 0, 1, 2, 3], [1, 1, 1, 2, 3, 3]),
+    ([1, 1, 1, 1], [2, 2, 2, 2]),
+    ([0], [2]),
+    ([0, 5], [1, 3]),
+])
+def test_mindmap_priority_ranks(project, values, levels):
+    pm, tabs, _, _ = project
+    ids = priority_tasks(tabs, values)
+    nodes = {pm.mindmap.links[n['id']]: n for n in pm.mindmap.nodes if n['isTab']}
+    assert [nodes[key]['priorityLevel'] for key in ids] == levels
+    assert [nodes[key]['priorityScore'] for key in ids] == pytest.approx(values)
+
+
+def test_mindmap_priority_scope_exclusion_and_updates(project):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    ids = priority_tasks(tabs, [0, 3, 6])
+    linked = {tab_id: node_id for node_id, tab_id in m.links.items()}
+    root = linked[ids[0]]
+    m.moveNode(linked[ids[1]], root, 'child')
+    m.select(root)
+    note = thought(m)
+    before = {n['id']: n['priorityLevel'] for n in m.nodes}
+    assert before[note] == before[m.map.root.id] == 0
+    m.set_scope(ids[0])
+    assert all(n['priorityLevel'] == before[n['id']] for n in m.nodes)
+    m.select(root)
+    m.toggleFold()
+    assert m.nodes[0]['priorityLevel'] == before[root]
+    m.toggleFold()
+    saved = m.to_dict()
+    notifications = []
+    m.sceneChanged.connect(lambda: notifications.append(True))
+    index = next(i for i, tab in enumerate(tabs.getAllTabs()) if tab.id == ids[0])
+    tabs.setPriorityPoint(index, math.e, 9)
+    assert notifications
+    assert next(n for n in m.nodes if n['id'] == root)['priorityLevel'] == 3
+    assert tabs.getAllTabs()[0].id == ids[0]
+    notifications.clear()
+    tabs.setPriorityPoint(0, math.e, 10)  # Same ordering still refreshes the scene.
+    assert notifications
+    assert next(n for n in m.nodes if n['id'] == root)['priorityScore'] == pytest.approx(10)
+    tabs.setIncludeInPriorityPlot(0, False)
+    node = next(n for n in m.nodes if n['id'] == root)
+    assert node['priorityLevel'] == 0 and node['priorityScore'] is None
+    assert m.to_dict() == saved
+
+
+def test_qml_mindmap_priority_rendering(project, app):
+    pm, tabs, tasks, diagram = project
+    ids = priority_tasks(tabs, [0, 3, 6])
+    m = pm.mindmap
+    linked = {tab_id: node_id for node_id, tab_id in m.links.items()}
+    high = linked[ids[2]]
+    m.map.find(high).note = 'Keep this note'
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    warnings = []
+    engine.warnings.connect(lambda messages: warnings.extend(message.toString() for message in messages))
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+
+    def find(item, name):
+        if item.objectName() == name:
+            return item
+        for child in item.childItems():
+            found = find(child, name)
+            if found is not None:
+                return found
+
+    try:
+        for tab_id, level, color in zip(ids, [1, 2, 3], ['#2b3e4c', '#294f6b', '#246594']):
+            node_id = linked[tab_id]
+            node = find(window.contentItem(), 'mindmapNode_' + node_id)
+            assert node.property('color').name() == color
+            bars = find(node, 'mindmapPriority_' + node_id)
+            assert bars.isVisible() and bars.property('level') == level
+            filled = [child for child in bars.childItems()
+                      if child.property('color') is not None and child.property('color').alpha() > 0]
+            assert len(filled) == level
+        m.select(high)
+        QTest.qWait(20)
+        node = find(window.contentItem(), 'mindmapNode_' + high)
+        assert node.property('selected')
+        assert QQmlProperty.read(node, 'border.width') == 2
+        assert QQmlProperty.read(node, 'border.color').name() == '#a5d9ff'
+        tooltip = node.findChild(QObject, 'mindmapTooltip_' + high)
+        assert 'Relative priority: Higher · Score: 6.00' in tooltip.property('text')
+        assert m.map.find(high).text in tooltip.property('text')
+        assert 'Keep this note' in tooltip.property('text')
+        m.toggleCompleted()
+        m.cutSelected()
+        QTest.qWait(20)
+        node = find(window.contentItem(), 'mindmapNode_' + high)
+        assert node.opacity() == pytest.approx(0.45)
+        assert any(str(child.property('text')).startswith('✓ ') for child in node.childItems())
+        index = next(i for i, tab in enumerate(tabs.getAllTabs()) if tab.id == ids[2])
+        tabs.setIncludeInPriorityPlot(index, False)
+        QTest.qWait(20)
+        node = find(window.contentItem(), 'mindmapNode_' + high)
+        assert node.property('color').name() == '#254d6c'
+        assert not find(node, 'mindmapPriority_' + high).isVisible()
+        assert not warnings
+    finally:
+        window.close()
+
+
+def test_delete_linked_branch_restores_complete_tabs_and_preserves_survivor(project):
+    pm, tabs, tasks, diagram = project
+    tabs.addTab('Delete A')
+    tabs.addTab('Delete B')
+    pm.switchTab(1)
+    tasks.addTask('Saved task')
+    box = diagram.addBox(10, 20)
+    # Materialize the editor's default note tabs before comparing saved content.
+    diagram.from_dict(diagram.to_dict())
+    deleted = tabs.getCurrentTabData()
+    deleted.markdown_tabs = [{'name': 'Notes', 'text': 'Keep this text'}]
+    deleted.goals = [{'title': 'A goal'}]
+    deleted.icon = 'star'
+    deleted.pinned = True
+    deleted.kanban_status = 'ready'
+    deleted.priority = 3
+    pm.showMindmap()
+    m = pm.mindmap
+    a, b = [next(key for key, value in m.links.items() if value == tab.id)
+            for tab in tabs.getAllTabs()[1:]]
+    m.select(a)
+    child = thought(m, 'Nested note')
+    m.toggleCompleted()
+    m.moveNode(b, child, 'child')
+    m.select(a)
+    m.select(b, 'toggle')  # An overlapping selection deletes each tab just once.
+    m.cutSelected()
+    before_map = m.to_dict()
+    expected_tabs = copy.deepcopy(tabs.getAllTabs())
+    m.deleteSelected()
+    assert [tab.id for tab in tabs.getAllTabs()] == [expected_tabs[0].id]
+    assert not m.canPaste and not m.cutNodeIds
+    assert pm.mindmapVisible and m.selectedId == m.map.root.id
+    assert m.map.find(a) is None and m.map.find(b) is None
+    assert tasks.rowCount() == 0
+    assert box not in {item['id'] for item in diagram.to_dict()['items']}
+    tasks.addTask('Unrelated later edit')
+    m.undo()
+    assert m.to_dict() == before_map
+    assert [tab.id for tab in tabs.getAllTabs()] == [tab.id for tab in expected_tabs]
+    assert tabs.getAllTabs()[1:] == expected_tabs[1:]
+    assert tabs.getAllTabs()[0].tasks['tasks'][0]['title'] == 'Unrelated later edit'
+    assert tabs.getCurrentTabData().id == deleted.id
+    assert tasks.to_dict()['tasks'][0]['title'] == 'Saved task'
+    assert box in {item['id'] for item in diagram.to_dict()['items']}
+    m.redo()
+    assert tabs.tabCount == 1
+    assert tasks.to_dict()['tasks'][0]['title'] == 'Unrelated later edit'
+    m.undo()
+    assert tabs.getAllTabs()[1:] == expected_tabs[1:]
+
+
+def test_linked_deletion_last_tab_and_redo_are_atomic(project):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    tabs.addTab('Survivor')
+    first = next(iter(m.links))
+    m.select(first)
+    m.deleteSelected()
+    m.undo()
+    tabs.removeTab(1)  # Redo would now delete the last remaining tab.
+    before = m.to_dict()
+    errors = []
+    m.errorOccurred.connect(errors.append)
+    m.redo()
+    assert errors and 'at least one tab' in errors[-1]
+    assert m.to_dict() == before and tabs.tabCount == 1 and m.canRedo
+    m.select(first)
+    m.deleteSelected()
+    assert m.to_dict() == before and tabs.tabCount == 1
+
+
+def test_linked_deletion_persists_and_load_clears_tab_history(project, tmp_path, monkeypatch):
+    pm, tabs, _, _ = project
+    credentials = EncryptionCredentials(passphrase='mindmap-delete-test')
+    monkeypatch.setattr(pm, '_prompt_encryption_credentials', lambda *a: credentials)
+    tabs.addTab('Removed tab')
+    removed_id = tabs.getAllTabs()[1].id
+    m = pm.mindmap
+    node_id = next(key for key, value in m.links.items() if value == removed_id)
+    m.select(node_id)
+    m.deleteSelected()
+    path = tmp_path / 'deleted.progress'
+    assert pm.saveProject(str(path))
+    payload = decrypt_project_data(json.loads(path.read_text()), credentials)
+    assert removed_id not in {tab['id'] for tab in payload['tabs']}
+    assert node_id not in payload['mindmap']['tab_links']
+    pm.loadProject(str(path))
+    assert tabs.tabCount == 1 and m.map.find(node_id) is None
+    assert not m.canUndo and not m.canRedo
+
+
+def test_redo_removing_current_scope_returns_to_project_map(project):
+    pm, tabs, _, _ = project
+    tabs.addTab('Keep')
+    m = pm.mindmap
+    first = next(iter(m.links))
+    m.select(first)
+    m.deleteSelected()
+    m.undo()
+    pm.showTabMindmap()
+    assert m.tabScoped
+    m.redo()
+    assert not m.tabScoped and pm.mindmapVisible
+    assert m.view_root is m.map.root and m.selectedId == m.map.root.id
+
+
+def test_qml_linked_delete_updates_sidebar_and_boards(project, app):
+    pm, tabs, tasks, diagram = project
+    name = 'Tab removed from every view'
+    tabs.addTab(name)
+    tab_id = tabs.getAllTabs()[1].id
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    QMetaObject.invokeMethod(window, 'openPriorityPlotWindow')
+    QMetaObject.invokeMethod(window, 'openKanbanWindow')
+    plot = window.property('priorityPlotWindowRef')
+    board = window.property('kanbanWindowRef')
+    pm.showMindmap()
+
+    def contains(item, property_name):
+        return (item.property(property_name) == name
+                or any(contains(child, property_name) for child in item.childItems()))
+
+    try:
+        QTest.qWait(100)
+        assert contains(window.contentItem(), 'dragTabName')
+        assert contains(plot.contentItem(), 'text')
+        assert contains(board.contentItem(), 'text')
+        node_id = next(key for key, value in pm.mindmap.links.items() if value == tab_id)
+        pm.mindmap.select(node_id)
+        pm.mindmap.deleteSelected()
+        QTest.qWait(100)
+        assert not contains(window.contentItem(), 'dragTabName')
+        assert not contains(plot.contentItem(), 'text')
+        assert not contains(board.contentItem(), 'text')
+        pm.mindmap.undo()
+        QTest.qWait(100)
+        assert contains(window.contentItem(), 'dragTabName')
+        assert contains(plot.contentItem(), 'text')
+        assert contains(board.contentItem(), 'text')
+    finally:
+        plot.close()
+        board.close()
+        plot.deleteLater()
+        board.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        window.close()
+        engine.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
 
 def test_create_tab_preserves_thought_branch_and_history(project):
@@ -1006,3 +1281,277 @@ def test_qml_tab_switch_completion_and_editor_focus(project, app):
     window.close()
     engine.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+
+def reminder_date(minutes=60):
+    from datetime import datetime, timedelta
+    return (datetime.now() + timedelta(minutes=minutes)).strftime('%Y-%m-%d %H:%M')
+
+
+@pytest.mark.parametrize('node_kind', ['root', 'tab', 'thought'])
+def test_node_reminder_crud_and_completion(project, node_kind):
+    pm, _, tasks, _ = project
+    m = pm.mindmap
+    node_id = (m.map.root.id if node_kind == 'root' else
+               next(iter(m.links)) if node_kind == 'tab' else thought(m))
+    date = reminder_date()
+    assert pm.setMindmapReminder(node_id, date, True)
+    m.select(node_id)
+    assert m.selectedNode['reminderAt'] == date
+    assert m.selectedNode['reminderSendNotification']
+    entries = pm.getActiveReminders()
+    assert [(entry['kind'], entry['nodeId']) for entry in entries] == [('mindmap', node_id)]
+    assert entries[0]['sendNotification']
+    assert tasks.to_dict()['tasks'] == []
+    assert not pm.setMindmapReminder(node_id, 'invalid', False)
+    assert not pm.setMindmapReminder('missing-node', date, False)
+    assert m.reminderData(node_id)['reminderAt'] == date
+    updated = reminder_date(120)
+    assert pm.setMindmapReminder(node_id, updated, False)
+    assert m.reminderData(node_id)['reminderAt'] == updated
+    m.toggleCompleted()
+    assert not m.reminders and not pm.getActiveReminders()
+    m.undo()
+    assert m.reminderData(node_id)['reminderAt'] == updated
+    m.redo()
+    assert not m.reminders
+    m.undo()
+    pm.clearMindmapReminder(node_id)
+    assert not m.reminders
+    m.undo()
+    assert m.reminderData(node_id)['reminderAt'] == updated
+
+
+def test_node_reminders_persist_and_older_projects_load(project, tmp_path, monkeypatch):
+    pm, _, _, _ = project
+    m = pm.mindmap
+    node_id = thought(m)
+    date = reminder_date()
+    assert pm.setMindmapReminder(node_id, date, True)
+    credentials = EncryptionCredentials(passphrase='node-reminder-test')
+    monkeypatch.setattr(pm, '_prompt_encryption_credentials', lambda *a: credentials)
+    path = tmp_path / 'reminders.progress'
+    assert pm.saveProject(str(path))
+    pm.clearMindmapReminder(node_id)
+    pm.loadProject(str(path))
+    assert m.reminderData(node_id)['reminderAt'] == date
+    assert m.reminderData(node_id)['reminderSendNotification']
+    old_payload = m.to_dict()
+    old_payload.pop('reminders')
+    m.load(old_payload)
+    assert not m.reminders
+
+
+@pytest.mark.parametrize('value', [None, [], {'at': 'tomorrow', 'send_notification': False},
+                                  {'at': float('nan'), 'send_notification': False},
+                                  {'at': float('inf'), 'send_notification': False},
+                                  {'at': 10**20, 'send_notification': False},
+                                  {'at': 10**1000, 'send_notification': False},
+                                  {'at': 123, 'send_notification': 'yes'}])
+def test_node_reminder_payload_validation(project, value):
+    m = project[0].mindmap
+    payload = m.to_dict()
+    payload['reminders'] = {m.map.root.id: value}
+    with pytest.raises(ValueError, match='reminder'):
+        m.decode(payload)
+    payload['reminders'] = {'missing': {'at': 123, 'send_notification': False}}
+    with pytest.raises(ValueError, match='reminder'):
+        m.decode(payload)
+
+
+def test_node_reminders_survive_move_conversion_and_delete_undo(project):
+    pm, _, _, _ = project
+    m = pm.mindmap
+    parent = thought(m, 'Parent')
+    child = thought(m, 'Child')
+    assert pm.setMindmapReminder(child, reminder_date(), True)
+    expected = copy.deepcopy(m.reminders)
+    m.editSelected('Renamed', '')
+    m.moveNode(child, m.map.root.id, 'child')
+    assert m.reminders == expected
+    m.select(child)
+    m.createTabFromSelected()
+    assert child in m.links and m.reminders == expected
+    m.deleteSelected()
+    assert child not in m.reminders
+    m.undo()
+    assert m.reminders == expected
+    m.redo()
+    assert child not in m.reminders
+    assert m.map.find(parent) is not None
+
+
+@pytest.mark.parametrize('send_notification', [False, True])
+def test_node_reminder_due_once_across_history_and_renewal(project, monkeypatch, send_notification):
+    pm, _, _, _ = project
+    m = pm.mindmap
+    node_id = thought(m, 'Call someone')
+    due, published, saved = [], [], []
+    pm.mindmapReminderDue.connect(lambda *args: due.append(args))
+    monkeypatch.setattr(pm, '_publishReminderNotification', lambda *args, **kwargs: published.append((args, kwargs)))
+    monkeypatch.setattr(pm, '_save_after_reminder', lambda: saved.append(True))
+    assert pm.setMindmapReminder(node_id, reminder_date(-1), send_notification)
+    m.editSelected('Current title', '')
+    m.editSelected('Another title', '')
+    m.undo()  # Both history stacks contain the schedule at delivery.
+    pm.showTabCanvas()
+    pm._processReminderTimers()
+    assert due == [(node_id, 'Current title', send_notification)]
+    assert len(published) == int(send_notification)
+    if published:
+        assert published[0] == ((0, 'Current title'), {'scope_label': 'Mindmap'})
+    assert saved == [True]
+    assert not m.reminders
+    m.redo()
+    pm._processReminderTimers()
+    while m.canUndo:
+        m.undo()
+        pm._processReminderTimers()
+    while m.canRedo:
+        m.redo()
+        pm._processReminderTimers()
+    assert len(due) == 1
+    assert pm.setMindmapReminder(node_id, reminder_date(60), send_notification)
+    assert len(pm.getActiveReminders()) == 1
+
+
+def test_open_node_reminder_unfolds_and_leaves_unrelated_scope(project):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    branch = thought(m, 'Branch')
+    node_id = thought(m, 'Deep node')
+    m.map.find(branch).folded = True
+    m.map.root.folded = True
+    m.set_scope(tabs.getAllTabs()[0].id)
+    pm.showTabCanvas()
+    pm.openMindmapReminder(node_id)
+    assert pm.mindmapVisible and not m.tabScoped
+    assert m.selectedId == node_id
+    assert node_id in {node['id'] for node in m.nodes}
+    assert not m.map.find(branch).folded and not m.map.root.folded
+
+
+def test_qml_node_reminder_controls_and_overview(project, app, tmp_path):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    node_id = thought(m, 'Remember this thought')
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    warnings = []
+    engine.warnings.connect(lambda messages: warnings.extend(message.toString() for message in messages))
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+
+    def find(item, name):
+        if item.objectName() == name:
+            return item
+        for child in item.childItems():
+            found = find(child, name)
+            if found is not None:
+                return found
+
+    def click(item):
+        point = item.mapToScene(item.boundingRect().center()).toPoint()
+        QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, point)
+        QTest.qWait(40)
+
+    try:
+        overview = find(window.contentItem(), 'reminderOverview')
+        assert overview.isVisible()
+        button = find(window.contentItem(), 'mindmapReminder')
+        click(button)
+        dialog = window.findChild(QObject, 'reminderDialog')
+        assert dialog.property('visible') and dialog.property('nodeId') == node_id
+        date, clock = reminder_date().split(' ')
+        dialog.setProperty('dateValue', date)
+        dialog.setProperty('timeValue', clock)
+        QMetaObject.invokeMethod(dialog, 'accept')
+        QTest.qWait(80)
+        assert m.reminderData(node_id)['reminderAt'] == date + ' ' + clock
+        badge = find(window.contentItem(), 'mindmapReminderBadge_' + node_id)
+        assert badge.isVisible()
+        click(badge)
+        menu = window.findChild(QObject, 'mindmapNodeMenu')
+        assert menu.property('visible')
+        update = window.findChild(QObject, 'mindmapSetReminder')
+        assert update.property('text') == 'Update Reminder'
+        QMetaObject.invokeMethod(menu, 'close')
+        QTest.qWait(30)
+        pm.showTabCanvas()
+        QTest.qWait(40)
+        assert overview.isVisible()
+        click(find(window.contentItem(), 'openReminder_' + node_id))
+        assert pm.mindmapVisible and m.selectedId == node_id
+        click(find(window.contentItem(), 'editReminder_' + node_id))
+        assert dialog.property('nodeId') == node_id
+        assert dialog.property('dateValue') == date
+        QMetaObject.invokeMethod(dialog, 'reject')
+        QTest.qWait(40)
+        # Narrow layouts and multiple zoom factors keep the badge inside its node.
+        pane = window.findChild(QObject, 'mindmapPane')
+        for width, zoom in [(800, 0.7), (800, 1.4), (1280, 1.0)]:
+            window.setWidth(width)
+            window.setHeight(800)
+            QMetaObject.invokeMethod(pane, 'fitMap')
+            pane.setProperty('zoom', zoom)
+            pm.openMindmapReminder(node_id)
+            QTest.qWait(80)
+            badge = find(window.contentItem(), 'mindmapReminderBadge_' + node_id)
+            node = find(window.contentItem(), 'mindmapNode_' + node_id)
+            assert badge.x() >= 0 and badge.x() + badge.width() <= node.width()
+            assert badge.y() >= 36 and badge.y() + badge.height() <= node.height()
+            assert overview.height() < window.height() / 2
+            window.grabWindow().save(str(tmp_path / f"mindmap-reminders-{width}-{zoom}.png"))
+        window.grabWindow().save(str(tmp_path / 'mindmap-reminders.png'))
+        click(find(window.contentItem(), 'clearReminder_' + node_id))
+        assert not m.reminders
+        m.select(next(iter(m.links)), 'toggle')
+        QTest.qWait(30)
+        assert not button.isEnabled()
+        assert not warnings
+    finally:
+        window.close()
+
+
+def test_qml_due_reminder_renewal_keeps_target_with_queued_alerts(project, app, monkeypatch):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    first = thought(m, 'First reminder')
+    second = thought(m, 'Second reminder')
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    warnings = []
+    engine.warnings.connect(lambda messages: warnings.extend(message.toString() for message in messages))
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(100)
+    monkeypatch.setattr(pm, '_save_after_reminder', lambda: None)
+    try:
+        pm.setMindmapReminder(first, reminder_date(-1), False)
+        pm.setMindmapReminder(second, reminder_date(-1), False)
+        pm._processReminderTimers()
+        QTest.qWait(50)
+        popup = window.findChild(QObject, 'reminderDuePopup')
+        assert popup.property('visible')
+        assert window.property('pendingReminderNodeId') == first
+        renew = window.findChild(QObject, 'renewDueReminder')
+        QMetaObject.invokeMethod(renew, 'clicked')
+        QTest.qWait(50)
+        dialog = window.findChild(QObject, 'reminderDialog')
+        assert dialog.property('visible') and dialog.property('nodeId') == first
+        assert not popup.property('visible')
+        date, clock = reminder_date(120).split(' ')
+        dialog.setProperty('dateValue', date)
+        dialog.setProperty('timeValue', clock)
+        QMetaObject.invokeMethod(dialog, 'accept')
+        QTest.qWait(50)
+        assert m.reminderData(first)['reminderAt'] == date + ' ' + clock
+        assert second not in m.reminders
+        assert popup.property('visible')
+        assert window.property('pendingReminderNodeId') == second
+        QMetaObject.invokeMethod(popup, 'close')
+        QTest.qWait(30)
+        assert not warnings
+    finally:
+        window.close()

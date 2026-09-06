@@ -2207,6 +2207,20 @@ class TabModel(QAbstractListModel):
         """Get all tabs."""
         return self._tabs
 
+    def restoreMindmapTabs(self, tabs: List[Tab], active_tab: int) -> None:
+        """Publish a mindmap history transaction without normalizing existing tabs."""
+        recent_ids = [self._tabs[index].id for index in self._recent_tab_indices]
+        self.beginResetModel()
+        self._tabs = tabs
+        self._current_tab_index = active_tab
+        self._recent_tab_indices = [index for tab_id in recent_ids
+                                    for index, tab in enumerate(tabs) if tab.id == tab_id]
+        self.endResetModel()
+        self.tabsChanged.emit()
+        self.currentTabIndexChanged.emit()
+        self.currentTabChanged.emit()
+        self._emitRecentTabsChanged()
+
     def setTabs(self, tabs: List[Tab], active_tab: int = 0) -> None:
         """Replace all tabs with new data."""
         self.beginResetModel()
@@ -2318,6 +2332,7 @@ class ProjectManager(QObject):
     kanbanBoardRequested = Signal()
     taskDrillRequested = Signal(int, arguments=["taskIndex"])
     taskReminderDue = Signal(int, int, str, bool, arguments=["tabIndex", "taskIndex", "taskTitle", "sendNotification"])
+    mindmapReminderDue = Signal(str, str, bool, arguments=["nodeId", "title", "sendNotification"])
     standaloneReminderDue = Signal(str, bool, arguments=["title", "sendNotification"])
     taskContractBreached = Signal(
         int,
@@ -2380,6 +2395,7 @@ class ProjectManager(QObject):
         self._workspace_markdown_tabs = normalize_editor_tabs([], fallback_text="")
         self._mindmap_visible = False
         self.mindmap = MindMapController(self._tab_model, self)
+        self.mindmap.exchange_tabs = self._exchangeMindmapTabs
         self.mindmap.tabActivated.connect(self.openMindmapTab)
         self.mindmap.errorOccurred.connect(self.errorOccurred)
         self._last_saved_snapshot = self._serialize_project_payload(self._build_project_data())
@@ -2613,9 +2629,10 @@ class ProjectManager(QObject):
         self._standalone_reminders.sort(key=lambda reminder: float(reminder.reminder_at))
 
     def _processReminderTimers(self) -> None:
-        """Process reminder timers for background tabs and standalone reminders."""
+        """Process reminders for background tabs, the project, and mindmap nodes."""
         self._checkBackgroundTabReminders()
         self._checkStandaloneReminders()
+        self._checkMindmapReminders()
 
     def _onCurrentTabReminderDue(self, task_index: int, task_title: str, send_notification: bool) -> None:
         tab_index = self._tab_model.currentTabIndex if self._tab_model is not None else 0
@@ -2716,6 +2733,41 @@ class ProjectManager(QObject):
                 )
 
         if sent_notification:
+            self._save_after_reminder()
+
+    @Slot(str, str, result=bool)
+    @Slot(str, str, bool, result=bool)
+    def setMindmapReminder(self, node_id: str, reminder_at_str: str, send_notification: bool = False) -> bool:
+        timestamp = _parse_local_datetime(reminder_at_str)
+        if timestamp is None:
+            return False
+        return self.mindmap.set_reminder(node_id, timestamp, send_notification)
+
+    @Slot(str)
+    def clearMindmapReminder(self, node_id: str) -> None:
+        self.mindmap.clearReminder(node_id)
+
+    @Slot(str)
+    def openMindmapReminder(self, node_id: str) -> None:
+        if self.mindmap.map.find(node_id) is None:
+            return
+        self._saveCurrentTabState()
+        self._setMindmapVisible(True)
+        self.mindmap.reveal_reminder(node_id)
+
+    def _checkMindmapReminders(self) -> None:
+        now = time.time()
+        due = [(node_id, reminder.copy()) for node_id, reminder in self.mindmap.reminders.items()
+               if reminder['at'] <= now]
+        for node_id, reminder in due:
+            node = self.mindmap.map.find(node_id)
+            self.mindmap.consume_reminder(node_id)
+            if node is None:
+                continue
+            if reminder['send_notification']:
+                self._publishReminderNotification(0, node.text, scope_label="Mindmap")
+            self.mindmapReminderDue.emit(node_id, node.text, reminder['send_notification'])
+        if due:
             self._save_after_reminder()
 
     def _checkStandaloneReminders(self) -> None:
@@ -2893,6 +2945,16 @@ class ProjectManager(QObject):
                     )
                 )
 
+        for node_id, reminder in self.mindmap.reminders.items():
+            node = self.mindmap.map.find(node_id)
+            if node is None or reminder['at'] <= now:
+                continue
+            entry = self._build_active_reminder_payload(
+                kind="mindmap", title=node.text, tab_index=-1, tab_name="Mindmap",
+                task_index=-1, standalone_index=-1, reminder_ts=reminder['at'],
+                send_notification=reminder['send_notification'], is_current_tab=False, now=now)
+            entry['nodeId'] = node_id
+            reminders.append(entry)
         reminders.extend(self.getActiveStandaloneReminders())
         reminders.sort(key=lambda entry: float(entry.get("reminderAt", 0.0)))
         return reminders
@@ -4214,6 +4276,35 @@ class ProjectManager(QObject):
             self.reloadCurrentTab()
         else:
             self.tabSwitched.emit()
+
+    def _exchangeMindmapTabs(self, state):
+        """Exchange only tabs owned by a mindmap history entry, returning its inverse."""
+        model = self._tab_model
+        ids = set(state['ids'])
+        tabs = model.getAllTabs()
+        surviving = [tab for tab in tabs if tab.id not in ids]
+        if not surviving and not state['tabs']:
+            raise ValueError('Cannot delete this branch: at least one tab must remain.')
+        self._saveCurrentTabState()
+        current_id = model.getCurrentTabData().id
+        inverse = {'ids': ids,
+                   'tabs': [(index, copy.deepcopy(tab)) for index, tab in enumerate(tabs)
+                            if tab.id in ids],
+                   'active': current_id}
+        for index, tab in sorted(state['tabs'], key=lambda entry: entry[0]):
+            surviving.insert(min(index, len(surviving)), copy.deepcopy(tab))
+        active_id = state.get('active', current_id)
+        active = next((index for index, tab in enumerate(surviving) if tab.id == active_id),
+                      min(model.currentTabIndex, len(surviving) - 1))
+        model.restoreMindmapTabs(surviving, active)
+        tab = model.getCurrentTabData()
+        if tab.id != current_id:
+            tasks, diagram = copy.deepcopy((tab.tasks, tab.diagram))
+            self._task_model.from_dict(tasks)
+            self._diagram_model.from_dict(diagram)
+        self.currentTabMarkdownTabsChanged.emit()
+        self.tabSwitched.emit()
+        return inverse
 
     @Slot()
     def reloadCurrentTab(self) -> None:
