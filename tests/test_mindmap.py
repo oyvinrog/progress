@@ -660,6 +660,72 @@ def test_qml_ctrl_arrows_reorder_and_editor_isolation(project, app):
     window.close()
 
 
+@pytest.mark.parametrize('tab_scoped', [False, True])
+def test_qml_ctrl_left_right_moves_branch(project, app, tab_scoped):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    if tab_scoped:
+        pm.showTabMindmap()
+    else:
+        pm.showMindmap()
+    QTest.qWait(150)
+    m.select(m.view_root.id)
+    branch_id = thought(m, 'Moving branch')
+    child_id = thought(m, 'Descendant')
+    m.select(branch_id)
+    QTest.qWait(150)
+    window.findChild(QObject, 'mindmapPane').forceActiveFocus()
+    revealed = []
+    m.revealNode.connect(revealed.append)
+
+    try:
+        for key, side in ((Qt.Key_Left, 'left'), (Qt.Key_Right, 'right')):
+            before = m.to_dict()
+            QTest.keyClick(window, key, Qt.ControlModifier)
+            branch = m.map.find(branch_id)
+            child = m.map.find(child_id)
+            assert branch.side == side
+            assert branch.parent is m.view_root and child.parent is branch
+            assert m.selectedIds == [branch_id]
+            assert revealed[-1] == branch_id
+            boxes = m._layout()
+            assert (boxes[child].x < boxes[branch].x) == (side == 'left')
+            after = m.to_dict()
+            decoded, _ = m.decode(after)
+            assert decoded.find(branch_id).side == side
+            QTest.keyClick(window, Qt.Key_Z, Qt.ControlModifier)
+            assert m.to_dict() == before and m.selectedId == branch_id
+            QTest.keyClick(window, Qt.Key_Y, Qt.ControlModifier)
+            assert m.to_dict() == after and m.selectedId == branch_id
+
+        before = m.to_dict()
+        QTest.keyClick(window, Qt.Key_Right)
+        assert m.selectedId == child_id
+        QTest.keyClick(window, Qt.Key_Left)
+        assert m.selectedId == branch_id and m.to_dict() == before
+
+        for node_id in (m.view_root.id, child_id):
+            m.select(node_id)
+            history_size = len(m._undo)
+            for key in (Qt.Key_Left, Qt.Key_Right):
+                QTest.keyClick(window, key, Qt.ControlModifier)
+                assert m.to_dict() == before and len(m._undo) == history_size
+
+        m.select(branch_id)
+        QTest.keyClick(window, Qt.Key_F2)
+        QTest.qWait(30)
+        assert window.findChild(QObject, 'mindmapNodeEditor').property('visible')
+        for key in (Qt.Key_Left, Qt.Key_Right):
+            QTest.keyClick(window, key, Qt.ControlModifier)
+            assert m.to_dict() == before
+        QTest.keyClick(window, Qt.Key_Escape)
+    finally:
+        window.close()
+
+
 def test_encrypted_roundtrip_dirty_and_scrub(project, tmp_path, monkeypatch):
     pm, tabs, _, _ = project
     credentials = EncryptionCredentials(passphrase='mindmap-test-passphrase')

@@ -577,7 +577,8 @@ class MindMapController(QObject):
     def setSide(self, side):
         node = self.map.find(self._selected)
         if node and node.parent is self.view_root and side in ('left', 'right'):
-            self._commit(lambda: setattr(node, 'side', side))
+            if self._commit(lambda: setattr(node, 'side', side)):
+                self.revealNode.emit(node.id)
 
     def _reorder_context(self, node_id):
         node = self.map.find(node_id)
