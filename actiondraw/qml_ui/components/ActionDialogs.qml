@@ -416,9 +416,17 @@ Item {
         function applySelection() {
             if (!targetDialog)
                 return
+            // Commit any text being edited before reading the selected time.
+            contentItem.forceActiveFocus()
             var selected = new Date(2000, 0, 1, selectedHour, selectedMinute, 0, 0)
             targetDialog.timeValue = dialogHost.formatTimeValue(selected)
             close()
+        }
+
+        Shortcut {
+            sequences: ["Return", "Enter"]
+            enabled: timePickerPopup.visible
+            onActivated: timePickerPopup.applySelection()
         }
 
         onOpened: {

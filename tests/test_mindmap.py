@@ -56,6 +56,22 @@ def test_mindmap_priority_ranks(project, values, levels):
     assert [nodes[key]['priorityScore'] for key in ids] == pytest.approx(values)
 
 
+@pytest.mark.parametrize('values', [[7], [2, 5], [1, 9, 3, 7, 5], [4, 4, 4, 4]])
+def test_mindmap_top_three_badges_follow_priority_order(project, values):
+    pm, tabs, _, _ = project
+    priority_tasks(tabs, values)
+
+    def ranks():
+        return {pm.mindmap.links[n['id']]: n['priorityRank']
+                for n in pm.mindmap.nodes if n['isTab']}
+
+    order = [tab.id for tab in tabs.getAllTabs()]
+    assert [ranks()[key] for key in order] == [1, 2, 3, 0, 0][:len(order)]
+    tabs.setIncludeInPriorityPlot(0, False)
+    assert ranks()[order[0]] == 0
+    assert [ranks()[key] for key in order[1:]] == [1, 2, 3, 0][:len(order) - 1]
+
+
 def test_mindmap_priority_scope_exclusion_and_updates(project):
     pm, tabs, _, _ = project
     m = pm.mindmap
@@ -66,9 +82,12 @@ def test_mindmap_priority_scope_exclusion_and_updates(project):
     m.select(root)
     note = thought(m)
     before = {n['id']: n['priorityLevel'] for n in m.nodes}
+    ranks_before = {n['id']: n['priorityRank'] for n in m.nodes}
     assert before[note] == before[m.map.root.id] == 0
+    assert ranks_before[note] == ranks_before[m.map.root.id] == 0
     m.set_scope(ids[0])
     assert all(n['priorityLevel'] == before[n['id']] for n in m.nodes)
+    assert all(n['priorityRank'] == ranks_before[n['id']] for n in m.nodes)
     m.select(root)
     m.toggleFold()
     assert m.nodes[0]['priorityLevel'] == before[root]
@@ -80,6 +99,7 @@ def test_mindmap_priority_scope_exclusion_and_updates(project):
     tabs.setPriorityPoint(index, math.e, 9)
     assert notifications
     assert next(n for n in m.nodes if n['id'] == root)['priorityLevel'] == 3
+    assert next(n for n in m.nodes if n['id'] == root)['priorityRank'] == 1
     assert tabs.getAllTabs()[0].id == ids[0]
     notifications.clear()
     tabs.setPriorityPoint(0, math.e, 10)  # Same ordering still refreshes the scene.
@@ -88,7 +108,53 @@ def test_mindmap_priority_scope_exclusion_and_updates(project):
     tabs.setIncludeInPriorityPlot(0, False)
     node = next(n for n in m.nodes if n['id'] == root)
     assert node['priorityLevel'] == 0 and node['priorityScore'] is None
+    assert node['priorityRank'] == 0
     assert m.to_dict() == saved
+
+
+def test_qml_plot_and_mindmap_share_score_ranks_after_load_and_moves(project, app):
+    pm, tabs, tasks, diagram = project
+    priority_tasks(tabs, [1, 9, 5, 3])
+    # Saved and manually arranged tab orders need not be sorted by score.
+    tabs.setTabs(list(reversed(tabs.getAllTabs())))
+    assert tabs.priorityRanks == [4, 3, 2, 1]
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    QMetaObject.invokeMethod(window, 'openPriorityPlotWindow')
+    plot = window.property('priorityPlotWindowRef')
+
+    def find(item, name):
+        if item.objectName() == name:
+            return item
+        for child in item.childItems():
+            found = find(child, name)
+            if found is not None:
+                return found
+
+    def check_ranks(expected):
+        QTest.qWait(30)
+        assert tabs.priorityRanks == expected
+        nodes = {pm.mindmap.links[n['id']]: n for n in pm.mindmap.nodes if n['isTab']}
+        for index, tab in enumerate(tabs.getAllTabs()):
+            point = find(plot.contentItem(), 'priorityPlotPoint_' + str(index))
+            rank = expected[index]
+            assert point.property('priorityRank') == rank
+            assert point.property('isTopPriority') == (1 <= rank <= 3)
+            assert nodes[tab.id]['priorityRank'] == (rank if 1 <= rank <= 3 else 0)
+
+    try:
+        check_ranks([4, 3, 2, 1])
+        tabs.moveTab(3, 0)
+        check_ranks([1, 4, 3, 2])
+        tabs.setIncludeInPriorityPlot(0, False)
+        check_ranks([1, 2, 3, 0])
+        tabs.setPriorityPoint(2, math.e, 10)
+        check_ranks([1, 2, 3, 0])
+        tabs.removeTab(0)
+        check_ranks([1, 2, 0])
+    finally:
+        plot.close()
+        window.close()
 
 
 def test_qml_mindmap_priority_rendering(project, app):
@@ -121,6 +187,9 @@ def test_qml_mindmap_priority_rendering(project, app):
             assert node.property('color').name() == color
             bars = find(node, 'mindmapPriority_' + node_id)
             assert bars.isVisible() and bars.property('level') == level
+            badge = find(node, 'mindmapPriorityRank_' + node_id)
+            assert badge.isVisible() and badge.property('rank') == 4 - level
+            assert badge.x() + badge.width() <= bars.x()
             filled = [child for child in bars.childItems()
                       if child.property('color') is not None and child.property('color').alpha() > 0]
             assert len(filled) == level
@@ -132,6 +201,7 @@ def test_qml_mindmap_priority_rendering(project, app):
         assert QQmlProperty.read(node, 'border.color').name() == '#a5d9ff'
         tooltip = node.findChild(QObject, 'mindmapTooltip_' + high)
         assert 'Relative priority: Higher · Score: 6.00' in tooltip.property('text')
+        assert 'Priority rank: 1' in tooltip.property('text')
         assert m.map.find(high).text in tooltip.property('text')
         assert 'Keep this note' in tooltip.property('text')
         m.toggleCompleted()
@@ -146,6 +216,7 @@ def test_qml_mindmap_priority_rendering(project, app):
         node = find(window.contentItem(), 'mindmapNode_' + high)
         assert node.property('color').name() == '#254d6c'
         assert not find(node, 'mindmapPriority_' + high).isVisible()
+        assert not find(node, 'mindmapPriorityRank_' + high).isVisible()
         assert not warnings
     finally:
         window.close()
@@ -660,6 +731,202 @@ def test_qml_ctrl_arrows_reorder_and_editor_isolation(project, app):
     window.close()
 
 
+@pytest.mark.parametrize('tab_scoped', [False, True])
+def test_qml_ctrl_left_right_moves_branch(project, app, tab_scoped):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    if tab_scoped:
+        pm.showTabMindmap()
+    else:
+        pm.showMindmap()
+    QTest.qWait(150)
+    m.select(m.view_root.id)
+    branch_id = thought(m, 'Moving branch')
+    child_id = thought(m, 'Descendant')
+    m.select(branch_id)
+    QTest.qWait(150)
+    window.findChild(QObject, 'mindmapPane').forceActiveFocus()
+    revealed = []
+    m.revealNode.connect(revealed.append)
+
+    try:
+        for key, side in ((Qt.Key_Left, 'left'), (Qt.Key_Right, 'right')):
+            before = m.to_dict()
+            QTest.keyClick(window, key, Qt.ControlModifier)
+            branch = m.map.find(branch_id)
+            child = m.map.find(child_id)
+            assert branch.side == side
+            assert branch.parent is m.view_root and child.parent is branch
+            assert m.selectedIds == [branch_id]
+            assert revealed[-1] == branch_id
+            boxes = m._layout()
+            assert (boxes[child].x < boxes[branch].x) == (side == 'left')
+            after = m.to_dict()
+            decoded, _ = m.decode(after)
+            assert decoded.find(branch_id).side == side
+            QTest.keyClick(window, Qt.Key_Z, Qt.ControlModifier)
+            assert m.to_dict() == before and m.selectedId == branch_id
+            QTest.keyClick(window, Qt.Key_Y, Qt.ControlModifier)
+            assert m.to_dict() == after and m.selectedId == branch_id
+
+        before = m.to_dict()
+        QTest.keyClick(window, Qt.Key_Right)
+        assert m.selectedId == child_id
+        QTest.keyClick(window, Qt.Key_Left)
+        assert m.selectedId == branch_id and m.to_dict() == before
+
+        for node_id in (m.view_root.id, child_id):
+            m.select(node_id)
+            history_size = len(m._undo)
+            for key in (Qt.Key_Left, Qt.Key_Right):
+                QTest.keyClick(window, key, Qt.ControlModifier)
+                assert m.to_dict() == before and len(m._undo) == history_size
+
+        m.select(branch_id)
+        QTest.keyClick(window, Qt.Key_F2)
+        QTest.qWait(30)
+        assert window.findChild(QObject, 'mindmapNodeEditor').property('visible')
+        for key in (Qt.Key_Left, Qt.Key_Right):
+            QTest.keyClick(window, key, Qt.ControlModifier)
+            assert m.to_dict() == before
+        QTest.keyClick(window, Qt.Key_Escape)
+    finally:
+        window.close()
+
+
+def test_bookmark_history_and_navigation(project):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    root = m.map.root.id
+    tab = next(iter(m.links))
+    m.select(tab)
+    child = thought(m, 'Child')
+    m.toggleBookmark(child)
+    m.toggleBookmark(root)
+    assert [b['id'] for b in m.bookmarks] == [child, root]
+    m.editSelected('Renamed', '')
+    assert m.bookmarks[0]['path'].endswith('/ Renamed')
+    m.moveNode(child, root, 'child')
+    assert m.bookmarks[0]['path'] == 'Project / Renamed'
+    m.toggleBookmark(child)
+    assert [b['id'] for b in m.bookmarks] == [root]
+    m.undo()
+    assert [b['id'] for b in m.bookmarks] == [child, root]
+    m.select(child)
+    m.deleteSelected()
+    assert [b['id'] for b in m.bookmarks] == [root]
+    m.undo()
+    assert [b['id'] for b in m.bookmarks] == [child, root]
+    m.redo()
+    assert [b['id'] for b in m.bookmarks] == [root]
+    m.undo()
+    pm.showTabMindmap()
+    history = len(m._undo)
+    m.jumpToBookmark(child)
+    assert not m.tabScoped and m.selectedIds == [child]
+    assert len(m._undo) == history
+    m.toggleBookmark(tab)
+    pm.showTabMindmap()
+    m.jumpToBookmark(tab)
+    assert m.tabScoped and m.selectedId == tab
+    payload = m.to_dict()
+    restored = MindMapController()
+    restored.load(payload)
+    assert restored.bookmarks == m.bookmarks
+    payload.pop('bookmarks')
+    restored.load(payload)
+    assert restored.bookmarks == []
+    m.load()
+    assert m.bookmarks == []
+
+
+@pytest.mark.parametrize('value', [None, {}, 'node', [42], [[]], ['missing'], 'duplicate'])
+def test_bookmark_payload_validation(project, value):
+    m = project[0].mindmap
+    payload = m.to_dict()
+    payload['bookmarks'] = [m.map.root.id] * 2 if value == 'duplicate' else value
+    with pytest.raises(ValueError, match='bookmarks'):
+        m.decode(payload)
+
+
+def test_qml_bookmarks(project, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    tab = next(iter(m.links))
+    m.select(tab)
+    child = thought(m, 'Bookmarked child')
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    warnings = []
+    engine.warnings.connect(lambda messages: warnings.extend(x.toString() for x in messages))
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+    pane = window.findChild(QObject, 'mindmapPane')
+
+    def find_item(item, name):
+        if item.objectName() == name:
+            return item
+        for nested in item.childItems():
+            found = find_item(nested, name)
+            if found is not None:
+                return found
+
+    def click(item):
+        QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                         item.mapToScene(item.boundingRect().center()).toPoint())
+        QTest.qWait(50)
+
+    try:
+        row = window.findChild(QObject, 'mindmapBookmarks')
+        assert not row.property('visible')
+        m.select(child)
+        click(window.findChild(QObject, 'mindmapBookmark'))
+        assert m.selectedNode['bookmarked'] and row.property('visible')
+        click(window.findChild(QObject, 'mindmapBookmark'))
+        assert not m.bookmarks and not row.property('visible')
+        click(window.findChild(QObject, 'mindmapBookmark'))
+        m.select(tab)
+        m.toggleFold()
+        history = len(m._undo)
+        click(find_item(window.contentItem(), 'mindmapBookmark_' + child))
+        assert not m.map.find(tab).folded and m.selectedIds == [child]
+        assert len(m._undo) == history and pane.hasActiveFocus()
+        # Context action targets the clicked node even with another primary selection.
+        m.select(tab, 'toggle')
+        m.select(child, 'add')
+        assert m.selectedId == child
+        menu = window.findChild(QObject, 'mindmapNodeMenu')
+        menu.setProperty('targetNodeId', tab)
+        QMetaObject.invokeMethod(window.findChild(QObject, 'mindmapBookmarkMenuItem'), 'triggered')
+        assert [b['id'] for b in m.bookmarks] == [child, tab]
+        m.toggleBookmark(m.map.root.id)
+        pm.showTabMindmap()
+        QTest.qWait(50)
+        pane.setProperty('zoom', 0.7)
+        click(find_item(window.contentItem(), 'mindmapBookmark_' + m.map.root.id))
+        assert not m.tabScoped and m.selectedId == m.map.root.id
+        assert pane.property('zoom') == pytest.approx(0.7)
+        item = find_item(window.contentItem(), 'mindmapNode_' + m.selectedId)
+        viewport = window.findChild(QObject, 'mindmapViewport')
+        point = item.mapToItem(viewport, item.boundingRect().center())
+        assert 0 <= point.x() <= viewport.width() and 0 <= point.y() <= viewport.height()
+        click(find_item(window.contentItem(), 'mindmapBookmark_' + tab))
+        assert not m.tabScoped and m.selectedId == tab
+        for i in range(12):
+            m.select(m.map.root.id)
+            node_id = thought(m, 'A long bookmark title ' + str(i))
+            m.toggleBookmark(node_id)
+        QTest.qWait(50)
+        assert row.property('contentWidth') > row.width()
+        assert not warnings, warnings
+    finally:
+        window.close()
+
+
 def test_encrypted_roundtrip_dirty_and_scrub(project, tmp_path, monkeypatch):
     pm, tabs, _, _ = project
     credentials = EncryptionCredentials(passphrase='mindmap-test-passphrase')
@@ -667,6 +934,7 @@ def test_encrypted_roundtrip_dirty_and_scrub(project, tmp_path, monkeypatch):
     tab_root = next(iter(pm.mindmap.links))
     pm.mindmap.select(tab_root)
     node_id = thought(pm.mindmap)
+    pm.mindmap.toggleBookmark(node_id)
     pm.mindmap.toggleCompleted()
     pm.mindmap.select(pm.mindmap.map.root.id)
     pm.mindmap.toggleFold()
@@ -681,6 +949,7 @@ def test_encrypted_roundtrip_dirty_and_scrub(project, tmp_path, monkeypatch):
     assert payload['tabs'][0]['id'] == tab_id
     assert 'Secret thought' in payload['mindmap']['xml']
     assert payload['mindmap']['completed'] == [node_id]
+    assert payload['mindmap']['bookmarks'] == [node_id]
     expected = pm.mindmap.to_dict()
     pm.loadProject(str(path))
     assert pm.mindmap.to_dict() == expected
@@ -696,6 +965,7 @@ def test_encrypted_roundtrip_dirty_and_scrub(project, tmp_path, monkeypatch):
     pm.scrubProjectData()
     assert 'Secret' not in str(pm.mindmap.to_dict())
     assert pm.mindmap.to_dict()['completed'] == []
+    assert pm.mindmap.bookmarks == []
     assert not pm.mindmap._view_selections
     assert not pm.mindmap.canUndo and not pm.mindmap.canRedo
     assert pm.mindmap.selectedId == pm.mindmap.map.root.id

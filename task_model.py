@@ -53,6 +53,7 @@ from actiondraw.priorityplot.model import (
     clamp_subjective_value,
     clamp_time_hours,
     compute_priority_score,
+    normalize_priority_weight,
 )
 from actiondraw.mindmap import MindMapController
 from actiondraw.markdown_note_tabs import normalize_editor_tabs
@@ -1502,12 +1503,48 @@ class TabModel(QAbstractListModel):
     goalsChanged = Signal()
     assessmentChanged = Signal(int)
     kanbanChanged = Signal()
+    priorityRanksChanged = Signal()
+    priorityWeightsChanged = Signal()
 
     def __init__(self):
         super().__init__()
         self._tabs: List[Tab] = [Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})]
         self._current_tab_index: int = 0
         self._recent_tab_indices: List[int] = []
+        self._priority_value_weight = 1.0
+        self._priority_time_weight = 1.0
+        self.dataChanged.connect(self.priorityRanksChanged)
+        self.modelReset.connect(self.priorityRanksChanged)
+        self.rowsInserted.connect(self.priorityRanksChanged)
+        self.rowsRemoved.connect(self.priorityRanksChanged)
+        self.rowsMoved.connect(self.priorityRanksChanged)
+
+    @Property(float, notify=priorityWeightsChanged)
+    def priorityValueWeight(self):
+        return self._priority_value_weight
+
+    @Property(float, notify=priorityWeightsChanged)
+    def priorityTimeWeight(self):
+        return self._priority_time_weight
+
+    @Slot(float, float)
+    def setPriorityWeights(self, value_weight, time_weight):
+        weights = (normalize_priority_weight(value_weight), normalize_priority_weight(time_weight))
+        if weights == (self._priority_value_weight, self._priority_time_weight):
+            return
+        self._priority_value_weight, self._priority_time_weight = weights
+        self.recomputeAndSortPriorities()
+        self.priorityWeightsChanged.emit()
+
+    @Property('QVariantList', notify=priorityRanksChanged)
+    def priorityRanks(self):
+        """Score ranks by model row, shared by the plot and mindmap (0 = excluded)."""
+        ordered = sorted((i for i, tab in enumerate(self._tabs) if tab.include_in_priority_plot),
+                         key=lambda i: -self._tabs[i].priority_score)
+        ranks = [0] * len(self._tabs)
+        for rank, index in enumerate(ordered, 1):
+            ranks[index] = rank
+        return ranks
 
     def rowCount(self, parent: Optional[QModelIndex] = QModelIndex()) -> int:  # type: ignore[override]
         return len(self._tabs)
@@ -1736,6 +1773,7 @@ class TabModel(QAbstractListModel):
         tab = self._tabs[index]
         return {
             "tabIndex": index,
+            "id": tab.id,
             "name": tab.name,
             "completionPercent": self._calculateTabCompletion(tab),
             "activeTaskTitle": self._getActiveTaskTitle(tab),
@@ -1759,6 +1797,8 @@ class TabModel(QAbstractListModel):
             tasks={"tasks": []},
             diagram={"items": [], "edges": [], "strokes": []}
         )
+        new_tab.priority_score = self._computePriorityScore(new_tab.priority_subjective_value,
+                                                          new_tab.priority_time_hours)
 
         self.beginInsertRows(QModelIndex(), len(self._tabs), len(self._tabs))
         self._tabs.append(new_tab)
@@ -2076,7 +2116,8 @@ class TabModel(QAbstractListModel):
         self.assessmentChanged.emit(index)
 
     def _computePriorityScore(self, value: float, time_hours: float) -> float:
-        return compute_priority_score(value, time_hours)
+        return compute_priority_score(value, time_hours,
+                                      self._priority_value_weight, self._priority_time_weight)
 
     @Slot(int, float, float)
     def setPriorityPoint(self, index: int, time_hours: float, subjective_value: float) -> None:
@@ -2212,6 +2253,10 @@ class TabModel(QAbstractListModel):
         recent_ids = [self._tabs[index].id for index in self._recent_tab_indices]
         self.beginResetModel()
         self._tabs = tabs
+        for tab in self._tabs:
+            tab.priority_score = (self._computePriorityScore(tab.priority_subjective_value,
+                                                            tab.priority_time_hours)
+                                  if tab.include_in_priority_plot else 0.0)
         self._current_tab_index = active_tab
         self._recent_tab_indices = [index for tab_id in recent_ids
                                     for index, tab in enumerate(tabs) if tab.id == tab_id]
@@ -2221,9 +2266,13 @@ class TabModel(QAbstractListModel):
         self.currentTabChanged.emit()
         self._emitRecentTabsChanged()
 
-    def setTabs(self, tabs: List[Tab], active_tab: int = 0) -> None:
+    def setTabs(self, tabs: List[Tab], active_tab: int = 0, priority_scoring=None) -> None:
         """Replace all tabs with new data."""
         self.beginResetModel()
+        if priority_scoring is not None:
+            scoring = priority_scoring if isinstance(priority_scoring, dict) else {}
+            self._priority_value_weight = normalize_priority_weight(scoring.get("value_weight", 1.0))
+            self._priority_time_weight = normalize_priority_weight(scoring.get("time_weight", 1.0))
         self._tabs = tabs if tabs else [Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})]
         for tab in self._tabs:
             from actiondraw.actionpaint import normalize_action_paint_state
@@ -2257,6 +2306,7 @@ class TabModel(QAbstractListModel):
         self._current_tab_index = active_tab
         self._recent_tab_indices = []
 
+        self.priorityWeightsChanged.emit()
         self.tabsChanged.emit()
         self.currentTabIndexChanged.emit()
         self.currentTabChanged.emit()
@@ -2264,7 +2314,8 @@ class TabModel(QAbstractListModel):
 
     def clear(self) -> None:
         """Reset to a single empty tab."""
-        self.setTabs([Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})], 0)
+        self.setTabs([Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})], 0,
+                     priority_scoring={})
 
     @Slot(int, int)
     def moveTab(self, from_index: int, to_index: int) -> None:
@@ -2463,6 +2514,23 @@ class ProjectManager(QObject):
     @Slot()
     def showTabCanvas(self) -> None:
         self._setMindmapVisible(False)
+
+    @Slot(result='QStringList')
+    def addActionPaintToMindmap(self):
+        """Import the current tab's Action Paint list as ordered sibling nodes."""
+        if self._tab_model is None:
+            return []
+        from actiondraw.actionpaint import normalize_action_paint_state
+
+        tab = self._tab_model.getCurrentTabData()
+        titles = [action['text'] for action in normalize_action_paint_state(tab.action_paint)['actions']]
+        if not titles:
+            return []
+        parent_id = next((key for key, value in self.mindmap.links.items() if value == tab.id), None)
+        if parent_id is None:
+            return []
+        self.showTabMindmap()
+        return self.mindmap.add_siblings(parent_id, titles)
 
     def _defaultTabView(self) -> None:
         tab = self._tab_model.getCurrentTabData()
@@ -3488,6 +3556,8 @@ class ProjectManager(QObject):
                 "version": self.PROJECT_VERSION,
                 "tabs": tabs_data,
                 "active_tab": current_tab_index,
+                "priority_scoring": {"value_weight": self._tab_model.priorityValueWeight,
+                                     "time_weight": self._tab_model.priorityTimeWeight},
                 "workspace_markdown_tabs": normalize_editor_tabs(self._workspace_markdown_tabs, fallback_text=""),
                 "mindmap": self.mindmap.to_dict(),
                 "standalone_reminders": self._serialize_standalone_reminders(),
@@ -4040,7 +4110,8 @@ class ProjectManager(QObject):
 
             # Update tab model if available
             if self._tab_model is not None:
-                self._tab_model.setTabs(tabs, active_tab)
+                self._tab_model.setTabs(tabs, active_tab,
+                                        priority_scoring=project_data.get("priority_scoring") or {})
 
             self.mindmap.load(project_data.get("mindmap"))
             if self._tab_model is not None:

@@ -110,11 +110,13 @@ Rectangle {
 
         delegate: Item {
             id: pointItem
+            objectName: "priorityPlotPoint_" + index
             width: isTopPriority ? 24 : 14
             height: width
             visible: model.includeInPriorityPlot !== false
             property bool isSelected: index === root.selectedTabIndex
-            property bool isTopPriority: index >= 0 && index < 3
+            property int priorityRank: root.tabModel ? (root.tabModel.priorityRanks[index] || 0) : 0
+            property bool isTopPriority: priorityRank >= 1 && priorityRank <= 3
             property real pointTime: model.priorityTimeHours || 1.01
             property real pointValue: model.prioritySubjectiveValue || 0.0
             x: root.toX(pointTime) - width / 2
@@ -136,7 +138,7 @@ Rectangle {
             Text {
                 anchors.centerIn: parent
                 visible: pointItem.isTopPriority
-                text: index + 1
+                text: pointItem.priorityRank
                 color: "#15202a"
                 font.pixelSize: 13
                 font.bold: true

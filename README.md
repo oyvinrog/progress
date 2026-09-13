@@ -1,103 +1,183 @@
 # ActionDraw
 
-### Your whole plan. One canvas.
+**Your whole plan. One canvas.**
 
-<p align="center">
-  <img src="https://github.com/oyvinrog/progress/blob/master/assets/img1.png?raw=1" alt="ActionDraw — visual planning canvas" width="700">
-</p>
+ActionDraw is a desktop app for turning ideas into plans you can act on. Organize
+projects in a mindmap, open a branch to focus on the next steps, and use visual
+canvases, notes, priorities, and reminders to carry the work forward. Save your
+work in an encrypted project file.
 
-Diagrams, tasks, notes, reminders, priorities, and encrypted storage — in a single desktop app you install with one command.
-
-```bash
-pip install actiondraw
-```
-
-<p align="center">
-  <img src="https://github.com/oyvinrog/progress/blob/master/assets/img2.png?raw=1" alt="ActionDraw — encrypted storage" width="700">
-</p>
-
-## What you get
-
-- **Global mindmap** — arrange thoughts and notes around every project tab; click a tab node to open it. The map is saved inside the encrypted project file.
-- **Visual task diagrams** — drag boxes, databases, servers, clouds, and sticky notes onto an infinite canvas
-- **Live connections** — draw arrows between nodes with drag-and-drop; arrowheads and previews update in real time
-- **Markdown notes** — click any node to open a rich markdown editor
-- **Time tracking & reminders** — built-in scheduling so nothing slips
-- **Priority scoring** — rank tasks by impact and effort with an integrated priority plot
-- **Obstacle & wish planning** — dedicated shapes for blockers and goals
-- **Free drawing** — sketch and annotate directly on the canvas
-- **Action Paint** — sketch a scene, place and reorder numbered actions, then add them to the diagram as a connected task chain
-- **Paste images** — drop external graphics right onto the diagram
-- **Encrypted storage** — your data is protected with Argon2id key derivation, with optional YubiKey challenge-response
+<img src="https://github.com/oyvinrog/progress/blob/master/assets/mindmap-overview.png?raw=1" alt="ActionDraw project mindmap showing an autumn launch, with website work, customer research, and a launch checklist" width="1000">
 
 ## Quick start
 
+Requires **Python 3.10+**. Installation includes PySide6 (Qt) and the other required dependencies.
+
 ```bash
-pip install actiondraw    # Install
-actiondraw                # Launch the canvas
-priorityplot              # Launch standalone priority plot
+pip install actiondraw
+actiondraw
 ```
 
-Configure `ntfy` in the app under `Tools > Notification Settings...`. Environment variables `PROGRESS_NTFY_TOPIC`, `PROGRESS_NTFY_SERVER`, and `PROGRESS_NTFY_TOKEN` still work as a fallback.
+To run the standalone priority plot:
 
-## Requirements
+```bash
+priorityplot
+```
 
-- Python 3.8+
-- PySide6 >= 6.6
+[Mindmap walkthrough](#plan-a-project-with-the-mindmap) ·
+[Keyboard shortcuts](#mindmap-shortcuts) ·
+[Other tools](#beyond-the-mindmap) ·
+[Development](#run-from-source)
 
-## Links
+## Plan a project with the mindmap
+
+The screenshots use a fictional **Autumn launch** project. Each project tab is
+also a node in the map, so you can organize the big picture and open the work
+behind it from the same place.
+
+### 1. Lay out the whole project
+
+Choose **Mindmap** above the sidebar tabs to open the full project map. Start
+with tabs such as **Website launch**, **Customer research**, and **Launch
+checklist**, then select a node and choose **Add child** to break it into smaller
+steps. Use **Sibling** for another step at the same level.
+
+In the overview above, the website branch contains content and quality checks,
+while research and the launch checklist sit on the left. Drag a node onto
+another node to nest it, or onto its top or bottom edge to reorder it. Use the
+right-click menu to place a branch on the left or right. Scroll to zoom, drag
+the background to pan, and choose **Fit** to see the whole map.
+
+Blue shades and one, two, or three filled bars show lower, middle, or higher
+relative priority for tabs included in the priority plot. Numbered badges mark
+the top three; hover over a node for its score. The scale compares all included
+project tabs, so folding or focusing a branch does not change its priority.
+Tied scores share a level; a single task or all-equal scores use the middle level.
+Notes and excluded tabs have no priority indicator.
+
+### 2. Open a branch and focus on the next steps
+
+Click a tab node to open it. Tabs with children open their own mindmap branch;
+use **Canvas** to switch to that tab's diagram. The tab's **Mindmap** control
+opens or starts its branch, while the sidebar **Mindmap** returns to the full
+project map. **Alt+Left** returns to the previous view.
+
+<img src="https://github.com/oyvinrog/progress/blob/master/assets/mindmap-branch.png?raw=1" alt="Website launch branch showing content and quality work, a completed draft, and a scheduled design review" width="1000">
+
+Here, **Website launch** is the branch root. The finished homepage draft has a
+check mark, and **Review with design** has a reminder. Both the full map and
+this focused view edit the same nodes and share undo/redo.
+
+Select a thought and choose **Create tab** when it needs its own workspace.
+Use **Bookmark** to keep a frequently visited node within reach; its button
+appears above the map.
+
+### 3. Keep context and reminders beside the work
+
+Select a node and choose **Edit / Notes** (or press **F2**) to capture decisions,
+questions, and what it will take to finish. In this example, the design review
+has an agenda and a clear completion condition.
+
+<img src="https://github.com/oyvinrog/progress/blob/master/assets/mindmap-notes.png?raw=1" alt="Thought and notes dialog with a design review agenda and completion condition" width="1000">
+
+Choose **Reminder** for a selected node to set a date and time, with optional
+notifications. An orange bell and date appear beneath its title. Every node
+supports a reminder, including tab nodes and the project root.
+
+**Waiting Reminders** stays visible above both the canvas and mindmap. Choose
+**Open Node** to reveal the relevant node, even inside a folded branch. The
+right-click menu lets you update or clear its reminder.
+
+Use **Complete** or **F4** to mark selected nodes with a ✓. If all selected
+nodes are complete, the same action clears the marks. Completing a node does
+not complete its descendants or canvas tasks. Completion marks, notes, and the
+map are saved with the project.
+
+Completing or deleting a node cancels its reminder; undo restores it. Reminders
+that have already fired stay cleared through undo/redo. Use **Renew** in the
+due alert to schedule another one.
+
+### 4. Reorganize as the plan changes
+
+**Ctrl+click** toggles nodes in the selection without opening tabs.
+**Shift+click** selects a range, and **Shift+arrow keys** extend the selection.
+To move several branches, select them, press **Ctrl+X**, select a destination,
+and press **Ctrl+V**. The move preserves descendants and tab links and can be
+undone with **Ctrl+Z**.
+
+Cut branches stay dimmed until pasted; **Escape** cancels the cut. Clicking a
+tab while a cut is pending selects it as the destination. Cut selections are
+local to the current project. Deleting a project tab keeps its map node as a
+thought.
+
+## Mindmap shortcuts
+
+These shortcuts apply while the mindmap has focus, outside dialogs and menus.
+
+| Action | Shortcut |
+| --- | --- |
+| Select a nearby visible node | Arrow keys |
+| Extend the selection | Shift + arrow keys |
+| Add a child / sibling | Tab / Enter |
+| Open the selected tab | Ctrl + Enter |
+| Edit title and notes | F2 |
+| Fold or unfold | Space |
+| Toggle completion | F4 |
+| Move a node up / down | Ctrl + Up / Down |
+| Place a branch left / right | Ctrl + Left / Right |
+| Cut / paste branches | Ctrl + X / Ctrl + V |
+| Cancel a pending cut | Escape |
+| Undo / redo | Ctrl + Z / Ctrl + Y |
+| Return to the previous view | Alt + Left |
+
+## Beyond the mindmap
+
+<img src="https://github.com/oyvinrog/progress/blob/master/assets/img1.png?raw=1" alt="ActionDraw visual planning canvas" width="1000">
+
+- **Visual task diagrams** — arrange boxes, databases, servers, clouds, and sticky notes; connect them with arrows that follow the nodes.
+- **Markdown notes** — open a rich Markdown editor from a canvas node.
+- **Time tracking and reminders** — track work and schedule follow-ups.
+- **Priority scoring** — compare tasks by impact and effort in the integrated priority plot.
+- **Obstacles and wishes** — use dedicated shapes for blockers and goals.
+- **Free drawing and images** — sketch on the canvas and paste external graphics.
+- **Action Paint** — sketch a scene, arrange numbered actions, then add them as a connected task chain in the diagram or as nodes in a tab's mindmap.
+- **Encrypted storage** — protect project data with Argon2id key derivation, with optional YubiKey challenge-response.
+
+<img src="https://github.com/oyvinrog/progress/blob/master/assets/img2.png?raw=1" alt="ActionDraw encrypted storage" width="700">
+
+Configure `ntfy` under **Tools > Notification Settings...** for notifications.
+`PROGRESS_NTFY_TOPIC`, `PROGRESS_NTFY_SERVER`, and `PROGRESS_NTFY_TOKEN` also work
+as environment-variable fallbacks.
+
+## Run from source
+
+```bash
+git clone https://github.com/oyvinrog/progress.git
+cd progress
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"
+actiondraw
+```
+
+Run the tests with `python -m pytest`.
+
+The mindmap screenshots are captures of the actual QML interface with fictional
+sample data. Regenerate all three from a source checkout with:
+
+```bash
+python tools/capture_mindmap_screenshots.py
+```
+
+The script uses Qt's offscreen software renderer and writes PNGs to `assets/`.
+It does not load or save project files.
+
+## Links and license
 
 - [Source on GitHub](https://github.com/oyvinrog/progress)
-- [Report issues](https://github.com/oyvinrog/progress/issues)
-- MIT License
-
-## Project mindmap
-
-Choose **Mindmap** above the sidebar tabs. Drag nodes onto another node to nest
-them, or onto its top/bottom edge to reorder. Right-click a tab node to add
-thoughts or edit notes; a normal click opens the tab. Ctrl+click toggles nodes in the selection without opening tabs; Shift+click
-selects a range, and Shift+arrow keys extend the selection. Use Alt+Left to return.
-
-In the map, arrow keys select nearby visible nodes and keep them on screen.
-Tab adds a child to the selected node (including tabs), Ctrl+Enter opens the
-selected tab, Enter adds a sibling, F2 edits, Space folds, F4 toggles completion,
-and Ctrl+Z / Ctrl+Y undo and redo. Use the mouse wheel to zoom and drag the
-background to pan. Deleting a project tab keeps its map node as a thought.
-
-Tabs with child nodes open in a mindmap showing their branch. Use **Canvas**
-to return to the tab's canvas and **Mindmap** to view or start its branch.
-The sidebar **Mindmap** opens the full project map. Both views edit the same
-nodes, so changes and undo/redo are shared. The tab view's root stays in place;
-open nested tab nodes to view their branches and use Alt+Left to return.
-
-Task nodes use three blue shades and one, two, or three filled bars to show
-lower, middle, or higher relative priority from the priority plot's calculated
-score. Levels compare all included project tabs, so opening or folding a branch
-does not change the scale. Tied scores share a level; a single task or all-equal
-scores use the middle level. Hover over a task for its score. Notes and tabs
-excluded from the priority plot have no priority indicator.
-
-Use **Complete** in the toolbar or right-click menu, or press **F4**, to mark
-selected nodes with a ✓. If all selected nodes are already complete, this clears
-their marks. Descendants and canvas tasks are unaffected. Marks are saved with
-the project.
-
-Select a single node and choose **Reminder**, or right-click it to set, update,
-or clear a reminder. Every node supports its own reminder, including tab nodes
-and the project root. Use the same date/time presets and optional notifications
-as canvas tasks. An orange bell and date appear beneath the node title.
-
-**Waiting Reminders** stays visible above both the canvas and mindmap. Use
-**Open Node** to reveal a reminder's node, including inside folded branches.
-Completing or deleting a node cancels its reminder; undo restores it. Reminders
-that have already fired stay cleared through undo/redo; use **Renew** in the due
-alert to schedule another one.
+- [Report an issue](https://github.com/oyvinrog/progress/issues)
+- [MIT License](LICENSE)
 
 The mindmap reuses the MIT-licensed [PyPlane](https://github.com/oyvinrog/pyplane)
-core, bundled with its license and source revision.
-
-To move several branches, select them and press Ctrl+X, select a destination,
-then press Ctrl+V. Cut branches stay dimmed in place until pasted; Escape
-cancels the cut. Clicking a tab while a cut is pending selects it as the
-destination. The move preserves tab links and descendants and can be undone
-with Ctrl+Z. Cut selections are local to the current project.
+core, bundled with its [license](actiondraw/_vendor/pyplane/LICENSE) and
+[source revision](actiondraw/_vendor/pyplane/UPSTREAM.md).

@@ -59,6 +59,14 @@ FocusScope {
         initialized = true
     }
     function zoomBy(factor) { zoom = Math.max(0.2, Math.min(4, zoom * factor)) }
+    function jumpBookmark(nodeId) {
+        var currentZoom = zoom
+        controller.jumpToBookmark(nodeId)
+        zoom = currentZoom
+        initialized = true
+        forceActiveFocus()
+        Qt.callLater(function() { pane.revealNode(nodeId) })
+    }
     function revealNode(nodeId) {
         if (!visible || !controller) return
         var nodes = controller.nodes
@@ -106,7 +114,7 @@ FocusScope {
             pane.panY = saved ? saved.y : 0
             pane.initialized = saved ? saved.initialized : false
             editor.close()
-            if (!pane.initialized) Qt.callLater(function() { if (pane.visible) pane.fitMap() })
+            if (!pane.initialized) Qt.callLater(function() { if (pane.visible && !pane.initialized) pane.fitMap() })
         }
         function onResetView() {
             pane.viewPositions = ({})
@@ -157,6 +165,12 @@ FocusScope {
                 onClicked: pane.reminderRequested(pane.controller.selectedId)
             }
             Button { text: "Edit / Notes"; onClicked: pane.editNode() }
+            Button {
+                objectName: "mindmapBookmark"
+                text: pane.controller && pane.controller.selectedNode.bookmarked ? "Remove bookmark" : "Bookmark"
+                enabled: pane.controller && pane.controller.selectedId !== ""
+                onClicked: { pane.controller.toggleBookmark(pane.controller.selectedId); pane.forceActiveFocus() }
+            }
             Button { text: "Fold"; onClicked: pane.controller.toggleFold() }
             Button { text: "Cut"; enabled: pane.controller && pane.controller.canCut; onClicked: pane.controller.cutSelected() }
             Button { text: "Paste"; enabled: pane.controller && pane.controller.canPaste; onClicked: pane.controller.pasteSelected() }
@@ -167,11 +181,48 @@ FocusScope {
             Button { text: "+"; onClicked: pane.zoomBy(1.2) }
             Button { text: "Fit"; onClicked: pane.fitMap() }
         }
+        ScrollView {
+            id: bookmarkScroll
+            objectName: "mindmapBookmarks"
+            Layout.fillWidth: true
+            Layout.preferredHeight: bookmarkRow.height + 14
+            visible: pane.controller && pane.controller.bookmarks.length > 0
+            clip: true
+            contentWidth: bookmarkRow.width
+            contentHeight: bookmarkRow.height
+            ScrollBar.horizontal.policy: ScrollBar.AsNeeded
+            ScrollBar.vertical.policy: ScrollBar.AlwaysOff
+            Row {
+                id: bookmarkRow
+                spacing: 6
+                Repeater {
+                    model: pane.controller ? pane.controller.bookmarks : []
+                    Button {
+                        required property var modelData
+                        objectName: "mindmapBookmark_" + modelData.id
+                        width: Math.min(220, Math.max(70, implicitWidth))
+                        text: modelData.text
+                        contentItem: Text {
+                            text: parent.text
+                            color: parent.palette.buttonText
+                            font: parent.font
+                            elide: Text.ElideRight
+                            verticalAlignment: Text.AlignVCenter
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+                        ToolTip.visible: hovered
+                        ToolTip.delay: 600
+                        ToolTip.text: modelData.path
+                        onClicked: pane.jumpBookmark(modelData.id)
+                    }
+                }
+            }
+        }
         Label {
             Layout.fillWidth: true
             text: pane.controller && pane.controller.canPaste
                 ? "Branches cut: click a destination and press Ctrl+V to move them beneath it · Escape cancels"
-                : "Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+X / Ctrl+V moves branches · F4 completes · Arrows navigate · Tab adds a child · Ctrl+Enter opens a tab"
+                : "Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+X / Ctrl+V moves branches · F4 completes · Arrows navigate · Tab adds a child · Ctrl+Enter opens a tab"
             wrapMode: Text.WordWrap
             color: "#a9bfd1"
         }
@@ -275,11 +326,33 @@ FocusScope {
                         Text {
                             anchors.fill: parent
                             anchors.bottomMargin: nodeItem.modelData.reminderActive ? 28 : 0
-                            anchors.leftMargin: 9; anchors.rightMargin: nodeItem.modelData.priorityLevel > 0 ? 48 : 18
+                            anchors.leftMargin: 9
+                            anchors.rightMargin: (nodeItem.modelData.priorityLevel > 0 ? 48 : 18)
+                                                 + (nodeItem.modelData.priorityRank > 0 ? 30 : 0)
                             verticalAlignment: Text.AlignVCenter
                             text: (nodeItem.modelData.completed ? "✓ " : "") + (nodeItem.modelData.isTab ? "▣ " : "") + nodeItem.modelData.text
                             font.pixelSize: 14
                             color: "#e5f0fa"; elide: Text.ElideRight
+                        }
+                        Rectangle {
+                            objectName: "mindmapPriorityRank_" + nodeItem.modelData.id
+                            readonly property int rank: nodeItem.modelData.priorityRank
+                            visible: rank > 0
+                            width: 24; height: 24; radius: 12
+                            anchors.right: parent.right; anchors.rightMargin: 48
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.verticalCenterOffset: nodeItem.modelData.reminderActive ? -14 : 0
+                            color: rank === 1 ? "#f2c75c" : rank === 2 ? "#c8d3df" : "#d99b6c"
+                            border.color: "#e5f0fa"
+                            Accessible.role: Accessible.StaticText
+                            Accessible.name: "Priority rank " + rank
+                            Text {
+                                anchors.centerIn: parent
+                                text: parent.rank
+                                font.pixelSize: 14
+                                font.bold: true
+                                color: "#1b2028"
+                            }
                         }
                         PriorityBars {
                             objectName: "mindmapPriority_" + nodeItem.modelData.id
@@ -370,6 +443,8 @@ FocusScope {
                                 delay: 800
                                 visible: nodeMouse.containsMouse && !nodeMouse.pressed
                                 text: nodeItem.modelData.text
+                                      + (nodeItem.modelData.priorityRank > 0
+                                         ? "\nPriority rank: " + nodeItem.modelData.priorityRank : "")
                                       + (nodeItem.modelData.priorityLevel > 0
                                          ? "\nRelative priority: " + pane.priorityLabel(nodeItem.modelData.priorityLevel)
                                            + " · Score: " + nodeItem.modelData.priorityScore.toFixed(2) : "")
@@ -436,6 +511,12 @@ FocusScope {
             onTriggered: pane.clearReminderRequested(nodeMenu.targetNodeId)
         }
         MenuSeparator {}
+        MenuItem {
+            objectName: "mindmapBookmarkMenuItem"
+            text: pane.controller && pane.controller.bookmarks.some(function(b) { return b.id === nodeMenu.targetNodeId })
+                  ? "Remove bookmark" : "Bookmark"
+            onTriggered: { pane.controller.toggleBookmark(nodeMenu.targetNodeId); pane.forceActiveFocus() }
+        }
         MenuItem {
             objectName: "mindmapMoveUp"
             text: "Move up"
@@ -518,6 +599,8 @@ FocusScope {
     Shortcut { sequence: "Down"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.navigate("down") }
     Shortcut { sequence: "Ctrl+Up"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.reorderNode(pane.controller.selectedId, -1) }
     Shortcut { sequence: "Ctrl+Down"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.reorderNode(pane.controller.selectedId, 1) }
+    Shortcut { sequence: "Ctrl+Left"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.setSide("left") }
+    Shortcut { sequence: "Ctrl+Right"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.setSide("right") }
     Shortcut { sequences: ["Ctrl+Return", "Ctrl+Enter"]; enabled: pane.shortcutsEnabled; onActivated: pane.controller.activate(pane.controller.selectedId) }
     Shortcut { sequence: "Return"; enabled: pane.shortcutsEnabled; onActivated: pane.addThought(true) }
     Shortcut { sequence: "F4"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.toggleCompleted() }

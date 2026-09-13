@@ -193,6 +193,74 @@ def test_actionpaint_qml_and_toolbar_are_wired():
     assert "openActionPaintWindow" in window_qml
 
 
+def test_actionpaint_mindmap_sequence_order_scope_and_undo(app):
+    tasks = TaskModel()
+    diagram = DiagramModel(task_model=tasks)
+    tabs = TabModel()
+    manager = ProjectManager(tasks, diagram, tabs)
+    paint = ActionPaintModel(tab_model=tabs)
+    mindmap = manager.mindmap
+    original_root = mindmap.view_root
+    assert manager.addActionPaintToMindmap() == []
+    assert mindmap.view_root is original_root
+    tabs.addTab('Sequence destination')
+    manager.switchTab(1)
+    tab_id = tabs.getCurrentTabData().id
+    parent_id = next(key for key, value in mindmap.links.items() if value == tab_id)
+    paint.addAction('First', 300, 200)
+    paint.addAction('Second', 10, 10)
+    paint.addAction('Third', 200, 100)
+    paint.moveAction(2, 0)
+    before = mindmap.to_dict()
+    created = manager.addActionPaintToMindmap()
+    assert len(created) == 3
+    assert manager.mindmapVisible and mindmap.tabScoped
+    assert mindmap.view_root.id == parent_id
+    assert [mindmap.map.find(key).text for key in created] == ['Third', 'First', 'Second']
+    assert [mindmap.map.find(key).parent.id for key in created] == [parent_id] * 3
+    positions = {node['id']: node for node in mindmap.nodes}
+    assert len({positions[key]['x'] for key in created}) == 1
+    assert [positions[key]['y'] for key in created] == sorted(positions[key]['y'] for key in created)
+    assert all(not mindmap.map.find(key).children for key in created)
+    assert all(key not in mindmap.links for key in created)
+    assert mindmap.selectedId == created[0]
+    assert tasks.rowCount() == 0 and not diagram.to_dict()['items']
+    after = mindmap.to_dict()
+    mindmap.undo()
+    assert mindmap.to_dict() == before
+    mindmap.redo()
+    assert mindmap.to_dict() == after
+    assert mindmap.add_siblings(parent_id, ['valid', ' ']) == []
+    assert mindmap.to_dict() == after
+    # Another group belongs to the tab, regardless of which imported node is selected.
+    mindmap.select(created[-1])
+    second = manager.addActionPaintToMindmap()
+    assert mindmap.map.find(second[0]).parent.id == parent_id
+
+
+def test_actionpaint_mindmap_sequence_persists(app, tmp_path, monkeypatch):
+    monkeypatch.setattr(ProjectManager, '_prompt_encryption_credentials',
+                        lambda *args: EncryptionCredentials(passphrase='paint-mindmap-test'))
+    tasks = TaskModel()
+    diagram = DiagramModel(task_model=tasks)
+    tabs = TabModel()
+    manager = ProjectManager(tasks, diagram, tabs)
+    paint = ActionPaintModel(tab_model=tabs)
+    paint.addAction('Prepare', 30, 10)
+    paint.addAction('Finish', 10, 10)
+    created = manager.addActionPaintToMindmap()
+    assert manager.hasUnsavedChanges()
+    expected = manager.mindmap.to_dict()
+    path = tmp_path / 'paint-mindmap.progress'
+    assert manager.saveProject(str(path))
+    manager.loadProject(str(path))
+    assert manager.mindmap.to_dict() == expected
+    parent = manager.mindmap.map.find(created[0]).parent
+    assert manager.mindmap.map.find(created[1]).parent is parent
+    assert [node.id for node in parent.children] == created
+    assert not manager.hasUnsavedChanges()
+
+
 def test_integrated_actionpaint_window_opens(app):
     from PySide6.QtCore import QObject, QPoint, QPointF, Qt
     from PySide6.QtTest import QTest
@@ -242,3 +310,40 @@ def test_integrated_actionpaint_window_opens(app):
     app.processEvents()
     assert engine._action_paint_model.orderedTitles == ["Second", "First"]
     paint_window.close()
+
+
+def test_actionpaint_add_to_mindmap_button(app):
+    from PySide6.QtCore import QObject, Qt
+    from PySide6.QtTest import QTest
+
+    tasks = TaskModel()
+    diagram = DiagramModel(task_model=tasks)
+    tabs = TabModel()
+    manager = ProjectManager(tasks, diagram, tabs)
+    engine = create_actiondraw_window(diagram, tasks, manager, tab_model=tabs)
+    root = engine.rootObjects()[0]
+    root.openActionPaintWindow()
+    window = root.property('actionPaintWindowRef')
+    button = window.findChild(QObject, 'actionPaintAddToMindmap')
+    try:
+        assert not button.property('enabled')
+        paint = engine._action_paint_model
+        paint.addAction('One', 10, 10)
+        paint.addAction('Two', 20, 20)
+        paint.moveAction(1, 0)
+        # Exporting to the diagram does not disable the separate mindmap destination.
+        paint.markImported()
+        QTest.qWait(40)
+        assert button.property('enabled')
+        button.forceActiveFocus()
+        QTest.keyClick(window, Qt.Key_Space)
+        QTest.qWait(20)
+        parent = manager.mindmap.view_root
+        assert manager.mindmapVisible
+        assert parent.children[0].text == 'Two'
+        assert parent.children[1].text == 'One'
+        assert all(not node.children for node in parent.children)
+        assert window.property('statusText') == 'Added 2 actions to mindmap'
+    finally:
+        window.close()
+        root.close()

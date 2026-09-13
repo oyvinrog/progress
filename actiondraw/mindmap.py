@@ -29,6 +29,7 @@ class MindMapController(QObject):
         self.links = {}
         self._completed = set()
         self.reminders = {}
+        self._bookmarks = []
         self._scope_tab = None
         self._view_selections = {}
         self._selected = self.map.root.id
@@ -42,7 +43,7 @@ class MindMapController(QObject):
         self.exchange_tabs = None
         if tab_model is not None:
             tab_model.tabsChanged.connect(self.reconcile)
-            tab_model.dataChanged.connect(self.reconcile)
+            tab_model.priorityRanksChanged.connect(self.reconcile)
         self.reconcile()
 
     @property
@@ -116,6 +117,7 @@ class MindMapController(QObject):
             if tab.id not in seen:
                 self.links[self.map.root.add_child(tab.name).id] = tab.id
         self._completed.intersection_update(nodes)
+        self._bookmarks = [key for key in self._bookmarks if key in nodes]
         self.reminders = {key: value for key, value in self.reminders.items() if key in nodes}
         self._selected_ids = [key for key in self._selected_ids if self._in_scope(self.map.find(key))]
         if not self._selected_ids or self._selected not in self._selected_ids:
@@ -127,7 +129,7 @@ class MindMapController(QObject):
     def to_dict(self):
         return {'version': 1, 'xml': dumps(self.map).decode('utf-8'),
                 'tab_links': dict(self.links), 'completed': sorted(self._completed),
-                'reminders': copy.deepcopy(self.reminders)}
+                'reminders': copy.deepcopy(self.reminders), 'bookmarks': list(self._bookmarks)}
 
     @staticmethod
     def decode(payload):
@@ -154,6 +156,11 @@ class MindMapController(QObject):
                 or any(not isinstance(key, str) or mindmap.find(key) is None for key in completed)
                 or len(set(completed)) != len(completed)):
             raise ValueError('Malformed mindmap completion data')
+        bookmarks = payload.get('bookmarks', [])
+        if (not isinstance(bookmarks, list)
+                or any(not isinstance(key, str) or mindmap.find(key) is None for key in bookmarks)
+                or len(set(bookmarks)) != len(bookmarks)):
+            raise ValueError('Malformed mindmap bookmarks')
         reminders = payload.get('reminders', {})
         if not isinstance(reminders, dict):
             raise ValueError('Malformed mindmap reminders')
@@ -175,6 +182,7 @@ class MindMapController(QObject):
         self.map, self.links = self.decode(payload) if payload is not None else (MindMap('Project'), {})
         self._completed = set((payload or {}).get('completed', []))
         self.reminders = copy.deepcopy((payload or {}).get('reminders', {}))
+        self._bookmarks = list((payload or {}).get('bookmarks', []))
         self._scope_tab = None
         self._view_selections.clear()
         self._undo.clear()
@@ -196,7 +204,35 @@ class MindMapController(QObject):
         return {'id': node.id, 'text': node.text, 'note': node.note or '',
                 'isTab': node.id in self.links, 'folded': node.folded,
                 'isViewRoot': node is self.view_root, 'completed': node.id in self._completed,
+                'bookmarked': node.id in self._bookmarks,
                 **self.reminderData(node.id)}
+
+    @Property('QVariantList', notify=changed)
+    def bookmarks(self):
+        result = []
+        for node_id in self._bookmarks:
+            node = self.map.find(node_id)
+            if node is not None:
+                path = list(reversed(list(node.ancestors()))) + [node]
+                result.append({'id': node.id, 'text': node.text,
+                               'path': ' / '.join(n.text for n in path)})
+        return result
+
+    @Slot(str)
+    def toggleBookmark(self, node_id):
+        if self.map.find(node_id) is None:
+            return
+        def mutate():
+            if node_id in self._bookmarks:
+                self._bookmarks.remove(node_id)
+            else:
+                self._bookmarks.append(node_id)
+        self._commit(mutate)
+
+    @Slot(str)
+    def jumpToBookmark(self, node_id):
+        if node_id in self._bookmarks:
+            self.reveal_reminder(node_id)
 
     @Slot(str, result='QVariantMap')
     def reminderData(self, node_id):
@@ -242,7 +278,7 @@ class MindMapController(QObject):
         return True
 
     def _priority_data(self):
-        """Project-wide midrank thirds, independent of the visible branch."""
+        """Project-wide priority thirds and top-three badges, independent of scope."""
         all_tabs = self._tabs.getAllTabs() if self._tabs is not None else []
         tabs = sorted((tab for tab in all_tabs if tab.include_in_priority_plot),
                       key=lambda tab: tab.priority_score)
@@ -256,8 +292,13 @@ class MindMapController(QObject):
             percentile = (start + end) / (2 * len(tabs))
             level = 1 if percentile < 1 / 3 else 3 if percentile >= 2 / 3 else 2
             for tab in tabs[start:end]:
-                result[tab.id] = {'priorityScore': score, 'priorityLevel': level}
+                result[tab.id] = {'priorityScore': score, 'priorityLevel': level,
+                                  'priorityRank': 0}
             start = end
+        ranks = self._tabs.priorityRanks if self._tabs is not None else []
+        for tab, rank in zip(all_tabs, ranks):
+            if 1 <= rank <= 3:
+                result[tab.id]['priorityRank'] = rank
         return result
 
     def _layout(self, priorities=None):
@@ -271,6 +312,8 @@ class MindMapController(QObject):
             padding = 74.0 if node.id in self._completed else 52.0
             if self.links.get(node.id) in priorities:
                 padding += 30.0
+                if priorities[self.links[node.id]]['priorityRank'] > 0:
+                    padding += 30.0
             width = max(110.0, min(380.0, metrics.horizontalAdvance(node.text) + padding))
             if node.id in self.reminders:
                 width = max(width, 210.0)
@@ -286,7 +329,8 @@ class MindMapController(QObject):
                  'folded': n.folded, 'hasChildren': bool(n.children),
                  'isViewRoot': n is self.view_root, 'completed': n.id in self._completed,
                  **self.reminderData(n.id),
-                 **priorities.get(self.links.get(n.id), {'priorityScore': None, 'priorityLevel': 0})}
+                 **priorities.get(self.links.get(n.id), {'priorityScore': None, 'priorityLevel': 0,
+                                                       'priorityRank': 0})}
                 for n, b in self._layout(priorities).items()]
 
     @Property('QVariantList', notify=sceneChanged)
@@ -478,11 +522,13 @@ class MindMapController(QObject):
             self.map.validate()
             live = {n.id for n in self.map.walk()}
             self._completed.intersection_update(live)
+            self._bookmarks = [key for key in self._bookmarks if key in live]
             self.reminders = {key: value for key, value in self.reminders.items() if key in live}
         except (ValueError, IndexError) as exc:
             self.map, self.links = self.decode(before)
             self._completed = set(before.get('completed', []))
             self.reminders = copy.deepcopy(before.get('reminders', {}))
+            self._bookmarks = list(before.get('bookmarks', []))
             self._restore_selection(selected)
             self.errorOccurred.emit(str(exc))
             self.changed.emit()
@@ -493,6 +539,27 @@ class MindMapController(QObject):
         self.sceneChanged.emit()
         self.changed.emit()
         return True
+
+    def add_siblings(self, parent_id, titles):
+        """Append actions vertically under one parent as a single undoable edit."""
+        parent = self.map.find(parent_id)
+        if parent is None or not self._in_scope(parent) or not titles:
+            return []
+        if any(not isinstance(title, str) or not title.strip() for title in titles):
+            return []
+        created = []
+
+        def mutate():
+            parent.folded = False
+            for title in titles:
+                # Keep the group together when the parent is the scoped view root.
+                created.append(parent.add_child(title.strip(), side='right').id)
+            self._set_selection([created[0]])
+
+        if not self._commit(mutate):
+            return []
+        self.revealNode.emit(created[0])
+        return created
 
     @Slot(bool)
     def addThought(self, sibling=False):
@@ -577,7 +644,8 @@ class MindMapController(QObject):
     def setSide(self, side):
         node = self.map.find(self._selected)
         if node and node.parent is self.view_root and side in ('left', 'right'):
-            self._commit(lambda: setattr(node, 'side', side))
+            if self._commit(lambda: setattr(node, 'side', side)):
+                self.revealNode.emit(node.id)
 
     def _reorder_context(self, node_id):
         node = self.map.find(node_id)
@@ -655,6 +723,7 @@ class MindMapController(QObject):
         self.map, self.links = self.decode(payload)
         self._completed = set(payload.get('completed', []))
         self.reminders = copy.deepcopy(payload.get('reminders', {}))
+        self._bookmarks = list(payload.get('bookmarks', []))
         if tab_state is not None:
             live = {tab.id for tab in self._tabs.getAllTabs()}
             self._view_selections = {key: value for key, value in self._view_selections.items()
