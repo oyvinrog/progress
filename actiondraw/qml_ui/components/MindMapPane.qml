@@ -59,6 +59,14 @@ FocusScope {
         initialized = true
     }
     function zoomBy(factor) { zoom = Math.max(0.2, Math.min(4, zoom * factor)) }
+    function jumpBookmark(nodeId) {
+        var currentZoom = zoom
+        controller.jumpToBookmark(nodeId)
+        zoom = currentZoom
+        initialized = true
+        forceActiveFocus()
+        Qt.callLater(function() { pane.revealNode(nodeId) })
+    }
     function revealNode(nodeId) {
         if (!visible || !controller) return
         var nodes = controller.nodes
@@ -106,7 +114,7 @@ FocusScope {
             pane.panY = saved ? saved.y : 0
             pane.initialized = saved ? saved.initialized : false
             editor.close()
-            if (!pane.initialized) Qt.callLater(function() { if (pane.visible) pane.fitMap() })
+            if (!pane.initialized) Qt.callLater(function() { if (pane.visible && !pane.initialized) pane.fitMap() })
         }
         function onResetView() {
             pane.viewPositions = ({})
@@ -157,6 +165,12 @@ FocusScope {
                 onClicked: pane.reminderRequested(pane.controller.selectedId)
             }
             Button { text: "Edit / Notes"; onClicked: pane.editNode() }
+            Button {
+                objectName: "mindmapBookmark"
+                text: pane.controller && pane.controller.selectedNode.bookmarked ? "Remove bookmark" : "Bookmark"
+                enabled: pane.controller && pane.controller.selectedId !== ""
+                onClicked: { pane.controller.toggleBookmark(pane.controller.selectedId); pane.forceActiveFocus() }
+            }
             Button { text: "Fold"; onClicked: pane.controller.toggleFold() }
             Button { text: "Cut"; enabled: pane.controller && pane.controller.canCut; onClicked: pane.controller.cutSelected() }
             Button { text: "Paste"; enabled: pane.controller && pane.controller.canPaste; onClicked: pane.controller.pasteSelected() }
@@ -166,6 +180,43 @@ FocusScope {
             Button { text: "−"; onClicked: pane.zoomBy(1 / 1.2) }
             Button { text: "+"; onClicked: pane.zoomBy(1.2) }
             Button { text: "Fit"; onClicked: pane.fitMap() }
+        }
+        ScrollView {
+            id: bookmarkScroll
+            objectName: "mindmapBookmarks"
+            Layout.fillWidth: true
+            Layout.preferredHeight: bookmarkRow.height + 14
+            visible: pane.controller && pane.controller.bookmarks.length > 0
+            clip: true
+            contentWidth: bookmarkRow.width
+            contentHeight: bookmarkRow.height
+            ScrollBar.horizontal.policy: ScrollBar.AsNeeded
+            ScrollBar.vertical.policy: ScrollBar.AlwaysOff
+            Row {
+                id: bookmarkRow
+                spacing: 6
+                Repeater {
+                    model: pane.controller ? pane.controller.bookmarks : []
+                    Button {
+                        required property var modelData
+                        objectName: "mindmapBookmark_" + modelData.id
+                        width: Math.min(220, Math.max(70, implicitWidth))
+                        text: modelData.text
+                        contentItem: Text {
+                            text: parent.text
+                            color: parent.palette.buttonText
+                            font: parent.font
+                            elide: Text.ElideRight
+                            verticalAlignment: Text.AlignVCenter
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+                        ToolTip.visible: hovered
+                        ToolTip.delay: 600
+                        ToolTip.text: modelData.path
+                        onClicked: pane.jumpBookmark(modelData.id)
+                    }
+                }
+            }
         }
         Label {
             Layout.fillWidth: true
@@ -436,6 +487,12 @@ FocusScope {
             onTriggered: pane.clearReminderRequested(nodeMenu.targetNodeId)
         }
         MenuSeparator {}
+        MenuItem {
+            objectName: "mindmapBookmarkMenuItem"
+            text: pane.controller && pane.controller.bookmarks.some(function(b) { return b.id === nodeMenu.targetNodeId })
+                  ? "Remove bookmark" : "Bookmark"
+            onTriggered: { pane.controller.toggleBookmark(nodeMenu.targetNodeId); pane.forceActiveFocus() }
+        }
         MenuItem {
             objectName: "mindmapMoveUp"
             text: "Move up"

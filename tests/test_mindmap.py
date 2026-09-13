@@ -726,6 +726,136 @@ def test_qml_ctrl_left_right_moves_branch(project, app, tab_scoped):
         window.close()
 
 
+def test_bookmark_history_and_navigation(project):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    root = m.map.root.id
+    tab = next(iter(m.links))
+    m.select(tab)
+    child = thought(m, 'Child')
+    m.toggleBookmark(child)
+    m.toggleBookmark(root)
+    assert [b['id'] for b in m.bookmarks] == [child, root]
+    m.editSelected('Renamed', '')
+    assert m.bookmarks[0]['path'].endswith('/ Renamed')
+    m.moveNode(child, root, 'child')
+    assert m.bookmarks[0]['path'] == 'Project / Renamed'
+    m.toggleBookmark(child)
+    assert [b['id'] for b in m.bookmarks] == [root]
+    m.undo()
+    assert [b['id'] for b in m.bookmarks] == [child, root]
+    m.select(child)
+    m.deleteSelected()
+    assert [b['id'] for b in m.bookmarks] == [root]
+    m.undo()
+    assert [b['id'] for b in m.bookmarks] == [child, root]
+    m.redo()
+    assert [b['id'] for b in m.bookmarks] == [root]
+    m.undo()
+    pm.showTabMindmap()
+    history = len(m._undo)
+    m.jumpToBookmark(child)
+    assert not m.tabScoped and m.selectedIds == [child]
+    assert len(m._undo) == history
+    m.toggleBookmark(tab)
+    pm.showTabMindmap()
+    m.jumpToBookmark(tab)
+    assert m.tabScoped and m.selectedId == tab
+    payload = m.to_dict()
+    restored = MindMapController()
+    restored.load(payload)
+    assert restored.bookmarks == m.bookmarks
+    payload.pop('bookmarks')
+    restored.load(payload)
+    assert restored.bookmarks == []
+    m.load()
+    assert m.bookmarks == []
+
+
+@pytest.mark.parametrize('value', [None, {}, 'node', [42], [[]], ['missing'], 'duplicate'])
+def test_bookmark_payload_validation(project, value):
+    m = project[0].mindmap
+    payload = m.to_dict()
+    payload['bookmarks'] = [m.map.root.id] * 2 if value == 'duplicate' else value
+    with pytest.raises(ValueError, match='bookmarks'):
+        m.decode(payload)
+
+
+def test_qml_bookmarks(project, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    tab = next(iter(m.links))
+    m.select(tab)
+    child = thought(m, 'Bookmarked child')
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    warnings = []
+    engine.warnings.connect(lambda messages: warnings.extend(x.toString() for x in messages))
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+    pane = window.findChild(QObject, 'mindmapPane')
+
+    def find_item(item, name):
+        if item.objectName() == name:
+            return item
+        for nested in item.childItems():
+            found = find_item(nested, name)
+            if found is not None:
+                return found
+
+    def click(item):
+        QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                         item.mapToScene(item.boundingRect().center()).toPoint())
+        QTest.qWait(50)
+
+    try:
+        row = window.findChild(QObject, 'mindmapBookmarks')
+        assert not row.property('visible')
+        m.select(child)
+        click(window.findChild(QObject, 'mindmapBookmark'))
+        assert m.selectedNode['bookmarked'] and row.property('visible')
+        click(window.findChild(QObject, 'mindmapBookmark'))
+        assert not m.bookmarks and not row.property('visible')
+        click(window.findChild(QObject, 'mindmapBookmark'))
+        m.select(tab)
+        m.toggleFold()
+        history = len(m._undo)
+        click(find_item(window.contentItem(), 'mindmapBookmark_' + child))
+        assert not m.map.find(tab).folded and m.selectedIds == [child]
+        assert len(m._undo) == history and pane.hasActiveFocus()
+        # Context action targets the clicked node even with another primary selection.
+        m.select(tab, 'toggle')
+        m.select(child, 'add')
+        assert m.selectedId == child
+        menu = window.findChild(QObject, 'mindmapNodeMenu')
+        menu.setProperty('targetNodeId', tab)
+        QMetaObject.invokeMethod(window.findChild(QObject, 'mindmapBookmarkMenuItem'), 'triggered')
+        assert [b['id'] for b in m.bookmarks] == [child, tab]
+        m.toggleBookmark(m.map.root.id)
+        pm.showTabMindmap()
+        QTest.qWait(50)
+        pane.setProperty('zoom', 0.7)
+        click(find_item(window.contentItem(), 'mindmapBookmark_' + m.map.root.id))
+        assert not m.tabScoped and m.selectedId == m.map.root.id
+        assert pane.property('zoom') == pytest.approx(0.7)
+        item = find_item(window.contentItem(), 'mindmapNode_' + m.selectedId)
+        viewport = window.findChild(QObject, 'mindmapViewport')
+        point = item.mapToItem(viewport, item.boundingRect().center())
+        assert 0 <= point.x() <= viewport.width() and 0 <= point.y() <= viewport.height()
+        click(find_item(window.contentItem(), 'mindmapBookmark_' + tab))
+        assert not m.tabScoped and m.selectedId == tab
+        for i in range(12):
+            m.select(m.map.root.id)
+            node_id = thought(m, 'A long bookmark title ' + str(i))
+            m.toggleBookmark(node_id)
+        QTest.qWait(50)
+        assert row.property('contentWidth') > row.width()
+        assert not warnings, warnings
+    finally:
+        window.close()
+
+
 def test_encrypted_roundtrip_dirty_and_scrub(project, tmp_path, monkeypatch):
     pm, tabs, _, _ = project
     credentials = EncryptionCredentials(passphrase='mindmap-test-passphrase')
@@ -733,6 +863,7 @@ def test_encrypted_roundtrip_dirty_and_scrub(project, tmp_path, monkeypatch):
     tab_root = next(iter(pm.mindmap.links))
     pm.mindmap.select(tab_root)
     node_id = thought(pm.mindmap)
+    pm.mindmap.toggleBookmark(node_id)
     pm.mindmap.toggleCompleted()
     pm.mindmap.select(pm.mindmap.map.root.id)
     pm.mindmap.toggleFold()
@@ -747,6 +878,7 @@ def test_encrypted_roundtrip_dirty_and_scrub(project, tmp_path, monkeypatch):
     assert payload['tabs'][0]['id'] == tab_id
     assert 'Secret thought' in payload['mindmap']['xml']
     assert payload['mindmap']['completed'] == [node_id]
+    assert payload['mindmap']['bookmarks'] == [node_id]
     expected = pm.mindmap.to_dict()
     pm.loadProject(str(path))
     assert pm.mindmap.to_dict() == expected
@@ -762,6 +894,7 @@ def test_encrypted_roundtrip_dirty_and_scrub(project, tmp_path, monkeypatch):
     pm.scrubProjectData()
     assert 'Secret' not in str(pm.mindmap.to_dict())
     assert pm.mindmap.to_dict()['completed'] == []
+    assert pm.mindmap.bookmarks == []
     assert not pm.mindmap._view_selections
     assert not pm.mindmap.canUndo and not pm.mindmap.canRedo
     assert pm.mindmap.selectedId == pm.mindmap.map.root.id
