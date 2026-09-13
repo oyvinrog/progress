@@ -7,7 +7,7 @@ projects in a mindmap, open a branch to focus on the next steps, and use visual
 canvases, notes, priorities, and reminders to carry the work forward. Save your
 work in an encrypted project file.
 
-![ActionDraw project mindmap showing an autumn launch, with website work, customer research, and a launch checklist](assets/mindmap-overview.png)
+<img src="https://github.com/oyvinrog/progress/blob/master/assets/mindmap-overview.png?raw=1" alt="ActionDraw project mindmap showing an autumn launch, with website work, customer research, and a launch checklist" width="1000">
 
 ## Quick start
 
@@ -62,7 +62,7 @@ use **Canvas** to switch to that tab's diagram. The tab's **Mindmap** control
 opens or starts its branch, while the sidebar **Mindmap** returns to the full
 project map. **Alt+Left** returns to the previous view.
 
-![Website launch branch showing content and quality work, a completed draft, and a scheduled design review](assets/mindmap-branch.png)
+<img src="https://github.com/oyvinrog/progress/blob/master/assets/mindmap-branch.png?raw=1" alt="Website launch branch showing content and quality work, a completed draft, and a scheduled design review" width="1000">
 
 Here, **Website launch** is the branch root. The finished homepage draft has a
 check mark, and **Review with design** has a reminder. Both the full map and
@@ -78,7 +78,7 @@ Select a node and choose **Edit / Notes** (or press **F2**) to capture decisions
 questions, and what it will take to finish. In this example, the design review
 has an agenda and a clear completion condition.
 
-![Thought and notes dialog with a design review agenda and completion condition](assets/mindmap-notes.png)
+<img src="https://github.com/oyvinrog/progress/blob/master/assets/mindmap-notes.png?raw=1" alt="Thought and notes dialog with a design review agenda and completion condition" width="1000">
 
 Choose **Reminder** for a selected node to set a date and time, with optional
 notifications. An orange bell and date appear beneath its title. Every node
@@ -132,7 +132,7 @@ These shortcuts apply while the mindmap has focus, outside dialogs and menus.
 
 ## Beyond the mindmap
 
-![ActionDraw visual planning canvas](assets/img1.png)
+<img src="https://github.com/oyvinrog/progress/blob/master/assets/img1.png?raw=1" alt="ActionDraw visual planning canvas" width="1000">
 
 - **Visual task diagrams** — arrange boxes, databases, servers, clouds, and sticky notes; connect them with arrows that follow the nodes.
 - **Markdown notes** — open a rich Markdown editor from a canvas node.
@@ -142,6 +142,8 @@ These shortcuts apply while the mindmap has focus, outside dialogs and menus.
 - **Free drawing and images** — sketch on the canvas and paste external graphics.
 - **Action Paint** — sketch a scene, arrange numbered actions, then add them as a connected task chain in the diagram or as nodes in a tab's mindmap.
 - **Encrypted storage** — protect project data with Argon2id key derivation, with optional YubiKey challenge-response.
+
+<img src="https://github.com/oyvinrog/progress/blob/master/assets/img2.png?raw=1" alt="ActionDraw encrypted storage" width="700">
 
 Configure `ntfy` under **Tools > Notification Settings...** for notifications.
 `PROGRESS_NTFY_TOPIC`, `PROGRESS_NTFY_SERVER`, and `PROGRESS_NTFY_TOKEN` also work
