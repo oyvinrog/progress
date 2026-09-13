@@ -19,6 +19,35 @@ Window {
     property int selectedTabIndex: -1
     property int pendingDeleteTabIndex: -1
     property string pendingDeleteTabName: ""
+    property string savedSelectionId: ""
+
+    function rememberSelection() {
+        savedSelectionId = tabModelRef && selectedTabIndex >= 0
+                         ? (tabModelRef.getTabSummary(selectedTabIndex).id || "") : ""
+    }
+
+    function restoreSelection() {
+        var restoredIndex = -1
+        for (var i = 0; savedSelectionId && i < modelCount(); ++i) {
+            if (tabModelRef.getTabSummary(i).id === savedSelectionId) {
+                restoredIndex = i
+                break
+            }
+        }
+        selectedTabIndex = restoredIndex
+    }
+
+    Connections {
+        target: root.tabModelRef
+        function onModelAboutToBeReset() { root.rememberSelection() }
+        function onModelReset() { root.restoreSelection() }
+        function onRowsAboutToBeMoved() { root.rememberSelection() }
+        function onRowsMoved() { root.restoreSelection() }
+        function onRowsAboutToBeRemoved() { root.rememberSelection() }
+        function onRowsRemoved() { root.restoreSelection() }
+        function onRowsAboutToBeInserted() { root.rememberSelection() }
+        function onRowsInserted() { root.restoreSelection() }
+    }
 
     function modelCount() {
         if (!tabModelRef)
@@ -113,9 +142,84 @@ Window {
                 }
 
                 Text {
-                    text: "Score = subjective value / ln(time hours). Drag points and release to update tab priority ordering."
+                    text: "Drag points and release to update time, value, and tab priority ordering."
                     color: "#9ec6e2"
                     font.pixelSize: 12
+                }
+            }
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            implicitHeight: adjustmentContent.implicitHeight + 20
+            radius: 12
+            color: "#0f2030"
+            border.color: "#2a4e68"
+
+            ColumnLayout {
+                id: adjustmentContent
+                anchors.fill: parent
+                anchors.margins: 10
+                spacing: 6
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label {
+                        text: "Adjustment"
+                        font.bold: true
+                        color: "#ecf6ff"
+                    }
+                    Label {
+                        objectName: "priorityAdjustmentFormula"
+                        Layout.fillWidth: true
+                        text: "Score = value^" + valueWeightSlider.value.toFixed(1)
+                              + " / ln(time)^" + timeWeightSlider.value.toFixed(1)
+                        color: "#9ec6e2"
+                    }
+                    Button {
+                        objectName: "priorityAdjustmentReset"
+                        text: "Reset"
+                        enabled: !!root.tabModelRef
+                        onClicked: root.tabModelRef.setPriorityWeights(1, 1)
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Label { text: "Value importance"; color: "#d9efff" }
+                    Slider {
+                        id: valueWeightSlider
+                        objectName: "priorityValueWeightSlider"
+                        Layout.fillWidth: true
+                        from: 0; to: 2; stepSize: 0.1
+                        snapMode: Slider.SnapAlways
+                        value: root.tabModelRef ? root.tabModelRef.priorityValueWeight : 1
+                        enabled: !!root.tabModelRef
+                        Accessible.name: "Value importance"
+                        onMoved: root.tabModelRef.setPriorityWeights(value, root.tabModelRef.priorityTimeWeight)
+                    }
+                    Label { text: valueWeightSlider.value.toFixed(1); color: "#ecf6ff" }
+                    Label { text: "Time importance"; color: "#d9efff" }
+                    Slider {
+                        id: timeWeightSlider
+                        objectName: "priorityTimeWeightSlider"
+                        Layout.fillWidth: true
+                        from: 0; to: 2; stepSize: 0.1
+                        snapMode: Slider.SnapAlways
+                        value: root.tabModelRef ? root.tabModelRef.priorityTimeWeight : 1
+                        enabled: !!root.tabModelRef
+                        Accessible.name: "Time importance"
+                        onMoved: root.tabModelRef.setPriorityWeights(root.tabModelRef.priorityValueWeight, value)
+                    }
+                    Label { text: timeWeightSlider.value.toFixed(1); color: "#ecf6ff" }
+                }
+
+                Label {
+                    Layout.fillWidth: true
+                    text: "Higher value importance favors higher-value tasks; higher time importance favors shorter tasks. 0 ignores a factor. Changes apply live and are saved with the project."
+                    wrapMode: Text.WordWrap
+                    font.pixelSize: 12
+                    color: "#9ec6e2"
                 }
             }
         }
@@ -287,6 +391,7 @@ Window {
 
     Dialog {
         id: deleteTabDialog
+        implicitWidth: 300
         title: "Delete Task"
         modal: true
         standardButtons: Dialog.Yes | Dialog.No
@@ -320,25 +425,4 @@ Window {
         }
     }
 
-    Connections {
-        target: root.tabModelRef
-        function onModelReset() {
-            var count = root.modelCount()
-            if (root.selectedTabIndex >= count)
-                root.selectedTabIndex = -1
-        }
-        function onRowsRemoved(parent, first, last) {
-            var count = root.modelCount()
-            if (count <= 0) {
-                root.selectedTabIndex = -1
-                return
-            }
-            if (root.selectedTabIndex > last) {
-                root.selectedTabIndex = root.selectedTabIndex - (last - first + 1)
-                return
-            }
-            if (root.selectedTabIndex >= first)
-                root.selectedTabIndex = Math.min(first, count - 1)
-        }
-    }
 }

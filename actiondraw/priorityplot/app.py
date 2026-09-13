@@ -57,7 +57,7 @@ def main() -> int:
 
     engine = QQmlApplicationEngine()
     tab_model = _build_demo_tab_model()
-    engine.rootContext().setContextProperty("tabModel", tab_model)
+    engine.setInitialProperties({"tabModel": tab_model})
     engine.addImportPath(str(QML_DIR))
     engine.load(QUrl.fromLocalFile(str(PRIORITY_PLOT_QML_PATH)))
 
