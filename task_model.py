@@ -1502,12 +1502,28 @@ class TabModel(QAbstractListModel):
     goalsChanged = Signal()
     assessmentChanged = Signal(int)
     kanbanChanged = Signal()
+    priorityRanksChanged = Signal()
 
     def __init__(self):
         super().__init__()
         self._tabs: List[Tab] = [Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})]
         self._current_tab_index: int = 0
         self._recent_tab_indices: List[int] = []
+        self.dataChanged.connect(self.priorityRanksChanged)
+        self.modelReset.connect(self.priorityRanksChanged)
+        self.rowsInserted.connect(self.priorityRanksChanged)
+        self.rowsRemoved.connect(self.priorityRanksChanged)
+        self.rowsMoved.connect(self.priorityRanksChanged)
+
+    @Property('QVariantList', notify=priorityRanksChanged)
+    def priorityRanks(self):
+        """Score ranks by model row, shared by the plot and mindmap (0 = excluded)."""
+        ordered = sorted((i for i, tab in enumerate(self._tabs) if tab.include_in_priority_plot),
+                         key=lambda i: -self._tabs[i].priority_score)
+        ranks = [0] * len(self._tabs)
+        for rank, index in enumerate(ordered, 1):
+            ranks[index] = rank
+        return ranks
 
     def rowCount(self, parent: Optional[QModelIndex] = QModelIndex()) -> int:  # type: ignore[override]
         return len(self._tabs)

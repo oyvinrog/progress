@@ -43,7 +43,7 @@ class MindMapController(QObject):
         self.exchange_tabs = None
         if tab_model is not None:
             tab_model.tabsChanged.connect(self.reconcile)
-            tab_model.dataChanged.connect(self.reconcile)
+            tab_model.priorityRanksChanged.connect(self.reconcile)
         self.reconcile()
 
     @property
@@ -278,7 +278,7 @@ class MindMapController(QObject):
         return True
 
     def _priority_data(self):
-        """Project-wide midrank thirds, independent of the visible branch."""
+        """Project-wide priority thirds and top-three badges, independent of scope."""
         all_tabs = self._tabs.getAllTabs() if self._tabs is not None else []
         tabs = sorted((tab for tab in all_tabs if tab.include_in_priority_plot),
                       key=lambda tab: tab.priority_score)
@@ -292,8 +292,13 @@ class MindMapController(QObject):
             percentile = (start + end) / (2 * len(tabs))
             level = 1 if percentile < 1 / 3 else 3 if percentile >= 2 / 3 else 2
             for tab in tabs[start:end]:
-                result[tab.id] = {'priorityScore': score, 'priorityLevel': level}
+                result[tab.id] = {'priorityScore': score, 'priorityLevel': level,
+                                  'priorityRank': 0}
             start = end
+        ranks = self._tabs.priorityRanks if self._tabs is not None else []
+        for tab, rank in zip(all_tabs, ranks):
+            if 1 <= rank <= 3:
+                result[tab.id]['priorityRank'] = rank
         return result
 
     def _layout(self, priorities=None):
@@ -307,6 +312,8 @@ class MindMapController(QObject):
             padding = 74.0 if node.id in self._completed else 52.0
             if self.links.get(node.id) in priorities:
                 padding += 30.0
+                if priorities[self.links[node.id]]['priorityRank'] > 0:
+                    padding += 30.0
             width = max(110.0, min(380.0, metrics.horizontalAdvance(node.text) + padding))
             if node.id in self.reminders:
                 width = max(width, 210.0)
@@ -322,7 +329,8 @@ class MindMapController(QObject):
                  'folded': n.folded, 'hasChildren': bool(n.children),
                  'isViewRoot': n is self.view_root, 'completed': n.id in self._completed,
                  **self.reminderData(n.id),
-                 **priorities.get(self.links.get(n.id), {'priorityScore': None, 'priorityLevel': 0})}
+                 **priorities.get(self.links.get(n.id), {'priorityScore': None, 'priorityLevel': 0,
+                                                       'priorityRank': 0})}
                 for n, b in self._layout(priorities).items()]
 
     @Property('QVariantList', notify=sceneChanged)

@@ -56,6 +56,22 @@ def test_mindmap_priority_ranks(project, values, levels):
     assert [nodes[key]['priorityScore'] for key in ids] == pytest.approx(values)
 
 
+@pytest.mark.parametrize('values', [[7], [2, 5], [1, 9, 3, 7, 5], [4, 4, 4, 4]])
+def test_mindmap_top_three_badges_follow_priority_order(project, values):
+    pm, tabs, _, _ = project
+    priority_tasks(tabs, values)
+
+    def ranks():
+        return {pm.mindmap.links[n['id']]: n['priorityRank']
+                for n in pm.mindmap.nodes if n['isTab']}
+
+    order = [tab.id for tab in tabs.getAllTabs()]
+    assert [ranks()[key] for key in order] == [1, 2, 3, 0, 0][:len(order)]
+    tabs.setIncludeInPriorityPlot(0, False)
+    assert ranks()[order[0]] == 0
+    assert [ranks()[key] for key in order[1:]] == [1, 2, 3, 0][:len(order) - 1]
+
+
 def test_mindmap_priority_scope_exclusion_and_updates(project):
     pm, tabs, _, _ = project
     m = pm.mindmap
@@ -66,9 +82,12 @@ def test_mindmap_priority_scope_exclusion_and_updates(project):
     m.select(root)
     note = thought(m)
     before = {n['id']: n['priorityLevel'] for n in m.nodes}
+    ranks_before = {n['id']: n['priorityRank'] for n in m.nodes}
     assert before[note] == before[m.map.root.id] == 0
+    assert ranks_before[note] == ranks_before[m.map.root.id] == 0
     m.set_scope(ids[0])
     assert all(n['priorityLevel'] == before[n['id']] for n in m.nodes)
+    assert all(n['priorityRank'] == ranks_before[n['id']] for n in m.nodes)
     m.select(root)
     m.toggleFold()
     assert m.nodes[0]['priorityLevel'] == before[root]
@@ -80,6 +99,7 @@ def test_mindmap_priority_scope_exclusion_and_updates(project):
     tabs.setPriorityPoint(index, math.e, 9)
     assert notifications
     assert next(n for n in m.nodes if n['id'] == root)['priorityLevel'] == 3
+    assert next(n for n in m.nodes if n['id'] == root)['priorityRank'] == 1
     assert tabs.getAllTabs()[0].id == ids[0]
     notifications.clear()
     tabs.setPriorityPoint(0, math.e, 10)  # Same ordering still refreshes the scene.
@@ -88,7 +108,53 @@ def test_mindmap_priority_scope_exclusion_and_updates(project):
     tabs.setIncludeInPriorityPlot(0, False)
     node = next(n for n in m.nodes if n['id'] == root)
     assert node['priorityLevel'] == 0 and node['priorityScore'] is None
+    assert node['priorityRank'] == 0
     assert m.to_dict() == saved
+
+
+def test_qml_plot_and_mindmap_share_score_ranks_after_load_and_moves(project, app):
+    pm, tabs, tasks, diagram = project
+    priority_tasks(tabs, [1, 9, 5, 3])
+    # Saved and manually arranged tab orders need not be sorted by score.
+    tabs.setTabs(list(reversed(tabs.getAllTabs())))
+    assert tabs.priorityRanks == [4, 3, 2, 1]
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    QMetaObject.invokeMethod(window, 'openPriorityPlotWindow')
+    plot = window.property('priorityPlotWindowRef')
+
+    def find(item, name):
+        if item.objectName() == name:
+            return item
+        for child in item.childItems():
+            found = find(child, name)
+            if found is not None:
+                return found
+
+    def check_ranks(expected):
+        QTest.qWait(30)
+        assert tabs.priorityRanks == expected
+        nodes = {pm.mindmap.links[n['id']]: n for n in pm.mindmap.nodes if n['isTab']}
+        for index, tab in enumerate(tabs.getAllTabs()):
+            point = find(plot.contentItem(), 'priorityPlotPoint_' + str(index))
+            rank = expected[index]
+            assert point.property('priorityRank') == rank
+            assert point.property('isTopPriority') == (1 <= rank <= 3)
+            assert nodes[tab.id]['priorityRank'] == (rank if 1 <= rank <= 3 else 0)
+
+    try:
+        check_ranks([4, 3, 2, 1])
+        tabs.moveTab(3, 0)
+        check_ranks([1, 4, 3, 2])
+        tabs.setIncludeInPriorityPlot(0, False)
+        check_ranks([1, 2, 3, 0])
+        tabs.setPriorityPoint(2, math.e, 10)
+        check_ranks([1, 2, 3, 0])
+        tabs.removeTab(0)
+        check_ranks([1, 2, 0])
+    finally:
+        plot.close()
+        window.close()
 
 
 def test_qml_mindmap_priority_rendering(project, app):
@@ -121,6 +187,9 @@ def test_qml_mindmap_priority_rendering(project, app):
             assert node.property('color').name() == color
             bars = find(node, 'mindmapPriority_' + node_id)
             assert bars.isVisible() and bars.property('level') == level
+            badge = find(node, 'mindmapPriorityRank_' + node_id)
+            assert badge.isVisible() and badge.property('rank') == 4 - level
+            assert badge.x() + badge.width() <= bars.x()
             filled = [child for child in bars.childItems()
                       if child.property('color') is not None and child.property('color').alpha() > 0]
             assert len(filled) == level
@@ -132,6 +201,7 @@ def test_qml_mindmap_priority_rendering(project, app):
         assert QQmlProperty.read(node, 'border.color').name() == '#a5d9ff'
         tooltip = node.findChild(QObject, 'mindmapTooltip_' + high)
         assert 'Relative priority: Higher · Score: 6.00' in tooltip.property('text')
+        assert 'Priority rank: 1' in tooltip.property('text')
         assert m.map.find(high).text in tooltip.property('text')
         assert 'Keep this note' in tooltip.property('text')
         m.toggleCompleted()
@@ -146,6 +216,7 @@ def test_qml_mindmap_priority_rendering(project, app):
         node = find(window.contentItem(), 'mindmapNode_' + high)
         assert node.property('color').name() == '#254d6c'
         assert not find(node, 'mindmapPriority_' + high).isVisible()
+        assert not find(node, 'mindmapPriorityRank_' + high).isVisible()
         assert not warnings
     finally:
         window.close()

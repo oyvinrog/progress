@@ -326,11 +326,33 @@ FocusScope {
                         Text {
                             anchors.fill: parent
                             anchors.bottomMargin: nodeItem.modelData.reminderActive ? 28 : 0
-                            anchors.leftMargin: 9; anchors.rightMargin: nodeItem.modelData.priorityLevel > 0 ? 48 : 18
+                            anchors.leftMargin: 9
+                            anchors.rightMargin: (nodeItem.modelData.priorityLevel > 0 ? 48 : 18)
+                                                 + (nodeItem.modelData.priorityRank > 0 ? 30 : 0)
                             verticalAlignment: Text.AlignVCenter
                             text: (nodeItem.modelData.completed ? "✓ " : "") + (nodeItem.modelData.isTab ? "▣ " : "") + nodeItem.modelData.text
                             font.pixelSize: 14
                             color: "#e5f0fa"; elide: Text.ElideRight
+                        }
+                        Rectangle {
+                            objectName: "mindmapPriorityRank_" + nodeItem.modelData.id
+                            readonly property int rank: nodeItem.modelData.priorityRank
+                            visible: rank > 0
+                            width: 24; height: 24; radius: 12
+                            anchors.right: parent.right; anchors.rightMargin: 48
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.verticalCenterOffset: nodeItem.modelData.reminderActive ? -14 : 0
+                            color: rank === 1 ? "#f2c75c" : rank === 2 ? "#c8d3df" : "#d99b6c"
+                            border.color: "#e5f0fa"
+                            Accessible.role: Accessible.StaticText
+                            Accessible.name: "Priority rank " + rank
+                            Text {
+                                anchors.centerIn: parent
+                                text: parent.rank
+                                font.pixelSize: 14
+                                font.bold: true
+                                color: "#1b2028"
+                            }
                         }
                         PriorityBars {
                             objectName: "mindmapPriority_" + nodeItem.modelData.id
@@ -421,6 +443,8 @@ FocusScope {
                                 delay: 800
                                 visible: nodeMouse.containsMouse && !nodeMouse.pressed
                                 text: nodeItem.modelData.text
+                                      + (nodeItem.modelData.priorityRank > 0
+                                         ? "\nPriority rank: " + nodeItem.modelData.priorityRank : "")
                                       + (nodeItem.modelData.priorityLevel > 0
                                          ? "\nRelative priority: " + pane.priorityLabel(nodeItem.modelData.priorityLevel)
                                            + " · Score: " + nodeItem.modelData.priorityScore.toFixed(2) : "")

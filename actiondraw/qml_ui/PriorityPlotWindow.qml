@@ -189,7 +189,8 @@ Window {
                                 spacing: 2
 
                                 Text {
-                                    text: (index + 1) + ". " + model.name
+                                    text: (root.tabModelRef.priorityRanks[index] > 0
+                                           ? root.tabModelRef.priorityRanks[index] + ". " : "") + model.name
                                     color: "#e7f4ff"
                                     font.pixelSize: 11
                                     font.bold: true
