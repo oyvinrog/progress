@@ -124,6 +124,20 @@ Window {
         }
     }
 
+    function importActionsToMindmap() {
+        if (!paintModel || paintModel.actionCount === 0 || !hostRoot || !hostRoot.projectManagerRef)
+            return
+        var created = hostRoot.projectManagerRef.addActionPaintToMindmap()
+        if (created && created.length === paintModel.actionCount) {
+            statusText = "Added " + created.length + " actions to mindmap"
+            hostRoot.showSaveNotification(statusText)
+            hostRoot.raise()
+            hostRoot.requestActivate()
+        } else {
+            statusText = "Could not add every action to mindmap"
+        }
+    }
+
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 12
@@ -425,6 +439,15 @@ Window {
 
                     Label { text: "Action order"; color: "#eff8ff"; font.pixelSize: 16; font.bold: true }
                     Label { text: "Drag rows to rearrange the chain."; color: "#9db5c7"; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+
+                    Button {
+                        objectName: "actionPaintAddToMindmap"
+                        Layout.fillWidth: true
+                        text: "Add to mindmap"
+                        enabled: paintModel && paintModel.actionCount > 0
+                                 && !!root.hostRoot && !!root.hostRoot.projectManagerRef
+                        onClicked: root.importActionsToMindmap()
+                    }
 
                     ListView {
                         id: actionList

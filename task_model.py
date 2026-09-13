@@ -2515,6 +2515,23 @@ class ProjectManager(QObject):
     def showTabCanvas(self) -> None:
         self._setMindmapVisible(False)
 
+    @Slot(result='QStringList')
+    def addActionPaintToMindmap(self):
+        """Import the current tab's Action Paint list as ordered sibling nodes."""
+        if self._tab_model is None:
+            return []
+        from actiondraw.actionpaint import normalize_action_paint_state
+
+        tab = self._tab_model.getCurrentTabData()
+        titles = [action['text'] for action in normalize_action_paint_state(tab.action_paint)['actions']]
+        if not titles:
+            return []
+        parent_id = next((key for key, value in self.mindmap.links.items() if value == tab.id), None)
+        if parent_id is None:
+            return []
+        self.showTabMindmap()
+        return self.mindmap.add_siblings(parent_id, titles)
+
     def _defaultTabView(self) -> None:
         tab = self._tab_model.getCurrentTabData()
         node = next((self.mindmap.map.find(key) for key, value in self.mindmap.links.items()

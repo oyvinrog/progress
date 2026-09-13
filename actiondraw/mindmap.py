@@ -540,6 +540,27 @@ class MindMapController(QObject):
         self.changed.emit()
         return True
 
+    def add_siblings(self, parent_id, titles):
+        """Append actions vertically under one parent as a single undoable edit."""
+        parent = self.map.find(parent_id)
+        if parent is None or not self._in_scope(parent) or not titles:
+            return []
+        if any(not isinstance(title, str) or not title.strip() for title in titles):
+            return []
+        created = []
+
+        def mutate():
+            parent.folded = False
+            for title in titles:
+                # Keep the group together when the parent is the scoped view root.
+                created.append(parent.add_child(title.strip(), side='right').id)
+            self._set_selection([created[0]])
+
+        if not self._commit(mutate):
+            return []
+        self.revealNode.emit(created[0])
+        return created
+
     @Slot(bool)
     def addThought(self, sibling=False):
         parent = self.map.find(self._selected) or self.view_root
