@@ -884,10 +884,13 @@ def test_qml_bookmarks(project, app):
         row = window.findChild(QObject, 'mindmapBookmarks')
         assert not row.property('visible')
         m.select(child)
+        click(window.findChild(QObject, 'mindmapActionsButton'))
         click(window.findChild(QObject, 'mindmapBookmark'))
         assert m.selectedNode['bookmarked'] and row.property('visible')
+        click(window.findChild(QObject, 'mindmapActionsButton'))
         click(window.findChild(QObject, 'mindmapBookmark'))
         assert not m.bookmarks and not row.property('visible')
+        click(window.findChild(QObject, 'mindmapActionsButton'))
         click(window.findChild(QObject, 'mindmapBookmark'))
         m.select(tab)
         m.toggleFold()
@@ -1143,6 +1146,9 @@ def test_qml_click_drag_back_and_shortcut_isolation(project, app):
     QTest.qWait(30)
     assert create_button.property('enabled')
     tab_count = tabs.tabCount
+    QMetaObject.invokeMethod(window.findChild(QObject, 'mindmapActionsMenu'), 'open')
+    QMetaObject.invokeMethod(window.findChild(QObject, 'mindmapTabsMenu'), 'open')
+    QTest.qWait(30)
     QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
                      create_button.mapToScene(create_button.boundingRect().center()).toPoint())
     QTest.qWait(30)
@@ -1531,6 +1537,8 @@ def test_qml_tab_switch_completion_and_editor_focus(project, app):
     pane.forceActiveFocus()
     QTest.keyClick(window, Qt.Key_F4)
     assert m.selectedNode['completed']
+    QMetaObject.invokeMethod(window.findChild(QObject, 'mindmapActionsMenu'), 'open')
+    QTest.qWait(30)
     button = window.findChild(QObject, 'mindmapComplete')
     QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
                      button.mapToScene(button.boundingRect().center()).toPoint())
@@ -1729,7 +1737,8 @@ def test_qml_node_reminder_controls_and_overview(project, app, tmp_path):
     try:
         overview = find(window.contentItem(), 'reminderOverview')
         assert overview.isVisible()
-        button = find(window.contentItem(), 'mindmapReminder')
+        click(window.findChild(QObject, 'mindmapActionsButton'))
+        button = window.findChild(QObject, 'mindmapReminder')
         click(button)
         dialog = window.findChild(QObject, 'reminderDialog')
         assert dialog.property('visible') and dialog.property('nodeId') == node_id
@@ -2033,4 +2042,44 @@ def test_qml_ctrl_b_toggles_node_font_and_respects_editor(project, app):
     QTest.keyClick(window, Qt.Key_B, Qt.ControlModifier)
     assert m.to_dict() == before
     QTest.keyClick(window, Qt.Key_Escape)
+    window.close()
+
+
+def test_mindmap_compact_menu_keyboard_and_help(project, app):
+    pm, tabs, tasks, diagram = project
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+    pane = window.findChild(QObject, 'mindmapPane')
+    toolbar = window.findChild(QObject, 'mindmapToolbar')
+    viewport = window.findChild(QObject, 'mindmapViewport')
+    button = window.findChild(QObject, 'mindmapActionsButton')
+    menu = window.findChild(QObject, 'mindmapActionsMenu')
+    help_dialog = window.findChild(QObject, 'mindmapHelpDialog')
+    assert toolbar.height() < 60
+    assert viewport.height() > pane.height() - 90
+    button.forceActiveFocus()
+    QTest.keyClick(window, Qt.Key_Space)
+    QTest.qWait(40)
+    assert menu.property('visible')
+    assert not pane.property('shortcutsEnabled')
+    QTest.keyClick(window, Qt.Key_Down)
+    assert menu.property('currentIndex') >= 0
+    QTest.keyClick(window, Qt.Key_Escape)
+    QTest.qWait(40)
+    assert not menu.property('visible') and pane.hasActiveFocus()
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                     button.mapToScene(button.boundingRect().center()).toPoint())
+    QTest.qWait(40)
+    help_item = window.findChild(QObject, 'mindmapHelpAction')
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                     help_item.mapToScene(help_item.boundingRect().center()).toPoint())
+    QTest.qWait(40)
+    assert help_dialog.property('visible') and not menu.property('visible')
+    assert not pane.property('shortcutsEnabled')
+    QTest.keyClick(window, Qt.Key_Escape)
+    QTest.qWait(40)
+    assert not help_dialog.property('visible') and pane.hasActiveFocus()
     window.close()
