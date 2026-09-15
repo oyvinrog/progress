@@ -307,6 +307,8 @@ class MindMapController(QObject):
         font = QFont()
         font.setPixelSize(14)
         metrics = QFontMetricsF(font)
+        font.setBold(True)
+        bold_metrics = QFontMetricsF(font)
         sizes = {}
         for node in self.view_root.walk():
             padding = 74.0 if node.id in self._completed else 52.0
@@ -314,7 +316,8 @@ class MindMapController(QObject):
                 padding += 30.0
                 if priorities[self.links[node.id]]['priorityRank'] > 0:
                     padding += 30.0
-            width = max(110.0, min(380.0, metrics.horizontalAdvance(node.text) + padding))
+            node_metrics = bold_metrics if node.style.bold else metrics
+            width = max(110.0, min(380.0, node_metrics.horizontalAdvance(node.text) + padding))
             if node.id in self.reminders:
                 width = max(width, 210.0)
             sizes[node] = (width, 64.0 if node.id in self.reminders else 40.0)
@@ -326,7 +329,7 @@ class MindMapController(QObject):
         priorities = self._priority_data()
         return [{'id': n.id, 'text': n.text, 'note': n.note or '', 'x': b.x, 'y': b.y,
                  'width': b.width, 'height': b.height, 'isTab': n.id in self.links,
-                 'folded': n.folded, 'hasChildren': bool(n.children),
+                 'folded': n.folded, 'hasChildren': bool(n.children), 'bold': bool(n.style.bold),
                  'isViewRoot': n is self.view_root, 'completed': n.id in self._completed,
                  **self.reminderData(n.id),
                  **priorities.get(self.links.get(n.id), {'priorityScore': None, 'priorityLevel': 0,
@@ -626,6 +629,21 @@ class MindMapController(QObject):
             return False
         self.revealNode.emit(self._selected)
         return True
+
+    @Slot()
+    def toggleBold(self):
+        nodes = [self.map.find(key) for key in self._selected_ids]
+        nodes = [node for node in nodes if self._in_scope(node)]
+        if not nodes:
+            return
+        bold = not all(node.style.bold for node in nodes)
+
+        def mutate():
+            for node in nodes:
+                node.style.bold = bold
+                node.touch()
+
+        self._commit(mutate)
 
     @Slot(str, str)
     def editSelected(self, text, note):

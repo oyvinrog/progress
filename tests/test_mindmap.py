@@ -1967,3 +1967,70 @@ def test_qml_double_click_empty_canvas(project, app, zoom, pan):
     QTest.mouseDClick(window, Qt.LeftButton, Qt.ControlModifier, start)
     assert len(list(m.map.walk())) == count + 1
     window.close()
+
+
+def test_bold_selection_history_and_persistence(project):
+    m = project[0].mindmap
+    tab = m.map.find(next(iter(m.links)))
+    child = tab.add_child('Medium length thought')
+    untouched = tab.add_child('Untouched')
+    m.select(tab.id)
+    m.select(child.id, 'add')
+    child.style.bold = True
+    before = m.to_dict()
+    m.toggleBold()
+    assert tab.style.bold and child.style.bold and not untouched.style.bold
+    assert all(n['bold'] for n in m.nodes if n['id'] in m.selectedIds)
+    assert project[0].hasUnsavedChanges()
+    assert len(m._undo) == 1
+    after = m.to_dict()
+    m.undo()
+    assert m.to_dict() == before
+    m.redo()
+    assert m.to_dict() == after
+    m.load(after)
+    assert m.to_dict() == after
+    m.select(tab.id)
+    m.select(child.id, 'add')
+    m.toggleBold()
+    assert not m.map.find(tab.id).style.bold
+    assert not m.map.find(child.id).style.bold
+
+
+def test_qml_ctrl_b_toggles_node_font_and_respects_editor(project, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    node = m.map.root.add_child('Medium length thought')
+    normal_width = m._layout()[node].width
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+    m.select(node.id)
+
+    def label(item):
+        if item.objectName() == 'mindmapNodeText_' + node.id:
+            return item
+        for child in item.childItems():
+            found = label(child)
+            if found is not None:
+                return found
+        return None
+
+    QTest.keyClick(window, Qt.Key_B, Qt.ControlModifier)
+    QTest.qWait(30)
+    assert node.style.bold
+    assert label(window.contentItem()).property('font').bold()
+    assert m._layout()[node].width > normal_width
+    QTest.keyClick(window, Qt.Key_B, Qt.ControlModifier)
+    QTest.qWait(30)
+    assert not node.style.bold
+    assert not label(window.contentItem()).property('font').bold()
+    QTest.keyClick(window, Qt.Key_F2)
+    QTest.qWait(30)
+    before = m.to_dict()
+    QTest.keyClick(window, Qt.Key_B, Qt.ControlModifier)
+    assert m.to_dict() == before
+    QTest.keyClick(window, Qt.Key_Escape)
+    window.close()
