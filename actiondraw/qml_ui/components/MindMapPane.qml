@@ -15,6 +15,8 @@ FocusScope {
     property real panY: 0
     property bool initialized: false
     property var viewPositions: ({})
+    property string bookmarkHighlightId: ""
+    property real bookmarkHighlightOpacity: 0
     readonly property bool shortcutsEnabled: visible && activeFocus && !editor.visible && !nodeMenu.visible && !actionsButton.activeFocus && !actionsMenu.visible && !helpDialog.visible && !reminderDialogOpen
 
     function priorityColor(level) {
@@ -65,7 +67,21 @@ FocusScope {
         zoom = currentZoom
         initialized = true
         forceActiveFocus()
-        Qt.callLater(function() { pane.revealNode(nodeId) })
+        Qt.callLater(function() {
+            if (!pane.visible || !pane.controller || pane.controller.selectedId !== nodeId) return
+            var nodes = pane.controller.nodes
+            for (var i = 0; i < nodes.length; ++i) {
+                var n = nodes[i]
+                if (n.id !== nodeId) continue
+                pane.panX = -(n.x + n.width / 2) * pane.zoom
+                pane.panY = -(n.y + n.height / 2) * pane.zoom
+                bookmarkFade.stop()
+                pane.bookmarkHighlightId = nodeId
+                pane.bookmarkHighlightOpacity = 1
+                bookmarkHold.restart()
+                return
+            }
+        })
     }
     function revealNode(nodeId) {
         if (!visible || !controller) return
@@ -102,11 +118,24 @@ FocusScope {
         forceActiveFocus()
         if (!initialized) Qt.callLater(fitMap)
     }
+    Timer {
+        id: bookmarkHold
+        interval: 1800
+        onTriggered: bookmarkFade.restart()
+    }
+    NumberAnimation {
+        id: bookmarkFade
+        target: pane
+        property: "bookmarkHighlightOpacity"
+        to: 0
+        duration: 600
+    }
     Connections {
         target: pane.controller
         function onSceneChanged() { edges.requestPaint() }
         function onRevealNode(nodeId) { pane.revealNode(nodeId) }
         function onScopeChanging(oldScope, newScope) {
+            pane.bookmarkHighlightId = ""
             pane.viewPositions[oldScope] = { zoom: pane.zoom, x: pane.panX, y: pane.panY, initialized: pane.initialized }
             var saved = pane.viewPositions[newScope]
             pane.zoom = saved ? saved.zoom : 1
@@ -117,6 +146,7 @@ FocusScope {
             if (!pane.initialized) Qt.callLater(function() { if (pane.visible && !pane.initialized) pane.fitMap() })
         }
         function onResetView() {
+            pane.bookmarkHighlightId = ""
             pane.viewPositions = ({})
             pane.initialized = false
             pane.zoom = 1; pane.panX = 0; pane.panY = 0
@@ -340,6 +370,18 @@ FocusScope {
                         opacity: pane.controller.cutNodeIds.indexOf(modelData.id) >= 0 ? 0.45 : 1
                         border.width: selected ? 2 : 1
                         border.color: selected ? "#a5d9ff" : "#557b98"
+                        Rectangle {
+                            objectName: "mindmapBookmarkHighlight_" + nodeItem.modelData.id
+                            anchors.fill: parent
+                            anchors.margins: -6 / pane.zoom
+                            radius: nodeItem.radius + 6 / pane.zoom
+                            color: "transparent"
+                            border.color: "#fff2a8"
+                            border.width: 3 / pane.zoom
+                            opacity: pane.bookmarkHighlightOpacity
+                            visible: nodeItem.selected && pane.bookmarkHighlightId === nodeItem.modelData.id
+                                     && opacity > 0
+                        }
                         Text {
                             objectName: "mindmapNodeText_" + nodeItem.modelData.id
                             anchors.fill: parent

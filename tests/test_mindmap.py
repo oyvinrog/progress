@@ -916,9 +916,22 @@ def test_qml_bookmarks(project, app):
         item = find_item(window.contentItem(), 'mindmapNode_' + m.selectedId)
         viewport = window.findChild(QObject, 'mindmapViewport')
         point = item.mapToItem(viewport, item.boundingRect().center())
-        assert 0 <= point.x() <= viewport.width() and 0 <= point.y() <= viewport.height()
+        assert point.x() == pytest.approx(viewport.width() / 2)
+        assert point.y() == pytest.approx(viewport.height() / 2)
+        highlight = find_item(window.contentItem(), 'mindmapBookmarkHighlight_' + m.selectedId)
+        assert highlight.isVisible() and highlight.opacity() == 1
+        assert QQmlProperty.read(highlight, 'border.width') * pane.property('zoom') == pytest.approx(3)
         click(find_item(window.contentItem(), 'mindmapBookmark_' + tab))
         assert not m.tabScoped and m.selectedId == tab
+        assert not highlight.isVisible()
+        highlight = find_item(window.contentItem(), 'mindmapBookmarkHighlight_' + tab)
+        assert highlight.isVisible()
+        before = m.to_dict()
+        QTest.qWait(2600)
+        assert not highlight.isVisible()
+        click(find_item(window.contentItem(), 'mindmapBookmark_' + tab))
+        assert highlight.isVisible() and highlight.opacity() == 1
+        assert m.to_dict() == before
         for i in range(12):
             m.select(m.map.root.id)
             node_id = thought(m, 'A long bookmark title ' + str(i))
