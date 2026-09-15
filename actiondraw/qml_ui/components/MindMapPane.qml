@@ -15,7 +15,9 @@ FocusScope {
     property real panY: 0
     property bool initialized: false
     property var viewPositions: ({})
-    readonly property bool shortcutsEnabled: visible && activeFocus && !editor.visible && !nodeMenu.visible && !reminderDialogOpen
+    property string bookmarkHighlightId: ""
+    property real bookmarkHighlightOpacity: 0
+    readonly property bool shortcutsEnabled: visible && activeFocus && !editor.visible && !nodeMenu.visible && !actionsButton.activeFocus && !actionsMenu.visible && !helpDialog.visible && !reminderDialogOpen
 
     function priorityColor(level) {
         return level === 3 ? "#246594" : level === 2 ? "#294f6b" : "#2b3e4c"
@@ -65,7 +67,21 @@ FocusScope {
         zoom = currentZoom
         initialized = true
         forceActiveFocus()
-        Qt.callLater(function() { pane.revealNode(nodeId) })
+        Qt.callLater(function() {
+            if (!pane.visible || !pane.controller || pane.controller.selectedId !== nodeId) return
+            var nodes = pane.controller.nodes
+            for (var i = 0; i < nodes.length; ++i) {
+                var n = nodes[i]
+                if (n.id !== nodeId) continue
+                pane.panX = -(n.x + n.width / 2) * pane.zoom
+                pane.panY = -(n.y + n.height / 2) * pane.zoom
+                bookmarkFade.stop()
+                pane.bookmarkHighlightId = nodeId
+                pane.bookmarkHighlightOpacity = 1
+                bookmarkHold.restart()
+                return
+            }
+        })
     }
     function revealNode(nodeId) {
         if (!visible || !controller) return
@@ -102,11 +118,24 @@ FocusScope {
         forceActiveFocus()
         if (!initialized) Qt.callLater(fitMap)
     }
+    Timer {
+        id: bookmarkHold
+        interval: 1800
+        onTriggered: bookmarkFade.restart()
+    }
+    NumberAnimation {
+        id: bookmarkFade
+        target: pane
+        property: "bookmarkHighlightOpacity"
+        to: 0
+        duration: 600
+    }
     Connections {
         target: pane.controller
         function onSceneChanged() { edges.requestPaint() }
         function onRevealNode(nodeId) { pane.revealNode(nodeId) }
         function onScopeChanging(oldScope, newScope) {
+            pane.bookmarkHighlightId = ""
             pane.viewPositions[oldScope] = { zoom: pane.zoom, x: pane.panX, y: pane.panY, initialized: pane.initialized }
             var saved = pane.viewPositions[newScope]
             pane.zoom = saved ? saved.zoom : 1
@@ -117,6 +146,7 @@ FocusScope {
             if (!pane.initialized) Qt.callLater(function() { if (pane.visible && !pane.initialized) pane.fitMap() })
         }
         function onResetView() {
+            pane.bookmarkHighlightId = ""
             pane.viewPositions = ({})
             pane.initialized = false
             pane.zoom = 1; pane.panX = 0; pane.panY = 0
@@ -130,7 +160,8 @@ FocusScope {
         anchors.fill: parent
         anchors.margins: 10
         spacing: 8
-        Flow {
+        RowLayout {
+            objectName: "mindmapToolbar"
             Layout.fillWidth: true
             spacing: 5
             Button {
@@ -139,47 +170,81 @@ FocusScope {
                 visible: pane.controller && pane.controller.tabScoped
                 onClicked: pane.canvasRequested()
             }
-            Button {
-                objectName: "mindmapComplete"
-                text: "Complete"
-                enabled: pane.controller && pane.controller.selectedIds.length > 0
-                onClicked: { pane.controller.toggleCompleted(); pane.forceActiveFocus() }
+            ToolButton {
+                id: actionsButton
+                objectName: "mindmapActionsButton"
+                text: "Mindmap ▾"
+                Accessible.name: "Mindmap actions"
+                enabled: !!pane.controller
+                onClicked: actionsMenu.open()
+                Keys.onDownPressed: actionsMenu.open()
+                Keys.onReturnPressed: actionsMenu.open()
+                Keys.onEnterPressed: actionsMenu.open()
+                Menu {
+                    id: actionsMenu
+                    objectName: "mindmapActionsMenu"
+                    y: actionsButton.height
+                    enabled: !!pane.controller
+                    MenuItem {
+                        objectName: "mindmapComplete"
+                        text: "Complete"
+                        enabled: pane.controller && pane.controller.selectedIds.length > 0
+                        onTriggered: { pane.controller.toggleCompleted(); pane.forceActiveFocus() }
+                    }
+                    MenuItem { text: "Add child"; onTriggered: pane.addThought(false) }
+                    MenuItem { text: "Add sibling"; onTriggered: pane.addThought(true) }
+                    MenuItem {
+                        objectName: "mindmapReminder"
+                        text: "Reminder"
+                        enabled: pane.controller && pane.controller.selectedIds.length === 1
+                        onTriggered: pane.reminderRequested(pane.controller.selectedId)
+                    }
+                    MenuItem { text: "Edit / Notes"; onTriggered: pane.editNode() }
+                    MenuItem {
+                        objectName: "mindmapBookmark"
+                        text: pane.controller && pane.controller.selectedNode.bookmarked ? "Remove bookmark" : "Bookmark"
+                        enabled: pane.controller && pane.controller.selectedId !== ""
+                        onTriggered: { pane.controller.toggleBookmark(pane.controller.selectedId); pane.forceActiveFocus() }
+                    }
+                    MenuItem { text: "Fold / Unfold"; onTriggered: pane.controller.toggleFold() }
+                    MenuSeparator {}
+                    Menu {
+                        title: "Edit"
+                        MenuItem { text: "Toggle bold (Ctrl+B)"; onTriggered: pane.controller.toggleBold() }
+                        MenuItem { text: "Cut"; enabled: pane.controller && pane.controller.canCut; onTriggered: pane.controller.cutSelected() }
+                        MenuItem { text: "Paste"; enabled: pane.controller && pane.controller.canPaste; onTriggered: pane.controller.pasteSelected() }
+                        MenuSeparator {}
+                        MenuItem { text: "Delete"; onTriggered: pane.controller.deleteSelected() }
+                        MenuSeparator {}
+                        MenuItem { text: "Undo"; enabled: pane.controller && pane.controller.canUndo; onTriggered: pane.controller.undo() }
+                        MenuItem { text: "Redo"; enabled: pane.controller && pane.controller.canRedo; onTriggered: pane.controller.redo() }
+                    }
+                    Menu {
+                        objectName: "mindmapTabsMenu"
+                        title: "Tabs"
+                        MenuItem {
+                            objectName: "mindmapCreateTab"
+                            text: "Create tab"
+                            enabled: pane.controller && pane.controller.canCreateTab
+                            onTriggered: { pane.controller.createTabFromSelected(); pane.forceActiveFocus() }
+                        }
+                        MenuItem {
+                            text: "Open tab"
+                            enabled: pane.controller && pane.controller.selectedNode.isTab === true
+                            onTriggered: pane.controller.activate(pane.controller.selectedId)
+                        }
+                    }
+                    MenuSeparator {}
+                    MenuItem { objectName: "mindmapHelpAction"; text: "Shortcuts and legend…"; onTriggered: helpDialog.open() }
+                    onClosed: Qt.callLater(function() {
+                        if (!editor.visible && !helpDialog.visible && !pane.reminderDialogOpen) pane.forceActiveFocus()
+                    })
+                }
             }
-            Button { text: "Add child"; onClicked: pane.addThought(false) }
-            Button { text: "Sibling"; onClicked: pane.addThought(true) }
-            Button {
-                objectName: "mindmapCreateTab"
-                text: "Create tab"
-                enabled: pane.controller && pane.controller.canCreateTab
-                onClicked: { pane.controller.createTabFromSelected(); pane.forceActiveFocus() }
-            }
-            Button {
-                text: "Open tab"
-                enabled: pane.controller && pane.controller.selectedNode.isTab === true
-                onClicked: pane.controller.activate(pane.controller.selectedId)
-            }
-            Button {
-                objectName: "mindmapReminder"
-                text: "Reminder"
-                enabled: pane.controller && pane.controller.selectedIds.length === 1
-                onClicked: pane.reminderRequested(pane.controller.selectedId)
-            }
-            Button { text: "Edit / Notes"; onClicked: pane.editNode() }
-            Button {
-                objectName: "mindmapBookmark"
-                text: pane.controller && pane.controller.selectedNode.bookmarked ? "Remove bookmark" : "Bookmark"
-                enabled: pane.controller && pane.controller.selectedId !== ""
-                onClicked: { pane.controller.toggleBookmark(pane.controller.selectedId); pane.forceActiveFocus() }
-            }
-            Button { text: "Fold"; onClicked: pane.controller.toggleFold() }
-            Button { text: "Cut"; enabled: pane.controller && pane.controller.canCut; onClicked: pane.controller.cutSelected() }
-            Button { text: "Paste"; enabled: pane.controller && pane.controller.canPaste; onClicked: pane.controller.pasteSelected() }
-            Button { text: "Delete"; onClicked: pane.controller.deleteSelected() }
-            Button { text: "Undo"; enabled: pane.controller && pane.controller.canUndo; onClicked: pane.controller.undo() }
-            Button { text: "Redo"; enabled: pane.controller && pane.controller.canRedo; onClicked: pane.controller.redo() }
-            Button { text: "−"; onClicked: pane.zoomBy(1 / 1.2) }
-            Button { text: "+"; onClicked: pane.zoomBy(1.2) }
-            Button { text: "Fit"; onClicked: pane.fitMap() }
+            Item { Layout.fillWidth: true }
+            ToolButton { text: "−"; Accessible.name: "Zoom out"; ToolTip.visible: hovered; ToolTip.text: "Zoom out"; onClicked: { pane.zoomBy(1 / 1.2); pane.forceActiveFocus() } }
+            ToolButton { text: "+"; Accessible.name: "Zoom in"; ToolTip.visible: hovered; ToolTip.text: "Zoom in"; onClicked: { pane.zoomBy(1.2); pane.forceActiveFocus() } }
+            ToolButton { text: "Fit"; Accessible.name: "Fit mindmap"; onClicked: { pane.fitMap(); pane.forceActiveFocus() } }
         }
         ScrollView {
             id: bookmarkScroll
@@ -220,33 +285,10 @@ FocusScope {
         }
         Label {
             Layout.fillWidth: true
-            text: pane.controller && pane.controller.canPaste
-                ? "Branches cut: click a destination and press Ctrl+V to move them beneath it · Escape cancels"
-                : "Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+X / Ctrl+V moves branches · F4 completes · Arrows navigate · Tab adds a child · Ctrl+Enter opens a tab"
+            visible: pane.controller && pane.controller.canPaste
+            text: "Branches cut: select a destination and press Ctrl+V · Escape cancels"
             wrapMode: Text.WordWrap
             color: "#a9bfd1"
-        }
-        Flow {
-            Layout.fillWidth: true
-            spacing: 12
-            Label { text: "Relative priority:"; color: "#a9bfd1" }
-            Repeater {
-                model: 3
-                delegate: Rectangle {
-                    required property int index
-                    width: legendContent.width + 12
-                    height: 24
-                    radius: 4
-                    color: pane.priorityColor(index + 1)
-                    Row {
-                        id: legendContent
-                        anchors.centerIn: parent
-                        spacing: 6
-                        PriorityBars { level: index + 1; anchors.verticalCenter: parent.verticalCenter }
-                        Label { text: pane.priorityLabel(index + 1); color: "#e5f0fa" }
-                    }
-                }
-            }
         }
         Item {
             id: viewport
@@ -259,6 +301,11 @@ FocusScope {
             MouseArea {
                 anchors.fill: parent
                 property point lastPosition
+                onDoubleClicked: function(mouse) {
+                    if (!pane.controller || mouse.button !== Qt.LeftButton || mouse.modifiers !== Qt.NoModifier) return
+                    var point = mapToItem(world, mouse.x, mouse.y)
+                    if (pane.controller.addThoughtAt(point.x, point.y)) pane.editNode()
+                }
                 onPressed: function(mouse) {
                     pane.forceActiveFocus()
                     lastPosition = Qt.point(mouse.x, mouse.y)
@@ -323,7 +370,20 @@ FocusScope {
                         opacity: pane.controller.cutNodeIds.indexOf(modelData.id) >= 0 ? 0.45 : 1
                         border.width: selected ? 2 : 1
                         border.color: selected ? "#a5d9ff" : "#557b98"
+                        Rectangle {
+                            objectName: "mindmapBookmarkHighlight_" + nodeItem.modelData.id
+                            anchors.fill: parent
+                            anchors.margins: -6 / pane.zoom
+                            radius: nodeItem.radius + 6 / pane.zoom
+                            color: "transparent"
+                            border.color: "#fff2a8"
+                            border.width: 3 / pane.zoom
+                            opacity: pane.bookmarkHighlightOpacity
+                            visible: nodeItem.selected && pane.bookmarkHighlightId === nodeItem.modelData.id
+                                     && opacity > 0
+                        }
                         Text {
+                            objectName: "mindmapNodeText_" + nodeItem.modelData.id
                             anchors.fill: parent
                             anchors.bottomMargin: nodeItem.modelData.reminderActive ? 28 : 0
                             anchors.leftMargin: 9
@@ -332,6 +392,7 @@ FocusScope {
                             verticalAlignment: Text.AlignVCenter
                             text: (nodeItem.modelData.completed ? "✓ " : "") + (nodeItem.modelData.isTab ? "▣ " : "") + nodeItem.modelData.text
                             font.pixelSize: 14
+                            font.bold: nodeItem.modelData.bold
                             color: "#e5f0fa"; elide: Text.ElideRight
                         }
                         Rectangle {
@@ -487,6 +548,48 @@ FocusScope {
     onZoomChanged: edges.requestPaint()
     onPanXChanged: edges.requestPaint()
     onPanYChanged: edges.requestPaint()
+    Dialog {
+        id: helpDialog
+        objectName: "mindmapHelpDialog"
+        title: "Mindmap shortcuts and legend"
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(520, pane.width - 20)
+        standardButtons: Dialog.Close
+        onClosed: pane.forceActiveFocus()
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 16
+            Label {
+                Layout.fillWidth: true
+                text: "Double-click empty space to add a thought · Ctrl+B toggles bold · Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+X / Ctrl+V moves branches · F4 completes · Arrows navigate · Tab adds a child · Ctrl+Enter opens a tab"
+                wrapMode: Text.WordWrap
+                color: "#a9bfd1"
+            }
+            Flow {
+                Layout.fillWidth: true
+                spacing: 12
+                Label { text: "Relative priority:"; color: "#a9bfd1" }
+                Repeater {
+                    model: 3
+                    delegate: Rectangle {
+                        required property int index
+                        width: legendContent.width + 12
+                        height: 24
+                        radius: 4
+                        color: pane.priorityColor(index + 1)
+                        Row {
+                            id: legendContent
+                            anchors.centerIn: parent
+                            spacing: 6
+                            PriorityBars { level: index + 1; anchors.verticalCenter: parent.verticalCenter }
+                            Label { text: pane.priorityLabel(index + 1); color: "#e5f0fa" }
+                        }
+                    }
+                }
+            }
+        }
+    }
     Menu {
         id: nodeMenu
         objectName: "mindmapNodeMenu"
@@ -585,6 +688,7 @@ FocusScope {
         }
         onRejected: { titleField.text = ""; noteField.text = ""; pane.forceActiveFocus() }
     }
+    Shortcut { sequence: "Ctrl+B"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.toggleBold() }
     Shortcut { sequence: "Ctrl+X"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.cutSelected() }
     Shortcut { sequence: "Ctrl+V"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.pasteSelected() }
     Shortcut { sequence: "Escape"; enabled: pane.shortcutsEnabled && pane.controller.canPaste; onActivated: pane.controller.cancelCut() }

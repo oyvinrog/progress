@@ -307,6 +307,8 @@ class MindMapController(QObject):
         font = QFont()
         font.setPixelSize(14)
         metrics = QFontMetricsF(font)
+        font.setBold(True)
+        bold_metrics = QFontMetricsF(font)
         sizes = {}
         for node in self.view_root.walk():
             padding = 74.0 if node.id in self._completed else 52.0
@@ -314,7 +316,8 @@ class MindMapController(QObject):
                 padding += 30.0
                 if priorities[self.links[node.id]]['priorityRank'] > 0:
                     padding += 30.0
-            width = max(110.0, min(380.0, metrics.horizontalAdvance(node.text) + padding))
+            node_metrics = bold_metrics if node.style.bold else metrics
+            width = max(110.0, min(380.0, node_metrics.horizontalAdvance(node.text) + padding))
             if node.id in self.reminders:
                 width = max(width, 210.0)
             sizes[node] = (width, 64.0 if node.id in self.reminders else 40.0)
@@ -326,7 +329,7 @@ class MindMapController(QObject):
         priorities = self._priority_data()
         return [{'id': n.id, 'text': n.text, 'note': n.note or '', 'x': b.x, 'y': b.y,
                  'width': b.width, 'height': b.height, 'isTab': n.id in self.links,
-                 'folded': n.folded, 'hasChildren': bool(n.children),
+                 'folded': n.folded, 'hasChildren': bool(n.children), 'bold': bool(n.style.bold),
                  'isViewRoot': n is self.view_root, 'completed': n.id in self._completed,
                  **self.reminderData(n.id),
                  **priorities.get(self.links.get(n.id), {'priorityScore': None, 'priorityLevel': 0,
@@ -571,6 +574,76 @@ class MindMapController(QObject):
             self._set_selection([parent.add_child('New thought').id])
         self._commit(mutate)
         self.revealNode.emit(self._selected)
+
+    @Slot(float, float, result=bool)
+    def addThoughtAt(self, x, y):
+        """Infer a parent and insertion position from a visible canvas point."""
+        if not math.isfinite(x) or not math.isfinite(y):
+            return False
+        boxes = self._layout()
+        if any(b.x <= x <= b.x + b.width and b.y <= y <= b.y + b.height
+               for b in boxes.values()):
+            return False
+        sides = assigned_sides(SimpleNamespace(root=self.view_root))
+        groups = {}
+        for node in boxes:
+            if node is not self.view_root:
+                groups.setdefault((node.parent, sides[node]), []).append(node)
+
+        gaps = []
+        for (parent, side), siblings in groups.items():
+            for upper, lower in zip(siblings, siblings[1:]):
+                a, b = boxes[upper], boxes[lower]
+                left, right = min(a.x, b.x), max(a.x + a.width, b.x + b.width)
+                top, bottom = a.y + a.height, b.y
+                if left <= x <= right and top < y < bottom:
+                    distance = (x - (left + right) / 2) ** 2 + (y - (top + bottom) / 2) ** 2
+                    gaps.append((distance, parent, side, parent.children.index(lower)))
+        if gaps:
+            _, parent, side, index = min(gaps, key=lambda gap: gap[0])
+        else:
+            def distance(node):
+                b = boxes[node]
+                return max(b.x - x, 0, x - b.x - b.width) ** 2 + max(b.y - y, 0, y - b.y - b.height) ** 2
+
+            nearest = min(boxes, key=distance)
+            b = boxes[nearest]
+            side = sides.get(nearest, 'left' if x < b.x + b.width / 2 else 'right')
+            outward = x < b.x if side == 'left' else x > b.x + b.width
+            parent = nearest if nearest is self.view_root or outward else nearest.parent
+            siblings = groups.get((parent, side), [])
+            following = next((n for n in siblings if boxes[n].center_y > y), None)
+            index = (parent.children.index(following) if following else
+                     parent.children.index(siblings[-1]) + 1 if siblings else len(parent.children))
+
+        def mutate():
+            # Inserting a branch must not rebalance existing automatic sides.
+            for branch in self.view_root.children:
+                branch.side = sides[branch]
+            parent.folded = False
+            node = parent.add_child('New thought', side=side)
+            node.move_to(parent, index)
+            self._set_selection([node.id])
+
+        if not self._commit(mutate):
+            return False
+        self.revealNode.emit(self._selected)
+        return True
+
+    @Slot()
+    def toggleBold(self):
+        nodes = [self.map.find(key) for key in self._selected_ids]
+        nodes = [node for node in nodes if self._in_scope(node)]
+        if not nodes:
+            return
+        bold = not all(node.style.bold for node in nodes)
+
+        def mutate():
+            for node in nodes:
+                node.style.bold = bold
+                node.touch()
+
+        self._commit(mutate)
 
     @Slot(str, str)
     def editSelected(self, text, note):
