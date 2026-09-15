@@ -1825,3 +1825,145 @@ def test_qml_due_reminder_renewal_keeps_target_with_queued_alerts(project, app, 
         assert not warnings
     finally:
         window.close()
+
+
+@pytest.mark.parametrize('side', ['left', 'right'])
+def test_add_thought_at_gap_history_and_sides(app, side):
+    from actiondraw._vendor.pyplane.layout import assigned_sides
+    m = MindMapController()
+    a = m.map.root.add_child('A', side=side)
+    other = m.map.root.add_child('Other', side='right' if side == 'left' else 'left')
+    b = m.map.root.add_child('B', side=side)
+    m.map.root.add_child('Automatic')
+    m.select(other.id)
+    before = m.to_dict()
+    before_sides = {n.id: s for n, s in assigned_sides(m.map).items()}
+    boxes = m._layout()
+    x = boxes[a].x + boxes[a].width / 2
+    y = (boxes[a].y + boxes[a].height + boxes[b].y) / 2
+    assert m.addThoughtAt(x, y)
+    created = m.map.find(m.selectedId)
+    assert m.map.root.children == [a, other, created, b, m.map.root.children[-1]]
+    assert created.side == side
+    assert all(assigned_sides(m.map)[m.map.find(key)] == value for key, value in before_sides.items())
+    assert len(m._undo) == 1
+    after = m.to_dict()
+    m.undo()
+    assert m.to_dict() == before and m.selectedId == other.id
+    m.redo()
+    assert m.to_dict() == after and m.selectedIds == [created.id]
+    m.load(after)
+    assert m.to_dict() == after
+
+
+@pytest.mark.parametrize('side', ['left', 'right'])
+@pytest.mark.parametrize('placement', ['above', 'below', 'child', 'folded'])
+def test_add_thought_at_nearest(app, side, placement):
+    m = MindMapController()
+    parent = m.map.root.add_child('Parent', side=side)
+    a, b = [parent.add_child(t) for t in ('A', 'B')]
+    if placement == 'folded':
+        parent.folded = True
+        target = parent
+    else:
+        target = a if placement == 'above' else b
+    box = m._layout()[target]
+    if placement in ('child', 'folded'):
+        x = box.x - 30 if side == 'left' else box.x + box.width + 30
+        y = box.center_y
+    else:
+        x = box.x + box.width / 2
+        y = box.y - 15 if placement == 'above' else box.y + box.height + 15
+    assert m.addThoughtAt(x, y)
+    node = m.map.find(m.selectedId)
+    assert node.parent is (target if placement in ('child', 'folded') else parent)
+    assert not node.parent.folded
+    if placement == 'above':
+        assert parent.children == [node, a, b]
+    elif placement == 'below':
+        assert parent.children == [a, b, node]
+    elif placement == 'folded':
+        assert parent.children == [a, b, node]
+
+
+@pytest.mark.parametrize('x,side', [(-10000, 'left'), (10000, 'right')])
+def test_add_thought_at_root_and_invalid_points(app, x, side):
+    m = MindMapController()
+    before = m.to_dict()
+    assert not m.addThoughtAt(0, 0)
+    assert not m.addThoughtAt(float('nan'), 0)
+    assert not m.addThoughtAt(0, float('inf'))
+    assert m.to_dict() == before and not m.canUndo
+    assert m.addThoughtAt(x, 0)
+    node = m.map.find(m.selectedId)
+    assert node.parent is m.map.root and node.side == side
+
+
+def test_add_thought_at_scope_and_tie(project):
+    m = project[0].mindmap
+    tab = m.map.find(next(iter(m.links)))
+    outside = m.map.root.add_child('Outside')
+    m.set_scope(m.links[tab.id])
+    a, b = [tab.add_child(t, side='right') for t in ('A', 'B')]
+    boxes = m._layout()
+    # Just beyond both outer edges: equal distance chooses A in visible order.
+    assert m.addThoughtAt(boxes[a].x + boxes[a].width + 20,
+                          (boxes[a].y + boxes[a].height + boxes[b].y) / 2)
+    assert m.map.find(m.selectedId).parent is a
+    assert outside.children == [] and tab.parent is m.map.root
+
+
+@pytest.mark.parametrize('zoom,pan', [(1.0, 0), (0.55, 35)])
+def test_qml_double_click_empty_canvas(project, app, zoom, pan):
+    from PySide6.QtCore import QPointF
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    parent = m.map.find(next(iter(m.links)))
+    a, b = [parent.add_child(t) for t in ('A', 'B')]
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+    pane = window.findChild(QObject, 'mindmapPane')
+    viewport = window.findChild(QObject, 'mindmapViewport')
+    editor = window.findChild(QObject, 'mindmapNodeEditor')
+    box = m._layout()[a]
+    pane.setProperty('zoom', zoom)
+    pane.setProperty('panX', pan - (box.x + box.width / 2) * zoom)
+    pane.setProperty('panY', pan)
+    QTest.qWait(30)
+
+    def point(x, y):
+        return viewport.mapToScene(QPointF(viewport.width() / 2 + pane.property('panX') + x * zoom,
+                                          viewport.height() / 2 + pane.property('panY') + y * zoom)).toPoint()
+
+    boxes = m._layout()
+    gap = point(box.x + box.width / 2, (box.y + box.height + boxes[b].y) / 2)
+    count = len(list(m.map.walk()))
+    QTest.mouseDClick(window, Qt.LeftButton, Qt.NoModifier, gap)
+    QTest.qWait(50)
+    created = m.map.find(m.selectedId)
+    assert len(list(m.map.walk())) == count + 1
+    assert parent.children == [a, created, b]
+    assert editor.property('visible')
+    assert window.findChild(QObject, 'mindmapNodeTitle').property('text') == 'New thought'
+    QMetaObject.invokeMethod(editor, 'reject')
+    QTest.qWait(50)
+    assert len(list(m.map.walk())) == count + 1
+    box = m._layout()[created]
+    QTest.mouseDClick(window, Qt.LeftButton, Qt.NoModifier, point(box.x + box.width / 2, box.center_y))
+    QTest.qWait(50)
+    assert editor.property('visible') and len(list(m.map.walk())) == count + 1
+    QMetaObject.invokeMethod(editor, 'reject')
+    QTest.qWait(50)
+    start = viewport.mapToScene(QPointF(30, 30)).toPoint()
+    previous_pan = pane.property('panX')
+    QTest.mousePress(window, Qt.LeftButton, Qt.NoModifier, start)
+    QTest.mouseMove(window, start + QPoint(30, 10), 30)
+    QTest.mouseRelease(window, Qt.LeftButton, Qt.NoModifier, start + QPoint(30, 10))
+    assert pane.property('panX') != previous_pan
+    assert len(list(m.map.walk())) == count + 1 and not editor.property('visible')
+    QTest.mouseDClick(window, Qt.LeftButton, Qt.ControlModifier, start)
+    assert len(list(m.map.walk())) == count + 1
+    window.close()

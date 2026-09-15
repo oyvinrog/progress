@@ -572,6 +572,61 @@ class MindMapController(QObject):
         self._commit(mutate)
         self.revealNode.emit(self._selected)
 
+    @Slot(float, float, result=bool)
+    def addThoughtAt(self, x, y):
+        """Infer a parent and insertion position from a visible canvas point."""
+        if not math.isfinite(x) or not math.isfinite(y):
+            return False
+        boxes = self._layout()
+        if any(b.x <= x <= b.x + b.width and b.y <= y <= b.y + b.height
+               for b in boxes.values()):
+            return False
+        sides = assigned_sides(SimpleNamespace(root=self.view_root))
+        groups = {}
+        for node in boxes:
+            if node is not self.view_root:
+                groups.setdefault((node.parent, sides[node]), []).append(node)
+
+        gaps = []
+        for (parent, side), siblings in groups.items():
+            for upper, lower in zip(siblings, siblings[1:]):
+                a, b = boxes[upper], boxes[lower]
+                left, right = min(a.x, b.x), max(a.x + a.width, b.x + b.width)
+                top, bottom = a.y + a.height, b.y
+                if left <= x <= right and top < y < bottom:
+                    distance = (x - (left + right) / 2) ** 2 + (y - (top + bottom) / 2) ** 2
+                    gaps.append((distance, parent, side, parent.children.index(lower)))
+        if gaps:
+            _, parent, side, index = min(gaps, key=lambda gap: gap[0])
+        else:
+            def distance(node):
+                b = boxes[node]
+                return max(b.x - x, 0, x - b.x - b.width) ** 2 + max(b.y - y, 0, y - b.y - b.height) ** 2
+
+            nearest = min(boxes, key=distance)
+            b = boxes[nearest]
+            side = sides.get(nearest, 'left' if x < b.x + b.width / 2 else 'right')
+            outward = x < b.x if side == 'left' else x > b.x + b.width
+            parent = nearest if nearest is self.view_root or outward else nearest.parent
+            siblings = groups.get((parent, side), [])
+            following = next((n for n in siblings if boxes[n].center_y > y), None)
+            index = (parent.children.index(following) if following else
+                     parent.children.index(siblings[-1]) + 1 if siblings else len(parent.children))
+
+        def mutate():
+            # Inserting a branch must not rebalance existing automatic sides.
+            for branch in self.view_root.children:
+                branch.side = sides[branch]
+            parent.folded = False
+            node = parent.add_child('New thought', side=side)
+            node.move_to(parent, index)
+            self._set_selection([node.id])
+
+        if not self._commit(mutate):
+            return False
+        self.revealNode.emit(self._selected)
+        return True
+
     @Slot(str, str)
     def editSelected(self, text, note):
         node = self.map.find(self._selected)

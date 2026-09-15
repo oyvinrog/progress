@@ -222,7 +222,7 @@ FocusScope {
             Layout.fillWidth: true
             text: pane.controller && pane.controller.canPaste
                 ? "Branches cut: click a destination and press Ctrl+V to move them beneath it · Escape cancels"
-                : "Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+X / Ctrl+V moves branches · F4 completes · Arrows navigate · Tab adds a child · Ctrl+Enter opens a tab"
+                : "Double-click empty space to add a thought · Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+X / Ctrl+V moves branches · F4 completes · Arrows navigate · Tab adds a child · Ctrl+Enter opens a tab"
             wrapMode: Text.WordWrap
             color: "#a9bfd1"
         }
@@ -259,6 +259,11 @@ FocusScope {
             MouseArea {
                 anchors.fill: parent
                 property point lastPosition
+                onDoubleClicked: function(mouse) {
+                    if (!pane.controller || mouse.button !== Qt.LeftButton || mouse.modifiers !== Qt.NoModifier) return
+                    var point = mapToItem(world, mouse.x, mouse.y)
+                    if (pane.controller.addThoughtAt(point.x, point.y)) pane.editNode()
+                }
                 onPressed: function(mouse) {
                     pane.forceActiveFocus()
                     lastPosition = Qt.point(mouse.x, mouse.y)
