@@ -36,6 +36,7 @@ class MindMapController(QObject):
         self._selected_ids = [self._selected]
         self._selection_anchor = self._selected
         self._cut_ids = []
+        self._search_query = ''
         self._undo = []
         self._redo = []
         self._creating_tab = False
@@ -71,6 +72,7 @@ class MindMapController(QObject):
     def set_scope(self, tab_id=None):
         if self._scope_tab == tab_id:
             return
+        self.clearSearch()
         self.scopeChanging.emit(self._scope_tab or '', tab_id or '')
         self._view_selections[self._scope_tab] = self._selection_state()
         self._scope_tab = tab_id
@@ -180,6 +182,7 @@ class MindMapController(QObject):
 
     def load(self, payload=None):
         self.map, self.links = self.decode(payload) if payload is not None else (MindMap('Project'), {})
+        self._search_query = ''
         self._completed = set((payload or {}).get('completed', []))
         self.reminders = copy.deepcopy((payload or {}).get('reminders', {}))
         self._bookmarks = list((payload or {}).get('bookmarks', []))
@@ -195,6 +198,51 @@ class MindMapController(QObject):
     @Property(str, notify=changed)
     def selectedId(self):
         return self._selected
+
+    @Property(str, notify=changed)
+    def searchQuery(self):
+        return self._search_query
+
+    def _search_matches(self):
+        query = self._search_query.casefold()
+        return [node for node in self.view_root.walk() if query in node.text.casefold()] if query else []
+
+    @Property(int, notify=changed)
+    def searchMatchCount(self):
+        return len(self._search_matches())
+
+    @Property(int, notify=changed)
+    def searchMatchPosition(self):
+        ids = [node.id for node in self._search_matches()]
+        return ids.index(self._selected) + 1 if self._selected in ids else 0
+
+    @Slot()
+    def clearSearch(self):
+        if self._search_query:
+            self._search_query = ''
+            self.changed.emit()
+
+    @Slot(str)
+    def searchText(self, query):
+        self._search_query = query
+        self.navigateSearch(0)
+
+    @Slot(int)
+    def navigateSearch(self, direction):
+        matches = self._search_matches()
+        if not matches:
+            self.changed.emit()
+            return
+        ids = [node.id for node in matches]
+        index = ((ids.index(self._selected) + direction) % len(ids)
+                 if self._selected in ids else (-1 if direction < 0 else 0))
+        node = matches[index]
+        for ancestor in node.ancestors():
+            if self._in_scope(ancestor):
+                ancestor.folded = False
+        self.select(node.id)
+        self.sceneChanged.emit()
+        self.revealNode.emit(node.id)
 
     @Property('QVariantMap', notify=changed)
     def selectedNode(self):

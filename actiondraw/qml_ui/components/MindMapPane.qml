@@ -18,6 +18,20 @@ FocusScope {
     property string bookmarkHighlightId: ""
     property real bookmarkHighlightOpacity: 0
     readonly property bool shortcutsEnabled: visible && activeFocus && !editor.visible && !nodeMenu.visible && !actionsButton.activeFocus && !actionsMenu.visible && !helpDialog.visible && !reminderDialogOpen
+    readonly property bool searching: controller && controller.searchQuery.length > 0
+    onShortcutsEnabledChanged: if (!shortcutsEnabled && controller) controller.clearSearch()
+
+    Keys.onPressed: function(event) {
+        if (!shortcutsEnabled || !controller) return
+        if (event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier)) return
+        if (searching && event.key === Qt.Key_Backspace) {
+            controller.searchText(Array.from(controller.searchQuery).slice(0, -1).join(""))
+            event.accepted = true
+        } else if (event.text.length > 0 && !/[\u0000-\u001f\u007f]/.test(event.text)) {
+            controller.searchText(controller.searchQuery + event.text)
+            event.accepted = true
+        }
+    }
 
     function priorityColor(level) {
         return level === 3 ? "#246594" : level === 2 ? "#294f6b" : "#2b3e4c"
@@ -135,6 +149,7 @@ FocusScope {
         function onSceneChanged() { edges.requestPaint() }
         function onRevealNode(nodeId) { pane.revealNode(nodeId) }
         function onScopeChanging(oldScope, newScope) {
+            pane.controller.clearSearch()
             pane.bookmarkHighlightId = ""
             pane.viewPositions[oldScope] = { zoom: pane.zoom, x: pane.panX, y: pane.panY, initialized: pane.initialized }
             var saved = pane.viewPositions[newScope]
@@ -146,6 +161,7 @@ FocusScope {
             if (!pane.initialized) Qt.callLater(function() { if (pane.visible && !pane.initialized) pane.fitMap() })
         }
         function onResetView() {
+            pane.controller.clearSearch()
             pane.bookmarkHighlightId = ""
             pane.viewPositions = ({})
             pane.initialized = false
@@ -288,6 +304,17 @@ FocusScope {
             visible: pane.controller && pane.controller.canPaste
             text: "Branches cut: select a destination and press Ctrl+V · Escape cancels"
             wrapMode: Text.WordWrap
+            color: "#a9bfd1"
+        }
+        Label {
+            objectName: "mindmapSearchIndicator"
+            Layout.fillWidth: true
+            visible: pane.searching
+            text: pane.controller ? "Find: " + pane.controller.searchQuery + " · "
+                  + (pane.controller.searchMatchCount > 0
+                     ? pane.controller.searchMatchPosition + "/" + pane.controller.searchMatchCount
+                     : "No matches") + " · Enter / Shift+Enter: next / previous · Esc: clear" : ""
+            elide: Text.ElideRight
             color: "#a9bfd1"
         }
         Item {
@@ -562,7 +589,7 @@ FocusScope {
             spacing: 16
             Label {
                 Layout.fillWidth: true
-                text: "Double-click empty space to add a thought · Ctrl+B toggles bold · Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+X / Ctrl+V moves branches · F4 completes · Arrows navigate · Tab adds a child · Ctrl+Enter opens a tab"
+                text: "Type to find node titles, including folded branches · Enter / Shift+Enter cycles matches · Backspace edits search · Escape clears search · Double-click empty space to add a thought · Ctrl+B toggles bold · Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+X / Ctrl+V moves branches · F4 completes · Arrows navigate · Tab adds a child · Ctrl+Enter opens a tab"
                 wrapMode: Text.WordWrap
                 color: "#a9bfd1"
             }
@@ -691,7 +718,7 @@ FocusScope {
     Shortcut { sequence: "Ctrl+B"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.toggleBold() }
     Shortcut { sequence: "Ctrl+X"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.cutSelected() }
     Shortcut { sequence: "Ctrl+V"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.pasteSelected() }
-    Shortcut { sequence: "Escape"; enabled: pane.shortcutsEnabled && pane.controller.canPaste; onActivated: pane.controller.cancelCut() }
+    Shortcut { sequence: "Escape"; enabled: pane.shortcutsEnabled && (pane.searching || pane.controller.canPaste); onActivated: { if (pane.searching) pane.controller.clearSearch(); else pane.controller.cancelCut() } }
     Shortcut { sequence: "Shift+Left"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.navigate("left", true) }
     Shortcut { sequence: "Shift+Right"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.navigate("right", true) }
     Shortcut { sequence: "Shift+Up"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.navigate("up", true) }
@@ -706,11 +733,12 @@ FocusScope {
     Shortcut { sequence: "Ctrl+Left"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.setSide("left") }
     Shortcut { sequence: "Ctrl+Right"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.setSide("right") }
     Shortcut { sequences: ["Ctrl+Return", "Ctrl+Enter"]; enabled: pane.shortcutsEnabled; onActivated: pane.controller.activate(pane.controller.selectedId) }
-    Shortcut { sequence: "Return"; enabled: pane.shortcutsEnabled; onActivated: pane.addThought(true) }
+    Shortcut { sequences: ["Return", "Enter"]; enabled: pane.shortcutsEnabled; onActivated: { if (pane.searching) pane.controller.navigateSearch(1); else pane.addThought(true) } }
+    Shortcut { sequences: ["Shift+Return", "Shift+Enter"]; enabled: pane.shortcutsEnabled && pane.searching; onActivated: pane.controller.navigateSearch(-1) }
     Shortcut { sequence: "F4"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.toggleCompleted() }
     Shortcut { sequence: "F2"; enabled: pane.shortcutsEnabled; onActivated: pane.editNode() }
     Shortcut { sequence: "Delete"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.deleteSelected() }
-    Shortcut { sequence: "Space"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.toggleFold() }
+    Shortcut { sequence: "Space"; enabled: pane.shortcutsEnabled; onActivated: { if (pane.searching) pane.controller.searchText(pane.controller.searchQuery + " "); else pane.controller.toggleFold() } }
     Shortcut { sequence: "Ctrl+Z"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.undo() }
     Shortcut { sequence: "Ctrl+Y"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.redo() }
     Shortcut { sequence: "Ctrl++"; enabled: pane.shortcutsEnabled; onActivated: pane.zoomBy(1.2) }

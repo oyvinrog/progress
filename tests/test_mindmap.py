@@ -31,6 +31,155 @@ def thought(controller, text='Secret thought', note='Secret note'):
     return controller.selectedId
 
 
+def test_type_search_matches_cycles_and_reveals(project):
+    m = project[0].mindmap
+    branch = m.map.root.add_child('People')
+    first = branch.add_child('Guest')
+    second = branch.add_child('Invite guests')
+    branch.add_child('Other', note='guest')
+    branch.folded = True
+    revealed = []
+    m.revealNode.connect(revealed.append)
+    history = len(m._undo)
+    m.searchText('GUEST')
+    assert m.selectedId == first.id
+    assert not branch.folded
+    assert revealed[-1] == first.id
+    assert m.searchMatchCount == 2 and m.searchMatchPosition == 1
+    m.navigateSearch(1)
+    assert m.selectedId == second.id and m.searchMatchPosition == 2
+    m.searchText('guests')
+    assert m.selectedId == second.id and m.searchMatchCount == 1
+    m.searchText('guest')
+    assert m.selectedId == second.id
+    m.navigateSearch(1)
+    assert m.selectedId == first.id
+    m.navigateSearch(-1)
+    assert m.selectedId == second.id
+    count = len(revealed)
+    m.searchText('missing')
+    assert m.searchMatchCount == 0 and m.searchMatchPosition == 0
+    assert m.selectedId == second.id and len(revealed) == count
+    m.clearSearch()
+    assert m.searchQuery == '' and m.searchMatchCount == 0
+    assert len(m._undo) == history
+    assert 'searchQuery' not in m.to_dict()
+
+
+def test_type_search_scope_and_reset(project):
+    m = project[0].mindmap
+    node_id, tab_id = next(iter(m.links.items()))
+    scoped = m.map.find(node_id)
+    inside = scoped.add_child('Guest inside')
+    m.map.root.add_child('Guest outside')
+    m.searchText('guest')
+    assert m.searchMatchCount == 2
+    m.set_scope(tab_id)
+    assert m.searchQuery == ''
+    m.searchText('guest')
+    assert m.searchMatchCount == 1 and m.selectedId == inside.id
+    m.searchText(scoped.text)
+    assert m.selectedId == scoped.id
+    m.load(m.to_dict())
+    assert m.searchQuery == ''
+
+
+def test_qml_type_search_keyboard_and_focus(project, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    branch = m.map.root.add_child('People')
+    first = branch.add_child('Guest one')
+    second = branch.add_child('Guest two')
+    branch.folded = True
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+
+    def type_text(text):
+        for character in text:
+            QTest.keyClick(window, character)
+
+    pane = window.findChild(QObject, 'mindmapPane')
+    indicator = window.findChild(QObject, 'mindmapSearchIndicator')
+    pane.setProperty('zoom', 1.2)
+    pane.setProperty('panX', -10000)
+    type_text('guest')
+    QTest.qWait(30)
+    assert m.searchQuery == 'guest' and m.selectedId == first.id
+    assert indicator.property('visible') and '1/2' in indicator.property('text')
+    assert pane.property('zoom') == 1.2 and pane.property('panX') != -10000
+    viewport = window.findChild(QObject, 'mindmapViewport')
+    box = m._layout()[first]
+    left = viewport.width() / 2 + pane.property('panX') + box.x * 1.2
+    top = viewport.height() / 2 + pane.property('panY') + box.y * 1.2
+    assert 0 <= left <= viewport.width() - box.width * 1.2
+    assert 0 <= top <= viewport.height() - box.height * 1.2
+    assert not branch.folded
+    QTest.keyClick(window, Qt.Key_Return)
+    assert m.selectedId == second.id
+    QTest.keyClick(window, Qt.Key_Return, Qt.ShiftModifier)
+    assert m.selectedId == first.id
+    QTest.keyClick(window, Qt.Key_Space)
+    assert m.searchQuery == 'guest '
+    QTest.keyClick(window, Qt.Key_Backspace)
+    assert m.searchQuery == 'guest'
+    pan = (pane.property('panX'), pane.property('panY'))
+    type_text('zzz')
+    assert 'No matches' in indicator.property('text')
+    assert m.selectedId == first.id
+    assert (pane.property('panX'), pane.property('panY')) == pan
+    QTest.keyClick(window, Qt.Key_Escape)
+    assert not m.searchQuery and not indicator.property('visible')
+    m.cutSelected()
+    type_text('guest')
+    QTest.keyClick(window, Qt.Key_Escape)
+    assert m.canPaste
+    QTest.keyClick(window, Qt.Key_Escape)
+    assert not m.canPaste
+    type_text('guest')
+    QTest.keyClick(window, Qt.Key_B, Qt.ControlModifier)
+    assert m.map.find(m.selectedId).style.bold and m.searchQuery == 'guest'
+    QTest.keyClick(window, Qt.Key_F2)
+    QTest.qWait(30)
+    assert not m.searchQuery
+    type_text('editing')
+    assert not m.searchQuery
+    QTest.keyClick(window, Qt.Key_Escape)
+    QTest.qWait(30)
+    type_text('guest')
+    window.findChild(QObject, 'mindmapActionsButton').forceActiveFocus()
+    assert not m.searchQuery
+    window.findChild(QObject, 'mindmapActionsButton').setProperty('focus', False)
+    pane.forceActiveFocus()
+    assert pane.property('shortcutsEnabled')
+    type_text('x')
+    QTest.keyClick(window, Qt.Key_Backspace)
+    assert not m.searchQuery
+    m.select(branch.id)
+    QTest.keyClick(window, Qt.Key_Space)
+    assert branch.folded
+    before = len(list(m.map.walk()))
+    QTest.keyClick(window, Qt.Key_Return)
+    QTest.qWait(30)
+    assert len(list(m.map.walk())) == before + 1
+    assert window.findChild(QObject, 'mindmapNodeEditor').property('visible')
+    QTest.keyClick(window, Qt.Key_Escape)
+    QTest.qWait(30)
+    type_text('guest')
+    m.set_scope(next(iter(m.links.values())))
+    assert not m.searchQuery and not indicator.property('visible')
+    type_text('guest')
+    m.load(m.to_dict())
+    assert not m.searchQuery and not indicator.property('visible')
+    QTest.qWait(30)
+    type_text('guest')
+    pane.setProperty('visible', False)
+    assert not m.searchQuery
+    window.close()
+
+
 def priority_tasks(tabs, values):
     while len(tabs.getAllTabs()) < len(values):
         tabs.addTab('Priority task ' + str(len(tabs.getAllTabs())))
