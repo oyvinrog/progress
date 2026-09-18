@@ -1227,6 +1227,9 @@ def test_qml_click_drag_back_and_shortcut_isolation(project, app):
     QTest.qWait(900)  # A visible tooltip must not intercept tab activation.
     QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, center(node_id))
     QTest.qWait(30)
+    assert pm.mindmapVisible and m.selectedId == node_id
+    QTest.mouseDClick(window, Qt.LeftButton, Qt.NoModifier, center(node_id))
+    QTest.qWait(30)
     assert not pm.mindmapVisible
     assert tabs.getCurrentTabData().id == tab_id
     pm.goBack()
@@ -1287,7 +1290,7 @@ def test_qml_click_drag_back_and_shortcut_isolation(project, app):
     assert pm.mindmapVisible and m.tabScoped and tabs.getCurrentTabData().id == m.links[first_node]
     pm.goBack()
     QTest.qWait(30)
-    # Ctrl+click selects a tab for adding thoughts; ordinary clicks still drill.
+    # Ctrl+click selects a tab for adding thoughts; double-click opens the tab.
     m.select(m.map.root.id)
     QTest.mouseClick(window, Qt.LeftButton, Qt.ControlModifier, center(first_node))
     assert pm.mindmapVisible and m.selectedId == first_node
@@ -2524,5 +2527,51 @@ def test_qml_priority_filter_slider_and_creation(project, app):
     QTest.qWait(30)
     assert m.priorityFilter == 1 and slider.property('value') == 1
     assert window.findChild(QObject, 'mindmapNodeEditor').property('visible')
+    QTest.keyClick(window, Qt.Key_Escape)
+    window.close()
+
+
+def test_qml_double_click_tab_safeguards(project, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    node_id, tab_id = next(iter(m.links.items()))
+    ordinary = m.map.find(node_id).add_child('Thought')
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+    activated = []
+    m.tabActivated.connect(activated.append)
+
+    def center(node_id):
+        def find(item):
+            if item.objectName() == 'mindmapNode_' + node_id:
+                return item
+            for child in item.childItems():
+                found = find(child)
+                if found is not None:
+                    return found
+            return None
+        item = find(window.contentItem())
+        return item.mapToScene(item.boundingRect().center()).toPoint()
+
+    for modifier in (Qt.ControlModifier, Qt.ShiftModifier, Qt.AltModifier, Qt.MetaModifier):
+        QTest.mouseDClick(window, Qt.LeftButton, modifier, center(node_id))
+        assert not activated and pm.mindmapVisible
+    m.select(ordinary.id)
+    m.cutSelected()
+    QTest.mouseDClick(window, Qt.LeftButton, Qt.NoModifier, center(node_id))
+    assert not activated and m.canPaste and m.selectedId == node_id
+    m.cancelCut()
+    m.set_scope(tab_id)
+    QTest.qWait(50)
+    QTest.mouseDClick(window, Qt.LeftButton, Qt.NoModifier, center(node_id))
+    assert not activated and pm.mindmapVisible
+    assert not window.findChild(QObject, 'mindmapNodeEditor').property('visible')
+    QTest.mouseDClick(window, Qt.LeftButton, Qt.NoModifier, center(ordinary.id))
+    QTest.qWait(30)
+    assert window.findChild(QObject, 'mindmapNodeEditor').property('visible')
+    assert m.selectedId == ordinary.id and not activated
     QTest.keyClick(window, Qt.Key_Escape)
     window.close()

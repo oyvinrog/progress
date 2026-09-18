@@ -561,7 +561,6 @@ FocusScope {
                             onClicked: function(mouse) {
                                 if (wasDragged) return
                                 var nodeId = nodeItem.modelData.id
-                                var tab = nodeItem.modelData.isTab
                                 if (mouse.button === Qt.RightButton) {
                                     if (!nodeItem.selected) pane.controller.select(nodeId)
                                     nodeMenu.targetNodeId = nodeId
@@ -572,11 +571,18 @@ FocusScope {
                                     pane.controller.select(nodeId, "range")
                                 } else {
                                     pane.controller.select(nodeId)
-                                    if (tab && !(pane.controller.tabScoped && nodeItem.modelData.isViewRoot) && !pane.controller.canPaste) pane.controller.activate(nodeId)
                                 }
                             }
                             onDoubleClicked: function(mouse) {
-                                if (!nodeItem.modelData.isTab && !(mouse.modifiers & (Qt.ControlModifier | Qt.ShiftModifier))) pane.editNode()
+                                if (wasDragged || mouse.button !== Qt.LeftButton || mouse.modifiers !== Qt.NoModifier) return
+                                var nodeId = nodeItem.modelData.id
+                                pane.controller.select(nodeId)
+                                if (nodeItem.modelData.isTab) {
+                                    if (!(pane.controller.tabScoped && nodeItem.modelData.isViewRoot) && !pane.controller.canPaste)
+                                        pane.controller.activate(nodeId)
+                                } else {
+                                    pane.editNode()
+                                }
                             }
                             ToolTip {
                                 objectName: "mindmapTooltip_" + nodeItem.modelData.id
@@ -704,7 +710,7 @@ FocusScope {
             spacing: 16
             Label {
                 Layout.fillWidth: true
-                text: "Drag the priority slider left for highest scores, right to include more; All restores every branch · Hover or select a node and click + above or below to add a sibling · Type to find node titles, including folded branches · Enter / Shift+Enter cycles matches · Backspace edits search · Escape clears search · Double-click empty space to add a thought · Ctrl+B toggles bold · Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+X / Ctrl+V moves branches · F4 completes · Arrows navigate · Tab adds a child · Ctrl+Enter opens a tab"
+                text: "Drag the priority slider left for highest scores, right to include more; All restores every branch · Hover or select a node and click + above or below to add a sibling · Type to find node titles, including folded branches · Enter / Shift+Enter cycles matches · Backspace edits search · Escape clears search · Double-click a tab node to open it · Double-click empty space to add a thought · Ctrl+B toggles bold · Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+X / Ctrl+V moves branches · F4 completes · Arrows navigate · Tab adds a child · Ctrl+Enter opens a tab"
                 wrapMode: Text.WordWrap
                 color: "#a9bfd1"
             }
