@@ -2362,3 +2362,167 @@ def test_qml_sibling_insertion_controls(project, app, zoom, before):
     QTest.qWait(180)
     assert not above.property('visible')
     window.close()
+
+
+def filter_tabs(project, scores):
+    m, tabs = project[0].mindmap, project[1]
+    while len(tabs.getAllTabs()) < len(scores):
+        tabs.addTab('Priority ' + str(len(tabs.getAllTabs())))
+    for tab, score in zip(tabs.getAllTabs(), scores):
+        tab.priority_score = score
+    m.reconcile()
+    return [m.map.find(next(key for key, value in m.links.items() if value == tab.id))
+            for tab in tabs.getAllTabs()]
+
+
+def test_priority_filter_cutoffs_ties_and_persistence(project):
+    m = project[0].mindmap
+    low, middle, high, tied = filter_tabs(project, [-10, 0, 10, 10])
+    loose = m.map.root.add_child('Unscored')
+    detail = high.add_child('Detail')
+    original = m.to_dict()
+    history = len(m._undo)
+    original_sides = {n.id: box.x > 0 for n, box in m._layout().items()}
+    m.select(low.id)
+    m.setPriorityFilter(0)
+    assert m.priorityFilterEnabled and m.priorityFilterText == 'Score ≥ 10'
+    assert set(m._layout()) == {m.view_root, high, tied, detail}
+    assert m.selectedId == m.view_root.id
+    assert all((box.x > 0) == original_sides[n.id] for n, box in m._layout().items())
+    m.setPriorityFilter(0.5)
+    assert set(m._layout()) == {m.view_root, middle, high, tied, detail}
+    m.setPriorityFilter(0.99)
+    assert low not in m._layout() and loose not in m._layout()
+    m.setPriorityFilter(1)
+    assert low in m._layout() and loose in m._layout()
+    assert m.priorityFilterText == 'All'
+    assert m.to_dict() == original and len(m._undo) == history
+    m.setPriorityFilter(float('nan'))
+    assert m.priorityFilter == 1
+
+
+def test_priority_filter_nested_branches_search_and_scope(project):
+    m = project[0].mindmap
+    low, high, nested_low = filter_tabs(project, [0, 10, 1])
+    high.move_to(low)
+    nested_low.move_to(high)
+    kept = high.add_child('Guest kept')
+    hidden = low.add_child('Guest hidden')
+    excluded = nested_low.add_child('Guest excluded')
+    high.folded = True
+    m.setPriorityFilter(0)
+    assert set(m._layout()) == {m.view_root, low, high}
+    assert m._priority_nodes() == {m.view_root, low, high, kept}
+    m.searchText('Guest')
+    assert m.searchMatchCount == 1 and m.selectedId == kept.id
+    assert not high.folded and kept in m._layout()
+    m.setPriorityFilter(1)
+    assert m.searchMatchCount == 3
+    m.select(hidden.id)
+    m.setPriorityFilter(0)
+    assert m.selectedId == low.id
+    m.select(kept.id)
+    m.select(excluded.id, 'add')
+    m.setPriorityFilter(0)
+    assert m.selectedIds == [kept.id]
+    m.set_scope(m.links[high.id])
+    assert m.priorityFilter == 1
+    m.setPriorityFilter(0)
+    assert set(m._layout()) == {high, kept}
+    m.load(m.to_dict())
+    assert m.priorityFilter == 1
+
+
+def test_priority_filter_equal_missing_and_live_scores(project):
+    m = project[0].mindmap
+    a, b = filter_tabs(project, [0.1, 0.1])
+    loose = m.view_root.add_child('Loose')
+    m.setPriorityFilter(0)
+    assert set(m._layout()) == {m.view_root, a, b}
+    m.setPriorityFilter(0.3)
+    assert set(m._layout()) == {m.view_root, a, b}
+    m.setPriorityFilter(0)
+    project[1].getAllTabs()[0].priority_score = -2
+    project[1].priorityRanksChanged.emit()
+    assert a not in m._layout() and b in m._layout()
+    for tab in project[1].getAllTabs():
+        tab.include_in_priority_plot = False
+    project[1].priorityRanksChanged.emit()
+    assert not m.priorityFilterEnabled and m.priorityFilter == 1
+    assert loose in m._layout()
+    m.setPriorityFilter(0)
+    assert m.priorityFilter == 1
+
+
+def test_priority_filter_creation_reveal_and_compaction(project):
+    m = project[0].mindmap
+    low, high = filter_tabs(project, [0, 10])
+    low.side = high.side = 'right'
+    for i in range(5):
+        low.add_child(str(i))
+    old_height = max(b.y + b.height for b in m._layout().values()) - min(b.y for b in m._layout().values())
+    m.setPriorityFilter(0)
+    boxes = m._layout()
+    assert max(b.y + b.height for b in boxes.values()) - min(b.y for b in boxes.values()) < old_height
+    m.select(high.id)
+    m.addThought(False)
+    assert m.priorityFilter == 0 and m.map.find(m.selectedId) in m._layout()
+    m.addSiblingRelative(high.id, False)
+    assert m.priorityFilter == 1 and m.map.find(m.selectedId) in m._layout()
+    m.setPriorityFilter(0)
+    m.toggleBookmark(low.id)
+    m.jumpToBookmark(low.id)
+    assert m.priorityFilter == 1 and m.selectedId == low.id
+    m.setPriorityFilter(0)
+    m.reveal_reminder(low.id)
+    assert m.priorityFilter == 1 and m.selectedId == low.id
+
+
+def test_qml_priority_filter_slider_and_creation(project, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    low, high = filter_tabs(project, [0, 10])
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+    pane = window.findChild(QObject, 'mindmapPane')
+    slider = window.findChild(QObject, 'mindmapPriorityFilter')
+    label = window.findChild(QObject, 'mindmapPriorityFilterText')
+    pane.setProperty('zoom', 0.8)
+    pan = (pane.property('panX'), pane.property('panY'))
+    start = slider.mapToScene(QPoint(int(slider.width()) - 8, int(slider.height() / 2))).toPoint()
+    end = slider.mapToScene(QPoint(8, int(slider.height() / 2))).toPoint()
+    QTest.mousePress(window, Qt.LeftButton, Qt.NoModifier, start)
+    QTest.mouseMove(window, end, 30)
+    QTest.mouseRelease(window, Qt.LeftButton, Qt.NoModifier, end)
+    assert m.priorityFilter < 0.1 and low not in m._layout()
+    assert label.property('text').startswith('Score ≥')
+    assert pane.property('zoom') == 0.8
+    assert (pane.property('panX'), pane.property('panY')) == pan
+    slider.forceActiveFocus()
+    assert not pane.property('shortcutsEnabled')
+    selection = m.selectedId
+    QTest.keyClick(window, Qt.Key_Right)
+    assert m.priorityFilter > 0 and m.selectedId == selection
+    count = len(list(m.map.walk()))
+    QTest.keyClick(window, Qt.Key_Return)
+    assert len(list(m.map.walk())) == count
+    QTest.mousePress(window, Qt.LeftButton, Qt.NoModifier, end)
+    QTest.mouseMove(window, start, 30)
+    QTest.mouseRelease(window, Qt.LeftButton, Qt.NoModifier, start)
+    assert m.priorityFilter == 1 and label.property('text') == 'All'
+    m.setPriorityFilter(0)
+    assert slider.property('value') == 0
+    viewport = window.findChild(QObject, 'mindmapViewport')
+    point = viewport.mapToScene(QPoint(10, 10)).toPoint()
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, point)
+    assert pane.property('shortcutsEnabled')
+    m.select(high.id)
+    QTest.keyClick(window, Qt.Key_Return)
+    QTest.qWait(30)
+    assert m.priorityFilter == 1 and slider.property('value') == 1
+    assert window.findChild(QObject, 'mindmapNodeEditor').property('visible')
+    QTest.keyClick(window, Qt.Key_Escape)
+    window.close()

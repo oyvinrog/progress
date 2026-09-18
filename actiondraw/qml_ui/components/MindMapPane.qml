@@ -30,7 +30,7 @@ FocusScope {
             pane.hoveredNodeId = ""
         }
     }
-    readonly property bool shortcutsEnabled: visible && activeFocus && !editor.visible && !nodeMenu.visible && !actionsButton.activeFocus && !actionsMenu.visible && !helpDialog.visible && !reminderDialogOpen
+    readonly property bool shortcutsEnabled: visible && activeFocus && !editor.visible && !nodeMenu.visible && !actionsButton.activeFocus && !prioritySlider.activeFocus && !actionsMenu.visible && !helpDialog.visible && !reminderDialogOpen
     readonly property bool searching: controller && controller.searchQuery.length > 0
     onShortcutsEnabledChanged: if (!shortcutsEnabled && controller) controller.clearSearch()
 
@@ -44,6 +44,11 @@ FocusScope {
             controller.searchText(controller.searchQuery + event.text)
             event.accepted = true
         }
+    }
+
+    function focusMap() {
+        prioritySlider.focus = false
+        forceActiveFocus()
     }
 
     function priorityColor(level) {
@@ -220,7 +225,7 @@ FocusScope {
                         objectName: "mindmapComplete"
                         text: "Complete"
                         enabled: pane.controller && pane.controller.selectedIds.length > 0
-                        onTriggered: { pane.controller.toggleCompleted(); pane.forceActiveFocus() }
+                        onTriggered: { pane.controller.toggleCompleted(); pane.focusMap() }
                     }
                     MenuItem { text: "Add child"; onTriggered: pane.addThought(false) }
                     MenuItem { text: "Add sibling"; onTriggered: pane.addThought(true) }
@@ -235,7 +240,7 @@ FocusScope {
                         objectName: "mindmapBookmark"
                         text: pane.controller && pane.controller.selectedNode.bookmarked ? "Remove bookmark" : "Bookmark"
                         enabled: pane.controller && pane.controller.selectedId !== ""
-                        onTriggered: { pane.controller.toggleBookmark(pane.controller.selectedId); pane.forceActiveFocus() }
+                        onTriggered: { pane.controller.toggleBookmark(pane.controller.selectedId); pane.focusMap() }
                     }
                     MenuItem { text: "Fold / Unfold"; onTriggered: pane.controller.toggleFold() }
                     MenuSeparator {}
@@ -257,7 +262,7 @@ FocusScope {
                             objectName: "mindmapCreateTab"
                             text: "Create tab"
                             enabled: pane.controller && pane.controller.canCreateTab
-                            onTriggered: { pane.controller.createTabFromSelected(); pane.forceActiveFocus() }
+                            onTriggered: { pane.controller.createTabFromSelected(); pane.focusMap() }
                         }
                         MenuItem {
                             text: "Open tab"
@@ -268,14 +273,43 @@ FocusScope {
                     MenuSeparator {}
                     MenuItem { objectName: "mindmapHelpAction"; text: "Shortcuts and legend…"; onTriggered: helpDialog.open() }
                     onClosed: Qt.callLater(function() {
-                        if (!editor.visible && !helpDialog.visible && !pane.reminderDialogOpen) pane.forceActiveFocus()
+                        if (!editor.visible && !helpDialog.visible && !pane.reminderDialogOpen) pane.focusMap()
                     })
                 }
             }
             Item { Layout.fillWidth: true }
-            ToolButton { text: "−"; Accessible.name: "Zoom out"; ToolTip.visible: hovered; ToolTip.text: "Zoom out"; onClicked: { pane.zoomBy(1 / 1.2); pane.forceActiveFocus() } }
-            ToolButton { text: "+"; Accessible.name: "Zoom in"; ToolTip.visible: hovered; ToolTip.text: "Zoom in"; onClicked: { pane.zoomBy(1.2); pane.forceActiveFocus() } }
-            ToolButton { text: "Fit"; Accessible.name: "Fit mindmap"; onClicked: { pane.fitMap(); pane.forceActiveFocus() } }
+            ColumnLayout {
+                spacing: 0
+                Layout.preferredWidth: 190
+                Label {
+                    text: "Top priority → All priorities"
+                    color: "#a9bfd1"
+                    font.pixelSize: 12
+                }
+                Slider {
+                    id: prioritySlider
+                    objectName: "mindmapPriorityFilter"
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 24
+                    from: 0
+                    to: 1
+                    stepSize: 0.01
+                    value: pane.controller ? pane.controller.priorityFilter : 1
+                    enabled: pane.controller && pane.controller.priorityFilterEnabled
+                    Accessible.name: "Minimum mindmap priority, highest on the left, all on the right"
+                    onMoved: pane.controller.setPriorityFilter(value)
+                }
+            }
+            Label {
+                objectName: "mindmapPriorityFilterText"
+                text: pane.controller ? pane.controller.priorityFilterText : "All"
+                color: "#a9bfd1"
+                Layout.preferredWidth: 105
+                elide: Text.ElideRight
+            }
+            ToolButton { text: "−"; Accessible.name: "Zoom out"; ToolTip.visible: hovered; ToolTip.text: "Zoom out"; onClicked: { pane.zoomBy(1 / 1.2); pane.focusMap() } }
+            ToolButton { text: "+"; Accessible.name: "Zoom in"; ToolTip.visible: hovered; ToolTip.text: "Zoom in"; onClicked: { pane.zoomBy(1.2); pane.focusMap() } }
+            ToolButton { text: "Fit"; Accessible.name: "Fit mindmap"; onClicked: { pane.fitMap(); pane.focusMap() } }
         }
         ScrollView {
             id: bookmarkScroll
@@ -350,7 +384,7 @@ FocusScope {
                     if (pane.controller.addThoughtAt(point.x, point.y)) pane.editNode()
                 }
                 onPressed: function(mouse) {
-                    pane.forceActiveFocus()
+                    pane.focusMap()
                     lastPosition = Qt.point(mouse.x, mouse.y)
                 }
                 onPositionChanged: function(mouse) {
@@ -492,7 +526,7 @@ FocusScope {
                                 nodeItem.y = Qt.binding(function() { return nodeItem.modelData.y })
                             }
                             onPressed: function(mouse) {
-                                pane.forceActiveFocus()
+                                pane.focusMap()
                                 wasDragged = false
                                 reorderDrag = mouse.button === Qt.LeftButton && !!(mouse.modifiers & Qt.ControlModifier)
                             }
@@ -645,7 +679,7 @@ FocusScope {
                         onClicked: {
                             var nodeId = insertionControls.targetNode.id
                             pane.hoveredNodeId = ""
-                            pane.forceActiveFocus()
+                            pane.focusMap()
                             if (pane.controller.addSiblingRelative(nodeId, before)) pane.editNode()
                         }
                     }
@@ -664,13 +698,13 @@ FocusScope {
         anchors.centerIn: parent
         width: Math.min(520, pane.width - 20)
         standardButtons: Dialog.Close
-        onClosed: pane.forceActiveFocus()
+        onClosed: pane.focusMap()
         ColumnLayout {
             anchors.fill: parent
             spacing: 16
             Label {
                 Layout.fillWidth: true
-                text: "Hover or select a node and click + above or below to add a sibling · Type to find node titles, including folded branches · Enter / Shift+Enter cycles matches · Backspace edits search · Escape clears search · Double-click empty space to add a thought · Ctrl+B toggles bold · Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+X / Ctrl+V moves branches · F4 completes · Arrows navigate · Tab adds a child · Ctrl+Enter opens a tab"
+                text: "Drag the priority slider left for highest scores, right to include more; All restores every branch · Hover or select a node and click + above or below to add a sibling · Type to find node titles, including folded branches · Enter / Shift+Enter cycles matches · Backspace edits search · Escape clears search · Double-click empty space to add a thought · Ctrl+B toggles bold · Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+X / Ctrl+V moves branches · F4 completes · Arrows navigate · Tab adds a child · Ctrl+Enter opens a tab"
                 wrapMode: Text.WordWrap
                 color: "#a9bfd1"
             }
@@ -726,19 +760,19 @@ FocusScope {
             objectName: "mindmapBookmarkMenuItem"
             text: pane.controller && pane.controller.bookmarks.some(function(b) { return b.id === nodeMenu.targetNodeId })
                   ? "Remove bookmark" : "Bookmark"
-            onTriggered: { pane.controller.toggleBookmark(nodeMenu.targetNodeId); pane.forceActiveFocus() }
+            onTriggered: { pane.controller.toggleBookmark(nodeMenu.targetNodeId); pane.focusMap() }
         }
         MenuItem {
             objectName: "mindmapMoveUp"
             text: "Move up"
             enabled: nodeMenu.canMoveUp
-            onTriggered: { pane.controller.reorderNode(nodeMenu.targetNodeId, -1); pane.forceActiveFocus() }
+            onTriggered: { pane.controller.reorderNode(nodeMenu.targetNodeId, -1); pane.focusMap() }
         }
         MenuItem {
             objectName: "mindmapMoveDown"
             text: "Move down"
             enabled: nodeMenu.canMoveDown
-            onTriggered: { pane.controller.reorderNode(nodeMenu.targetNodeId, 1); pane.forceActiveFocus() }
+            onTriggered: { pane.controller.reorderNode(nodeMenu.targetNodeId, 1); pane.focusMap() }
         }
         MenuSeparator {}
         MenuItem { text: "Cut branches"; enabled: pane.controller && pane.controller.canCut; onTriggered: pane.controller.cutSelected() }
@@ -750,7 +784,7 @@ FocusScope {
         MenuItem {
             text: "Create tab"
             enabled: pane.controller && pane.controller.canCreateTab
-            onTriggered: { pane.controller.createTabFromSelected(); pane.forceActiveFocus() }
+            onTriggered: { pane.controller.createTabFromSelected(); pane.focusMap() }
         }
         MenuItem { text: "Complete"; enabled: pane.controller && pane.controller.selectedIds.length > 0; onTriggered: pane.controller.toggleCompleted() }
         MenuItem { text: "Fold / Unfold"; onTriggered: pane.controller.toggleFold() }
@@ -792,9 +826,9 @@ FocusScope {
         onAccepted: {
             pane.controller.editSelected(titleField.text, noteField.text)
             titleField.text = ""; noteField.text = ""
-            pane.forceActiveFocus()
+            pane.focusMap()
         }
-        onRejected: { titleField.text = ""; noteField.text = ""; pane.forceActiveFocus() }
+        onRejected: { titleField.text = ""; noteField.text = ""; pane.focusMap() }
     }
     Shortcut { sequence: "Ctrl+B"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.toggleBold() }
     Shortcut { sequence: "Ctrl+X"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.cutSelected() }
