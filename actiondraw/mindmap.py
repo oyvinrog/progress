@@ -678,6 +678,29 @@ class MindMapController(QObject):
         self.revealNode.emit(self._selected)
         return True
 
+    @Slot(str, bool, result=bool)
+    def addSiblingRelative(self, node_id, before):
+        target = self.map.find(node_id)
+        if not self._in_scope(target) or target is self.view_root:
+            return False
+        parent = target.parent
+        index = parent.children.index(target) + (0 if before else 1)
+        sides = assigned_sides(SimpleNamespace(root=self.view_root))
+
+        def mutate():
+            for branch in self.view_root.children:
+                branch.side = sides[branch]
+            parent.folded = False
+            node = parent.add_child('New thought', side=sides[target])
+            node.move_to(parent, index)
+            self._set_selection([node.id])
+
+        if not self._commit(mutate):
+            return False
+        self.clearSearch()
+        self.revealNode.emit(self._selected)
+        return True
+
     @Slot()
     def toggleBold(self):
         nodes = [self.map.find(key) for key in self._selected_ids]

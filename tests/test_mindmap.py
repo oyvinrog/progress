@@ -2245,3 +2245,120 @@ def test_mindmap_compact_menu_keyboard_and_help(project, app):
     QTest.qWait(40)
     assert not help_dialog.property('visible') and pane.hasActiveFocus()
     window.close()
+
+
+@pytest.mark.parametrize('side', ['left', 'right'])
+@pytest.mark.parametrize('target_index,before', [(0, True), (1, True), (1, False)])
+def test_add_sibling_relative_order_side_history(project, side, target_index, before):
+    from actiondraw._vendor.pyplane.layout import assigned_sides
+    m = project[0].mindmap
+    parent = m.map.root
+    a = parent.add_child('A', side=side)
+    b = parent.add_child('B', side=side)
+    target = [a, b][target_index]
+    old_ids = [n.id for n in parent.children]
+    old_sides = {n.id: s for n, s in assigned_sides(m.map).items()}
+    original = m.to_dict()
+    m.searchText('A')
+    assert m.addSiblingRelative(target.id, before)
+    new = m.map.find(m.selectedId)
+    expected = old_ids[:]
+    expected.insert(old_ids.index(target.id) + (0 if before else 1), new.id)
+    assert [n.id for n in parent.children] == expected
+    sides = {n.id: s for n, s in assigned_sides(m.map).items()}
+    assert sides[new.id] == side
+    assert all(sides[key] == value for key, value in old_sides.items())
+    assert new.text == 'New thought' and not m.searchQuery
+    after = m.to_dict()
+    m.undo()
+    assert m.to_dict() == original
+    m.redo()
+    assert m.to_dict() == after and m.selectedId == new.id
+
+
+def test_add_sibling_relative_scope_validation(project):
+    m = project[0].mindmap
+    root_id, tab_id = next(iter(m.links.items()))
+    root = m.map.find(root_id)
+    child = root.add_child('Child')
+    outside = m.map.root.add_child('Outside')
+    m.set_scope(tab_id)
+    original = m.to_dict()
+    for node_id in [root_id, outside.id, m.map.root.id, 'missing']:
+        assert not m.addSiblingRelative(node_id, True)
+        assert m.to_dict() == original
+    assert m.addSiblingRelative(child.id, False)
+    assert root.children[-1].id == m.selectedId
+    assert root.children[0] is child
+
+
+@pytest.mark.parametrize('zoom,before', [(0.6, True), (1.5, False)])
+def test_qml_sibling_insertion_controls(project, app, zoom, before):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    a = m.map.root.add_child('Alpha', side='right')
+    b = m.map.root.add_child('Beta', side='right')
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+    pane = window.findChild(QObject, 'mindmapPane')
+    viewport = window.findChild(QObject, 'mindmapViewport')
+    def visual_item(item, name):
+        if item.objectName() == name:
+            return item
+        for child in item.childItems():
+            found = visual_item(child, name)
+            if found is not None:
+                return found
+        return None
+
+    above = visual_item(window.contentItem(), 'mindmapAddAbove')
+    below = visual_item(window.contentItem(), 'mindmapAddBelow')
+    assert not above.property('visible')
+    m.select(a.id)
+    pane.setProperty('zoom', zoom)
+    pane.setProperty('panX', -140)
+    pane.setProperty('panY', 50)
+    QTest.qWait(30)
+    assert above.property('visible') and below.property('visible')
+    assert above.width() == 24 and above.height() == 24
+    pane.setProperty('zoom', 0.2)
+    assert below.y() >= above.y() + above.height()
+    pane.setProperty('zoom', zoom)
+    # Hover the other node, then move onto its insertion button.
+    box = m._layout()[b]
+    from PySide6.QtCore import QPointF
+    center = viewport.mapToScene(QPointF(viewport.width() / 2 - 140 + (box.x + box.width / 2) * zoom,
+                                         viewport.height() / 2 + 50 + box.center_y * zoom)).toPoint()
+    QTest.mouseMove(window, center)
+    QTest.qWait(30)
+    assert pane.property('hoveredNodeId') == b.id
+    button = above if before else below
+    expected_y = (viewport.height() / 2 + 50 + box.center_y * zoom
+                  + (-1 if before else 1) * max(box.height * zoom / 2, 14))
+    assert button.y() + button.height() / 2 == pytest.approx(expected_y)
+    point = button.mapToScene(button.boundingRect().center()).toPoint()
+    QTest.mouseMove(window, point)
+    QTest.qWait(180)
+    assert pane.property('hoveredNodeId') == b.id and button.property('visible')
+    original_ids = [n.id for n in m.map.root.children]
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, point)
+    QTest.qWait(40)
+    new = m.map.find(m.selectedId)
+    expected = original_ids[:]
+    expected.insert(original_ids.index(b.id) + (0 if before else 1), new.id)
+    assert [n.id for n in m.map.root.children] == expected
+    assert new.text == 'New thought'
+    editor = window.findChild(QObject, 'mindmapNodeEditor')
+    assert editor.property('visible') and not above.property('visible')
+    assert pane.property('panX') == -140 and pane.property('panY') == 50
+    QMetaObject.invokeMethod(editor, 'reject')
+    QTest.qWait(40)
+    assert m.map.find(new.id) is new
+    m.select(m.view_root.id)
+    QTest.mouseMove(window, QPoint(5, 5))
+    QTest.qWait(180)
+    assert not above.property('visible')
+    window.close()

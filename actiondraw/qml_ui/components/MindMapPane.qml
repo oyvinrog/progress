@@ -17,6 +17,19 @@ FocusScope {
     property var viewPositions: ({})
     property string bookmarkHighlightId: ""
     property real bookmarkHighlightOpacity: 0
+    property string hoveredNodeId: ""
+    property bool nodePressed: false
+    Timer {
+        id: insertionHoverExit
+        interval: 120
+        onTriggered: {
+            for (var i = 0; i < insertionButtons.count; ++i) {
+                var button = insertionButtons.itemAt(i)
+                if (button && button.hovered) return
+            }
+            pane.hoveredNodeId = ""
+        }
+    }
     readonly property bool shortcutsEnabled: visible && activeFocus && !editor.visible && !nodeMenu.visible && !actionsButton.activeFocus && !actionsMenu.visible && !helpDialog.visible && !reminderDialogOpen
     readonly property bool searching: controller && controller.searchQuery.length > 0
     onShortcutsEnabledChanged: if (!shortcutsEnabled && controller) controller.clearSearch()
@@ -149,6 +162,7 @@ FocusScope {
         function onSceneChanged() { edges.requestPaint() }
         function onRevealNode(nodeId) { pane.revealNode(nodeId) }
         function onScopeChanging(oldScope, newScope) {
+            pane.hoveredNodeId = ""
             pane.controller.clearSearch()
             pane.bookmarkHighlightId = ""
             pane.viewPositions[oldScope] = { zoom: pane.zoom, x: pane.panX, y: pane.panY, initialized: pane.initialized }
@@ -161,6 +175,7 @@ FocusScope {
             if (!pane.initialized) Qt.callLater(function() { if (pane.visible && !pane.initialized) pane.fitMap() })
         }
         function onResetView() {
+            pane.hoveredNodeId = ""
             pane.controller.clearSearch()
             pane.bookmarkHighlightId = ""
             pane.viewPositions = ({})
@@ -326,6 +341,7 @@ FocusScope {
             Layout.fillHeight: true
             clip: true
             MouseArea {
+                id: canvasMouse
                 anchors.fill: parent
                 property point lastPosition
                 onDoubleClicked: function(mouse) {
@@ -463,6 +479,9 @@ FocusScope {
                             anchors.fill: parent
                             acceptedButtons: Qt.LeftButton | Qt.RightButton
                             hoverEnabled: true
+                            onEntered: { insertionHoverExit.stop(); pane.hoveredNodeId = nodeItem.modelData.id }
+                            onExited: insertionHoverExit.restart()
+                            onPressedChanged: pane.nodePressed = pressed
                             cursorShape: Qt.PointingHandCursor
                             drag.target: pressedButtons === Qt.LeftButton ? nodeItem : null
                             drag.axis: reorderDrag ? Drag.YAxis : Drag.XAndYAxis
@@ -570,6 +589,68 @@ FocusScope {
                     }
                 }
             }
+            Item {
+                id: insertionControls
+                anchors.fill: parent
+                readonly property var targetNode: {
+                    if (!pane.controller) return null
+                    var id = pane.hoveredNodeId || pane.controller.selectedId
+                    var nodes = pane.controller.nodes
+                    for (var i = 0; i < nodes.length; ++i)
+                        if (nodes[i].id === id) return nodes[i].isViewRoot ? null : nodes[i]
+                    return null
+                }
+                visible: !!targetNode && !pane.nodePressed && !canvasMouse.pressed
+                         && !editor.visible && !nodeMenu.visible && !actionsMenu.visible
+                         && !helpDialog.visible && !pane.reminderDialogOpen
+                Repeater {
+                    model: 2
+                    id: insertionButtons
+                    delegate: ToolButton {
+                        id: insertionButton
+                        required property int index
+                        readonly property bool before: index === 0
+                        objectName: before ? "mindmapAddAbove" : "mindmapAddBelow"
+                        width: 24
+                        height: 24
+                        x: insertionControls.targetNode
+                           ? viewport.width / 2 + pane.panX
+                             + (insertionControls.targetNode.x + insertionControls.targetNode.width / 2) * pane.zoom - width / 2 : 0
+                        y: insertionControls.targetNode
+                           ? viewport.height / 2 + pane.panY
+                             + (insertionControls.targetNode.y + insertionControls.targetNode.height / 2) * pane.zoom
+                             + (before ? -1 : 1) * Math.max(insertionControls.targetNode.height * pane.zoom / 2, 14) - height / 2 : 0
+                        focusPolicy: Qt.NoFocus
+                        hoverEnabled: true
+                        Accessible.name: before ? "Add sibling above" : "Add sibling below"
+                        ToolTip.text: before ? "Add sibling above" : "Add sibling below"
+                        ToolTip.visible: hovered
+                        ToolTip.delay: 500
+                        onHoveredChanged: {
+                            if (hovered) insertionHoverExit.stop()
+                            else insertionHoverExit.restart()
+                        }
+                        background: Rectangle {
+                            radius: width / 2
+                            color: insertionButton.hovered ? "#467da3" : "#254d6c"
+                            border.color: "#a5d9ff"
+                        }
+                        contentItem: Text {
+                            text: "+"
+                            color: "#e5f0fa"
+                            font.pixelSize: 20
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                        onClicked: {
+                            var nodeId = insertionControls.targetNode.id
+                            pane.hoveredNodeId = ""
+                            pane.forceActiveFocus()
+                            if (pane.controller.addSiblingRelative(nodeId, before)) pane.editNode()
+                        }
+                    }
+                }
+            }
         }
     }
     onZoomChanged: edges.requestPaint()
@@ -589,7 +670,7 @@ FocusScope {
             spacing: 16
             Label {
                 Layout.fillWidth: true
-                text: "Type to find node titles, including folded branches · Enter / Shift+Enter cycles matches · Backspace edits search · Escape clears search · Double-click empty space to add a thought · Ctrl+B toggles bold · Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+X / Ctrl+V moves branches · F4 completes · Arrows navigate · Tab adds a child · Ctrl+Enter opens a tab"
+                text: "Hover or select a node and click + above or below to add a sibling · Type to find node titles, including folded branches · Enter / Shift+Enter cycles matches · Backspace edits search · Escape clears search · Double-click empty space to add a thought · Ctrl+B toggles bold · Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+X / Ctrl+V moves branches · F4 completes · Arrows navigate · Tab adds a child · Ctrl+Enter opens a tab"
                 wrapMode: Text.WordWrap
                 color: "#a9bfd1"
             }
