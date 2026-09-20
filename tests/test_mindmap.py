@@ -31,6 +31,155 @@ def thought(controller, text='Secret thought', note='Secret note'):
     return controller.selectedId
 
 
+def test_type_search_matches_cycles_and_reveals(project):
+    m = project[0].mindmap
+    branch = m.map.root.add_child('People')
+    first = branch.add_child('Guest')
+    second = branch.add_child('Invite guests')
+    branch.add_child('Other', note='guest')
+    branch.folded = True
+    revealed = []
+    m.revealNode.connect(revealed.append)
+    history = len(m._undo)
+    m.searchText('GUEST')
+    assert m.selectedId == first.id
+    assert not branch.folded
+    assert revealed[-1] == first.id
+    assert m.searchMatchCount == 2 and m.searchMatchPosition == 1
+    m.navigateSearch(1)
+    assert m.selectedId == second.id and m.searchMatchPosition == 2
+    m.searchText('guests')
+    assert m.selectedId == second.id and m.searchMatchCount == 1
+    m.searchText('guest')
+    assert m.selectedId == second.id
+    m.navigateSearch(1)
+    assert m.selectedId == first.id
+    m.navigateSearch(-1)
+    assert m.selectedId == second.id
+    count = len(revealed)
+    m.searchText('missing')
+    assert m.searchMatchCount == 0 and m.searchMatchPosition == 0
+    assert m.selectedId == second.id and len(revealed) == count
+    m.clearSearch()
+    assert m.searchQuery == '' and m.searchMatchCount == 0
+    assert len(m._undo) == history
+    assert 'searchQuery' not in m.to_dict()
+
+
+def test_type_search_scope_and_reset(project):
+    m = project[0].mindmap
+    node_id, tab_id = next(iter(m.links.items()))
+    scoped = m.map.find(node_id)
+    inside = scoped.add_child('Guest inside')
+    m.map.root.add_child('Guest outside')
+    m.searchText('guest')
+    assert m.searchMatchCount == 2
+    m.set_scope(tab_id)
+    assert m.searchQuery == ''
+    m.searchText('guest')
+    assert m.searchMatchCount == 1 and m.selectedId == inside.id
+    m.searchText(scoped.text)
+    assert m.selectedId == scoped.id
+    m.load(m.to_dict())
+    assert m.searchQuery == ''
+
+
+def test_qml_type_search_keyboard_and_focus(project, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    branch = m.map.root.add_child('People')
+    first = branch.add_child('Guest one')
+    second = branch.add_child('Guest two')
+    branch.folded = True
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+
+    def type_text(text):
+        for character in text:
+            QTest.keyClick(window, character)
+
+    pane = window.findChild(QObject, 'mindmapPane')
+    indicator = window.findChild(QObject, 'mindmapSearchIndicator')
+    pane.setProperty('zoom', 1.2)
+    pane.setProperty('panX', -10000)
+    type_text('guest')
+    QTest.qWait(30)
+    assert m.searchQuery == 'guest' and m.selectedId == first.id
+    assert indicator.property('visible') and '1/2' in indicator.property('text')
+    assert pane.property('zoom') == 1.2 and pane.property('panX') != -10000
+    viewport = window.findChild(QObject, 'mindmapViewport')
+    box = m._layout()[first]
+    left = viewport.width() / 2 + pane.property('panX') + box.x * 1.2
+    top = viewport.height() / 2 + pane.property('panY') + box.y * 1.2
+    assert 0 <= left <= viewport.width() - box.width * 1.2
+    assert 0 <= top <= viewport.height() - box.height * 1.2
+    assert not branch.folded
+    QTest.keyClick(window, Qt.Key_Return)
+    assert m.selectedId == second.id
+    QTest.keyClick(window, Qt.Key_Return, Qt.ShiftModifier)
+    assert m.selectedId == first.id
+    QTest.keyClick(window, Qt.Key_Space)
+    assert m.searchQuery == 'guest '
+    QTest.keyClick(window, Qt.Key_Backspace)
+    assert m.searchQuery == 'guest'
+    pan = (pane.property('panX'), pane.property('panY'))
+    type_text('zzz')
+    assert 'No matches' in indicator.property('text')
+    assert m.selectedId == first.id
+    assert (pane.property('panX'), pane.property('panY')) == pan
+    QTest.keyClick(window, Qt.Key_Escape)
+    assert not m.searchQuery and not indicator.property('visible')
+    m.cutSelected()
+    type_text('guest')
+    QTest.keyClick(window, Qt.Key_Escape)
+    assert m.canPaste
+    QTest.keyClick(window, Qt.Key_Escape)
+    assert not m.canPaste
+    type_text('guest')
+    QTest.keyClick(window, Qt.Key_B, Qt.ControlModifier)
+    assert m.map.find(m.selectedId).style.bold and m.searchQuery == 'guest'
+    QTest.keyClick(window, Qt.Key_F2)
+    QTest.qWait(30)
+    assert not m.searchQuery
+    type_text('editing')
+    assert not m.searchQuery
+    QTest.keyClick(window, Qt.Key_Escape)
+    QTest.qWait(30)
+    type_text('guest')
+    window.findChild(QObject, 'mindmapActionsButton').forceActiveFocus()
+    assert not m.searchQuery
+    window.findChild(QObject, 'mindmapActionsButton').setProperty('focus', False)
+    pane.forceActiveFocus()
+    assert pane.property('shortcutsEnabled')
+    type_text('x')
+    QTest.keyClick(window, Qt.Key_Backspace)
+    assert not m.searchQuery
+    m.select(branch.id)
+    QTest.keyClick(window, Qt.Key_Space)
+    assert branch.folded
+    before = len(list(m.map.walk()))
+    QTest.keyClick(window, Qt.Key_Return)
+    QTest.qWait(30)
+    assert len(list(m.map.walk())) == before + 1
+    assert window.findChild(QObject, 'mindmapNodeEditor').property('visible')
+    QTest.keyClick(window, Qt.Key_Escape)
+    QTest.qWait(30)
+    type_text('guest')
+    m.set_scope(next(iter(m.links.values())))
+    assert not m.searchQuery and not indicator.property('visible')
+    type_text('guest')
+    m.load(m.to_dict())
+    assert not m.searchQuery and not indicator.property('visible')
+    QTest.qWait(30)
+    type_text('guest')
+    pane.setProperty('visible', False)
+    assert not m.searchQuery
+    window.close()
+
+
 def priority_tasks(tabs, values):
     while len(tabs.getAllTabs()) < len(values):
         tabs.addTab('Priority task ' + str(len(tabs.getAllTabs())))
@@ -1078,6 +1227,9 @@ def test_qml_click_drag_back_and_shortcut_isolation(project, app):
     QTest.qWait(900)  # A visible tooltip must not intercept tab activation.
     QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, center(node_id))
     QTest.qWait(30)
+    assert pm.mindmapVisible and m.selectedId == node_id
+    QTest.mouseDClick(window, Qt.LeftButton, Qt.NoModifier, center(node_id))
+    QTest.qWait(30)
     assert not pm.mindmapVisible
     assert tabs.getCurrentTabData().id == tab_id
     pm.goBack()
@@ -1138,7 +1290,7 @@ def test_qml_click_drag_back_and_shortcut_isolation(project, app):
     assert pm.mindmapVisible and m.tabScoped and tabs.getCurrentTabData().id == m.links[first_node]
     pm.goBack()
     QTest.qWait(30)
-    # Ctrl+click selects a tab for adding thoughts; ordinary clicks still drill.
+    # Ctrl+click selects a tab for adding thoughts; double-click opens the tab.
     m.select(m.map.root.id)
     QTest.mouseClick(window, Qt.LeftButton, Qt.ControlModifier, center(first_node))
     assert pm.mindmapVisible and m.selectedId == first_node
@@ -2095,4 +2247,331 @@ def test_mindmap_compact_menu_keyboard_and_help(project, app):
     QTest.keyClick(window, Qt.Key_Escape)
     QTest.qWait(40)
     assert not help_dialog.property('visible') and pane.hasActiveFocus()
+    window.close()
+
+
+@pytest.mark.parametrize('side', ['left', 'right'])
+@pytest.mark.parametrize('target_index,before', [(0, True), (1, True), (1, False)])
+def test_add_sibling_relative_order_side_history(project, side, target_index, before):
+    from actiondraw._vendor.pyplane.layout import assigned_sides
+    m = project[0].mindmap
+    parent = m.map.root
+    a = parent.add_child('A', side=side)
+    b = parent.add_child('B', side=side)
+    target = [a, b][target_index]
+    old_ids = [n.id for n in parent.children]
+    old_sides = {n.id: s for n, s in assigned_sides(m.map).items()}
+    original = m.to_dict()
+    m.searchText('A')
+    assert m.addSiblingRelative(target.id, before)
+    new = m.map.find(m.selectedId)
+    expected = old_ids[:]
+    expected.insert(old_ids.index(target.id) + (0 if before else 1), new.id)
+    assert [n.id for n in parent.children] == expected
+    sides = {n.id: s for n, s in assigned_sides(m.map).items()}
+    assert sides[new.id] == side
+    assert all(sides[key] == value for key, value in old_sides.items())
+    assert new.text == 'New thought' and not m.searchQuery
+    after = m.to_dict()
+    m.undo()
+    assert m.to_dict() == original
+    m.redo()
+    assert m.to_dict() == after and m.selectedId == new.id
+
+
+def test_add_sibling_relative_scope_validation(project):
+    m = project[0].mindmap
+    root_id, tab_id = next(iter(m.links.items()))
+    root = m.map.find(root_id)
+    child = root.add_child('Child')
+    outside = m.map.root.add_child('Outside')
+    m.set_scope(tab_id)
+    original = m.to_dict()
+    for node_id in [root_id, outside.id, m.map.root.id, 'missing']:
+        assert not m.addSiblingRelative(node_id, True)
+        assert m.to_dict() == original
+    assert m.addSiblingRelative(child.id, False)
+    assert root.children[-1].id == m.selectedId
+    assert root.children[0] is child
+
+
+@pytest.mark.parametrize('zoom,before', [(0.6, True), (1.5, False)])
+def test_qml_sibling_insertion_controls(project, app, zoom, before):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    a = m.map.root.add_child('Alpha', side='right')
+    b = m.map.root.add_child('Beta', side='right')
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+    pane = window.findChild(QObject, 'mindmapPane')
+    viewport = window.findChild(QObject, 'mindmapViewport')
+    def visual_item(item, name):
+        if item.objectName() == name:
+            return item
+        for child in item.childItems():
+            found = visual_item(child, name)
+            if found is not None:
+                return found
+        return None
+
+    above = visual_item(window.contentItem(), 'mindmapAddAbove')
+    below = visual_item(window.contentItem(), 'mindmapAddBelow')
+    assert not above.property('visible')
+    m.select(a.id)
+    pane.setProperty('zoom', zoom)
+    pane.setProperty('panX', -140)
+    pane.setProperty('panY', 50)
+    QTest.qWait(30)
+    assert above.property('visible') and below.property('visible')
+    assert above.width() == 24 and above.height() == 24
+    pane.setProperty('zoom', 0.2)
+    assert below.y() >= above.y() + above.height()
+    pane.setProperty('zoom', zoom)
+    # Hover the other node, then move onto its insertion button.
+    box = m._layout()[b]
+    from PySide6.QtCore import QPointF
+    center = viewport.mapToScene(QPointF(viewport.width() / 2 - 140 + (box.x + box.width / 2) * zoom,
+                                         viewport.height() / 2 + 50 + box.center_y * zoom)).toPoint()
+    QTest.mouseMove(window, center)
+    QTest.qWait(30)
+    assert pane.property('hoveredNodeId') == b.id
+    button = above if before else below
+    expected_y = (viewport.height() / 2 + 50 + box.center_y * zoom
+                  + (-1 if before else 1) * max(box.height * zoom / 2, 14))
+    assert button.y() + button.height() / 2 == pytest.approx(expected_y)
+    point = button.mapToScene(button.boundingRect().center()).toPoint()
+    QTest.mouseMove(window, point)
+    QTest.qWait(180)
+    assert pane.property('hoveredNodeId') == b.id and button.property('visible')
+    original_ids = [n.id for n in m.map.root.children]
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, point)
+    QTest.qWait(40)
+    new = m.map.find(m.selectedId)
+    expected = original_ids[:]
+    expected.insert(original_ids.index(b.id) + (0 if before else 1), new.id)
+    assert [n.id for n in m.map.root.children] == expected
+    assert new.text == 'New thought'
+    editor = window.findChild(QObject, 'mindmapNodeEditor')
+    assert editor.property('visible') and not above.property('visible')
+    assert pane.property('panX') == -140 and pane.property('panY') == 50
+    QMetaObject.invokeMethod(editor, 'reject')
+    QTest.qWait(40)
+    assert m.map.find(new.id) is new
+    m.select(m.view_root.id)
+    QTest.mouseMove(window, QPoint(5, 5))
+    QTest.qWait(180)
+    assert not above.property('visible')
+    window.close()
+
+
+def filter_tabs(project, scores):
+    m, tabs = project[0].mindmap, project[1]
+    while len(tabs.getAllTabs()) < len(scores):
+        tabs.addTab('Priority ' + str(len(tabs.getAllTabs())))
+    for tab, score in zip(tabs.getAllTabs(), scores):
+        tab.priority_score = score
+    m.reconcile()
+    return [m.map.find(next(key for key, value in m.links.items() if value == tab.id))
+            for tab in tabs.getAllTabs()]
+
+
+def test_priority_filter_cutoffs_ties_and_persistence(project):
+    m = project[0].mindmap
+    low, middle, high, tied = filter_tabs(project, [-10, 0, 10, 10])
+    loose = m.map.root.add_child('Unscored')
+    detail = high.add_child('Detail')
+    original = m.to_dict()
+    history = len(m._undo)
+    original_sides = {n.id: box.x > 0 for n, box in m._layout().items()}
+    m.select(low.id)
+    m.setPriorityFilter(0)
+    assert m.priorityFilterEnabled and m.priorityFilterText == 'Score ≥ 10'
+    assert set(m._layout()) == {m.view_root, high, tied, detail}
+    assert m.selectedId == m.view_root.id
+    assert all((box.x > 0) == original_sides[n.id] for n, box in m._layout().items())
+    m.setPriorityFilter(0.5)
+    assert set(m._layout()) == {m.view_root, middle, high, tied, detail}
+    m.setPriorityFilter(0.99)
+    assert low not in m._layout() and loose not in m._layout()
+    m.setPriorityFilter(1)
+    assert low in m._layout() and loose in m._layout()
+    assert m.priorityFilterText == 'All'
+    assert m.to_dict() == original and len(m._undo) == history
+    m.setPriorityFilter(float('nan'))
+    assert m.priorityFilter == 1
+
+
+def test_priority_filter_nested_branches_search_and_scope(project):
+    m = project[0].mindmap
+    low, high, nested_low = filter_tabs(project, [0, 10, 1])
+    high.move_to(low)
+    nested_low.move_to(high)
+    kept = high.add_child('Guest kept')
+    hidden = low.add_child('Guest hidden')
+    excluded = nested_low.add_child('Guest excluded')
+    high.folded = True
+    m.setPriorityFilter(0)
+    assert set(m._layout()) == {m.view_root, low, high}
+    assert m._priority_nodes() == {m.view_root, low, high, kept}
+    m.searchText('Guest')
+    assert m.searchMatchCount == 1 and m.selectedId == kept.id
+    assert not high.folded and kept in m._layout()
+    m.setPriorityFilter(1)
+    assert m.searchMatchCount == 3
+    m.select(hidden.id)
+    m.setPriorityFilter(0)
+    assert m.selectedId == low.id
+    m.select(kept.id)
+    m.select(excluded.id, 'add')
+    m.setPriorityFilter(0)
+    assert m.selectedIds == [kept.id]
+    m.set_scope(m.links[high.id])
+    assert m.priorityFilter == 1
+    m.setPriorityFilter(0)
+    assert set(m._layout()) == {high, kept}
+    m.load(m.to_dict())
+    assert m.priorityFilter == 1
+
+
+def test_priority_filter_equal_missing_and_live_scores(project):
+    m = project[0].mindmap
+    a, b = filter_tabs(project, [0.1, 0.1])
+    loose = m.view_root.add_child('Loose')
+    m.setPriorityFilter(0)
+    assert set(m._layout()) == {m.view_root, a, b}
+    m.setPriorityFilter(0.3)
+    assert set(m._layout()) == {m.view_root, a, b}
+    m.setPriorityFilter(0)
+    project[1].getAllTabs()[0].priority_score = -2
+    project[1].priorityRanksChanged.emit()
+    assert a not in m._layout() and b in m._layout()
+    for tab in project[1].getAllTabs():
+        tab.include_in_priority_plot = False
+    project[1].priorityRanksChanged.emit()
+    assert not m.priorityFilterEnabled and m.priorityFilter == 1
+    assert loose in m._layout()
+    m.setPriorityFilter(0)
+    assert m.priorityFilter == 1
+
+
+def test_priority_filter_creation_reveal_and_compaction(project):
+    m = project[0].mindmap
+    low, high = filter_tabs(project, [0, 10])
+    low.side = high.side = 'right'
+    for i in range(5):
+        low.add_child(str(i))
+    old_height = max(b.y + b.height for b in m._layout().values()) - min(b.y for b in m._layout().values())
+    m.setPriorityFilter(0)
+    boxes = m._layout()
+    assert max(b.y + b.height for b in boxes.values()) - min(b.y for b in boxes.values()) < old_height
+    m.select(high.id)
+    m.addThought(False)
+    assert m.priorityFilter == 0 and m.map.find(m.selectedId) in m._layout()
+    m.addSiblingRelative(high.id, False)
+    assert m.priorityFilter == 1 and m.map.find(m.selectedId) in m._layout()
+    m.setPriorityFilter(0)
+    m.toggleBookmark(low.id)
+    m.jumpToBookmark(low.id)
+    assert m.priorityFilter == 1 and m.selectedId == low.id
+    m.setPriorityFilter(0)
+    m.reveal_reminder(low.id)
+    assert m.priorityFilter == 1 and m.selectedId == low.id
+
+
+def test_qml_priority_filter_slider_and_creation(project, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    low, high = filter_tabs(project, [0, 10])
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+    pane = window.findChild(QObject, 'mindmapPane')
+    slider = window.findChild(QObject, 'mindmapPriorityFilter')
+    label = window.findChild(QObject, 'mindmapPriorityFilterText')
+    pane.setProperty('zoom', 0.8)
+    pan = (pane.property('panX'), pane.property('panY'))
+    start = slider.mapToScene(QPoint(int(slider.width()) - 8, int(slider.height() / 2))).toPoint()
+    end = slider.mapToScene(QPoint(8, int(slider.height() / 2))).toPoint()
+    QTest.mousePress(window, Qt.LeftButton, Qt.NoModifier, start)
+    QTest.mouseMove(window, end, 30)
+    QTest.mouseRelease(window, Qt.LeftButton, Qt.NoModifier, end)
+    assert m.priorityFilter < 0.1 and low not in m._layout()
+    assert label.property('text').startswith('Score ≥')
+    assert pane.property('zoom') == 0.8
+    assert (pane.property('panX'), pane.property('panY')) == pan
+    slider.forceActiveFocus()
+    assert not pane.property('shortcutsEnabled')
+    selection = m.selectedId
+    QTest.keyClick(window, Qt.Key_Right)
+    assert m.priorityFilter > 0 and m.selectedId == selection
+    count = len(list(m.map.walk()))
+    QTest.keyClick(window, Qt.Key_Return)
+    assert len(list(m.map.walk())) == count
+    QTest.mousePress(window, Qt.LeftButton, Qt.NoModifier, end)
+    QTest.mouseMove(window, start, 30)
+    QTest.mouseRelease(window, Qt.LeftButton, Qt.NoModifier, start)
+    assert m.priorityFilter == 1 and label.property('text') == 'All'
+    m.setPriorityFilter(0)
+    assert slider.property('value') == 0
+    viewport = window.findChild(QObject, 'mindmapViewport')
+    point = viewport.mapToScene(QPoint(10, 10)).toPoint()
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, point)
+    assert pane.property('shortcutsEnabled')
+    m.select(high.id)
+    QTest.keyClick(window, Qt.Key_Return)
+    QTest.qWait(30)
+    assert m.priorityFilter == 1 and slider.property('value') == 1
+    assert window.findChild(QObject, 'mindmapNodeEditor').property('visible')
+    QTest.keyClick(window, Qt.Key_Escape)
+    window.close()
+
+
+def test_qml_double_click_tab_safeguards(project, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    node_id, tab_id = next(iter(m.links.items()))
+    ordinary = m.map.find(node_id).add_child('Thought')
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+    activated = []
+    m.tabActivated.connect(activated.append)
+
+    def center(node_id):
+        def find(item):
+            if item.objectName() == 'mindmapNode_' + node_id:
+                return item
+            for child in item.childItems():
+                found = find(child)
+                if found is not None:
+                    return found
+            return None
+        item = find(window.contentItem())
+        return item.mapToScene(item.boundingRect().center()).toPoint()
+
+    for modifier in (Qt.ControlModifier, Qt.ShiftModifier, Qt.AltModifier, Qt.MetaModifier):
+        QTest.mouseDClick(window, Qt.LeftButton, modifier, center(node_id))
+        assert not activated and pm.mindmapVisible
+    m.select(ordinary.id)
+    m.cutSelected()
+    QTest.mouseDClick(window, Qt.LeftButton, Qt.NoModifier, center(node_id))
+    assert not activated and m.canPaste and m.selectedId == node_id
+    m.cancelCut()
+    m.set_scope(tab_id)
+    QTest.qWait(50)
+    QTest.mouseDClick(window, Qt.LeftButton, Qt.NoModifier, center(node_id))
+    assert not activated and pm.mindmapVisible
+    assert not window.findChild(QObject, 'mindmapNodeEditor').property('visible')
+    QTest.mouseDClick(window, Qt.LeftButton, Qt.NoModifier, center(ordinary.id))
+    QTest.qWait(30)
+    assert window.findChild(QObject, 'mindmapNodeEditor').property('visible')
+    assert m.selectedId == ordinary.id and not activated
+    QTest.keyClick(window, Qt.Key_Escape)
     window.close()

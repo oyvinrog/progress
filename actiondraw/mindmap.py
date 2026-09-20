@@ -36,6 +36,8 @@ class MindMapController(QObject):
         self._selected_ids = [self._selected]
         self._selection_anchor = self._selected
         self._cut_ids = []
+        self._search_query = ''
+        self._priority_filter = 1.0
         self._undo = []
         self._redo = []
         self._creating_tab = False
@@ -71,6 +73,8 @@ class MindMapController(QObject):
     def set_scope(self, tab_id=None):
         if self._scope_tab == tab_id:
             return
+        self.clearSearch()
+        self._priority_filter = 1.0
         self.scopeChanging.emit(self._scope_tab or '', tab_id or '')
         self._view_selections[self._scope_tab] = self._selection_state()
         self._scope_tab = tab_id
@@ -123,6 +127,7 @@ class MindMapController(QObject):
         if not self._selected_ids or self._selected not in self._selected_ids:
             self._set_selection(self._selected_ids or [self.view_root.id])
         self._cut_ids = [key for key in self._cut_ids if key in nodes]
+        self._sync_filter_selection()
         self.sceneChanged.emit()
         self.changed.emit()
 
@@ -180,6 +185,8 @@ class MindMapController(QObject):
 
     def load(self, payload=None):
         self.map, self.links = self.decode(payload) if payload is not None else (MindMap('Project'), {})
+        self._search_query = ''
+        self._priority_filter = 1.0
         self._completed = set((payload or {}).get('completed', []))
         self.reminders = copy.deepcopy((payload or {}).get('reminders', {}))
         self._bookmarks = list((payload or {}).get('bookmarks', []))
@@ -195,6 +202,53 @@ class MindMapController(QObject):
     @Property(str, notify=changed)
     def selectedId(self):
         return self._selected
+
+    @Property(str, notify=changed)
+    def searchQuery(self):
+        return self._search_query
+
+    def _search_matches(self):
+        query = self._search_query.casefold()
+        retained = self._priority_nodes()
+        return [node for node in self.view_root.walk()
+                if node in retained and query in node.text.casefold()] if query else []
+
+    @Property(int, notify=changed)
+    def searchMatchCount(self):
+        return len(self._search_matches())
+
+    @Property(int, notify=changed)
+    def searchMatchPosition(self):
+        ids = [node.id for node in self._search_matches()]
+        return ids.index(self._selected) + 1 if self._selected in ids else 0
+
+    @Slot()
+    def clearSearch(self):
+        if self._search_query:
+            self._search_query = ''
+            self.changed.emit()
+
+    @Slot(str)
+    def searchText(self, query):
+        self._search_query = query
+        self.navigateSearch(0)
+
+    @Slot(int)
+    def navigateSearch(self, direction):
+        matches = self._search_matches()
+        if not matches:
+            self.changed.emit()
+            return
+        ids = [node.id for node in matches]
+        index = ((ids.index(self._selected) + direction) % len(ids)
+                 if self._selected in ids else (-1 if direction < 0 else 0))
+        node = matches[index]
+        for ancestor in node.ancestors():
+            if self._in_scope(ancestor):
+                ancestor.folded = False
+        self.select(node.id)
+        self.sceneChanged.emit()
+        self.revealNode.emit(node.id)
 
     @Property('QVariantMap', notify=changed)
     def selectedNode(self):
@@ -270,6 +324,8 @@ class MindMapController(QObject):
             return False
         if not self._in_scope(node):
             self.set_scope()
+        if node not in self._priority_nodes():
+            self.setPriorityFilter(1.0)
         for ancestor in node.ancestors():
             ancestor.folded = False
         self.select(node_id)
@@ -301,6 +357,76 @@ class MindMapController(QObject):
                 result[tab.id]['priorityRank'] = rank
         return result
 
+    def _scope_scores(self, priorities):
+        return [priorities[self.links[n.id]]['priorityScore'] for n in self.view_root.walk()
+                if self.links.get(n.id) in priorities]
+
+    @Property(float, notify=changed)
+    def priorityFilter(self):
+        return self._priority_filter
+
+    @Property(bool, notify=changed)
+    def priorityFilterEnabled(self):
+        return bool(self._scope_scores(self._priority_data()))
+
+    @Property(str, notify=changed)
+    def priorityFilterText(self):
+        scores = self._scope_scores(self._priority_data())
+        if self._priority_filter == 1 or not scores:
+            return 'All'
+        cutoff = max(scores) + (min(scores) - max(scores)) * self._priority_filter
+        return f'Score ≥ {cutoff:.3g}'
+
+    def _priority_nodes(self, priorities=None):
+        priorities = self._priority_data() if priorities is None else priorities
+        scores = self._scope_scores(priorities)
+        root = self.view_root
+        if self._priority_filter == 1 or not scores:
+            return set(root.walk())
+        cutoff = max(scores) + (min(scores) - max(scores)) * self._priority_filter
+        retained = {root}
+        matching = {}
+        for node in root.walk():
+            if node.id in self.links:
+                data = priorities.get(self.links[node.id])
+                matching[node] = data is not None and data['priorityScore'] >= cutoff
+            else:
+                matching[node] = matching.get(node.parent, False)
+            if matching[node]:
+                retained.add(node)
+        for node in list(retained):
+            ancestor = node.parent
+            while ancestor is not None and node is not root:
+                retained.add(ancestor)
+                if ancestor is root:
+                    break
+                ancestor = ancestor.parent
+        return retained
+
+    def _sync_filter_selection(self):
+        if self._priority_filter == 1:
+            return
+        if not self.priorityFilterEnabled:
+            self._priority_filter = 1.0
+            return
+        visible = self._layout()
+        ids = [key for key in self._selected_ids if self.map.find(key) in visible]
+        if self._selected in ids and ids == self._selected_ids:
+            return
+        node = self.map.find(self._selected)
+        while node is not None and node not in visible:
+            node = node.parent
+        self._set_selection(ids or [(node or self.view_root).id], self._selected)
+
+    @Slot(float)
+    def setPriorityFilter(self, position):
+        if not math.isfinite(position):
+            return
+        self._priority_filter = max(0.0, min(1.0, position)) if self.priorityFilterEnabled else 1.0
+        self._sync_filter_selection()
+        self.sceneChanged.emit()
+        self.changed.emit()
+
     def _layout(self, priorities=None):
         if priorities is None:
             priorities = self._priority_data()
@@ -322,7 +448,19 @@ class MindMapController(QObject):
                 width = max(width, 210.0)
             sizes[node] = (width, 64.0 if node.id in self.reminders else 40.0)
         # Layout only needs a root; keep the canonical tree's parent links intact.
-        return layout(SimpleNamespace(root=self.view_root), sizes)
+        if self._priority_filter == 1:
+            return layout(SimpleNamespace(root=self.view_root), sizes)
+        retained = self._priority_nodes(priorities)
+        sides = assigned_sides(SimpleNamespace(root=self.view_root))
+        projected = {node: copy.copy(node) for node in retained}
+        for node, clone in projected.items():
+            clone.children = [projected[child] for child in node.children if child in retained]
+            clone.parent = projected.get(node.parent)
+            clone.side = sides.get(node, node.side)
+        boxes = layout(SimpleNamespace(root=projected[self.view_root]),
+                       {projected[node]: size for node, size in sizes.items() if node in retained})
+        return {node: boxes[projected[node]] for node in sizes
+                if node in projected and projected[node] in boxes}
 
     @Property('QVariantList', notify=sceneChanged)
     def nodes(self):
@@ -519,6 +657,7 @@ class MindMapController(QObject):
 
     def _commit(self, mutation, tab_state=None):
         before = self.to_dict()
+        previous_ids = {n.id for n in self.map.walk()}
         selected = self._selection_state()
         try:
             mutation()
@@ -539,6 +678,10 @@ class MindMapController(QObject):
         if self.to_dict() != before:
             self._undo.append((before, selected, tab_state))
             self._redo.clear()
+        retained = self._priority_nodes()
+        if any(n.id not in previous_ids and n not in retained for n in self.map.walk()):
+            self._priority_filter = 1.0
+        self._sync_filter_selection()
         self.sceneChanged.emit()
         self.changed.emit()
         return True
@@ -627,6 +770,29 @@ class MindMapController(QObject):
 
         if not self._commit(mutate):
             return False
+        self.revealNode.emit(self._selected)
+        return True
+
+    @Slot(str, bool, result=bool)
+    def addSiblingRelative(self, node_id, before):
+        target = self.map.find(node_id)
+        if not self._in_scope(target) or target is self.view_root:
+            return False
+        parent = target.parent
+        index = parent.children.index(target) + (0 if before else 1)
+        sides = assigned_sides(SimpleNamespace(root=self.view_root))
+
+        def mutate():
+            for branch in self.view_root.children:
+                branch.side = sides[branch]
+            parent.folded = False
+            node = parent.add_child('New thought', side=sides[target])
+            node.move_to(parent, index)
+            self._set_selection([node.id])
+
+        if not self._commit(mutate):
+            return False
+        self.clearSearch()
         self.revealNode.emit(self._selected)
         return True
 
