@@ -242,6 +242,13 @@ FocusScope {
                         enabled: pane.controller && pane.controller.selectedId !== ""
                         onTriggered: { pane.controller.toggleBookmark(pane.controller.selectedId); pane.focusMap() }
                     }
+                    MenuItem {
+                        objectName: "mindmapMeasureProgress"
+                        text: pane.controller && pane.controller.selectedNode.measureProgress
+                              ? "Stop measuring progress" : "Measure progress"
+                        enabled: pane.controller && pane.controller.selectedId !== ""
+                        onTriggered: { pane.controller.toggleMeasureProgress(pane.controller.selectedId); pane.focusMap() }
+                    }
                     MenuItem { text: "Fold / Unfold"; onTriggered: pane.controller.toggleFold() }
                     MenuSeparator {}
                     Menu {
@@ -464,7 +471,8 @@ FocusScope {
                             visible: nodeItem.modelData.bookmarked
                             anchors.left: parent.left; anchors.leftMargin: 9
                             anchors.verticalCenter: parent.verticalCenter
-                            anchors.verticalCenterOffset: nodeItem.modelData.reminderActive ? -14 : 0
+                            anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
+                                                          - (nodeItem.modelData.measureProgress ? 12 : 0)
                             text: "\uD83D\uDD16"
                             font.pixelSize: 15
                             Accessible.role: Accessible.StaticText
@@ -473,7 +481,8 @@ FocusScope {
                         Text {
                             objectName: "mindmapNodeText_" + nodeItem.modelData.id
                             anchors.fill: parent
-                            anchors.bottomMargin: nodeItem.modelData.reminderActive ? 28 : 0
+                            anchors.bottomMargin: (nodeItem.modelData.reminderActive ? 24 : 0)
+                                                  + (nodeItem.modelData.measureProgress ? 24 : 0)
                             anchors.leftMargin: nodeItem.modelData.bookmarked ? 29 : 9
                             anchors.rightMargin: (nodeItem.modelData.priorityLevel > 0 ? 48 : 18)
                                                  + (nodeItem.modelData.priorityRank > 0 ? 30 : 0)
@@ -490,7 +499,8 @@ FocusScope {
                             width: 24; height: 24; radius: 12
                             anchors.right: parent.right; anchors.rightMargin: 48
                             anchors.verticalCenter: parent.verticalCenter
-                            anchors.verticalCenterOffset: nodeItem.modelData.reminderActive ? -14 : 0
+                            anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
+                                                          - (nodeItem.modelData.measureProgress ? 12 : 0)
                             color: rank === 1 ? "#f2c75c" : rank === 2 ? "#c8d3df" : "#d99b6c"
                             border.color: "#e5f0fa"
                             Accessible.role: Accessible.StaticText
@@ -507,14 +517,16 @@ FocusScope {
                             objectName: "mindmapPriority_" + nodeItem.modelData.id
                             anchors.right: parent.right; anchors.rightMargin: 20
                             anchors.verticalCenter: parent.verticalCenter
-                            anchors.verticalCenterOffset: nodeItem.modelData.reminderActive ? -14 : 0
+                            anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
+                                                          - (nodeItem.modelData.measureProgress ? 12 : 0)
                             level: nodeItem.modelData.priorityLevel
                             visible: level > 0
                         }
                         Text {
                             anchors.right: parent.right; anchors.rightMargin: 5
                             anchors.verticalCenter: parent.verticalCenter
-                            anchors.verticalCenterOffset: nodeItem.modelData.reminderActive ? -14 : 0
+                            anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
+                                                          - (nodeItem.modelData.measureProgress ? 12 : 0)
                             text: nodeItem.modelData.hasChildren ? (nodeItem.modelData.folded ? "+" : "−") : ""
                             color: "#a5d9ff"
                         }
@@ -607,6 +619,28 @@ FocusScope {
                                          ? "\nRelative priority: " + pane.priorityLabel(nodeItem.modelData.priorityLevel)
                                            + " · Score: " + nodeItem.modelData.priorityScore.toFixed(2) : "")
                                       + (nodeItem.modelData.note ? "\n\n" + nodeItem.modelData.note : "")
+                            }
+                        }
+                        Rectangle {
+                            objectName: "mindmapProgressBadge_" + nodeItem.modelData.id
+                            visible: nodeItem.modelData.measureProgress
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.bottomMargin: nodeItem.modelData.reminderActive ? 28 : 4
+                            anchors.leftMargin: 4
+                            anchors.rightMargin: 4
+                            height: 20
+                            radius: 4
+                            color: "#345265"
+                            Text {
+                                objectName: "mindmapProgressText_" + nodeItem.modelData.id
+                                anchors.centerIn: parent
+                                text: "Progress: " + nodeItem.modelData.progressPercent + "%"
+                                color: "#e5f0fa"
+                                font.pixelSize: 12
+                                Accessible.role: Accessible.StaticText
+                                Accessible.name: text
                             }
                         }
                         Rectangle {
@@ -756,10 +790,14 @@ FocusScope {
         property var reminderData: ({})
         property bool canMoveUp: false
         property bool canMoveDown: false
+        property bool measuringProgress: false
+        onTargetNodeIdChanged: measuringProgress = pane.controller
+                               ? pane.controller.measuresProgress(targetNodeId) : false
         onAboutToShow: {
             reminderData = pane.controller.reminderData(targetNodeId)
             canMoveUp = pane.controller.canReorderNode(targetNodeId, -1)
             canMoveDown = pane.controller.canReorderNode(targetNodeId, 1)
+            measuringProgress = pane.controller.measuresProgress(targetNodeId)
         }
         MenuItem {
             objectName: "mindmapSetReminder"
@@ -778,6 +816,15 @@ FocusScope {
             text: pane.controller && pane.controller.bookmarks.some(function(b) { return b.id === nodeMenu.targetNodeId })
                   ? "Remove bookmark" : "Bookmark"
             onTriggered: { pane.controller.toggleBookmark(nodeMenu.targetNodeId); pane.focusMap() }
+        }
+        MenuItem {
+            objectName: "mindmapMeasureProgressMenuItem"
+            text: nodeMenu.measuringProgress ? "Stop measuring progress" : "Measure progress"
+            onTriggered: {
+                pane.controller.toggleMeasureProgress(nodeMenu.targetNodeId)
+                nodeMenu.measuringProgress = pane.controller.measuresProgress(nodeMenu.targetNodeId)
+                pane.focusMap()
+            }
         }
         MenuItem {
             objectName: "mindmapMoveUp"
