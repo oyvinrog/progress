@@ -1387,6 +1387,106 @@ def test_keyboard_navigation_directions_and_folded_nodes(project):
     assert m.selectedId == tab.id
 
 
+def test_horizontal_navigation_stays_on_parent_child_links(project):
+    m = project[0].mindmap
+    root = m.map.root
+    tab = m.map.find(next(iter(m.links)))
+    tab.side = 'right'
+    left = root.add_child('Left branch', side='left')
+    left_first = left.add_child('Left first')
+    left.add_child('Left second')
+    right = root.add_child('Right branch', side='right')
+    right_first = right.add_child('Right first')
+    right.add_child('Right second')
+    unrelated = root.add_child('Nearby branch', side='right')
+    m.reconcile()
+    before = m.to_dict()
+
+    m.select(root.id)
+    m.navigate('left')
+    assert m.selectedId == left.id
+    m.navigate('left')
+    assert m.selectedId == left_first.id
+    m.navigate('left')
+    assert m.selectedId == left_first.id  # No jump to a nearby branch.
+    m.navigate('right')
+    assert m.selectedId == left.id
+    m.navigate('right')
+    assert m.selectedId == root.id
+    m.navigate('right')
+    assert m.selectedId == tab.id  # First right-side branch in tree order.
+    m.select(right.id)
+    m.navigate('right')
+    assert m.selectedId == right_first.id
+    m.navigate('right')
+    assert m.selectedId == right_first.id
+    m.navigate('left')
+    assert m.selectedId == right.id
+    m.navigate('left')
+    assert m.selectedId == root.id
+    assert m.to_dict() == before
+
+
+def test_horizontal_navigation_shift_fold_scope_and_hidden_selection(project):
+    m = project[0].mindmap
+    tab_id = next(iter(m.links))
+    tab = m.map.find(tab_id)
+    tab.side = 'left'
+    first = tab.add_child('First', side='left')
+    second = tab.add_child('Second')
+    grandchild = first.add_child('Grandchild')
+    m.reconcile()
+    m.set_scope(m.links[tab_id])
+    before = m.to_dict()
+
+    m.select(tab.id)
+    m.navigate('right')
+    assert m.selectedId == second.id  # Scoped root enters a branch, not its global parent.
+    m.select(tab.id)
+    m.toggleFold()
+    m.navigate('right')
+    assert m.selectedId == tab.id
+    m.toggleFold()
+    m.navigate('left')
+    assert m.selectedId == first.id
+    m.navigate('left', True)
+    assert m.selectedId == grandchild.id and m.selectedIds == [first.id, grandchild.id]
+    m.navigate('right', True)
+    assert m.selectedId == first.id and set(m.selectedIds) == {first.id, grandchild.id}
+    m.select(first.id)
+    m.toggleFold()
+    m.navigate('left')
+    assert m.selectedId == first.id
+    m.select(grandchild.id)
+    m.navigate('right')
+    assert m.selectedId == first.id  # Recover to the visible ancestor first.
+    m.toggleFold()
+    m.select(tab.id)
+    m.navigate('left')
+    assert m.selectedId == first.id
+    m.select(second.id)
+    m.navigate('right')
+    assert m.selectedId == second.id
+    assert m.to_dict() == before
+
+
+def test_horizontal_navigation_skips_priority_filtered_branches(project):
+    _, tabs, _, _ = project
+    ids = priority_tasks(tabs, [0, 10])
+    m = project[0].mindmap
+    linked = {tab_id: m.map.find(node_id) for node_id, tab_id in m.links.items()}
+    low, high = linked[ids[0]], linked[ids[1]]
+    low.side = high.side = 'right'
+    m.reconcile()
+    m.setPriorityFilter(0)
+    assert low not in m._layout() and high in m._layout()
+    m.select(m.map.root.id)
+    m.navigate('right')
+    assert m.selectedId == high.id
+    m.navigate('right')
+    assert m.selectedId == high.id
+
+
 def test_multi_cut_paste_preserves_branches_tab_links_and_history(project):
     pm, tabs, _, _ = project
     m = pm.mindmap

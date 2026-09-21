@@ -658,7 +658,7 @@ class MindMapController(QObject):
     @Slot(str)
     @Slot(str, bool)
     def navigate(self, direction, extend=False):
-        """Select the nearest visible node in a direction, as in PyPlane's editor."""
+        """Follow the tree horizontally and nearby visible nodes vertically."""
         if direction not in ('left', 'right', 'up', 'down'):
             return
         boxes = self._layout()
@@ -671,19 +671,38 @@ class MindMapController(QObject):
             self.revealNode.emit(current.id)
             return
         origin = boxes[current]
+        if direction in ('left', 'right'):
+            if current is self.view_root:
+                root_center = origin.x + origin.width / 2
+                target = None if current.folded else next(
+                    (child for child in current.children if child in boxes
+                     and ((boxes[child].x + boxes[child].width / 2 < root_center)
+                          == (direction == 'left'))), None)
+            else:
+                parent = current.parent
+                parent_center = boxes[parent].x + boxes[parent].width / 2
+                on_left = origin.x + origin.width / 2 < parent_center
+                toward_parent = direction == ('right' if on_left else 'left')
+                if toward_parent:
+                    target = parent
+                else:
+                    target = (next((child for child in current.children if child in boxes), None)
+                              if not current.folded else None)
+            if target is not None:
+                self.select(target.id, 'add' if extend else 'replace')
+            self.revealNode.emit(self._selected)
+            return
         ranked = []
         for node, box in boxes.items():
             dx = box.x + box.width / 2 - origin.x - origin.width / 2
             dy = box.center_y - origin.center_y
             primary, perpendicular = {
-                'left': (-dx, abs(dy)), 'right': (dx, abs(dy)),
                 'up': (-dy, abs(dx)), 'down': (dy, abs(dx)),
             }[direction]
             if primary <= 1.0:
                 continue
-            reading_order = box.center_y if direction in ('left', 'right') else box.x
             ranked.append((primary + perpendicular * 0.35, perpendicular / primary,
-                           reading_order, node.id))
+                           box.x, node.id))
         if ranked:
             self.select(min(ranked)[-1], 'add' if extend else 'replace')
         self.revealNode.emit(self._selected)
