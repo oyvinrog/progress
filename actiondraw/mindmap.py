@@ -438,6 +438,8 @@ class MindMapController(QObject):
         sizes = {}
         for node in self.view_root.walk():
             padding = 74.0 if node.id in self._completed else 52.0
+            if node.id in self._bookmarks:
+                padding += 20.0
             if self.links.get(node.id) in priorities:
                 padding += 30.0
                 if priorities[self.links[node.id]]['priorityRank'] > 0:
@@ -469,6 +471,7 @@ class MindMapController(QObject):
                  'width': b.width, 'height': b.height, 'isTab': n.id in self.links,
                  'folded': n.folded, 'hasChildren': bool(n.children), 'bold': bool(n.style.bold),
                  'isViewRoot': n is self.view_root, 'completed': n.id in self._completed,
+                 'bookmarked': n.id in self._bookmarks,
                  **self.reminderData(n.id),
                  **priorities.get(self.links.get(n.id), {'priorityScore': None, 'priorityLevel': 0,
                                                        'priorityRank': 0})}

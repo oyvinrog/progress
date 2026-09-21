@@ -460,10 +460,21 @@ FocusScope {
                                      && opacity > 0
                         }
                         Text {
+                            objectName: "mindmapBookmarkIcon_" + nodeItem.modelData.id
+                            visible: nodeItem.modelData.bookmarked
+                            anchors.left: parent.left; anchors.leftMargin: 9
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.verticalCenterOffset: nodeItem.modelData.reminderActive ? -14 : 0
+                            text: "\uD83D\uDD16"
+                            font.pixelSize: 15
+                            Accessible.role: Accessible.StaticText
+                            Accessible.name: "Bookmarked"
+                        }
+                        Text {
                             objectName: "mindmapNodeText_" + nodeItem.modelData.id
                             anchors.fill: parent
                             anchors.bottomMargin: nodeItem.modelData.reminderActive ? 28 : 0
-                            anchors.leftMargin: 9
+                            anchors.leftMargin: nodeItem.modelData.bookmarked ? 29 : 9
                             anchors.rightMargin: (nodeItem.modelData.priorityLevel > 0 ? 48 : 18)
                                                  + (nodeItem.modelData.priorityRank > 0 ? 30 : 0)
                             verticalAlignment: Text.AlignVCenter
