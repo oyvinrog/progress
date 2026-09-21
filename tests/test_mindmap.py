@@ -1036,11 +1036,15 @@ def test_qml_bookmarks(project, app):
         click(window.findChild(QObject, 'mindmapActionsButton'))
         click(window.findChild(QObject, 'mindmapBookmark'))
         assert m.selectedNode['bookmarked'] and row.property('visible')
+        icon = find_item(window.contentItem(), 'mindmapBookmarkIcon_' + child)
+        assert icon.isVisible() and icon.property('text') == '\U0001f516'
         click(window.findChild(QObject, 'mindmapActionsButton'))
         click(window.findChild(QObject, 'mindmapBookmark'))
         assert not m.bookmarks and not row.property('visible')
+        assert not find_item(window.contentItem(), 'mindmapBookmarkIcon_' + child).isVisible()
         click(window.findChild(QObject, 'mindmapActionsButton'))
         click(window.findChild(QObject, 'mindmapBookmark'))
+        assert find_item(window.contentItem(), 'mindmapBookmarkIcon_' + child).isVisible()
         m.select(tab)
         m.toggleFold()
         history = len(m._undo)
@@ -1383,6 +1387,106 @@ def test_keyboard_navigation_directions_and_folded_nodes(project):
     assert m.selectedId == tab.id
 
 
+def test_horizontal_navigation_stays_on_parent_child_links(project):
+    m = project[0].mindmap
+    root = m.map.root
+    tab = m.map.find(next(iter(m.links)))
+    tab.side = 'right'
+    left = root.add_child('Left branch', side='left')
+    left_first = left.add_child('Left first')
+    left.add_child('Left second')
+    right = root.add_child('Right branch', side='right')
+    right_first = right.add_child('Right first')
+    right.add_child('Right second')
+    unrelated = root.add_child('Nearby branch', side='right')
+    m.reconcile()
+    before = m.to_dict()
+
+    m.select(root.id)
+    m.navigate('left')
+    assert m.selectedId == left.id
+    m.navigate('left')
+    assert m.selectedId == left_first.id
+    m.navigate('left')
+    assert m.selectedId == left_first.id  # No jump to a nearby branch.
+    m.navigate('right')
+    assert m.selectedId == left.id
+    m.navigate('right')
+    assert m.selectedId == root.id
+    m.navigate('right')
+    assert m.selectedId == tab.id  # First right-side branch in tree order.
+    m.select(right.id)
+    m.navigate('right')
+    assert m.selectedId == right_first.id
+    m.navigate('right')
+    assert m.selectedId == right_first.id
+    m.navigate('left')
+    assert m.selectedId == right.id
+    m.navigate('left')
+    assert m.selectedId == root.id
+    assert m.to_dict() == before
+
+
+def test_horizontal_navigation_shift_fold_scope_and_hidden_selection(project):
+    m = project[0].mindmap
+    tab_id = next(iter(m.links))
+    tab = m.map.find(tab_id)
+    tab.side = 'left'
+    first = tab.add_child('First', side='left')
+    second = tab.add_child('Second')
+    grandchild = first.add_child('Grandchild')
+    m.reconcile()
+    m.set_scope(m.links[tab_id])
+    before = m.to_dict()
+
+    m.select(tab.id)
+    m.navigate('right')
+    assert m.selectedId == second.id  # Scoped root enters a branch, not its global parent.
+    m.select(tab.id)
+    m.toggleFold()
+    m.navigate('right')
+    assert m.selectedId == tab.id
+    m.toggleFold()
+    m.navigate('left')
+    assert m.selectedId == first.id
+    m.navigate('left', True)
+    assert m.selectedId == grandchild.id and m.selectedIds == [first.id, grandchild.id]
+    m.navigate('right', True)
+    assert m.selectedId == first.id and set(m.selectedIds) == {first.id, grandchild.id}
+    m.select(first.id)
+    m.toggleFold()
+    m.navigate('left')
+    assert m.selectedId == first.id
+    m.select(grandchild.id)
+    m.navigate('right')
+    assert m.selectedId == first.id  # Recover to the visible ancestor first.
+    m.toggleFold()
+    m.select(tab.id)
+    m.navigate('left')
+    assert m.selectedId == first.id
+    m.select(second.id)
+    m.navigate('right')
+    assert m.selectedId == second.id
+    assert m.to_dict() == before
+
+
+def test_horizontal_navigation_skips_priority_filtered_branches(project):
+    _, tabs, _, _ = project
+    ids = priority_tasks(tabs, [0, 10])
+    m = project[0].mindmap
+    linked = {tab_id: m.map.find(node_id) for node_id, tab_id in m.links.items()}
+    low, high = linked[ids[0]], linked[ids[1]]
+    low.side = high.side = 'right'
+    m.reconcile()
+    m.setPriorityFilter(0)
+    assert low not in m._layout() and high in m._layout()
+    m.select(m.map.root.id)
+    m.navigate('right')
+    assert m.selectedId == high.id
+    m.navigate('right')
+    assert m.selectedId == high.id
+
+
 def test_multi_cut_paste_preserves_branches_tab_links_and_history(project):
     pm, tabs, _, _ = project
     m = pm.mindmap
@@ -1682,6 +1786,154 @@ def test_completion_selection_legacy_and_validation(project):
     del payload['completed']
     m.load(payload)
     assert not any(n['completed'] for n in m.nodes)
+
+
+def test_measure_progress_counts_direct_children_and_tracks_edits(project):
+    m = project[0].mindmap
+    parent = m.map.root.add_child('Measured parent')
+    first = parent.add_child('First')
+    second = parent.add_child('Second')
+    grandchild = first.add_child('Grandchild')
+    outside = m.map.root.add_child('Outside')
+    m.reconcile()
+
+    def progress():
+        return next(node for node in m.nodes if node['id'] == parent.id)['progressPercent']
+
+    m.toggleMeasureProgress(parent.id)
+    assert m.measuresProgress(parent.id) and progress() == 0
+    m.select(parent.id)
+    m.toggleCompleted()
+    assert progress() == 0  # The measuring node does not count itself.
+    m.select(grandchild.id)
+    m.toggleCompleted()
+    assert progress() == 0  # Grandchildren do not count.
+    m.select(first.id)
+    m.toggleCompleted()
+    assert progress() == 50
+    m.map.find(parent.id).folded = True
+    m.reconcile()
+    assert progress() == 50
+    m.select(second.id)
+    m.toggleCompleted()
+    assert progress() == 100
+    m.moveNode(outside.id, parent.id, 'child')
+    assert progress() == 67
+    m.undo()
+    assert progress() == 100
+    m.redo()
+    assert progress() == 67
+    m.select(outside.id)
+    m.deleteSelected()
+    assert progress() == 100
+    m.select(second.id)
+    m.deleteSelected()
+    assert progress() == 100
+    m.select(first.id)
+    m.deleteSelected()
+    assert progress() == 0
+    m.undo()
+    assert progress() == 100
+    m.select(parent.id)
+    m.deleteSelected()
+    assert not m.measuresProgress(parent.id)
+    assert parent.id not in m.to_dict()['measure_progress']
+    m.undo()
+    assert m.measuresProgress(parent.id) and progress() == 100
+
+
+def test_measure_progress_persists_validates_and_follows_history(project):
+    m = project[0].mindmap
+    tab = next(iter(m.links))
+    m.toggleMeasureProgress(tab)
+    assert m.selectedNode['measureProgress'] is False
+    m.select(tab)
+    assert m.selectedNode['measureProgress'] is True
+    assert next(node for node in m.nodes if node['id'] == tab)['progressPercent'] == 0
+    payload = m.to_dict()
+    assert payload['measure_progress'] == [tab]
+    m.undo()
+    assert not m.measuresProgress(tab)
+    m.redo()
+    assert m.measuresProgress(tab)
+    restored = MindMapController()
+    restored.load(payload)
+    assert restored.measuresProgress(tab)
+    old_payload = dict(payload)
+    old_payload.pop('measure_progress')
+    restored.load(old_payload)
+    assert not restored.measuresProgress(tab)
+    for invalid in (None, {}, 'node', [42], ['missing'], [tab, tab]):
+        with pytest.raises(ValueError, match='progress settings'):
+            m.decode(dict(payload, measure_progress=invalid))
+    m.toggleMeasureProgress(tab)
+    assert not m.measuresProgress(tab)
+    m.undo()
+    assert m.measuresProgress(tab)
+
+
+def test_qml_measure_progress_menu_and_badge(project, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    tab = next(iter(m.links))
+    m.select(tab)
+    child = thought(m, 'Progress child')
+    m.select(tab)
+    assert pm.setMindmapReminder(tab, reminder_date(), False)
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    warnings = []
+    engine.warnings.connect(lambda messages: warnings.extend(x.toString() for x in messages))
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+
+    def find_item(item, name):
+        if item.objectName() == name:
+            return item
+        for nested in item.childItems():
+            found = find_item(nested, name)
+            if found is not None:
+                return found
+
+    def click(item):
+        QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                         item.mapToScene(item.boundingRect().center()).toPoint())
+        QTest.qWait(30)
+
+    try:
+        badge = find_item(window.contentItem(), 'mindmapProgressBadge_' + tab)
+        assert not badge.isVisible()
+        click(window.findChild(QObject, 'mindmapActionsButton'))
+        action = window.findChild(QObject, 'mindmapMeasureProgress')
+        assert action.property('text') == 'Measure progress'
+        click(action)
+        badge = find_item(window.contentItem(), 'mindmapProgressBadge_' + tab)
+        label = find_item(badge, 'mindmapProgressText_' + tab)
+        assert badge.isVisible() and label.property('text') == 'Progress: 0%'
+        node = find_item(window.contentItem(), 'mindmapNode_' + tab)
+        title = find_item(node, 'mindmapNodeText_' + tab)
+        assert title.y() + title.height() <= badge.y()
+        reminder = find_item(node, 'mindmapReminderBadge_' + tab)
+        assert reminder.isVisible() and badge.y() + badge.height() <= reminder.y()
+        priority = find_item(node, 'mindmapPriorityRank_' + tab)
+        if priority.isVisible():
+            assert priority.y() + priority.height() <= badge.y()
+        m.select(child)
+        m.toggleCompleted()
+        QTest.qWait(30)
+        assert find_item(window.contentItem(), 'mindmapProgressText_' + tab).property('text') == 'Progress: 100%'
+        assert not find_item(window.contentItem(), 'mindmapProgressBadge_' + child).isVisible()
+        menu = window.findChild(QObject, 'mindmapNodeMenu')
+        menu.setProperty('targetNodeId', tab)
+        context_action = window.findChild(QObject, 'mindmapMeasureProgressMenuItem')
+        assert context_action.property('text') == 'Stop measuring progress'
+        QMetaObject.invokeMethod(context_action, 'triggered')
+        assert not m.measuresProgress(tab)
+        assert not find_item(window.contentItem(), 'mindmapProgressBadge_' + tab).isVisible()
+        assert not warnings, warnings
+    finally:
+        window.close()
 
 
 def test_qml_tab_switch_completion_and_editor_focus(project, app):

@@ -28,6 +28,7 @@ class MindMapController(QObject):
         self.map = MindMap('Project')
         self.links = {}
         self._completed = set()
+        self._measure_progress = set()
         self.reminders = {}
         self._bookmarks = []
         self._scope_tab = None
@@ -121,6 +122,7 @@ class MindMapController(QObject):
             if tab.id not in seen:
                 self.links[self.map.root.add_child(tab.name).id] = tab.id
         self._completed.intersection_update(nodes)
+        self._measure_progress.intersection_update(nodes)
         self._bookmarks = [key for key in self._bookmarks if key in nodes]
         self.reminders = {key: value for key, value in self.reminders.items() if key in nodes}
         self._selected_ids = [key for key in self._selected_ids if self._in_scope(self.map.find(key))]
@@ -134,7 +136,8 @@ class MindMapController(QObject):
     def to_dict(self):
         return {'version': 1, 'xml': dumps(self.map).decode('utf-8'),
                 'tab_links': dict(self.links), 'completed': sorted(self._completed),
-                'reminders': copy.deepcopy(self.reminders), 'bookmarks': list(self._bookmarks)}
+                'reminders': copy.deepcopy(self.reminders), 'bookmarks': list(self._bookmarks),
+                'measure_progress': sorted(self._measure_progress)}
 
     @staticmethod
     def decode(payload):
@@ -161,6 +164,12 @@ class MindMapController(QObject):
                 or any(not isinstance(key, str) or mindmap.find(key) is None for key in completed)
                 or len(set(completed)) != len(completed)):
             raise ValueError('Malformed mindmap completion data')
+        measure_progress = payload.get('measure_progress', [])
+        if (not isinstance(measure_progress, list)
+                or any(not isinstance(key, str) or mindmap.find(key) is None
+                       for key in measure_progress)
+                or len(set(measure_progress)) != len(measure_progress)):
+            raise ValueError('Malformed mindmap progress settings')
         bookmarks = payload.get('bookmarks', [])
         if (not isinstance(bookmarks, list)
                 or any(not isinstance(key, str) or mindmap.find(key) is None for key in bookmarks)
@@ -188,6 +197,7 @@ class MindMapController(QObject):
         self._search_query = ''
         self._priority_filter = 1.0
         self._completed = set((payload or {}).get('completed', []))
+        self._measure_progress = set((payload or {}).get('measure_progress', []))
         self.reminders = copy.deepcopy((payload or {}).get('reminders', {}))
         self._bookmarks = list((payload or {}).get('bookmarks', []))
         self._scope_tab = None
@@ -259,6 +269,7 @@ class MindMapController(QObject):
                 'isTab': node.id in self.links, 'folded': node.folded,
                 'isViewRoot': node is self.view_root, 'completed': node.id in self._completed,
                 'bookmarked': node.id in self._bookmarks,
+                'measureProgress': node.id in self._measure_progress,
                 **self.reminderData(node.id)}
 
     @Property('QVariantList', notify=changed)
@@ -282,6 +293,21 @@ class MindMapController(QObject):
             else:
                 self._bookmarks.append(node_id)
         self._commit(mutate)
+
+    @Slot(str)
+    def toggleMeasureProgress(self, node_id):
+        if self.map.find(node_id) is None:
+            return
+        def mutate():
+            if node_id in self._measure_progress:
+                self._measure_progress.remove(node_id)
+            else:
+                self._measure_progress.add(node_id)
+        self._commit(mutate)
+
+    @Slot(str, result=bool)
+    def measuresProgress(self, node_id):
+        return node_id in self._measure_progress
 
     @Slot(str)
     def jumpToBookmark(self, node_id):
@@ -438,6 +464,8 @@ class MindMapController(QObject):
         sizes = {}
         for node in self.view_root.walk():
             padding = 74.0 if node.id in self._completed else 52.0
+            if node.id in self._bookmarks:
+                padding += 20.0
             if self.links.get(node.id) in priorities:
                 padding += 30.0
                 if priorities[self.links[node.id]]['priorityRank'] > 0:
@@ -446,7 +474,8 @@ class MindMapController(QObject):
             width = max(110.0, min(380.0, node_metrics.horizontalAdvance(node.text) + padding))
             if node.id in self.reminders:
                 width = max(width, 210.0)
-            sizes[node] = (width, 64.0 if node.id in self.reminders else 40.0)
+            sizes[node] = (width, 40.0 + (24.0 if node.id in self.reminders else 0.0)
+                           + (24.0 if node.id in self._measure_progress else 0.0))
         # Layout only needs a root; keep the canonical tree's parent links intact.
         if self._priority_filter == 1:
             return layout(SimpleNamespace(root=self.view_root), sizes)
@@ -469,6 +498,10 @@ class MindMapController(QObject):
                  'width': b.width, 'height': b.height, 'isTab': n.id in self.links,
                  'folded': n.folded, 'hasChildren': bool(n.children), 'bold': bool(n.style.bold),
                  'isViewRoot': n is self.view_root, 'completed': n.id in self._completed,
+                 'bookmarked': n.id in self._bookmarks,
+                 'measureProgress': n.id in self._measure_progress,
+                 'progressPercent': (math.floor(100 * sum(child.id in self._completed for child in n.children)
+                                                  / len(n.children) + 0.5) if n.children else 0),
                  **self.reminderData(n.id),
                  **priorities.get(self.links.get(n.id), {'priorityScore': None, 'priorityLevel': 0,
                                                        'priorityRank': 0})}
@@ -625,7 +658,7 @@ class MindMapController(QObject):
     @Slot(str)
     @Slot(str, bool)
     def navigate(self, direction, extend=False):
-        """Select the nearest visible node in a direction, as in PyPlane's editor."""
+        """Follow the tree horizontally and nearby visible nodes vertically."""
         if direction not in ('left', 'right', 'up', 'down'):
             return
         boxes = self._layout()
@@ -638,19 +671,38 @@ class MindMapController(QObject):
             self.revealNode.emit(current.id)
             return
         origin = boxes[current]
+        if direction in ('left', 'right'):
+            if current is self.view_root:
+                root_center = origin.x + origin.width / 2
+                target = None if current.folded else next(
+                    (child for child in current.children if child in boxes
+                     and ((boxes[child].x + boxes[child].width / 2 < root_center)
+                          == (direction == 'left'))), None)
+            else:
+                parent = current.parent
+                parent_center = boxes[parent].x + boxes[parent].width / 2
+                on_left = origin.x + origin.width / 2 < parent_center
+                toward_parent = direction == ('right' if on_left else 'left')
+                if toward_parent:
+                    target = parent
+                else:
+                    target = (next((child for child in current.children if child in boxes), None)
+                              if not current.folded else None)
+            if target is not None:
+                self.select(target.id, 'add' if extend else 'replace')
+            self.revealNode.emit(self._selected)
+            return
         ranked = []
         for node, box in boxes.items():
             dx = box.x + box.width / 2 - origin.x - origin.width / 2
             dy = box.center_y - origin.center_y
             primary, perpendicular = {
-                'left': (-dx, abs(dy)), 'right': (dx, abs(dy)),
                 'up': (-dy, abs(dx)), 'down': (dy, abs(dx)),
             }[direction]
             if primary <= 1.0:
                 continue
-            reading_order = box.center_y if direction in ('left', 'right') else box.x
             ranked.append((primary + perpendicular * 0.35, perpendicular / primary,
-                           reading_order, node.id))
+                           box.x, node.id))
         if ranked:
             self.select(min(ranked)[-1], 'add' if extend else 'replace')
         self.revealNode.emit(self._selected)
@@ -664,11 +716,13 @@ class MindMapController(QObject):
             self.map.validate()
             live = {n.id for n in self.map.walk()}
             self._completed.intersection_update(live)
+            self._measure_progress.intersection_update(live)
             self._bookmarks = [key for key in self._bookmarks if key in live]
             self.reminders = {key: value for key, value in self.reminders.items() if key in live}
         except (ValueError, IndexError) as exc:
             self.map, self.links = self.decode(before)
             self._completed = set(before.get('completed', []))
+            self._measure_progress = set(before.get('measure_progress', []))
             self.reminders = copy.deepcopy(before.get('reminders', {}))
             self._bookmarks = list(before.get('bookmarks', []))
             self._restore_selection(selected)
@@ -961,6 +1015,7 @@ class MindMapController(QObject):
         self._cut_ids = []
         self.map, self.links = self.decode(payload)
         self._completed = set(payload.get('completed', []))
+        self._measure_progress = set(payload.get('measure_progress', []))
         self.reminders = copy.deepcopy(payload.get('reminders', {}))
         self._bookmarks = list(payload.get('bookmarks', []))
         if tab_state is not None:
