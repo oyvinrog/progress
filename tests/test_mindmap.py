@@ -2,6 +2,7 @@
 import copy
 import json
 import math
+import time
 import uuid
 
 import pytest
@@ -2324,6 +2325,66 @@ def test_qml_node_reminder_controls_and_overview(project, app, tmp_path):
         m.select(next(iter(m.links)), 'toggle')
         QTest.qWait(30)
         assert not button.isEnabled()
+        assert not warnings
+    finally:
+        window.close()
+
+
+def test_qml_node_quick_reminder_offsets_and_notification_preservation(project, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    node_id = thought(m, 'Quick reminder thought')
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    warnings = []
+    engine.warnings.connect(lambda messages: warnings.extend(message.toString() for message in messages))
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+
+    def find(item, name):
+        if item.objectName() == name:
+            return item
+        for child in item.childItems():
+            found = find(child, name)
+            if found is not None:
+                return found
+
+    try:
+        node = find(window.contentItem(), 'mindmapNode_' + node_id)
+        point = node.mapToScene(node.boundingRect().center()).toPoint()
+        QTest.mouseClick(window, Qt.RightButton, Qt.NoModifier, point)
+        QTest.qWait(30)
+
+        menu = window.findChild(QObject, 'mindmapNodeMenu')
+        quick_menu = window.findChild(QObject, 'mindmapQuickReminderMenu')
+        assert menu.property('targetNodeId') == node_id
+        assert quick_menu.property('title') == 'Quick reminder'
+
+        actions = [
+            ('mindmapQuickReminder10Minutes', '10 minutes', 10),
+            ('mindmapQuickReminder20Minutes', '20 minutes', 20),
+            ('mindmapQuickReminder1Hour', '1 hour', 60),
+            ('mindmapQuickReminder24Hours', '24 hours', 24 * 60),
+            ('mindmapQuickReminder2Days', '2 days', 2 * 24 * 60),
+            ('mindmapQuickReminder7Days', '7 days', 7 * 24 * 60),
+        ]
+        for index, (object_name, label, minutes) in enumerate(actions):
+            action = window.findChild(QObject, object_name)
+            assert action.property('text') == label
+            if index == 1:
+                assert pm.setMindmapReminder(node_id, reminder_date(), True)
+            before = time.time()
+            QMetaObject.invokeMethod(action, 'triggered')
+            QTest.qWait(40)
+            seconds_until_due = m.reminders[node_id]['at'] - before
+            assert minutes * 60 - 61 <= seconds_until_due <= minutes * 60 + 5
+            assert m.reminderData(node_id)['reminderSendNotification'] is (index >= 1)
+
+        badge = find(window.contentItem(), 'mindmapReminderBadge_' + node_id)
+        assert badge.isVisible()
+        reminders = pm.getActiveReminders()
+        assert len(reminders) == 1 and reminders[0]['nodeId'] == node_id
         assert not warnings
     finally:
         window.close()

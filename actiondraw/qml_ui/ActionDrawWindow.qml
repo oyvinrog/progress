@@ -1308,6 +1308,16 @@ ApplicationWindow {
                 var data = controller.reminderData(nodeId)
                 dialogs.openMindmapReminderDialog(nodeId, data.reminderAt, data.reminderSendNotification)
             }
+            onQuickReminderRequested: function(nodeId, minutesFromNow) {
+                var data = controller.reminderData(nodeId)
+                var reminderAt = new Date()
+                reminderAt.setMinutes(reminderAt.getMinutes() + minutesFromNow)
+                projectManager.setMindmapReminder(
+                    nodeId,
+                    Qt.formatDateTime(reminderAt, "yyyy-MM-dd HH:mm"),
+                    data.reminderActive ? data.reminderSendNotification : false
+                )
+            }
             onClearReminderRequested: function(nodeId) { projectManager.clearMindmapReminder(nodeId) }
         }
 

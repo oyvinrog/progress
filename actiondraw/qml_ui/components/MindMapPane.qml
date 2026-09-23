@@ -7,6 +7,7 @@ FocusScope {
     id: pane
     signal canvasRequested()
     signal reminderRequested(string nodeId)
+    signal quickReminderRequested(string nodeId, int minutesFromNow)
     signal clearReminderRequested(string nodeId)
     property bool reminderDialogOpen: false
     property var controller
@@ -803,6 +804,40 @@ FocusScope {
             objectName: "mindmapSetReminder"
             text: nodeMenu.reminderData.reminderActive ? "Update Reminder" : "Set Reminder"
             onTriggered: pane.reminderRequested(nodeMenu.targetNodeId)
+        }
+        Menu {
+            objectName: "mindmapQuickReminderMenu"
+            title: "Quick reminder"
+            MenuItem {
+                objectName: "mindmapQuickReminder10Minutes"
+                text: "10 minutes"
+                onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 10)
+            }
+            MenuItem {
+                objectName: "mindmapQuickReminder20Minutes"
+                text: "20 minutes"
+                onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 20)
+            }
+            MenuItem {
+                objectName: "mindmapQuickReminder1Hour"
+                text: "1 hour"
+                onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 60)
+            }
+            MenuItem {
+                objectName: "mindmapQuickReminder24Hours"
+                text: "24 hours"
+                onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 24 * 60)
+            }
+            MenuItem {
+                objectName: "mindmapQuickReminder2Days"
+                text: "2 days"
+                onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 2 * 24 * 60)
+            }
+            MenuItem {
+                objectName: "mindmapQuickReminder7Days"
+                text: "7 days"
+                onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 7 * 24 * 60)
+            }
         }
         MenuItem {
             objectName: "mindmapClearReminder"
