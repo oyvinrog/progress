@@ -6,6 +6,7 @@ import QtQuick.Layouts 1.15
 FocusScope {
     id: pane
     signal canvasRequested()
+    signal branchOpmlExportRequested(string nodeId)
     signal reminderRequested(string nodeId)
     signal quickReminderRequested(string nodeId, int minutesFromNow)
     signal clearReminderRequested(string nodeId)
@@ -276,6 +277,26 @@ FocusScope {
                             text: "Open tab"
                             enabled: pane.controller && pane.controller.selectedNode.isTab === true
                             onTriggered: pane.controller.activate(pane.controller.selectedId)
+                        }
+                    }
+                    Menu {
+                        objectName: "mindmapExportMenu"
+                        title: "Export branch"
+                        enabled: pane.controller && pane.controller.selectedId !== ""
+                        MenuItem {
+                            objectName: "mindmapSaveBranchOpml"
+                            text: "Save as OPML…"
+                            onTriggered: pane.branchOpmlExportRequested(pane.controller.selectedId)
+                        }
+                        MenuItem {
+                            objectName: "mindmapCopyBranchOpml"
+                            text: "Copy as OPML XML"
+                            onTriggered: { pane.controller.copyBranchAsOpml(pane.controller.selectedId); pane.focusMap() }
+                        }
+                        MenuItem {
+                            objectName: "mindmapCopyBranchText"
+                            text: "Copy as indented text"
+                            onTriggered: { pane.controller.copyBranchAsText(pane.controller.selectedId); pane.focusMap() }
                         }
                     }
                     MenuSeparator {}
@@ -876,6 +897,25 @@ FocusScope {
         MenuSeparator {}
         MenuItem { text: "Cut branches"; enabled: pane.controller && pane.controller.canCut; onTriggered: pane.controller.cutSelected() }
         MenuItem { objectName: "mindmapContextPaste"; text: "Paste beneath selected node"; enabled: pane.controller && (pane.controller.canPaste || pane.controller.canPasteClipboardText); onTriggered: pane.controller.pasteSelected() }
+        Menu {
+            objectName: "mindmapContextExportMenu"
+            title: "Export branch"
+            MenuItem {
+                objectName: "mindmapContextSaveBranchOpml"
+                text: "Save as OPML…"
+                onTriggered: pane.branchOpmlExportRequested(nodeMenu.targetNodeId)
+            }
+            MenuItem {
+                objectName: "mindmapContextCopyBranchOpml"
+                text: "Copy as OPML XML"
+                onTriggered: { pane.controller.copyBranchAsOpml(nodeMenu.targetNodeId); pane.focusMap() }
+            }
+            MenuItem {
+                objectName: "mindmapContextCopyBranchText"
+                text: "Copy as indented text"
+                onTriggered: { pane.controller.copyBranchAsText(nodeMenu.targetNodeId); pane.focusMap() }
+            }
+        }
         MenuSeparator {}
         MenuItem { text: "Add child"; onTriggered: pane.addThought(false) }
         MenuItem { text: "Add sibling"; onTriggered: pane.addThought(true) }

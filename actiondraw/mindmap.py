@@ -3,15 +3,22 @@ import copy
 import math
 import weakref
 from datetime import datetime
+from pathlib import Path
 from types import SimpleNamespace
 
-from PySide6.QtCore import QObject, Property, Signal, Slot
+from PySide6.QtCore import QObject, Property, QUrl, Signal, Slot
 from PySide6.QtGui import QFont, QFontMetricsF, QGuiApplication
 
 from ._vendor.pyplane.model import MindMap
 from ._vendor.pyplane.layout import assigned_sides, layout
 from ._vendor.pyplane.mm import dumps, loads
-from .outline_clipboard import looks_like_opml, parse_opml_text, parse_text_hierarchy
+from .outline_clipboard import (
+    looks_like_opml,
+    outline_to_indented_text,
+    outline_to_opml,
+    parse_opml_text,
+    parse_text_hierarchy,
+)
 
 
 class MindMapController(QObject):
@@ -567,6 +574,52 @@ class MindMapController(QObject):
         if looks_like_opml(text):
             return None
         return parse_text_hierarchy(text) or None
+
+    def _export_node(self, node_id):
+        node = self.map.find(node_id)
+        if node is None:
+            self.errorOccurred.emit('The branch to export no longer exists.')
+        return node
+
+    @Slot(str, result=bool)
+    def copyBranchAsOpml(self, node_id):
+        node = self._export_node(node_id)
+        clipboard = QGuiApplication.clipboard()
+        if node is None or clipboard is None:
+            return False
+        clipboard.setText(outline_to_opml(node, node.text or 'ActionDraw Branch'))
+        return True
+
+    @Slot(str, result=bool)
+    def copyBranchAsText(self, node_id):
+        node = self._export_node(node_id)
+        clipboard = QGuiApplication.clipboard()
+        if node is None or clipboard is None:
+            return False
+        clipboard.setText(outline_to_indented_text(node))
+        return True
+
+    @Slot(str, str, result=bool)
+    def saveBranchAsOpml(self, node_id, output_path):
+        node = self._export_node(node_id)
+        if node is None:
+            return False
+        path_value = str(output_path or '')
+        url = QUrl(path_value)
+        if url.isLocalFile() or path_value.startswith('file:'):
+            path_value = url.toLocalFile()
+        if not path_value:
+            self.errorOccurred.emit('No OPML export path was selected.')
+            return False
+        try:
+            Path(path_value).write_text(
+                outline_to_opml(node, node.text or 'ActionDraw Branch'),
+                encoding='utf-8',
+            )
+        except (OSError, ValueError) as exc:
+            self.errorOccurred.emit(f'Could not export OPML: {exc}')
+            return False
+        return True
 
     @Property(bool, notify=clipboardChanged)
     def canPasteClipboardText(self):

@@ -1264,6 +1264,7 @@ ApplicationWindow {
         diagramModel: diagramModelRef
         taskModel: taskModelRef
         projectManager: projectManagerRef
+        mindmapController: typeof mindmapController !== "undefined" ? mindmapController : null
         markdownNoteManager: markdownNoteManagerRef
         tabModel: tabModelRef
         diagramLayer: diagramLayer
@@ -1304,6 +1305,10 @@ ApplicationWindow {
             visible: root.mindmapOpen
             controller: typeof mindmapController !== "undefined" ? mindmapController : null
             reminderDialogOpen: dialogs.reminderDialog.visible || reminderPopup.visible
+                                || dialogs.branchOpmlExportDialog.visible
+            onBranchOpmlExportRequested: function(nodeId) {
+                dialogs.openBranchOpmlExport(nodeId)
+            }
             onReminderRequested: function(nodeId) {
                 var data = controller.reminderData(nodeId)
                 dialogs.openMindmapReminderDialog(nodeId, data.reminderAt, data.reminderSendNotification)

@@ -1,6 +1,14 @@
 """Tests for shared clipboard outline parsing."""
 
-from actiondraw.outline_clipboard import parse_opml_text, parse_text_hierarchy
+from types import SimpleNamespace
+import xml.etree.ElementTree as ET
+
+from actiondraw.outline_clipboard import (
+    outline_to_indented_text,
+    outline_to_opml,
+    parse_opml_text,
+    parse_text_hierarchy,
+)
 
 
 def test_parse_opml_nested_multiple_roots_and_title_fallback():
@@ -45,3 +53,24 @@ def test_parse_text_hierarchy_handles_single_lines_tabs_and_blanks():
         {"text": "Child", "level": 1},
         {"text": "Sibling", "level": 0},
     ]
+
+
+def test_outline_serializers_preserve_hierarchy_unicode_and_special_characters():
+    leaf = SimpleNamespace(text="", children=[])
+    child = SimpleNamespace(text="Barn & bøker <senere>", children=[leaf])
+    root = SimpleNamespace(text='Plan "høst"', children=[child])
+
+    opml_text = outline_to_opml(root, root.text)
+    document = ET.fromstring(opml_text)
+    assert document.get("version") == "2.0"
+    assert document.findtext("head/title") == 'Plan "høst"'
+    outlines = document.findall(".//outline")
+    assert [outline.get("text") for outline in outlines] == [
+        'Plan "høst"',
+        "Barn & bøker <senere>",
+        "",
+    ]
+    assert "&amp;" in opml_text and "&lt;senere&gt;" in opml_text
+    assert outline_to_indented_text(root) == (
+        'Plan "høst"\n  Barn & bøker <senere>\n    '
+    )

@@ -6,7 +6,7 @@ import time
 import uuid
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent, QMetaObject, QObject, QPoint, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QMetaObject, QObject, QPoint, Qt, QUrl
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtTest import QTest
 from PySide6.QtQml import QQmlProperty
@@ -31,6 +31,88 @@ def thought(controller, text='Secret thought', note='Secret note'):
     controller.addThought(False)
     controller.editSelected(text, note)
     return controller.selectedId
+
+
+def test_branch_export_clipboard_and_files_include_hidden_descendants(project, app, tmp_path):
+    m = project[0].mindmap
+    branch = m.map.root.add_child('Launch & learn')
+    child = branch.add_child('Skriv øvelse')
+    child.add_child('Leaf <done>')
+    branch.folded = True
+    m._priority_filter = 0.0
+    m.select(branch.id)
+    before = m.to_dict()
+    history = (len(m._undo), len(m._redo))
+
+    assert m.copyBranchAsText(branch.id)
+    assert QGuiApplication.clipboard().text() == (
+        'Launch & learn\n  Skriv øvelse\n    Leaf <done>'
+    )
+    assert m.copyBranchAsOpml(branch.id)
+    clipboard_opml = QGuiApplication.clipboard().text()
+    assert '&amp;' in clipboard_opml and '&lt;done&gt;' in clipboard_opml
+    assert [entry['text'] for entry in m._clipboard_outline()] == [
+        'Launch & learn', 'Skriv øvelse', 'Leaf <done>'
+    ]
+
+    plain_path = tmp_path / 'plain.opml'
+    url_path = tmp_path / 'url.opml'
+    assert m.saveBranchAsOpml(branch.id, str(plain_path))
+    assert m.saveBranchAsOpml(branch.id, QUrl.fromLocalFile(str(url_path)).toString())
+    assert plain_path.read_text(encoding='utf-8') == url_path.read_text(encoding='utf-8')
+    assert plain_path.read_bytes().decode('utf-8').startswith('<?xml version="1.0" encoding="UTF-8"?>')
+    assert m.to_dict() == before and (len(m._undo), len(m._redo)) == history
+
+
+def test_branch_export_reports_invalid_nodes_and_write_failures(project, tmp_path):
+    m = project[0].mindmap
+    errors = []
+    m.errorOccurred.connect(errors.append)
+
+    assert not m.copyBranchAsText('missing-node')
+    assert 'no longer exists' in errors[-1]
+    assert not m.saveBranchAsOpml(m.map.root.id, str(tmp_path / 'missing' / 'file.opml'))
+    assert errors[-1].startswith('Could not export OPML:')
+
+
+def test_qml_branch_export_actions_use_toolbar_and_context_targets(project, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    toolbar_branch = m.map.root.add_child('Toolbar branch')
+    toolbar_branch.add_child('Toolbar child')
+    context_branch = m.map.root.add_child('Context branch')
+    context_branch.add_child('Context child')
+    m.select(toolbar_branch.id)
+
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(100)
+
+    assert QMetaObject.invokeMethod(
+        window.findChild(QObject, 'mindmapCopyBranchText'), 'triggered'
+    )
+    assert QGuiApplication.clipboard().text() == 'Toolbar branch\n  Toolbar child'
+
+    node_menu = window.findChild(QObject, 'mindmapNodeMenu')
+    node_menu.setProperty('targetNodeId', context_branch.id)
+    assert QMetaObject.invokeMethod(
+        window.findChild(QObject, 'mindmapContextCopyBranchOpml'), 'triggered'
+    )
+    assert [entry['text'] for entry in m._clipboard_outline()] == [
+        'Context branch', 'Context child'
+    ]
+
+    export_dialog = window.findChild(QObject, 'branchOpmlExportDialog')
+    assert export_dialog.property('defaultSuffix') == 'opml'
+    assert QMetaObject.invokeMethod(
+        window.findChild(QObject, 'mindmapSaveBranchOpml'), 'triggered'
+    )
+    QTest.qWait(30)
+    assert export_dialog.property('visible')
+    QMetaObject.invokeMethod(export_dialog, 'reject')
+    window.close()
 
 
 def test_type_search_matches_cycles_and_reveals(project):

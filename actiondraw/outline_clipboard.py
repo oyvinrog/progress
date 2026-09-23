@@ -89,3 +89,33 @@ def parse_text_hierarchy(text: str) -> list[dict[str, Any]]:
                 level = len(indent_stack) - 1
         entries.append({"text": raw_line.lstrip(" \t").strip(), "level": level})
     return entries
+
+
+def outline_to_opml(root: Any, title: str = "ActionDraw Branch") -> str:
+    """Serialize a tree with ``text`` and ``children`` attributes as OPML."""
+    opml = ET.Element("opml", {"version": "2.0"})
+    head = ET.SubElement(opml, "head")
+    ET.SubElement(head, "title").text = title
+    body = ET.SubElement(opml, "body")
+
+    def append_outline(parent: ET.Element, node: Any) -> None:
+        outline = ET.SubElement(parent, "outline", {"text": str(node.text)})
+        for child in node.children:
+            append_outline(outline, child)
+
+    append_outline(body, root)
+    xml_text = ET.tostring(opml, encoding="unicode", short_empty_elements=False)
+    return f'<?xml version="1.0" encoding="UTF-8"?>{xml_text}'
+
+
+def outline_to_indented_text(root: Any, indent: str = "  ") -> str:
+    """Serialize a tree with ``text`` and ``children`` attributes as plain text."""
+    lines: list[str] = []
+
+    def append_line(node: Any, level: int) -> None:
+        lines.append(f"{indent * level}{node.text}")
+        for child in node.children:
+            append_line(child, level + 1)
+
+    append_line(root, 0)
+    return "\n".join(lines)
