@@ -33,6 +33,31 @@ def thought(controller, text='Secret thought', note='Secret note'):
     return controller.selectedId
 
 
+def test_mindmap_nodes_report_non_blank_notes_and_reserve_icon_space(project):
+    m = project[0].mindmap
+    root = m.map.root
+    m.select(root.id)
+
+    m.editSelected('A sufficiently long mindmap node title', '')
+    plain = next(node for node in m.nodes if node['id'] == root.id)
+    assert not plain['hasNote']
+
+    m.editSelected(root.text, '   \n\t')
+    whitespace = next(node for node in m.nodes if node['id'] == root.id)
+    assert not whitespace['hasNote']
+    assert whitespace['width'] == plain['width']
+
+    m.editSelected(root.text, 'A useful note')
+    noted = next(node for node in m.nodes if node['id'] == root.id)
+    assert noted['hasNote']
+    assert noted['width'] == plain['width'] + 20
+
+    m.editSelected(root.text, '')
+    cleared = next(node for node in m.nodes if node['id'] == root.id)
+    assert not cleared['hasNote']
+    assert cleared['width'] == plain['width']
+
+
 def test_branch_export_clipboard_and_files_include_hidden_descendants(project, app, tmp_path):
     m = project[0].mindmap
     branch = m.map.root.add_child('Launch & learn')
@@ -2081,6 +2106,8 @@ def test_qml_measure_progress_menu_and_badge(project, app):
     m.select(tab)
     child = thought(m, 'Progress child')
     m.select(tab)
+    m.editSelected(m.map.find(tab).text, 'Progress planning note')
+    m.toggleBookmark(tab)
     assert pm.setMindmapReminder(tab, reminder_date(), False)
     engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     warnings = []
@@ -2115,6 +2142,12 @@ def test_qml_measure_progress_menu_and_badge(project, app):
         assert badge.isVisible() and label.property('text') == 'Progress: 0%'
         node = find_item(window.contentItem(), 'mindmapNode_' + tab)
         title = find_item(node, 'mindmapNodeText_' + tab)
+        note_icon = find_item(node, 'mindmapNoteIcon_' + tab)
+        bookmark_icon = find_item(node, 'mindmapBookmarkIcon_' + tab)
+        assert note_icon.isVisible() and note_icon.property('text') == '\U0001f4dd'
+        assert bookmark_icon.isVisible()
+        assert note_icon.x() + note_icon.width() <= bookmark_icon.x()
+        assert bookmark_icon.x() + bookmark_icon.width() <= title.x()
         assert title.y() + title.height() <= badge.y()
         reminder = find_item(node, 'mindmapReminderBadge_' + tab)
         assert reminder.isVisible() and badge.y() + badge.height() <= reminder.y()
@@ -2133,6 +2166,20 @@ def test_qml_measure_progress_menu_and_badge(project, app):
         QMetaObject.invokeMethod(context_action, 'triggered')
         assert not m.measuresProgress(tab)
         assert not find_item(window.contentItem(), 'mindmapProgressBadge_' + tab).isVisible()
+
+        m.select(tab)
+        m.editSelected(m.map.find(tab).text, '  ')
+        QTest.qWait(30)
+        assert not find_item(window.contentItem(), 'mindmapNoteIcon_' + tab).isVisible()
+        m.editSelected(m.map.find(tab).text, 'Progress planning note')
+        QTest.qWait(30)
+        note_icon = find_item(window.contentItem(), 'mindmapNoteIcon_' + tab)
+        assert note_icon.isVisible()
+        click(note_icon)
+        editor = window.findChild(QObject, 'mindmapNodeEditor')
+        assert editor.property('visible') and m.selectedId == tab
+        assert window.findChild(QObject, 'mindmapNodeTitle').property('text') == m.map.find(tab).text
+        QTest.keyClick(window, Qt.Key_Escape)
         assert not warnings, warnings
     finally:
         window.close()

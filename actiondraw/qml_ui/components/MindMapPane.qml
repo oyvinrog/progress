@@ -489,9 +489,32 @@ FocusScope {
                                      && opacity > 0
                         }
                         Text {
+                            objectName: "mindmapNoteIcon_" + nodeItem.modelData.id
+                            visible: nodeItem.modelData.hasNote
+                            anchors.left: parent.left; anchors.leftMargin: 9
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
+                                                          - (nodeItem.modelData.measureProgress ? 12 : 0)
+                            text: "\uD83D\uDCDD"
+                            font.pixelSize: 15
+                            z: 2
+                            Accessible.role: Accessible.Button
+                            Accessible.name: "Edit note"
+                            MouseArea {
+                                anchors.fill: parent
+                                acceptedButtons: Qt.LeftButton
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    pane.controller.select(nodeItem.modelData.id)
+                                    pane.editNode()
+                                }
+                            }
+                        }
+                        Text {
                             objectName: "mindmapBookmarkIcon_" + nodeItem.modelData.id
                             visible: nodeItem.modelData.bookmarked
-                            anchors.left: parent.left; anchors.leftMargin: 9
+                            anchors.left: parent.left
+                            anchors.leftMargin: nodeItem.modelData.hasNote ? 29 : 9
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
                                                           - (nodeItem.modelData.measureProgress ? 12 : 0)
@@ -505,7 +528,8 @@ FocusScope {
                             anchors.fill: parent
                             anchors.bottomMargin: (nodeItem.modelData.reminderActive ? 24 : 0)
                                                   + (nodeItem.modelData.measureProgress ? 24 : 0)
-                            anchors.leftMargin: nodeItem.modelData.bookmarked ? 29 : 9
+                            anchors.leftMargin: 9 + (nodeItem.modelData.hasNote ? 20 : 0)
+                                                   + (nodeItem.modelData.bookmarked ? 20 : 0)
                             anchors.rightMargin: (nodeItem.modelData.priorityLevel > 0 ? 48 : 18)
                                                  + (nodeItem.modelData.priorityRank > 0 ? 30 : 0)
                             verticalAlignment: Text.AlignVCenter
