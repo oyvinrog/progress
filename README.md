@@ -110,6 +110,10 @@ tab while a cut is pending selects it as the destination. Cut selections are
 local to the current project. Deleting a project tab keeps its map node as a
 thought.
 
+With no cut pending, **Ctrl+V** adds clipboard text beneath the selected node.
+Plain text uses one node per non-empty line and indentation for nesting; OPML
+outlines retain their hierarchy.
+
 ## Mindmap shortcuts
 
 These shortcuts apply while the mindmap has focus, outside dialogs and menus.
@@ -125,7 +129,7 @@ These shortcuts apply while the mindmap has focus, outside dialogs and menus.
 | Toggle completion | F4 |
 | Move a node up / down | Ctrl + Up / Down |
 | Place a branch left / right | Ctrl + Left / Right |
-| Cut / paste branches | Ctrl + X / Ctrl + V |
+| Cut branches / paste branches or clipboard outlines | Ctrl + X / Ctrl + V |
 | Cancel a pending cut | Escape |
 | Undo / redo | Ctrl + Z / Ctrl + Y |
 | Return to the previous view | Alt + Left |

@@ -6,6 +6,7 @@ import uuid
 
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, QMetaObject, QObject, QPoint, Qt
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtTest import QTest
 from PySide6.QtQml import QQmlProperty
 
@@ -1547,6 +1548,83 @@ def test_multi_paste_rejects_cycles_without_partial_moves(project):
     assert m.selectedIds == [a.id] and m.canCut
 
 
+def test_clipboard_text_pastes_hierarchy_as_one_undoable_edit(project, app):
+    m = project[0].mindmap
+    target = m.map.root.add_child('Destination')
+    target.folded = True
+    other = m.map.root.add_child('Also selected')
+    m.reconcile()
+    m.select(other.id)
+    m.select(target.id, 'add')
+    before = m.to_dict()
+    QGuiApplication.clipboard().setText('Parent\n  Child\n\nSibling')
+
+    assert m.canPasteClipboardText
+    assert m.pasteSelected()
+    assert [node.text for node in target.children] == ['Parent', 'Sibling']
+    assert [node.text for node in target.children[0].children] == ['Child']
+    assert not target.folded
+    assert m.selectedIds == [target.children[0].id, target.children[1].id]
+    after = m.to_dict()
+
+    m.undo()
+    assert m.to_dict() == before
+    assert m.selectedId == target.id and set(m.selectedIds) == {target.id, other.id}
+    m.redo()
+    assert m.to_dict() == after
+
+
+def test_clipboard_opml_pastes_beneath_scoped_node_and_root_branches_go_right(project, app):
+    m = project[0].mindmap
+    tab_node_id, tab_id = next(iter(m.links.items()))
+    tab_node = m.map.find(tab_node_id)
+    m.set_scope(tab_id)
+    m.select(tab_node.id)
+    QGuiApplication.clipboard().setText(
+        '<?xml version="1.0"?><opml><body>'
+        '<outline text="One"><outline title="Child"/></outline>'
+        '<outline text="Two"/>'
+        '</body></opml>'
+    )
+
+    assert m.pasteSelected()
+    one, two = tab_node.children[-2:]
+    assert (one.text, two.text) == ('One', 'Two')
+    assert [node.text for node in one.children] == ['Child']
+    assert one.side == 'right' and two.side == 'right'
+
+
+def test_clipboard_malformed_opml_is_rejected_without_history(project, app):
+    m = project[0].mindmap
+    before = m.to_dict()
+    history = len(m._undo)
+    errors = []
+    m.errorOccurred.connect(errors.append)
+    QGuiApplication.clipboard().setText("<opml><body><outline text='Broken'></body>")
+
+    assert not m.canPasteClipboardText
+    assert not m.pasteSelected()
+    assert m.to_dict() == before and len(m._undo) == history
+    assert errors == ['Clipboard contains malformed or empty OPML.']
+
+
+def test_pending_cut_takes_precedence_over_clipboard_text(project, app):
+    m = project[0].mindmap
+    branch = m.map.root.add_child('Move me')
+    target = m.map.root.add_child('Destination')
+    m.reconcile()
+    m.select(branch.id)
+    m.cutSelected()
+    QGuiApplication.clipboard().setText('Do not import')
+    m.select(target.id)
+
+    assert m.canPaste and m.canPasteClipboardText
+    assert m.pasteSelected()
+    assert branch.parent is target
+    assert all(node.text != 'Do not import' for node in m.map.walk())
+    assert not m.canPaste
+
+
 def test_pending_cut_tracks_tab_changes_and_clears_on_scrub(project):
     pm, tabs, _, _ = project
     tabs.addTab('Delete this tab')
@@ -1666,6 +1744,47 @@ def test_qml_multi_selection_cut_and_paste(project, app):
         QTest.keyClick(window, Qt.Key_Escape)
         assert not m.canPaste
         assert not warnings, warnings
+    finally:
+        pm.scrubProjectData()
+        QTest.qWait(30)
+        window.close()
+        engine.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+
+def test_qml_ctrl_v_imports_clipboard_text_and_updates_paste_actions(project, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    clipboard = QGuiApplication.clipboard()
+    clipboard.clear()
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+
+    try:
+        pane = window.findChild(QObject, 'mindmapPane')
+        toolbar_paste = window.findChild(QObject, 'mindmapToolbarPaste')
+        context_paste = window.findChild(QObject, 'mindmapContextPaste')
+        assert pane is not None and toolbar_paste is not None and context_paste is not None
+        assert not toolbar_paste.property('enabled') and not context_paste.property('enabled')
+
+        clipboard.setText('Clipboard parent\n  Clipboard child')
+        QTest.qWait(30)
+        assert m.canPasteClipboardText
+        assert toolbar_paste.property('enabled') and context_paste.property('enabled')
+
+        pane.forceActiveFocus()
+        QTest.keyClick(window, Qt.Key_V, Qt.ControlModifier)
+        QTest.qWait(30)
+        parent = next(node for node in m.map.root.children if node.text == 'Clipboard parent')
+        assert [node.text for node in parent.children] == ['Clipboard child']
+
+        clipboard.clear()
+        QTest.qWait(30)
+        assert not m.canPasteClipboardText
+        assert not toolbar_paste.property('enabled') and not context_paste.property('enabled')
     finally:
         pm.scrubProjectData()
         QTest.qWait(30)

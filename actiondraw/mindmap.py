@@ -6,11 +6,12 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from PySide6.QtCore import QObject, Property, Signal, Slot
-from PySide6.QtGui import QFont, QFontMetricsF
+from PySide6.QtGui import QFont, QFontMetricsF, QGuiApplication
 
 from ._vendor.pyplane.model import MindMap
 from ._vendor.pyplane.layout import assigned_sides, layout
 from ._vendor.pyplane.mm import dumps, loads
+from .outline_clipboard import looks_like_opml, parse_opml_text, parse_text_hierarchy
 
 
 class MindMapController(QObject):
@@ -21,6 +22,7 @@ class MindMapController(QObject):
     tabActivated = Signal(str)
     revealNode = Signal(str)
     errorOccurred = Signal(str)
+    clipboardChanged = Signal()
 
     def __init__(self, tab_model=None, parent=None):
         super().__init__(parent)
@@ -44,6 +46,9 @@ class MindMapController(QObject):
         self._creating_tab = False
         self._changing_tabs = False
         self.exchange_tabs = None
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is not None:
+            clipboard.dataChanged.connect(self.clipboardChanged)
         if tab_model is not None:
             tab_model.tabsChanged.connect(self.reconcile)
             tab_model.priorityRanksChanged.connect(self.reconcile)
@@ -543,6 +548,30 @@ class MindMapController(QObject):
     def canPaste(self):
         return bool(self._cut_ids)
 
+    def _clipboard_text(self):
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is None:
+            return ''
+        mime_data = clipboard.mimeData()
+        if mime_data is None or not mime_data.hasText():
+            return ''
+        return mime_data.text() or ''
+
+    def _clipboard_outline(self):
+        text = self._clipboard_text()
+        if not text.strip():
+            return None
+        entries = parse_opml_text(text)
+        if entries is not None:
+            return entries
+        if looks_like_opml(text):
+            return None
+        return parse_text_hierarchy(text) or None
+
+    @Property(bool, notify=clipboardChanged)
+    def canPasteClipboardText(self):
+        return self._clipboard_outline() is not None
+
     @Property(bool, notify=changed)
     def canCreateTab(self):
         node = self.map.find(self._selected)
@@ -637,23 +666,61 @@ class MindMapController(QObject):
         self._cut_ids = []
         self.changed.emit()
 
-    @Slot()
+    @Slot(result=bool)
     def pasteSelected(self):
         target = self.map.find(self._selected)
-        roots = self._branch_roots(self._cut_ids)
-        if not self._in_scope(target) or not roots or self.view_root in roots:
-            return
-        if any(node is target or node in target.ancestors() for node in roots):
-            self.errorOccurred.emit('Choose a destination outside the cut branches.')
-            return
-        def mutate():
-            for node in roots:
-                node.move_to(target)
+        if self._cut_ids:
+            roots = self._branch_roots(self._cut_ids)
+            if not self._in_scope(target) or not roots or self.view_root in roots:
+                return False
+            if any(node is target or node in target.ancestors() for node in roots):
+                self.errorOccurred.emit('Choose a destination outside the cut branches.')
+                return False
+
+            def move_cut_branches():
+                for node in roots:
+                    node.move_to(target)
+                target.folded = False
+                self._set_selection([node.id for node in roots])
+
+            if self._commit(move_cut_branches):
+                self.cancelCut()
+                self.revealNode.emit(self._selected)
+                return True
+            return False
+
+        if not self._in_scope(target):
+            return False
+        text = self._clipboard_text()
+        entries = parse_opml_text(text)
+        if entries is None:
+            if looks_like_opml(text):
+                self.errorOccurred.emit('Clipboard contains malformed or empty OPML.')
+                return False
+            entries = parse_text_hierarchy(text)
+        if not entries:
+            return False
+
+        created_roots = []
+
+        def import_outline():
             target.folded = False
-            self._set_selection([node.id for node in roots])
-        if self._commit(mutate):
-            self.cancelCut()
-            self.revealNode.emit(self._selected)
+            parents = []
+            for entry in entries:
+                level = min(max(0, int(entry['level'])), len(parents))
+                del parents[level:]
+                parent = target if level == 0 else parents[level - 1]
+                side = 'right' if parent is self.view_root else None
+                node = parent.add_child(str(entry['text']).strip(), side=side)
+                parents.append(node)
+                if level == 0:
+                    created_roots.append(node)
+            self._set_selection([node.id for node in created_roots], created_roots[0].id)
+
+        if not self._commit(import_outline):
+            return False
+        self.revealNode.emit(created_roots[0].id)
+        return True
 
     @Slot(str)
     @Slot(str, bool)

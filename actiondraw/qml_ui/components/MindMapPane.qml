@@ -255,7 +255,7 @@ FocusScope {
                         title: "Edit"
                         MenuItem { text: "Toggle bold (Ctrl+B)"; onTriggered: pane.controller.toggleBold() }
                         MenuItem { text: "Cut"; enabled: pane.controller && pane.controller.canCut; onTriggered: pane.controller.cutSelected() }
-                        MenuItem { text: "Paste"; enabled: pane.controller && pane.controller.canPaste; onTriggered: pane.controller.pasteSelected() }
+                        MenuItem { objectName: "mindmapToolbarPaste"; text: "Paste"; enabled: pane.controller && (pane.controller.canPaste || pane.controller.canPasteClipboardText); onTriggered: pane.controller.pasteSelected() }
                         MenuSeparator {}
                         MenuItem { text: "Delete"; onTriggered: pane.controller.deleteSelected() }
                         MenuSeparator {}
@@ -840,7 +840,7 @@ FocusScope {
         }
         MenuSeparator {}
         MenuItem { text: "Cut branches"; enabled: pane.controller && pane.controller.canCut; onTriggered: pane.controller.cutSelected() }
-        MenuItem { text: "Paste beneath selected node"; enabled: pane.controller && pane.controller.canPaste; onTriggered: pane.controller.pasteSelected() }
+        MenuItem { objectName: "mindmapContextPaste"; text: "Paste beneath selected node"; enabled: pane.controller && (pane.controller.canPaste || pane.controller.canPasteClipboardText); onTriggered: pane.controller.pasteSelected() }
         MenuSeparator {}
         MenuItem { text: "Add child"; onTriggered: pane.addThought(false) }
         MenuItem { text: "Add sibling"; onTriggered: pane.addThought(true) }
