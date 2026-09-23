@@ -3,14 +3,22 @@ import copy
 import math
 import weakref
 from datetime import datetime
+from pathlib import Path
 from types import SimpleNamespace
 
-from PySide6.QtCore import QObject, Property, Signal, Slot
-from PySide6.QtGui import QFont, QFontMetricsF
+from PySide6.QtCore import QObject, Property, QUrl, Signal, Slot
+from PySide6.QtGui import QFont, QFontMetricsF, QGuiApplication
 
 from ._vendor.pyplane.model import MindMap
 from ._vendor.pyplane.layout import assigned_sides, layout
 from ._vendor.pyplane.mm import dumps, loads
+from .outline_clipboard import (
+    looks_like_opml,
+    outline_to_indented_text,
+    outline_to_opml,
+    parse_opml_text,
+    parse_text_hierarchy,
+)
 
 
 class MindMapController(QObject):
@@ -21,6 +29,7 @@ class MindMapController(QObject):
     tabActivated = Signal(str)
     revealNode = Signal(str)
     errorOccurred = Signal(str)
+    clipboardChanged = Signal()
 
     def __init__(self, tab_model=None, parent=None):
         super().__init__(parent)
@@ -44,6 +53,9 @@ class MindMapController(QObject):
         self._creating_tab = False
         self._changing_tabs = False
         self.exchange_tabs = None
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is not None:
+            clipboard.dataChanged.connect(self.clipboardChanged)
         if tab_model is not None:
             tab_model.tabsChanged.connect(self.reconcile)
             tab_model.priorityRanksChanged.connect(self.reconcile)
@@ -464,6 +476,8 @@ class MindMapController(QObject):
         sizes = {}
         for node in self.view_root.walk():
             padding = 74.0 if node.id in self._completed else 52.0
+            if node.note and node.note.strip():
+                padding += 20.0
             if node.id in self._bookmarks:
                 padding += 20.0
             if self.links.get(node.id) in priorities:
@@ -496,6 +510,7 @@ class MindMapController(QObject):
         priorities = self._priority_data()
         return [{'id': n.id, 'text': n.text, 'note': n.note or '', 'x': b.x, 'y': b.y,
                  'width': b.width, 'height': b.height, 'isTab': n.id in self.links,
+                 'hasNote': bool(n.note and n.note.strip()),
                  'folded': n.folded, 'hasChildren': bool(n.children), 'bold': bool(n.style.bold),
                  'isViewRoot': n is self.view_root, 'completed': n.id in self._completed,
                  'bookmarked': n.id in self._bookmarks,
@@ -542,6 +557,76 @@ class MindMapController(QObject):
     @Property(bool, notify=changed)
     def canPaste(self):
         return bool(self._cut_ids)
+
+    def _clipboard_text(self):
+        clipboard = QGuiApplication.clipboard()
+        if clipboard is None:
+            return ''
+        mime_data = clipboard.mimeData()
+        if mime_data is None or not mime_data.hasText():
+            return ''
+        return mime_data.text() or ''
+
+    def _clipboard_outline(self):
+        text = self._clipboard_text()
+        if not text.strip():
+            return None
+        entries = parse_opml_text(text)
+        if entries is not None:
+            return entries
+        if looks_like_opml(text):
+            return None
+        return parse_text_hierarchy(text) or None
+
+    def _export_node(self, node_id):
+        node = self.map.find(node_id)
+        if node is None:
+            self.errorOccurred.emit('The branch to export no longer exists.')
+        return node
+
+    @Slot(str, result=bool)
+    def copyBranchAsOpml(self, node_id):
+        node = self._export_node(node_id)
+        clipboard = QGuiApplication.clipboard()
+        if node is None or clipboard is None:
+            return False
+        clipboard.setText(outline_to_opml(node, node.text or 'ActionDraw Branch'))
+        return True
+
+    @Slot(str, result=bool)
+    def copyBranchAsText(self, node_id):
+        node = self._export_node(node_id)
+        clipboard = QGuiApplication.clipboard()
+        if node is None or clipboard is None:
+            return False
+        clipboard.setText(outline_to_indented_text(node))
+        return True
+
+    @Slot(str, str, result=bool)
+    def saveBranchAsOpml(self, node_id, output_path):
+        node = self._export_node(node_id)
+        if node is None:
+            return False
+        path_value = str(output_path or '')
+        url = QUrl(path_value)
+        if url.isLocalFile() or path_value.startswith('file:'):
+            path_value = url.toLocalFile()
+        if not path_value:
+            self.errorOccurred.emit('No OPML export path was selected.')
+            return False
+        try:
+            Path(path_value).write_text(
+                outline_to_opml(node, node.text or 'ActionDraw Branch'),
+                encoding='utf-8',
+            )
+        except (OSError, ValueError) as exc:
+            self.errorOccurred.emit(f'Could not export OPML: {exc}')
+            return False
+        return True
+
+    @Property(bool, notify=clipboardChanged)
+    def canPasteClipboardText(self):
+        return self._clipboard_outline() is not None
 
     @Property(bool, notify=changed)
     def canCreateTab(self):
@@ -637,23 +722,61 @@ class MindMapController(QObject):
         self._cut_ids = []
         self.changed.emit()
 
-    @Slot()
+    @Slot(result=bool)
     def pasteSelected(self):
         target = self.map.find(self._selected)
-        roots = self._branch_roots(self._cut_ids)
-        if not self._in_scope(target) or not roots or self.view_root in roots:
-            return
-        if any(node is target or node in target.ancestors() for node in roots):
-            self.errorOccurred.emit('Choose a destination outside the cut branches.')
-            return
-        def mutate():
-            for node in roots:
-                node.move_to(target)
+        if self._cut_ids:
+            roots = self._branch_roots(self._cut_ids)
+            if not self._in_scope(target) or not roots or self.view_root in roots:
+                return False
+            if any(node is target or node in target.ancestors() for node in roots):
+                self.errorOccurred.emit('Choose a destination outside the cut branches.')
+                return False
+
+            def move_cut_branches():
+                for node in roots:
+                    node.move_to(target)
+                target.folded = False
+                self._set_selection([node.id for node in roots])
+
+            if self._commit(move_cut_branches):
+                self.cancelCut()
+                self.revealNode.emit(self._selected)
+                return True
+            return False
+
+        if not self._in_scope(target):
+            return False
+        text = self._clipboard_text()
+        entries = parse_opml_text(text)
+        if entries is None:
+            if looks_like_opml(text):
+                self.errorOccurred.emit('Clipboard contains malformed or empty OPML.')
+                return False
+            entries = parse_text_hierarchy(text)
+        if not entries:
+            return False
+
+        created_roots = []
+
+        def import_outline():
             target.folded = False
-            self._set_selection([node.id for node in roots])
-        if self._commit(mutate):
-            self.cancelCut()
-            self.revealNode.emit(self._selected)
+            parents = []
+            for entry in entries:
+                level = min(max(0, int(entry['level'])), len(parents))
+                del parents[level:]
+                parent = target if level == 0 else parents[level - 1]
+                side = 'right' if parent is self.view_root else None
+                node = parent.add_child(str(entry['text']).strip(), side=side)
+                parents.append(node)
+                if level == 0:
+                    created_roots.append(node)
+            self._set_selection([node.id for node in created_roots], created_roots[0].id)
+
+        if not self._commit(import_outline):
+            return False
+        self.revealNode.emit(created_roots[0].id)
+        return True
 
     @Slot(str)
     @Slot(str, bool)

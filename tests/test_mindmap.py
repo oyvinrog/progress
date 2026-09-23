@@ -2,10 +2,12 @@
 import copy
 import json
 import math
+import time
 import uuid
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent, QMetaObject, QObject, QPoint, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QMetaObject, QObject, QPoint, Qt, QUrl
+from PySide6.QtGui import QGuiApplication
 from PySide6.QtTest import QTest
 from PySide6.QtQml import QQmlProperty
 
@@ -29,6 +31,113 @@ def thought(controller, text='Secret thought', note='Secret note'):
     controller.addThought(False)
     controller.editSelected(text, note)
     return controller.selectedId
+
+
+def test_mindmap_nodes_report_non_blank_notes_and_reserve_icon_space(project):
+    m = project[0].mindmap
+    root = m.map.root
+    m.select(root.id)
+
+    m.editSelected('A sufficiently long mindmap node title', '')
+    plain = next(node for node in m.nodes if node['id'] == root.id)
+    assert not plain['hasNote']
+
+    m.editSelected(root.text, '   \n\t')
+    whitespace = next(node for node in m.nodes if node['id'] == root.id)
+    assert not whitespace['hasNote']
+    assert whitespace['width'] == plain['width']
+
+    m.editSelected(root.text, 'A useful note')
+    noted = next(node for node in m.nodes if node['id'] == root.id)
+    assert noted['hasNote']
+    assert noted['width'] == plain['width'] + 20
+
+    m.editSelected(root.text, '')
+    cleared = next(node for node in m.nodes if node['id'] == root.id)
+    assert not cleared['hasNote']
+    assert cleared['width'] == plain['width']
+
+
+def test_branch_export_clipboard_and_files_include_hidden_descendants(project, app, tmp_path):
+    m = project[0].mindmap
+    branch = m.map.root.add_child('Launch & learn')
+    child = branch.add_child('Skriv øvelse')
+    child.add_child('Leaf <done>')
+    branch.folded = True
+    m._priority_filter = 0.0
+    m.select(branch.id)
+    before = m.to_dict()
+    history = (len(m._undo), len(m._redo))
+
+    assert m.copyBranchAsText(branch.id)
+    assert QGuiApplication.clipboard().text() == (
+        'Launch & learn\n  Skriv øvelse\n    Leaf <done>'
+    )
+    assert m.copyBranchAsOpml(branch.id)
+    clipboard_opml = QGuiApplication.clipboard().text()
+    assert '&amp;' in clipboard_opml and '&lt;done&gt;' in clipboard_opml
+    assert [entry['text'] for entry in m._clipboard_outline()] == [
+        'Launch & learn', 'Skriv øvelse', 'Leaf <done>'
+    ]
+
+    plain_path = tmp_path / 'plain.opml'
+    url_path = tmp_path / 'url.opml'
+    assert m.saveBranchAsOpml(branch.id, str(plain_path))
+    assert m.saveBranchAsOpml(branch.id, QUrl.fromLocalFile(str(url_path)).toString())
+    assert plain_path.read_text(encoding='utf-8') == url_path.read_text(encoding='utf-8')
+    assert plain_path.read_bytes().decode('utf-8').startswith('<?xml version="1.0" encoding="UTF-8"?>')
+    assert m.to_dict() == before and (len(m._undo), len(m._redo)) == history
+
+
+def test_branch_export_reports_invalid_nodes_and_write_failures(project, tmp_path):
+    m = project[0].mindmap
+    errors = []
+    m.errorOccurred.connect(errors.append)
+
+    assert not m.copyBranchAsText('missing-node')
+    assert 'no longer exists' in errors[-1]
+    assert not m.saveBranchAsOpml(m.map.root.id, str(tmp_path / 'missing' / 'file.opml'))
+    assert errors[-1].startswith('Could not export OPML:')
+
+
+def test_qml_branch_export_actions_use_toolbar_and_context_targets(project, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    toolbar_branch = m.map.root.add_child('Toolbar branch')
+    toolbar_branch.add_child('Toolbar child')
+    context_branch = m.map.root.add_child('Context branch')
+    context_branch.add_child('Context child')
+    m.select(toolbar_branch.id)
+
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(100)
+
+    assert QMetaObject.invokeMethod(
+        window.findChild(QObject, 'mindmapCopyBranchText'), 'triggered'
+    )
+    assert QGuiApplication.clipboard().text() == 'Toolbar branch\n  Toolbar child'
+
+    node_menu = window.findChild(QObject, 'mindmapNodeMenu')
+    node_menu.setProperty('targetNodeId', context_branch.id)
+    assert QMetaObject.invokeMethod(
+        window.findChild(QObject, 'mindmapContextCopyBranchOpml'), 'triggered'
+    )
+    assert [entry['text'] for entry in m._clipboard_outline()] == [
+        'Context branch', 'Context child'
+    ]
+
+    export_dialog = window.findChild(QObject, 'branchOpmlExportDialog')
+    assert export_dialog.property('defaultSuffix') == 'opml'
+    assert QMetaObject.invokeMethod(
+        window.findChild(QObject, 'mindmapSaveBranchOpml'), 'triggered'
+    )
+    QTest.qWait(30)
+    assert export_dialog.property('visible')
+    QMetaObject.invokeMethod(export_dialog, 'reject')
+    window.close()
 
 
 def test_type_search_matches_cycles_and_reveals(project):
@@ -1547,6 +1656,83 @@ def test_multi_paste_rejects_cycles_without_partial_moves(project):
     assert m.selectedIds == [a.id] and m.canCut
 
 
+def test_clipboard_text_pastes_hierarchy_as_one_undoable_edit(project, app):
+    m = project[0].mindmap
+    target = m.map.root.add_child('Destination')
+    target.folded = True
+    other = m.map.root.add_child('Also selected')
+    m.reconcile()
+    m.select(other.id)
+    m.select(target.id, 'add')
+    before = m.to_dict()
+    QGuiApplication.clipboard().setText('Parent\n  Child\n\nSibling')
+
+    assert m.canPasteClipboardText
+    assert m.pasteSelected()
+    assert [node.text for node in target.children] == ['Parent', 'Sibling']
+    assert [node.text for node in target.children[0].children] == ['Child']
+    assert not target.folded
+    assert m.selectedIds == [target.children[0].id, target.children[1].id]
+    after = m.to_dict()
+
+    m.undo()
+    assert m.to_dict() == before
+    assert m.selectedId == target.id and set(m.selectedIds) == {target.id, other.id}
+    m.redo()
+    assert m.to_dict() == after
+
+
+def test_clipboard_opml_pastes_beneath_scoped_node_and_root_branches_go_right(project, app):
+    m = project[0].mindmap
+    tab_node_id, tab_id = next(iter(m.links.items()))
+    tab_node = m.map.find(tab_node_id)
+    m.set_scope(tab_id)
+    m.select(tab_node.id)
+    QGuiApplication.clipboard().setText(
+        '<?xml version="1.0"?><opml><body>'
+        '<outline text="One"><outline title="Child"/></outline>'
+        '<outline text="Two"/>'
+        '</body></opml>'
+    )
+
+    assert m.pasteSelected()
+    one, two = tab_node.children[-2:]
+    assert (one.text, two.text) == ('One', 'Two')
+    assert [node.text for node in one.children] == ['Child']
+    assert one.side == 'right' and two.side == 'right'
+
+
+def test_clipboard_malformed_opml_is_rejected_without_history(project, app):
+    m = project[0].mindmap
+    before = m.to_dict()
+    history = len(m._undo)
+    errors = []
+    m.errorOccurred.connect(errors.append)
+    QGuiApplication.clipboard().setText("<opml><body><outline text='Broken'></body>")
+
+    assert not m.canPasteClipboardText
+    assert not m.pasteSelected()
+    assert m.to_dict() == before and len(m._undo) == history
+    assert errors == ['Clipboard contains malformed or empty OPML.']
+
+
+def test_pending_cut_takes_precedence_over_clipboard_text(project, app):
+    m = project[0].mindmap
+    branch = m.map.root.add_child('Move me')
+    target = m.map.root.add_child('Destination')
+    m.reconcile()
+    m.select(branch.id)
+    m.cutSelected()
+    QGuiApplication.clipboard().setText('Do not import')
+    m.select(target.id)
+
+    assert m.canPaste and m.canPasteClipboardText
+    assert m.pasteSelected()
+    assert branch.parent is target
+    assert all(node.text != 'Do not import' for node in m.map.walk())
+    assert not m.canPaste
+
+
 def test_pending_cut_tracks_tab_changes_and_clears_on_scrub(project):
     pm, tabs, _, _ = project
     tabs.addTab('Delete this tab')
@@ -1666,6 +1852,47 @@ def test_qml_multi_selection_cut_and_paste(project, app):
         QTest.keyClick(window, Qt.Key_Escape)
         assert not m.canPaste
         assert not warnings, warnings
+    finally:
+        pm.scrubProjectData()
+        QTest.qWait(30)
+        window.close()
+        engine.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+
+def test_qml_ctrl_v_imports_clipboard_text_and_updates_paste_actions(project, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    clipboard = QGuiApplication.clipboard()
+    clipboard.clear()
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+
+    try:
+        pane = window.findChild(QObject, 'mindmapPane')
+        toolbar_paste = window.findChild(QObject, 'mindmapToolbarPaste')
+        context_paste = window.findChild(QObject, 'mindmapContextPaste')
+        assert pane is not None and toolbar_paste is not None and context_paste is not None
+        assert not toolbar_paste.property('enabled') and not context_paste.property('enabled')
+
+        clipboard.setText('Clipboard parent\n  Clipboard child')
+        QTest.qWait(30)
+        assert m.canPasteClipboardText
+        assert toolbar_paste.property('enabled') and context_paste.property('enabled')
+
+        pane.forceActiveFocus()
+        QTest.keyClick(window, Qt.Key_V, Qt.ControlModifier)
+        QTest.qWait(30)
+        parent = next(node for node in m.map.root.children if node.text == 'Clipboard parent')
+        assert [node.text for node in parent.children] == ['Clipboard child']
+
+        clipboard.clear()
+        QTest.qWait(30)
+        assert not m.canPasteClipboardText
+        assert not toolbar_paste.property('enabled') and not context_paste.property('enabled')
     finally:
         pm.scrubProjectData()
         QTest.qWait(30)
@@ -1879,6 +2106,8 @@ def test_qml_measure_progress_menu_and_badge(project, app):
     m.select(tab)
     child = thought(m, 'Progress child')
     m.select(tab)
+    m.editSelected(m.map.find(tab).text, 'Progress planning note')
+    m.toggleBookmark(tab)
     assert pm.setMindmapReminder(tab, reminder_date(), False)
     engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     warnings = []
@@ -1913,6 +2142,12 @@ def test_qml_measure_progress_menu_and_badge(project, app):
         assert badge.isVisible() and label.property('text') == 'Progress: 0%'
         node = find_item(window.contentItem(), 'mindmapNode_' + tab)
         title = find_item(node, 'mindmapNodeText_' + tab)
+        note_icon = find_item(node, 'mindmapNoteIcon_' + tab)
+        bookmark_icon = find_item(node, 'mindmapBookmarkIcon_' + tab)
+        assert note_icon.isVisible() and note_icon.property('text') == '\U0001f4dd'
+        assert bookmark_icon.isVisible()
+        assert note_icon.x() + note_icon.width() <= bookmark_icon.x()
+        assert bookmark_icon.x() + bookmark_icon.width() <= title.x()
         assert title.y() + title.height() <= badge.y()
         reminder = find_item(node, 'mindmapReminderBadge_' + tab)
         assert reminder.isVisible() and badge.y() + badge.height() <= reminder.y()
@@ -1931,6 +2166,20 @@ def test_qml_measure_progress_menu_and_badge(project, app):
         QMetaObject.invokeMethod(context_action, 'triggered')
         assert not m.measuresProgress(tab)
         assert not find_item(window.contentItem(), 'mindmapProgressBadge_' + tab).isVisible()
+
+        m.select(tab)
+        m.editSelected(m.map.find(tab).text, '  ')
+        QTest.qWait(30)
+        assert not find_item(window.contentItem(), 'mindmapNoteIcon_' + tab).isVisible()
+        m.editSelected(m.map.find(tab).text, 'Progress planning note')
+        QTest.qWait(30)
+        note_icon = find_item(window.contentItem(), 'mindmapNoteIcon_' + tab)
+        assert note_icon.isVisible()
+        click(note_icon)
+        editor = window.findChild(QObject, 'mindmapNodeEditor')
+        assert editor.property('visible') and m.selectedId == tab
+        assert window.findChild(QObject, 'mindmapNodeTitle').property('text') == m.map.find(tab).text
+        QTest.keyClick(window, Qt.Key_Escape)
         assert not warnings, warnings
     finally:
         window.close()
@@ -2205,6 +2454,66 @@ def test_qml_node_reminder_controls_and_overview(project, app, tmp_path):
         m.select(next(iter(m.links)), 'toggle')
         QTest.qWait(30)
         assert not button.isEnabled()
+        assert not warnings
+    finally:
+        window.close()
+
+
+def test_qml_node_quick_reminder_offsets_and_notification_preservation(project, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    node_id = thought(m, 'Quick reminder thought')
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    warnings = []
+    engine.warnings.connect(lambda messages: warnings.extend(message.toString() for message in messages))
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+
+    def find(item, name):
+        if item.objectName() == name:
+            return item
+        for child in item.childItems():
+            found = find(child, name)
+            if found is not None:
+                return found
+
+    try:
+        node = find(window.contentItem(), 'mindmapNode_' + node_id)
+        point = node.mapToScene(node.boundingRect().center()).toPoint()
+        QTest.mouseClick(window, Qt.RightButton, Qt.NoModifier, point)
+        QTest.qWait(30)
+
+        menu = window.findChild(QObject, 'mindmapNodeMenu')
+        quick_menu = window.findChild(QObject, 'mindmapQuickReminderMenu')
+        assert menu.property('targetNodeId') == node_id
+        assert quick_menu.property('title') == 'Quick reminder'
+
+        actions = [
+            ('mindmapQuickReminder10Minutes', '10 minutes', 10),
+            ('mindmapQuickReminder20Minutes', '20 minutes', 20),
+            ('mindmapQuickReminder1Hour', '1 hour', 60),
+            ('mindmapQuickReminder24Hours', '24 hours', 24 * 60),
+            ('mindmapQuickReminder2Days', '2 days', 2 * 24 * 60),
+            ('mindmapQuickReminder7Days', '7 days', 7 * 24 * 60),
+        ]
+        for index, (object_name, label, minutes) in enumerate(actions):
+            action = window.findChild(QObject, object_name)
+            assert action.property('text') == label
+            if index == 1:
+                assert pm.setMindmapReminder(node_id, reminder_date(), True)
+            before = time.time()
+            QMetaObject.invokeMethod(action, 'triggered')
+            QTest.qWait(40)
+            seconds_until_due = m.reminders[node_id]['at'] - before
+            assert minutes * 60 - 61 <= seconds_until_due <= minutes * 60 + 5
+            assert m.reminderData(node_id)['reminderSendNotification'] is (index >= 1)
+
+        badge = find(window.contentItem(), 'mindmapReminderBadge_' + node_id)
+        assert badge.isVisible()
+        reminders = pm.getActiveReminders()
+        assert len(reminders) == 1 and reminders[0]['nodeId'] == node_id
         assert not warnings
     finally:
         window.close()

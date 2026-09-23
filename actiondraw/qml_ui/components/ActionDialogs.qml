@@ -9,6 +9,7 @@ Item {
     property var diagramModel: null
     property var taskModel: null
     property var projectManager: null
+    property var mindmapController: null
     property var markdownNoteManager: null
     property var tabModel: null
     property var diagramLayer: null
@@ -40,6 +41,7 @@ Item {
     property alias loadDialog: loadDialog
     property alias folderDialog: folderDialog
     property alias clipboardPasteDialog: clipboardPasteDialog
+    property alias branchOpmlExportDialog: branchOpmlExportDialog
     property alias goalsDialog: goalsDialog
     property alias assessmentDialog: assessmentDialog
     property bool anyDialogVisible: (
@@ -57,6 +59,7 @@ Item {
         || contractDialog.visible
         || edgeDropTaskDialog.visible
         || clipboardPasteDialog.visible
+        || branchOpmlExportDialog.visible
         || boxPdfDialog.visible
         || saveDialog.visible
         || loadDialog.visible
@@ -65,6 +68,13 @@ Item {
     )
 
     anchors.fill: parent
+
+    property string branchOpmlExportNodeId: ""
+
+    function openBranchOpmlExport(nodeId) {
+        branchOpmlExportNodeId = nodeId
+        branchOpmlExportDialog.open()
+    }
 
     function formatDateValue(dateObj) {
         return Qt.formatDateTime(dateObj, "yyyy-MM-dd")
@@ -2522,6 +2532,24 @@ Item {
             edgeDropTaskDialog.sourceType = "task"
             edgeDropTaskDialog.reverseDirection = false
         }
+    }
+
+    FileDialog {
+        id: branchOpmlExportDialog
+        objectName: "branchOpmlExportDialog"
+        title: "Export Branch as OPML"
+        fileMode: FileDialog.SaveFile
+        nameFilters: ["OPML files (*.opml)", "All files (*)"]
+        defaultSuffix: "opml"
+        onAccepted: {
+            if (dialogHost.mindmapController)
+                dialogHost.mindmapController.saveBranchAsOpml(
+                    dialogHost.branchOpmlExportNodeId,
+                    selectedFile
+                )
+            dialogHost.branchOpmlExportNodeId = ""
+        }
+        onRejected: dialogHost.branchOpmlExportNodeId = ""
     }
 
     FileDialog {

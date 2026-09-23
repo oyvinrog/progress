@@ -6,7 +6,9 @@ import QtQuick.Layouts 1.15
 FocusScope {
     id: pane
     signal canvasRequested()
+    signal branchOpmlExportRequested(string nodeId)
     signal reminderRequested(string nodeId)
+    signal quickReminderRequested(string nodeId, int minutesFromNow)
     signal clearReminderRequested(string nodeId)
     property bool reminderDialogOpen: false
     property var controller
@@ -255,7 +257,7 @@ FocusScope {
                         title: "Edit"
                         MenuItem { text: "Toggle bold (Ctrl+B)"; onTriggered: pane.controller.toggleBold() }
                         MenuItem { text: "Cut"; enabled: pane.controller && pane.controller.canCut; onTriggered: pane.controller.cutSelected() }
-                        MenuItem { text: "Paste"; enabled: pane.controller && pane.controller.canPaste; onTriggered: pane.controller.pasteSelected() }
+                        MenuItem { objectName: "mindmapToolbarPaste"; text: "Paste"; enabled: pane.controller && (pane.controller.canPaste || pane.controller.canPasteClipboardText); onTriggered: pane.controller.pasteSelected() }
                         MenuSeparator {}
                         MenuItem { text: "Delete"; onTriggered: pane.controller.deleteSelected() }
                         MenuSeparator {}
@@ -275,6 +277,26 @@ FocusScope {
                             text: "Open tab"
                             enabled: pane.controller && pane.controller.selectedNode.isTab === true
                             onTriggered: pane.controller.activate(pane.controller.selectedId)
+                        }
+                    }
+                    Menu {
+                        objectName: "mindmapExportMenu"
+                        title: "Export branch"
+                        enabled: pane.controller && pane.controller.selectedId !== ""
+                        MenuItem {
+                            objectName: "mindmapSaveBranchOpml"
+                            text: "Save as OPML…"
+                            onTriggered: pane.branchOpmlExportRequested(pane.controller.selectedId)
+                        }
+                        MenuItem {
+                            objectName: "mindmapCopyBranchOpml"
+                            text: "Copy as OPML XML"
+                            onTriggered: { pane.controller.copyBranchAsOpml(pane.controller.selectedId); pane.focusMap() }
+                        }
+                        MenuItem {
+                            objectName: "mindmapCopyBranchText"
+                            text: "Copy as indented text"
+                            onTriggered: { pane.controller.copyBranchAsText(pane.controller.selectedId); pane.focusMap() }
                         }
                     }
                     MenuSeparator {}
@@ -467,9 +489,32 @@ FocusScope {
                                      && opacity > 0
                         }
                         Text {
+                            objectName: "mindmapNoteIcon_" + nodeItem.modelData.id
+                            visible: nodeItem.modelData.hasNote
+                            anchors.left: parent.left; anchors.leftMargin: 9
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
+                                                          - (nodeItem.modelData.measureProgress ? 12 : 0)
+                            text: "\uD83D\uDCDD"
+                            font.pixelSize: 15
+                            z: 2
+                            Accessible.role: Accessible.Button
+                            Accessible.name: "Edit note"
+                            MouseArea {
+                                anchors.fill: parent
+                                acceptedButtons: Qt.LeftButton
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    pane.controller.select(nodeItem.modelData.id)
+                                    pane.editNode()
+                                }
+                            }
+                        }
+                        Text {
                             objectName: "mindmapBookmarkIcon_" + nodeItem.modelData.id
                             visible: nodeItem.modelData.bookmarked
-                            anchors.left: parent.left; anchors.leftMargin: 9
+                            anchors.left: parent.left
+                            anchors.leftMargin: nodeItem.modelData.hasNote ? 29 : 9
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
                                                           - (nodeItem.modelData.measureProgress ? 12 : 0)
@@ -483,7 +528,8 @@ FocusScope {
                             anchors.fill: parent
                             anchors.bottomMargin: (nodeItem.modelData.reminderActive ? 24 : 0)
                                                   + (nodeItem.modelData.measureProgress ? 24 : 0)
-                            anchors.leftMargin: nodeItem.modelData.bookmarked ? 29 : 9
+                            anchors.leftMargin: 9 + (nodeItem.modelData.hasNote ? 20 : 0)
+                                                   + (nodeItem.modelData.bookmarked ? 20 : 0)
                             anchors.rightMargin: (nodeItem.modelData.priorityLevel > 0 ? 48 : 18)
                                                  + (nodeItem.modelData.priorityRank > 0 ? 30 : 0)
                             verticalAlignment: Text.AlignVCenter
@@ -804,6 +850,40 @@ FocusScope {
             text: nodeMenu.reminderData.reminderActive ? "Update Reminder" : "Set Reminder"
             onTriggered: pane.reminderRequested(nodeMenu.targetNodeId)
         }
+        Menu {
+            objectName: "mindmapQuickReminderMenu"
+            title: "Quick reminder"
+            MenuItem {
+                objectName: "mindmapQuickReminder10Minutes"
+                text: "10 minutes"
+                onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 10)
+            }
+            MenuItem {
+                objectName: "mindmapQuickReminder20Minutes"
+                text: "20 minutes"
+                onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 20)
+            }
+            MenuItem {
+                objectName: "mindmapQuickReminder1Hour"
+                text: "1 hour"
+                onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 60)
+            }
+            MenuItem {
+                objectName: "mindmapQuickReminder24Hours"
+                text: "24 hours"
+                onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 24 * 60)
+            }
+            MenuItem {
+                objectName: "mindmapQuickReminder2Days"
+                text: "2 days"
+                onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 2 * 24 * 60)
+            }
+            MenuItem {
+                objectName: "mindmapQuickReminder7Days"
+                text: "7 days"
+                onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 7 * 24 * 60)
+            }
+        }
         MenuItem {
             objectName: "mindmapClearReminder"
             text: "Clear Reminder"
@@ -840,7 +920,26 @@ FocusScope {
         }
         MenuSeparator {}
         MenuItem { text: "Cut branches"; enabled: pane.controller && pane.controller.canCut; onTriggered: pane.controller.cutSelected() }
-        MenuItem { text: "Paste beneath selected node"; enabled: pane.controller && pane.controller.canPaste; onTriggered: pane.controller.pasteSelected() }
+        MenuItem { objectName: "mindmapContextPaste"; text: "Paste beneath selected node"; enabled: pane.controller && (pane.controller.canPaste || pane.controller.canPasteClipboardText); onTriggered: pane.controller.pasteSelected() }
+        Menu {
+            objectName: "mindmapContextExportMenu"
+            title: "Export branch"
+            MenuItem {
+                objectName: "mindmapContextSaveBranchOpml"
+                text: "Save as OPML…"
+                onTriggered: pane.branchOpmlExportRequested(nodeMenu.targetNodeId)
+            }
+            MenuItem {
+                objectName: "mindmapContextCopyBranchOpml"
+                text: "Copy as OPML XML"
+                onTriggered: { pane.controller.copyBranchAsOpml(nodeMenu.targetNodeId); pane.focusMap() }
+            }
+            MenuItem {
+                objectName: "mindmapContextCopyBranchText"
+                text: "Copy as indented text"
+                onTriggered: { pane.controller.copyBranchAsText(nodeMenu.targetNodeId); pane.focusMap() }
+            }
+        }
         MenuSeparator {}
         MenuItem { text: "Add child"; onTriggered: pane.addThought(false) }
         MenuItem { text: "Add sibling"; onTriggered: pane.addThought(true) }

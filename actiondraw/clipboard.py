@@ -16,6 +16,7 @@ from PySide6.QtQml import QJSValue
 
 from .constants import CLIPBOARD_MIME_TYPE
 from .markdown_note_tabs import normalize_editor_tabs
+from .outline_clipboard import parse_opml_text, parse_text_hierarchy
 from .types import DiagramEdge, DiagramItem, DiagramItemType
 
 if TYPE_CHECKING:
@@ -127,52 +128,8 @@ class ClipboardMixin:
             return ""
         return mime_data.text() or ""
 
-    @staticmethod
-    def _xml_local_name(tag: str) -> str:
-        if "}" in tag:
-            return tag.rsplit("}", 1)[-1]
-        return tag
-
     def _parse_opml_text(self, text: str) -> Optional[List[Dict[str, Any]]]:
-        if not text or "<opml" not in text.lower():
-            return None
-        try:
-            root = ET.fromstring(text)
-        except ET.ParseError:
-            return None
-
-        if self._xml_local_name(root.tag).lower() != "opml":
-            return None
-
-        body = None
-        for child in root:
-            if self._xml_local_name(child.tag).lower() == "body":
-                body = child
-                break
-        if body is None:
-            return None
-
-        entries: List[Dict[str, Any]] = []
-
-        def visit(outline: ET.Element, level: int) -> None:
-            text_value = outline.get("text")
-            if text_value is None:
-                text_value = outline.get("title")
-            if text_value is None:
-                text_value = (outline.text or "").strip()
-            if text_value.strip():
-                entries.append({"text": text_value, "level": level})
-
-            next_level = level + 1 if text_value.strip() else level
-            for child_outline in outline:
-                if self._xml_local_name(child_outline.tag).lower() == "outline":
-                    visit(child_outline, next_level)
-
-        for child in body:
-            if self._xml_local_name(child.tag).lower() == "outline":
-                visit(child, 0)
-
-        return entries or None
+        return parse_opml_text(text)
 
     def _read_clipboard_payload(self) -> Optional[Dict[str, Any]]:
         clipboard = QGuiApplication.clipboard()
@@ -289,34 +246,7 @@ class ClipboardMixin:
         return self._parse_opml_text(self._read_clipboard_text()) is not None
 
     def _parse_text_hierarchy(self, text: str) -> List[Dict[str, Any]]:
-        entries: List[Dict[str, Any]] = []
-        indent_stack: List[int] = []
-        for raw_line in text.splitlines():
-            if not raw_line.strip():
-                continue
-            leading = len(raw_line) - len(raw_line.lstrip(" \t"))
-            indent_text = raw_line[:leading].replace("\t", "    ")
-            indent_len = len(indent_text)
-            if not indent_stack:
-                indent_stack = [indent_len]
-                level = 0
-            else:
-                if indent_len > indent_stack[-1]:
-                    indent_stack.append(indent_len)
-                    level = len(indent_stack) - 1
-                else:
-                    while indent_stack and indent_len < indent_stack[-1]:
-                        indent_stack.pop()
-                    if not indent_stack:
-                        indent_stack = [indent_len]
-                        level = 0
-                    elif indent_len > indent_stack[-1]:
-                        indent_stack.append(indent_len)
-                        level = len(indent_stack) - 1
-                    else:
-                        level = len(indent_stack) - 1
-            entries.append({"text": raw_line.lstrip(" \t").strip(), "level": level})
-        return entries
+        return parse_text_hierarchy(text)
 
     @Slot(float, float, bool, result=bool)
     def pasteTextFromClipboard(self, x: float, y: float, as_tasks: bool) -> bool:
