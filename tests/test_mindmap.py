@@ -3162,6 +3162,13 @@ def test_mindmap_add_selected_to_plan_mixes_nodes_and_tabs_without_duplicates(pr
     assert next(option for option in m.planHourOptions if option['hour'] == 13)['count'] == 0
     assert next(option for option in m.planHourOptions if option['hour'] == 14)['label'] == '14:00 (2 tasks)'
 
+    assert m.addSelectedToReady()
+    ready = [item for item in pm.getKanbanItems() if item['kanbanStatus'] == 'ready']
+    assert {item['sourceType'] for item in ready} == {'node', 'tab'}
+    assert len(ready) == 2
+    assert m.planReadyLabel == 'Ready (2 tasks)'
+    assert next(option for option in m.planHourOptions if option['hour'] == 14)['count'] == 0
+
 
 def test_mindmap_plan_roundtrip_delete_cleanup_and_undo(project):
     _, tabs, _, _ = project
@@ -3216,6 +3223,8 @@ def test_add_to_plan_qml_exposes_live_hour_menu_and_mixed_board_api():
     assert 'title: "Add to plan"' in pane_qml
     assert 'pane.controller.planHourOptions' in pane_qml
     assert 'pane.controller.addSelectedToPlan(modelData.hour)' in pane_qml
+    assert 'pane.controller.planReadyLabel' in pane_qml
+    assert 'pane.controller.addSelectedToReady()' in pane_qml
     assert 'model: root.boardItems' in board_qml
     assert 'projectManagerRef.removeKanbanItem' in board_qml
     assert 'projectManagerRef.openKanbanItem' in board_qml
@@ -3241,3 +3250,15 @@ def test_open_kanban_node_reveals_full_mindmap_and_back_returns_to_board(project
 
     pm.goBack()
     assert reopened == [True]
+
+
+def test_qml_add_to_plan_ready_action_is_instantiated(project):
+    pm, tabs, tasks, diagram = project
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    try:
+        ready_action = window.findChild(QObject, 'mindmapAddToPlanReady')
+        assert ready_action is not None
+        assert ready_action.property('text') == 'Ready (0 tasks)'
+    finally:
+        window.close()

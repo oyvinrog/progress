@@ -127,6 +127,15 @@ class MindMapController(QObject):
         return next((index for index, tab in enumerate(self._tabs.getAllTabs())
                      if tab.id == tab_id), -1)
 
+    @Property(str, notify=planChanged)
+    def planReadyLabel(self):
+        count = 0
+        if self._tabs is not None:
+            count += sum(tab.kanban_status == 'ready' for tab in self._tabs.getAllTabs())
+        count += sum(placement['status'] == 'ready' for placement in self._kanban.values())
+        noun = 'task' if count == 1 else 'tasks'
+        return f"Ready ({count} {noun})"
+
     @Property('QVariantList', notify=planChanged)
     def planHourOptions(self):
         counts = {hour: 0 for hour in range(8, 18)}
@@ -142,9 +151,8 @@ class MindMapController(QObject):
                           f"{'task' if counts[hour] == 1 else 'tasks'})"}
                 for hour in range(8, 18)]
 
-    @Slot(int, result=bool)
-    def addSelectedToPlan(self, hour):
-        placement = self._normalize_kanban_placement('in_progress', hour)
+    def _add_selected_to_placement(self, status, slot_hour=-1):
+        placement = self._normalize_kanban_placement(status, slot_hour)
         if placement is None:
             return False
         changed = False
@@ -157,9 +165,10 @@ class MindMapController(QObject):
                 tab_index = self._tab_index(tab_id)
                 if tab_index >= 0:
                     tab = self._tabs.getAllTabs()[tab_index]
-                    changed = changed or (tab.kanban_status != 'in_progress'
+                    changed = changed or (tab.kanban_status != placement['status']
                                           or tab.kanban_slot_hour != placement['slot_hour'])
-                    self._tabs.setKanbanPlacement(tab_index, 'in_progress', placement['slot_hour'])
+                    self._tabs.setKanbanPlacement(
+                        tab_index, placement['status'], placement['slot_hour'])
                 continue
             if self._kanban.get(node_id) != placement:
                 self._kanban[node_id] = dict(placement)
@@ -168,6 +177,14 @@ class MindMapController(QObject):
             self.changed.emit()
             self.planChanged.emit()
         return changed
+
+    @Slot(int, result=bool)
+    def addSelectedToPlan(self, hour):
+        return self._add_selected_to_placement('in_progress', hour)
+
+    @Slot(result=bool)
+    def addSelectedToReady(self):
+        return self._add_selected_to_placement('ready', -1)
 
     @Slot(str, str, int, result=bool)
     def setNodeKanbanPlacement(self, node_id, status, slot_hour=-1):

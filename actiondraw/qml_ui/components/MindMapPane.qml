@@ -849,6 +849,15 @@ FocusScope {
             objectName: "mindmapAddToPlanMenu"
             title: "Add to plan"
             enabled: pane.controller && pane.controller.selectedIds.length > 0
+            MenuItem {
+                objectName: "mindmapAddToPlanReady"
+                text: pane.controller ? pane.controller.planReadyLabel : "Ready (0 tasks)"
+                onTriggered: {
+                    pane.controller.addSelectedToReady()
+                    pane.focusMap()
+                }
+            }
+            MenuSeparator {}
             Repeater {
                 model: pane.controller ? pane.controller.planHourOptions : []
                 delegate: MenuItem {
