@@ -101,6 +101,27 @@ def test_branch_export_reports_invalid_nodes_and_write_failures(project, tmp_pat
     assert errors[-1].startswith('Could not export OPML:')
 
 
+def test_copy_selected_exports_top_level_branches_for_paste(project, app):
+    m = project[0].mindmap
+    first = m.map.root.add_child('First')
+    first.add_child('First child')
+    second = m.map.root.add_child('Second')
+    nested = second.add_child('Nested selection')
+    m.select(first.id)
+    m.select(second.id, 'add')
+    m.select(nested.id, 'add')
+
+    assert m.copySelected()
+    assert QGuiApplication.clipboard().text() == (
+        'First\n  First child\nSecond\n  Nested selection'
+    )
+
+    m.select(m.map.root.id)
+    assert m.pasteSelected()
+    assert [node.text for node in m.map.root.children[-2:]] == ['First', 'Second']
+    assert [node.text for node in m.map.root.children[-1].children] == ['Nested selection']
+
+
 def test_qml_branch_export_actions_use_toolbar_and_context_targets(project, app):
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
@@ -1870,6 +1891,44 @@ def test_qml_multi_selection_cut_and_paste(project, app):
         QTest.keyClick(window, Qt.Key_Escape)
         assert not m.canPaste
         assert not warnings, warnings
+    finally:
+        pm.scrubProjectData()
+        QTest.qWait(30)
+        window.close()
+        engine.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+
+def test_qml_ctrl_c_then_ctrl_v_copies_selected_branch(project, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    source = m.map.root.add_child('Copied branch')
+    source.add_child('Copied child')
+    destination = m.map.root.add_child('Destination')
+    m.select(source.id)
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+
+    try:
+        pane = window.findChild(QObject, 'mindmapPane')
+        assert pane is not None
+        pane.forceActiveFocus()
+
+        QTest.keyClick(window, Qt.Key_C, Qt.ControlModifier)
+        QTest.qWait(30)
+        assert QGuiApplication.clipboard().text() == (
+            'Copied branch\n  Copied child'
+        )
+
+        m.select(destination.id)
+        QTest.keyClick(window, Qt.Key_V, Qt.ControlModifier)
+        QTest.qWait(30)
+        pasted = destination.children[-1]
+        assert pasted.text == 'Copied branch'
+        assert [node.text for node in pasted.children] == ['Copied child']
     finally:
         pm.scrubProjectData()
         QTest.qWait(30)

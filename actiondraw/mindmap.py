@@ -867,6 +867,19 @@ class MindMapController(QObject):
         self._cut_ids = [node.id for node in self._branch_roots(self._selected_ids)]
         self.changed.emit()
 
+    @Slot(result=bool)
+    def copySelected(self):
+        """Copy the selected top-level branches as pasteable indented text."""
+        roots = self._branch_roots(self._selected_ids)
+        clipboard = QGuiApplication.clipboard()
+        if not roots or clipboard is None:
+            return False
+        clipboard.setText('\n'.join(outline_to_indented_text(node) for node in roots))
+        if self._cut_ids:
+            self._cut_ids = []
+            self.changed.emit()
+        return True
+
     @Slot()
     def cancelCut(self):
         self._cut_ids = []
