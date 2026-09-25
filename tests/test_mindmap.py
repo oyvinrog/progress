@@ -211,6 +211,14 @@ def test_qml_type_search_keyboard_and_focus(project, app):
         for character in text:
             QTest.keyClick(window, character)
 
+    def find(item, name):
+        if item.objectName() == name:
+            return item
+        for child in item.childItems():
+            found = find(child, name)
+            if found is not None:
+                return found
+
     pane = window.findChild(QObject, 'mindmapPane')
     indicator = window.findChild(QObject, 'mindmapSearchIndicator')
     pane.setProperty('zoom', 1.2)
@@ -219,6 +227,11 @@ def test_qml_type_search_keyboard_and_focus(project, app):
     QTest.qWait(30)
     assert m.searchQuery == 'guest' and m.selectedId == first.id
     assert indicator.property('visible') and '1/2' in indicator.property('text')
+    first_highlight = find(window.contentItem(), 'mindmapSearchHighlight_' + first.id)
+    second_highlight = find(window.contentItem(), 'mindmapSearchHighlight_' + second.id)
+    assert first_highlight.isVisible() and not second_highlight.isVisible()
+    assert QQmlProperty.read(first_highlight, 'border.color').name() == '#ffbf47'
+    assert QQmlProperty.read(first_highlight, 'border.width') * pane.property('zoom') == pytest.approx(4)
     assert pane.property('zoom') == 1.2 and pane.property('panX') != -10000
     viewport = window.findChild(QObject, 'mindmapViewport')
     box = m._layout()[first]
@@ -229,8 +242,10 @@ def test_qml_type_search_keyboard_and_focus(project, app):
     assert not branch.folded
     QTest.keyClick(window, Qt.Key_Return)
     assert m.selectedId == second.id
+    assert not first_highlight.isVisible() and second_highlight.isVisible()
     QTest.keyClick(window, Qt.Key_Return, Qt.ShiftModifier)
     assert m.selectedId == first.id
+    assert first_highlight.isVisible() and not second_highlight.isVisible()
     QTest.keyClick(window, Qt.Key_Space)
     assert m.searchQuery == 'guest '
     QTest.keyClick(window, Qt.Key_Backspace)
@@ -239,9 +254,11 @@ def test_qml_type_search_keyboard_and_focus(project, app):
     type_text('zzz')
     assert 'No matches' in indicator.property('text')
     assert m.selectedId == first.id
+    assert not first_highlight.isVisible() and not second_highlight.isVisible()
     assert (pane.property('panX'), pane.property('panY')) == pan
     QTest.keyClick(window, Qt.Key_Escape)
     assert not m.searchQuery and not indicator.property('visible')
+    assert not first_highlight.isVisible() and not second_highlight.isVisible()
     m.cutSelected()
     type_text('guest')
     QTest.keyClick(window, Qt.Key_Escape)

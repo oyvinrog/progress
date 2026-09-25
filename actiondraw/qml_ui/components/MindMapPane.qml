@@ -473,6 +473,8 @@ FocusScope {
                         color: modelData.priorityLevel > 0 ? pane.priorityColor(modelData.priorityLevel)
                               : modelData.isTab ? "#254d6c" : "#223442"
                         readonly property bool selected: pane.controller.selectedIds.indexOf(modelData.id) >= 0
+                        readonly property bool currentSearchHit: pane.searching && selected
+                                                                      && pane.controller.searchMatchPosition > 0
                         opacity: pane.controller.cutNodeIds.indexOf(modelData.id) >= 0 ? 0.45 : 1
                         border.width: selected ? 2 : 1
                         border.color: selected ? "#a5d9ff" : "#557b98"
@@ -487,6 +489,16 @@ FocusScope {
                             opacity: pane.bookmarkHighlightOpacity
                             visible: nodeItem.selected && pane.bookmarkHighlightId === nodeItem.modelData.id
                                      && opacity > 0
+                        }
+                        Rectangle {
+                            objectName: "mindmapSearchHighlight_" + nodeItem.modelData.id
+                            anchors.fill: parent
+                            anchors.margins: -8 / pane.zoom
+                            radius: nodeItem.radius + 8 / pane.zoom
+                            color: "transparent"
+                            border.color: "#ffbf47"
+                            border.width: 4 / pane.zoom
+                            visible: nodeItem.currentSearchHit
                         }
                         Text {
                             objectName: "mindmapNoteIcon_" + nodeItem.modelData.id
