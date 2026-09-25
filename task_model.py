@@ -1527,6 +1527,11 @@ class TabModel(QAbstractListModel):
     def priorityTimeWeight(self):
         return self._priority_time_weight
 
+    @Property(bool, notify=priorityRanksChanged)
+    def hasIncludedPriorityTabs(self):
+        """Return whether the priority plot has any included tabs."""
+        return any(tab.include_in_priority_plot for tab in self._tabs)
+
     @Slot(float, float)
     def setPriorityWeights(self, value_weight, time_weight):
         weights = (normalize_priority_weight(value_weight), normalize_priority_weight(time_weight))
@@ -1605,7 +1610,7 @@ class TabModel(QAbstractListModel):
     @staticmethod
     def _normalizeKanbanStatus(status: str) -> str:
         normalized = str(status or "").strip().lower()
-        if normalized in {"todo", "ready", "in_progress", "done"}:
+        if normalized in {"unscheduled", "todo", "ready", "in_progress", "done"}:
             return normalized
         return "todo"
 
@@ -2132,6 +2137,26 @@ class TabModel(QAbstractListModel):
         tab.priority_subjective_value = clamp_subjective_value(subjective_value)
         self.recomputeAndSortPriorities()
 
+    @Slot()
+    def deflatePriorityValues(self) -> None:
+        """Spread included subjective values over 2–8 and leave excluded tabs alone."""
+        included_tabs = [tab for tab in self._tabs if tab.include_in_priority_plot]
+        if not included_tabs:
+            return
+
+        values = [tab.priority_subjective_value for tab in included_tabs]
+        minimum = min(values)
+        maximum = max(values)
+        if math.isclose(minimum, maximum, rel_tol=0.0, abs_tol=1e-12):
+            for tab in included_tabs:
+                tab.priority_subjective_value = 5.0
+        else:
+            scale = 6.0 / (maximum - minimum)
+            for tab in included_tabs:
+                tab.priority_subjective_value = 2.0 + (tab.priority_subjective_value - minimum) * scale
+
+        self.recomputeAndSortPriorities()
+
     @Slot(int, bool)
     def setIncludeInPriorityPlot(self, index: int, include: bool) -> None:
         """Include or exclude a tab from priority-plot scoring and plotting."""
@@ -2381,6 +2406,7 @@ class ProjectManager(QObject):
     tabSwitched = Signal()  # Emitted when switching to a different tab
     mindmapVisibleChanged = Signal()
     kanbanBoardRequested = Signal()
+    kanbanChanged = Signal()
     taskDrillRequested = Signal(int, arguments=["taskIndex"])
     taskReminderDue = Signal(int, int, str, bool, arguments=["tabIndex", "taskIndex", "taskTitle", "sendNotification"])
     mindmapReminderDue = Signal(str, str, bool, arguments=["nodeId", "title", "sendNotification"])
@@ -2449,6 +2475,7 @@ class ProjectManager(QObject):
         self.mindmap.exchange_tabs = self._exchangeMindmapTabs
         self.mindmap.tabActivated.connect(self.openMindmapTab)
         self.mindmap.errorOccurred.connect(self.errorOccurred)
+        self.mindmap.planChanged.connect(self.kanbanChanged)
         self._last_saved_snapshot = self._serialize_project_payload(self._build_project_data())
 
     def scrubProjectData(self) -> None:
@@ -4182,6 +4209,131 @@ class ProjectManager(QObject):
                 self.switchTab(tab_index)
         self.showTabCanvas()
         self.drillToTask(task_index)
+
+    def _kanbanTabIndex(self, tab_id: str) -> int:
+        if self._tab_model is None:
+            return -1
+        return next((index for index, tab in enumerate(self._tab_model.getAllTabs())
+                     if tab.id == tab_id), -1)
+
+    @Slot(result='QVariantList')
+    def getKanbanItems(self) -> List[Dict[str, Any]]:
+        """Return one board card per scheduled tab or mindmap node."""
+        items: List[Dict[str, Any]] = []
+        if self._tab_model is not None:
+            for index, tab in enumerate(self._tab_model.getAllTabs()):
+                if tab.kanban_status == 'unscheduled':
+                    continue
+                items.append({
+                    'itemId': 'tab:' + tab.id,
+                    'sourceType': 'tab',
+                    'sourceId': tab.id,
+                    'tabIndex': index,
+                    'name': tab.name,
+                    'sourceLabel': 'Tab',
+                    'icon': tab.icon or '▣',
+                    'color': tab.color or '#4aa3ff',
+                    'completionPercent': self._tab_model._calculateTabCompletion(tab),
+                    'activeTaskTitle': self._tab_model._getActiveTaskTitle(tab),
+                    'kanbanStatus': tab.kanban_status,
+                    'kanbanSlotHour': tab.kanban_slot_hour,
+                })
+        items.extend(self.mindmap.plannedNodeItems())
+        return items
+
+    @Slot(str, str, int, result=bool)
+    def setKanbanItemPlacement(self, item_id: str, status: str, slot_hour: int = -1) -> bool:
+        if item_id.startswith('tab:'):
+            index = self._kanbanTabIndex(item_id[4:])
+            return bool(self._tab_model is not None
+                        and self._tab_model.setKanbanPlacement(index, status, slot_hour))
+        if item_id.startswith('node:'):
+            return self.mindmap.setNodeKanbanPlacement(item_id[5:], status, slot_hour)
+        return False
+
+    @Slot(str, result=bool)
+    def removeKanbanItem(self, item_id: str) -> bool:
+        """Unschedule a card without deleting its source object."""
+        if item_id.startswith('tab:'):
+            index = self._kanbanTabIndex(item_id[4:])
+            return bool(self._tab_model is not None
+                        and self._tab_model.setKanbanPlacement(index, 'unscheduled', -1))
+        if item_id.startswith('node:'):
+            return self.mindmap.removeNodeFromPlan(item_id[5:])
+        return False
+
+    def _matchingKanbanItems(self, status: str, slot_hour: int = -1):
+        requested_slot = int(slot_hour)
+        for item in self.getKanbanItems():
+            if item['kanbanStatus'] != status:
+                continue
+            if status == 'in_progress' and requested_slot != -1:
+                if item['kanbanSlotHour'] != requested_slot:
+                    continue
+            yield item
+
+    @Slot(int, result=bool)
+    def postponeKanbanItems(self, start_hour: int) -> bool:
+        try:
+            start = int(start_hour)
+        except (TypeError, ValueError):
+            return False
+        if not 8 <= start <= 17:
+            return False
+        changed = False
+        for item in list(self.getKanbanItems()):
+            hour = item['kanbanSlotHour']
+            if item['kanbanStatus'] != 'in_progress' or hour < start or hour >= 17:
+                continue
+            changed = self.setKanbanItemPlacement(
+                item['itemId'], 'in_progress', hour + 1) or changed
+        return changed
+
+    @Slot(str, int, result=bool)
+    def clearKanbanItems(self, status: str, slot_hour: int = -1) -> bool:
+        normalized = TabModel._normalizeKanbanStatus(status)
+        if normalized in {'todo', 'unscheduled'}:
+            return False
+        changed = False
+        for item in list(self._matchingKanbanItems(normalized, slot_hour)):
+            changed = self.setKanbanItemPlacement(item['itemId'], 'todo', -1) or changed
+        return changed
+
+    @Slot(str, int, result=bool)
+    def moveKanbanItemsBack(self, status: str, slot_hour: int = -1) -> bool:
+        normalized = TabModel._normalizeKanbanStatus(status)
+        targets = {
+            'ready': ('todo', -1),
+            'in_progress': ('ready', -1),
+            'done': ('in_progress', 17),
+        }
+        if normalized not in targets:
+            return False
+        target_status, target_slot = targets[normalized]
+        changed = False
+        for item in list(self._matchingKanbanItems(normalized, slot_hour)):
+            changed = self.setKanbanItemPlacement(
+                item['itemId'], target_status, target_slot) or changed
+        return changed
+
+    @Slot(str)
+    def openKanbanItem(self, item_id: str) -> None:
+        if item_id.startswith('tab:'):
+            index = self._kanbanTabIndex(item_id[4:])
+            self.openKanbanTab(index)
+            return
+        if not item_id.startswith('node:'):
+            return
+        node_id = item_id[5:]
+        if self.mindmap.map.find(node_id) is None:
+            return
+        current_index = self._tab_model.currentTabIndex if self._tab_model is not None else 0
+        self._pushNavigationSnapshot(NavigationSnapshot(
+            tab_index=current_index, view_kind='kanban'))
+        self._saveCurrentTabState()
+        self.mindmap.set_scope()
+        self._setMindmapVisible(True)
+        self.mindmap.reveal_reminder(node_id)
 
     @Slot(int)
     def openKanbanTab(self, tab_index: int) -> None:

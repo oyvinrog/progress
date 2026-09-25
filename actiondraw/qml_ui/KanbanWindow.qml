@@ -16,14 +16,13 @@ Window {
     property var projectManager: null
     property var projectManagerRef: projectManager
     property var slotHours: [8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
+    property var boardItems: []
     property string createStatus: "todo"
     property int createSlotHour: -1
     property string todoSearchText: ""
-    property int pendingDeleteTabIndex: -1
-    property string pendingDeleteTabName: ""
     property var dropZones: []
     property bool dragActive: false
-    property int dragTabIndex: -1
+    property string dragItemId: ""
     property string dragTabName: ""
     property string dragTabIcon: ""
     property real dragSceneX: 0
@@ -31,20 +30,36 @@ Window {
     property int kanbanSlotMinHeight: 154
     property int kanbanCardMinHeight: 70
     property int kanbanCardWithActiveMinHeight: 94
-    property int kanbanCardEstimatedHeight: 104
+    property int kanbanCardEstimatedHeight: 112
     property int kanbanSectionChromeHeight: 58
     property int kanbanCardSpacing: 8
     property int kanbanLayoutRevision: 0
 
-    function modelCount() {
-        if (!tabModelRef)
-            return 0
-        if (tabModelRef.rowCount)
-            return tabModelRef.rowCount()
-        if (tabModelRef.count !== undefined)
-            return Number(tabModelRef.count)
-        return 0
+    function refreshBoardItems() {
+        if (projectManagerRef && projectManagerRef.getKanbanItems) {
+            boardItems = projectManagerRef.getKanbanItems()
+        } else {
+            var fallback = []
+            var count = tabModelRef && tabModelRef.rowCount ? tabModelRef.rowCount() : 0
+            for (var i = 0; i < count; ++i) {
+                var summary = tabModelRef.getTabSummary(i)
+                if (summary.kanbanStatus === "unscheduled")
+                    continue
+                fallback.push({ itemId: "tab:" + summary.id, sourceType: "tab",
+                                sourceId: summary.id, tabIndex: i, name: summary.name,
+                                sourceLabel: "Tab", icon: summary.icon || "▣",
+                                color: summary.color || "#4aa3ff",
+                                completionPercent: summary.completionPercent || 0,
+                                activeTaskTitle: summary.activeTaskTitle || "",
+                                kanbanStatus: summary.kanbanStatus,
+                                kanbanSlotHour: summary.kanbanSlotHour })
+            }
+            boardItems = fallback
+        }
+        kanbanLayoutRevision += 1
     }
+
+    function modelCount() { return boardItems.length }
 
     function slotLabel(hour) {
         var start = Number(hour)
@@ -62,37 +77,29 @@ Window {
         return status === "in_progress" && slot === Number(targetSlotHour)
     }
 
-    function todoSearchMatches(cardName) {
+    function todoSearchMatches(cardName, sourceLabel) {
         var query = todoSearchText.trim().toLowerCase()
         if (query.length === 0)
             return true
-        return String(cardName || "").toLowerCase().indexOf(query) >= 0
+        return (String(cardName || "") + " " + String(sourceLabel || ""))
+            .toLowerCase().indexOf(query) >= 0
     }
 
-    function cardMatchesSection(cardStatus, cardSlotHour, cardName, targetStatus, targetSlotHour) {
+    function cardMatchesSection(cardStatus, cardSlotHour, cardName, sourceLabel,
+                                targetStatus, targetSlotHour) {
         if (!placementMatches(cardStatus, cardSlotHour, targetStatus, targetSlotHour))
             return false
-        if (targetStatus !== "todo")
-            return true
-        return todoSearchMatches(cardName)
+        return targetStatus !== "todo" || todoSearchMatches(cardName, sourceLabel)
     }
 
     function sectionCardCount(targetStatus, targetSlotHour) {
-        if (!tabModelRef || !tabModelRef.getTabSummary)
-            return 0
         var count = 0
-        for (var i = 0; i < modelCount(); ++i) {
-            var summary = tabModelRef.getTabSummary(i)
-            if (summary
-                    && cardMatchesSection(
-                        summary.kanbanStatus,
-                        summary.kanbanSlotHour,
-                        summary.name,
-                        targetStatus,
-                        targetSlotHour
-                    )) {
+        for (var i = 0; i < boardItems.length; ++i) {
+            var item = boardItems[i]
+            if (cardMatchesSection(item.kanbanStatus, item.kanbanSlotHour,
+                                   item.name, item.sourceLabel,
+                                   targetStatus, targetSlotHour))
                 count += 1
-            }
         }
         return count
     }
@@ -102,68 +109,65 @@ Window {
         var count = sectionCardCount("in_progress", slotHour)
         if (count <= 1)
             return kanbanSlotMinHeight
-        return Math.max(
-            kanbanSlotMinHeight,
-            kanbanSectionChromeHeight
-                + count * kanbanCardEstimatedHeight
-                + Math.max(0, count - 1) * kanbanCardSpacing
-        )
+        return Math.max(kanbanSlotMinHeight,
+                        kanbanSectionChromeHeight + count * kanbanCardEstimatedHeight
+                        + Math.max(0, count - 1) * kanbanCardSpacing)
     }
 
     function inProgressCardCount() {
         var revision = kanbanLayoutRevision
-        if (!tabModelRef || !tabModelRef.getTabSummary)
-            return 0
         var count = 0
-        for (var i = 0; i < modelCount(); ++i) {
-            var summary = tabModelRef.getTabSummary(i)
-            if (summary && summary.kanbanStatus === "in_progress")
+        for (var i = 0; i < boardItems.length; ++i) {
+            if (boardItems[i].kanbanStatus === "in_progress")
                 count += 1
         }
         return count
     }
 
     function todoSearchHasMatches() {
-        var query = todoSearchText.trim()
-        if (query.length === 0 || !tabModelRef || !tabModelRef.getTabSummary)
+        if (todoSearchText.trim().length === 0)
             return true
-        for (var i = 0; i < modelCount(); ++i) {
-            var summary = tabModelRef.getTabSummary(i)
-            if (summary
-                    && placementMatches(summary.kanbanStatus, summary.kanbanSlotHour, "todo", -1)
-                    && todoSearchMatches(summary.name)) {
+        for (var i = 0; i < boardItems.length; ++i) {
+            var item = boardItems[i]
+            if (placementMatches(item.kanbanStatus, item.kanbanSlotHour, "todo", -1)
+                    && todoSearchMatches(item.name, item.sourceLabel))
                 return true
-            }
         }
         return false
     }
 
-    function setPlacement(tabIndex, status, slotHour) {
-        if (!tabModelRef || !tabModelRef.setKanbanPlacement)
+    function setPlacement(itemId, status, slotHour) {
+        if (projectManagerRef && projectManagerRef.setKanbanItemPlacement) {
+            projectManagerRef.setKanbanItemPlacement(String(itemId), status, Number(slotHour))
             return
-        tabModelRef.setKanbanPlacement(Number(tabIndex), status, Number(slotHour))
-        kanbanLayoutRevision += 1
+        }
+        for (var i = 0; i < boardItems.length; ++i) {
+            if (boardItems[i].itemId === itemId && tabModelRef) {
+                tabModelRef.setKanbanPlacement(boardItems[i].tabIndex, status, Number(slotHour))
+                return
+            }
+        }
     }
 
     function postponeInProgressFromSlot(startHour) {
-        if (!tabModelRef || !tabModelRef.postponeInProgressFromSlot)
-            return
-        if (tabModelRef.postponeInProgressFromSlot(Number(startHour)))
-            kanbanLayoutRevision += 1
+        if (projectManagerRef && projectManagerRef.postponeKanbanItems)
+            projectManagerRef.postponeKanbanItems(Number(startHour))
+        else if (tabModelRef)
+            tabModelRef.postponeInProgressFromSlot(Number(startHour))
     }
 
     function clearKanbanLane(status, slotHour) {
-        if (!tabModelRef || !tabModelRef.clearKanbanLane)
-            return
-        if (tabModelRef.clearKanbanLane(status, Number(slotHour)))
-            kanbanLayoutRevision += 1
+        if (projectManagerRef && projectManagerRef.clearKanbanItems)
+            projectManagerRef.clearKanbanItems(status, Number(slotHour))
+        else if (tabModelRef)
+            tabModelRef.clearKanbanLane(status, Number(slotHour))
     }
 
     function moveKanbanLaneBack(status, slotHour) {
-        if (!tabModelRef || !tabModelRef.moveKanbanLaneBack)
-            return
-        if (tabModelRef.moveKanbanLaneBack(status, Number(slotHour)))
-            kanbanLayoutRevision += 1
+        if (projectManagerRef && projectManagerRef.moveKanbanItemsBack)
+            projectManagerRef.moveKanbanItemsBack(status, Number(slotHour))
+        else if (tabModelRef)
+            tabModelRef.moveKanbanLaneBack(status, Number(slotHour))
     }
 
     function registerDropZone(zone) {
@@ -183,7 +187,7 @@ Window {
         dropZones = nextZones
     }
 
-    function dropTabAt(tabIndex, sceneX, sceneY) {
+    function dropItemAt(itemId, sceneX, sceneY) {
         for (var i = dropZones.length - 1; i >= 0; --i) {
             var zone = dropZones[i]
             if (!zone || !zone.visible)
@@ -191,22 +195,20 @@ Window {
             var local = zone.mapFromItem(null, sceneX, sceneY)
             if (local.x < 0 || local.y < 0 || local.x > zone.width || local.y > zone.height)
                 continue
-            setPlacement(tabIndex, zone.targetStatus, zone.targetSlotHour)
+            setPlacement(itemId, zone.targetStatus, zone.targetSlotHour)
             return true
         }
         return false
     }
 
     function cardScenePoint(card, localX, localY) {
-        if (!card)
-            return Qt.point(0, 0)
-        return card.mapToItem(null, localX, localY)
+        return card ? card.mapToItem(null, localX, localY) : Qt.point(0, 0)
     }
 
-    function beginCardDrag(card, tabIndex, tabName, tabIcon, localX, localY) {
+    function beginCardDrag(card, itemId, tabName, tabIcon, localX, localY) {
         var scene = cardScenePoint(card, localX, localY)
         dragActive = true
-        dragTabIndex = Number(tabIndex)
+        dragItemId = String(itemId)
         dragTabName = String(tabName || "")
         dragTabIcon = String(tabIcon || "")
         dragSceneX = scene.x
@@ -222,24 +224,32 @@ Window {
     }
 
     function endCardDrag() {
-        if (dragActive && dragTabIndex >= 0)
-            dropTabAt(dragTabIndex, dragSceneX, dragSceneY)
+        if (dragActive && dragItemId.length > 0)
+            dropItemAt(dragItemId, dragSceneX, dragSceneY)
         dragActive = false
-        dragTabIndex = -1
+        dragItemId = ""
         dragTabName = ""
         dragTabIcon = ""
     }
 
-    function openTab(tabIndex) {
-        if (tabIndex < 0 || tabIndex >= root.modelCount())
-            return
-        if (projectManagerRef && projectManagerRef.openKanbanTab)
-            projectManagerRef.openKanbanTab(tabIndex)
-        else if (projectManagerRef && projectManagerRef.switchTab)
-            projectManagerRef.switchTab(tabIndex)
-        else if (tabModelRef && tabModelRef.setCurrentTab)
-            tabModelRef.setCurrentTab(tabIndex)
+    function openItem(itemId) {
+        if (projectManagerRef && projectManagerRef.openKanbanItem)
+            projectManagerRef.openKanbanItem(String(itemId))
+        else if (tabModelRef) {
+            for (var i = 0; i < boardItems.length; ++i)
+                if (boardItems[i].itemId === itemId) tabModelRef.setCurrentTab(boardItems[i].tabIndex)
+        }
         root.close()
+    }
+
+    function removeItem(itemId) {
+        if (projectManagerRef && projectManagerRef.removeKanbanItem) {
+            projectManagerRef.removeKanbanItem(String(itemId))
+            return
+        }
+        for (var i = 0; i < boardItems.length; ++i)
+            if (boardItems[i].itemId === itemId && tabModelRef)
+                tabModelRef.setKanbanPlacement(boardItems[i].tabIndex, "unscheduled", -1)
     }
 
     function openCreateDialog(status, slotHour) {
@@ -259,24 +269,6 @@ Window {
             projectManagerRef.switchTab(createdIndex)
     }
 
-    function requestDeleteTab(tabIndex, tabName) {
-        if (tabIndex < 0 || tabIndex >= root.modelCount() || root.modelCount() <= 1)
-            return
-        pendingDeleteTabIndex = tabIndex
-        pendingDeleteTabName = tabName || ""
-        deleteTabDialog.open()
-    }
-
-    function confirmDeleteTab() {
-        if (pendingDeleteTabIndex < 0 || pendingDeleteTabIndex >= root.modelCount())
-            return
-        if (projectManagerRef && projectManagerRef.removeTab)
-            projectManagerRef.removeTab(pendingDeleteTabIndex)
-        else if (tabModelRef && tabModelRef.removeTab)
-            tabModelRef.removeTab(pendingDeleteTabIndex)
-        pendingDeleteTabIndex = -1
-        pendingDeleteTabName = ""
-    }
 
     Rectangle {
         anchors.fill: parent
@@ -287,45 +279,42 @@ Window {
         }
     }
 
+    Component.onCompleted: refreshBoardItems()
+
+    Connections {
+        target: root.projectManagerRef
+        ignoreUnknownSignals: true
+        function onKanbanChanged() { root.refreshBoardItems() }
+    }
+
     Connections {
         target: root.tabModelRef
         ignoreUnknownSignals: true
-
-        function onKanbanChanged() {
-            root.kanbanLayoutRevision += 1
-        }
-
-        function onRowsInserted() {
-            root.kanbanLayoutRevision += 1
-        }
-
-        function onRowsRemoved() {
-            root.kanbanLayoutRevision += 1
-        }
-
-        function onModelReset() {
-            root.kanbanLayoutRevision += 1
-        }
+        function onRowsInserted() { root.refreshBoardItems() }
+        function onRowsRemoved() { root.refreshBoardItems() }
+        function onModelReset() { root.refreshBoardItems() }
+        function onDataChanged() { root.refreshBoardItems() }
     }
 
     Component {
         id: kanbanCardComponent
 
         Rectangle {
-            id: tabCard
-            property int modelIndex: -1
-            property string tabName: ""
-            property string tabIcon: ""
-            property string tabColor: ""
+            id: itemCard
+            property string itemId: ""
+            property string sourceType: ""
+            property int tabIndex: -1
+            property string itemName: ""
+            property string itemIcon: ""
+            property string itemColor: ""
+            property string sourceLabel: ""
             property real completionPercent: 0
             property string activeTaskTitle: ""
-            property bool suppressClick: false
             property bool dragging: cardMouse.dragging
             property real pressX: 0
             property real pressY: 0
-
-            property int tabIndex: modelIndex
-            objectName: "kanbanCard_" + tabIndex
+            objectName: sourceType === "tab" ? "kanbanCard_" + tabIndex
+                                                : "kanbanCard_" + itemId
 
             width: parent ? parent.width : 240
             implicitHeight: Math.max(
@@ -341,19 +330,14 @@ Window {
             opacity: dragging ? 0.88 : 1.0
 
             Drag.active: cardDragHandler.active
-            Drag.source: tabCard
-            Drag.keys: ["kanban-tab"]
+            Drag.source: itemCard
+            Drag.keys: ["kanban-item"]
             Drag.supportedActions: Qt.MoveAction
             Drag.hotSpot.x: width / 2
             Drag.hotSpot.y: height / 2
 
-            Behavior on scale {
-                NumberAnimation { duration: 90; easing.type: Easing.OutCubic }
-            }
-
-            Behavior on opacity {
-                NumberAnimation { duration: 90; easing.type: Easing.OutCubic }
-            }
+            Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
+            Behavior on opacity { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
 
             Rectangle {
                 width: 4
@@ -361,7 +345,7 @@ Window {
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
                 radius: 2
-                color: tabColor && tabColor.length > 0 ? tabColor : "#4aa3ff"
+                color: itemColor.length > 0 ? itemColor : "#4aa3ff"
             }
 
             Item {
@@ -379,46 +363,35 @@ Window {
                 property bool dragging: false
 
                 onPressed: function(mouse) {
-                    tabCard.pressX = mouse.x
-                    tabCard.pressY = mouse.y
+                    itemCard.pressX = mouse.x
+                    itemCard.pressY = mouse.y
                     dragging = false
-                    tabCard.suppressClick = false
                 }
-
                 onPositionChanged: function(mouse) {
                     if (!(mouse.buttons & Qt.LeftButton))
                         return
-                    var dx = mouse.x - tabCard.pressX
-                    var dy = mouse.y - tabCard.pressY
+                    var dx = mouse.x - itemCard.pressX
+                    var dy = mouse.y - itemCard.pressY
                     if (!dragging && Math.sqrt(dx * dx + dy * dy) >= 6) {
                         dragging = true
-                        tabCard.suppressClick = true
-                        root.beginCardDrag(
-                            tabCard,
-                            tabCard.tabIndex,
-                            tabCard.tabName,
-                            tabCard.tabIcon,
-                            mouse.x,
-                            mouse.y
-                        )
+                        root.beginCardDrag(itemCard, itemCard.itemId, itemCard.itemName,
+                                           itemCard.itemIcon, mouse.x, mouse.y)
                     }
                     if (dragging)
-                        root.updateCardDrag(tabCard, mouse.x, mouse.y)
+                        root.updateCardDrag(itemCard, mouse.x, mouse.y)
                 }
-
                 onReleased: function(mouse) {
                     if (dragging) {
-                        root.updateCardDrag(tabCard, mouse.x, mouse.y)
+                        root.updateCardDrag(itemCard, mouse.x, mouse.y)
                         root.endCardDrag()
                         dragging = false
                         return
                     }
-                    if (mouse.x >= tabCard.width - 42)
-                        root.requestDeleteTab(tabCard.tabIndex, tabCard.tabName)
+                    if (mouse.x >= itemCard.width - 42)
+                        root.removeItem(itemCard.itemId)
                     else
-                        root.openTab(tabCard.tabIndex)
+                        root.openItem(itemCard.itemId)
                 }
-
                 onCanceled: {
                     if (dragging)
                         root.endCardDrag()
@@ -436,7 +409,7 @@ Window {
                 spacing: 8
 
                 Text {
-                    text: tabIcon && tabIcon.length > 0 ? tabIcon : "."
+                    text: itemIcon.length > 0 ? itemIcon : "."
                     color: "#dcebf6"
                     font.pixelSize: 13
                     font.bold: true
@@ -447,9 +420,8 @@ Window {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     spacing: 3
-
                     Text {
-                        text: tabName
+                        text: itemName
                         color: "#f0f7ff"
                         font.pixelSize: 13
                         font.bold: true
@@ -458,7 +430,13 @@ Window {
                         elide: Text.ElideRight
                         Layout.fillWidth: true
                     }
-
+                    Text {
+                        text: sourceLabel
+                        color: "#8eabba"
+                        font.pixelSize: 10
+                        elide: Text.ElideMiddle
+                        Layout.fillWidth: true
+                    }
                     Text {
                         visible: activeTaskTitle.length > 0
                         text: "Active: " + activeTaskTitle
@@ -469,7 +447,6 @@ Window {
                         elide: Text.ElideRight
                         Layout.fillWidth: true
                     }
-
                     Text {
                         text: Math.round(completionPercent) + "% complete"
                         color: "#94bdd4"
@@ -483,14 +460,13 @@ Window {
                     Layout.preferredWidth: 28
                     Layout.preferredHeight: 26
                     radius: 6
-                    color: root.modelCount() > 1 ? "#26394b" : "#1a2530"
+                    color: "#26394b"
                     border.color: "#3c5569"
                     border.width: 1
-
                     Text {
                         anchors.centerIn: parent
                         text: "x"
-                        color: root.modelCount() > 1 ? "#dceaf4" : "#617181"
+                        color: "#dceaf4"
                         font.pixelSize: 11
                         font.bold: true
                     }
@@ -498,7 +474,6 @@ Window {
             }
         }
     }
-
     Component {
         id: boardSectionComponent
 
@@ -532,11 +507,11 @@ Window {
             DropArea {
                 id: dropArea
                 anchors.fill: parent
-                keys: ["kanban-tab"]
+                keys: ["kanban-item"]
                 z: 20
                 onDropped: function(drop) {
-                    if (drop.source && drop.source.tabIndex !== undefined) {
-                        root.setPlacement(drop.source.tabIndex, sectionRoot.targetStatus, sectionRoot.targetSlotHour)
+                    if (drop.source && drop.source.itemId !== undefined) {
+                        root.setPlacement(drop.source.itemId, sectionRoot.targetStatus, sectionRoot.targetSlotHour)
                         drop.acceptProposedAction()
                     }
                 }
@@ -630,13 +605,15 @@ Window {
                         spacing: 8
 
                         Repeater {
-                            model: root.tabModelRef
+                            model: root.boardItems
 
                             delegate: Loader {
+                                required property var modelData
                                 property bool placedHere: root.cardMatchesSection(
-                                    kanbanStatus,
-                                    kanbanSlotHour,
-                                    name,
+                                    modelData.kanbanStatus,
+                                    modelData.kanbanSlotHour,
+                                    modelData.name,
+                                    modelData.sourceLabel,
                                     sectionRoot.targetStatus,
                                     sectionRoot.targetSlotHour
                                 )
@@ -649,12 +626,15 @@ Window {
                                 onVisibleChanged: Qt.callLater(cardsColumn.forceLayout)
                                 onActiveChanged: Qt.callLater(cardsColumn.forceLayout)
                                 onLoaded: {
-                                    item.modelIndex = index
-                                    item.tabName = name || ""
-                                    item.tabIcon = icon || ""
-                                    item.tabColor = color || ""
-                                    item.completionPercent = completionPercent || 0
-                                    item.activeTaskTitle = activeTaskTitle || ""
+                                    item.itemId = modelData.itemId || ""
+                                    item.itemName = modelData.name || ""
+                                    item.itemIcon = modelData.icon || ""
+                                    item.sourceType = modelData.sourceType || ""
+                                    item.tabIndex = modelData.tabIndex === undefined ? -1 : modelData.tabIndex
+                                    item.itemColor = modelData.color || ""
+                                    item.sourceLabel = modelData.sourceLabel || ""
+                                    item.completionPercent = modelData.completionPercent || 0
+                                    item.activeTaskTitle = modelData.activeTaskTitle || ""
                                 }
                             }
                         }
@@ -693,7 +673,7 @@ Window {
             }
 
             Text {
-                text: root.modelCount() + " tabs"
+                text: root.modelCount() + (root.modelCount() === 1 ? " item" : " items")
                 color: "#95bfd7"
                 font.pixelSize: 12
             }
@@ -887,17 +867,4 @@ Window {
         }
     }
 
-    Dialog {
-        id: deleteTabDialog
-        title: "Remove Tab"
-        modal: true
-        standardButtons: Dialog.Ok | Dialog.Cancel
-        onAccepted: root.confirmDeleteTab()
-
-        Label {
-            width: 320
-            wrapMode: Text.WordWrap
-            text: "Remove tab \"" + root.pendingDeleteTabName + "\" completely?"
-        }
-    }
 }

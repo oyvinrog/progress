@@ -3,6 +3,7 @@ import copy
 import json
 import math
 import time
+from pathlib import Path
 import uuid
 
 import pytest
@@ -98,6 +99,27 @@ def test_branch_export_reports_invalid_nodes_and_write_failures(project, tmp_pat
     assert 'no longer exists' in errors[-1]
     assert not m.saveBranchAsOpml(m.map.root.id, str(tmp_path / 'missing' / 'file.opml'))
     assert errors[-1].startswith('Could not export OPML:')
+
+
+def test_copy_selected_exports_top_level_branches_for_paste(project, app):
+    m = project[0].mindmap
+    first = m.map.root.add_child('First')
+    first.add_child('First child')
+    second = m.map.root.add_child('Second')
+    nested = second.add_child('Nested selection')
+    m.select(first.id)
+    m.select(second.id, 'add')
+    m.select(nested.id, 'add')
+
+    assert m.copySelected()
+    assert QGuiApplication.clipboard().text() == (
+        'First\n  First child\nSecond\n  Nested selection'
+    )
+
+    m.select(m.map.root.id)
+    assert m.pasteSelected()
+    assert [node.text for node in m.map.root.children[-2:]] == ['First', 'Second']
+    assert [node.text for node in m.map.root.children[-1].children] == ['Nested selection']
 
 
 def test_qml_branch_export_actions_use_toolbar_and_context_targets(project, app):
@@ -210,6 +232,14 @@ def test_qml_type_search_keyboard_and_focus(project, app):
         for character in text:
             QTest.keyClick(window, character)
 
+    def find(item, name):
+        if item.objectName() == name:
+            return item
+        for child in item.childItems():
+            found = find(child, name)
+            if found is not None:
+                return found
+
     pane = window.findChild(QObject, 'mindmapPane')
     indicator = window.findChild(QObject, 'mindmapSearchIndicator')
     pane.setProperty('zoom', 1.2)
@@ -218,6 +248,11 @@ def test_qml_type_search_keyboard_and_focus(project, app):
     QTest.qWait(30)
     assert m.searchQuery == 'guest' and m.selectedId == first.id
     assert indicator.property('visible') and '1/2' in indicator.property('text')
+    first_highlight = find(window.contentItem(), 'mindmapSearchHighlight_' + first.id)
+    second_highlight = find(window.contentItem(), 'mindmapSearchHighlight_' + second.id)
+    assert first_highlight.isVisible() and not second_highlight.isVisible()
+    assert QQmlProperty.read(first_highlight, 'border.color').name() == '#ffbf47'
+    assert QQmlProperty.read(first_highlight, 'border.width') * pane.property('zoom') == pytest.approx(4)
     assert pane.property('zoom') == 1.2 and pane.property('panX') != -10000
     viewport = window.findChild(QObject, 'mindmapViewport')
     box = m._layout()[first]
@@ -228,8 +263,10 @@ def test_qml_type_search_keyboard_and_focus(project, app):
     assert not branch.folded
     QTest.keyClick(window, Qt.Key_Return)
     assert m.selectedId == second.id
+    assert not first_highlight.isVisible() and second_highlight.isVisible()
     QTest.keyClick(window, Qt.Key_Return, Qt.ShiftModifier)
     assert m.selectedId == first.id
+    assert first_highlight.isVisible() and not second_highlight.isVisible()
     QTest.keyClick(window, Qt.Key_Space)
     assert m.searchQuery == 'guest '
     QTest.keyClick(window, Qt.Key_Backspace)
@@ -238,9 +275,11 @@ def test_qml_type_search_keyboard_and_focus(project, app):
     type_text('zzz')
     assert 'No matches' in indicator.property('text')
     assert m.selectedId == first.id
+    assert not first_highlight.isVisible() and not second_highlight.isVisible()
     assert (pane.property('panX'), pane.property('panY')) == pan
     QTest.keyClick(window, Qt.Key_Escape)
     assert not m.searchQuery and not indicator.property('visible')
+    assert not first_highlight.isVisible() and not second_highlight.isVisible()
     m.cutSelected()
     type_text('guest')
     QTest.keyClick(window, Qt.Key_Escape)
@@ -1860,6 +1899,44 @@ def test_qml_multi_selection_cut_and_paste(project, app):
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
 
+def test_qml_ctrl_c_then_ctrl_v_copies_selected_branch(project, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    source = m.map.root.add_child('Copied branch')
+    source.add_child('Copied child')
+    destination = m.map.root.add_child('Destination')
+    m.select(source.id)
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+
+    try:
+        pane = window.findChild(QObject, 'mindmapPane')
+        assert pane is not None
+        pane.forceActiveFocus()
+
+        QTest.keyClick(window, Qt.Key_C, Qt.ControlModifier)
+        QTest.qWait(30)
+        assert QGuiApplication.clipboard().text() == (
+            'Copied branch\n  Copied child'
+        )
+
+        m.select(destination.id)
+        QTest.keyClick(window, Qt.Key_V, Qt.ControlModifier)
+        QTest.qWait(30)
+        pasted = destination.children[-1]
+        assert pasted.text == 'Copied branch'
+        assert [node.text for node in pasted.children] == ['Copied child']
+    finally:
+        pm.scrubProjectData()
+        QTest.qWait(30)
+        window.close()
+        engine.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+
 def test_qml_ctrl_v_imports_clipboard_text_and_updates_paste_actions(project, app):
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
@@ -3136,3 +3213,128 @@ def test_qml_double_click_tab_safeguards(project, app):
     assert m.selectedId == ordinary.id and not activated
     QTest.keyClick(window, Qt.Key_Escape)
     window.close()
+
+
+def test_mindmap_add_selected_to_plan_mixes_nodes_and_tabs_without_duplicates(project):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    node_id = thought(m, 'Write launch brief')
+    tab_node_id = next(iter(m.links))
+    m.select(node_id)
+    m.select(tab_node_id, 'toggle')
+
+    assert m.addSelectedToPlan(13)
+    items = pm.getKanbanItems()
+    planned = [item for item in items if item['kanbanStatus'] == 'in_progress'
+               and item['kanbanSlotHour'] == 13]
+    assert {item['sourceType'] for item in planned} == {'node', 'tab'}
+    assert {item['name'] for item in planned} == {'Write launch brief', tabs.getAllTabs()[0].name}
+    assert next(option for option in m.planHourOptions if option['hour'] == 13)['label'] == '13:00 (2 tasks)'
+
+    assert m.addSelectedToPlan(14)
+    items = pm.getKanbanItems()
+    assert len([item for item in items if item['sourceId'] == node_id]) == 1
+    assert len([item for item in items if item['sourceId'] == tabs.getAllTabs()[0].id]) == 1
+    assert next(option for option in m.planHourOptions if option['hour'] == 13)['count'] == 0
+    assert next(option for option in m.planHourOptions if option['hour'] == 14)['label'] == '14:00 (2 tasks)'
+
+    assert m.addSelectedToReady()
+    ready = [item for item in pm.getKanbanItems() if item['kanbanStatus'] == 'ready']
+    assert {item['sourceType'] for item in ready} == {'node', 'tab'}
+    assert len(ready) == 2
+    assert m.planReadyLabel == 'Ready (2 tasks)'
+    assert next(option for option in m.planHourOptions if option['hour'] == 14)['count'] == 0
+
+
+def test_mindmap_plan_roundtrip_delete_cleanup_and_undo(project):
+    _, tabs, _, _ = project
+    m = project[0].mindmap
+    node_id = thought(m, 'Persisted plan item')
+    assert m.addSelectedToPlan(15)
+    payload = m.to_dict()
+
+    restored = MindMapController(tabs)
+    restored.load(payload)
+    assert restored._kanban[node_id] == {'status': 'in_progress', 'slot_hour': 15}
+    assert restored.plannedNodeItems()[0]['name'] == 'Persisted plan item'
+
+    restored.select(node_id)
+    restored.deleteSelected()
+    assert node_id not in restored._kanban
+    restored.undo()
+    assert restored._kanban[node_id] == {'status': 'in_progress', 'slot_hour': 15}
+
+
+def test_mixed_kanban_lane_actions_and_unschedule_preserve_sources(project):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    node_id = thought(m, 'Move through board')
+    tab_node_id = next(iter(m.links))
+    m.select(node_id)
+    m.select(tab_node_id, 'toggle')
+    assert m.addSelectedToPlan(15)
+
+    assert pm.postponeKanbanItems(15)
+    scheduled = [item for item in pm.getKanbanItems()
+                 if item['kanbanStatus'] == 'in_progress']
+    assert {item['kanbanSlotHour'] for item in scheduled} == {16}
+    assert pm.moveKanbanItemsBack('in_progress', 16)
+    assert all(item['kanbanStatus'] == 'ready' for item in pm.getKanbanItems())
+    assert pm.clearKanbanItems('ready', -1)
+    assert all(item['kanbanStatus'] == 'todo' for item in pm.getKanbanItems())
+
+    tab_id = tabs.getAllTabs()[0].id
+    assert pm.removeKanbanItem('node:' + node_id)
+    assert pm.removeKanbanItem('tab:' + tab_id)
+    assert m.map.find(node_id) is not None
+    assert tabs.getAllTabs()[0].id == tab_id
+    assert pm.getKanbanItems() == []
+
+
+def test_add_to_plan_qml_exposes_live_hour_menu_and_mixed_board_api():
+    qml_dir = Path(__file__).parents[1] / 'actiondraw' / 'qml_ui'
+    pane_qml = (qml_dir / 'components' / 'MindMapPane.qml').read_text(encoding='utf-8')
+    board_qml = (qml_dir / 'KanbanWindow.qml').read_text(encoding='utf-8')
+
+    assert 'title: "Add to plan"' in pane_qml
+    assert 'pane.controller.planHourOptions' in pane_qml
+    assert 'pane.controller.addSelectedToPlan(modelData.hour)' in pane_qml
+    assert 'pane.controller.planReadyLabel' in pane_qml
+    assert 'pane.controller.addSelectedToReady()' in pane_qml
+    assert 'model: root.boardItems' in board_qml
+    assert 'projectManagerRef.removeKanbanItem' in board_qml
+    assert 'projectManagerRef.openKanbanItem' in board_qml
+    assert 'modelData.sourceLabel' in board_qml
+
+
+def test_open_kanban_node_reveals_full_mindmap_and_back_returns_to_board(project):
+    pm, _, _, _ = project
+    m = pm.mindmap
+    node_id = thought(m, 'Navigate from kanban')
+    m.map.root.folded = True
+    assert m.addSelectedToPlan(13)
+    reopened = []
+    pm.kanbanBoardRequested.connect(lambda: reopened.append(True))
+
+    pm.openKanbanItem('node:' + node_id)
+
+    assert pm.mindmapVisible
+    assert not m.tabScoped
+    assert m.selectedId == node_id
+    assert not m.map.root.folded
+    assert pm.canGoBack
+
+    pm.goBack()
+    assert reopened == [True]
+
+
+def test_qml_add_to_plan_ready_action_is_instantiated(project):
+    pm, tabs, tasks, diagram = project
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    try:
+        ready_action = window.findChild(QObject, 'mindmapAddToPlanReady')
+        assert ready_action is not None
+        assert ready_action.property('text') == 'Ready (0 tasks)'
+    finally:
+        window.close()

@@ -473,6 +473,8 @@ FocusScope {
                         color: modelData.priorityLevel > 0 ? pane.priorityColor(modelData.priorityLevel)
                               : modelData.isTab ? "#254d6c" : "#223442"
                         readonly property bool selected: pane.controller.selectedIds.indexOf(modelData.id) >= 0
+                        readonly property bool currentSearchHit: pane.searching && selected
+                                                                      && pane.controller.searchMatchPosition > 0
                         opacity: pane.controller.cutNodeIds.indexOf(modelData.id) >= 0 ? 0.45 : 1
                         border.width: selected ? 2 : 1
                         border.color: selected ? "#a5d9ff" : "#557b98"
@@ -487,6 +489,16 @@ FocusScope {
                             opacity: pane.bookmarkHighlightOpacity
                             visible: nodeItem.selected && pane.bookmarkHighlightId === nodeItem.modelData.id
                                      && opacity > 0
+                        }
+                        Rectangle {
+                            objectName: "mindmapSearchHighlight_" + nodeItem.modelData.id
+                            anchors.fill: parent
+                            anchors.margins: -8 / pane.zoom
+                            radius: nodeItem.radius + 8 / pane.zoom
+                            color: "transparent"
+                            border.color: "#ffbf47"
+                            border.width: 4 / pane.zoom
+                            visible: nodeItem.currentSearchHit
                         }
                         Text {
                             objectName: "mindmapNoteIcon_" + nodeItem.modelData.id
@@ -801,7 +813,7 @@ FocusScope {
             spacing: 16
             Label {
                 Layout.fillWidth: true
-                text: "Drag the priority slider left for highest scores, right to include more; All restores every branch · Hover or select a node and click + above or below to add a sibling · Type to find node titles, including folded branches · Enter / Shift+Enter cycles matches · Backspace edits search · Escape clears search · Double-click a tab node to open it · Double-click empty space to add a thought · Ctrl+B toggles bold · Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+X / Ctrl+V moves branches · F4 completes · Arrows navigate · Tab adds a child · Ctrl+Enter opens a tab"
+                text: "Drag the priority slider left for highest scores, right to include more; All restores every branch · Hover or select a node and click + above or below to add a sibling · Type to find node titles, including folded branches · Enter / Shift+Enter cycles matches · Backspace edits search · Escape clears search · Double-click a tab node to open it · Double-click empty space to add a thought · Ctrl+B toggles bold · Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+C / Ctrl+V copies branches · Ctrl+X / Ctrl+V moves branches · F4 completes · Arrows navigate · Tab adds a child · Ctrl+Enter opens a tab"
                 wrapMode: Text.WordWrap
                 color: "#a9bfd1"
             }
@@ -845,6 +857,33 @@ FocusScope {
             canMoveDown = pane.controller.canReorderNode(targetNodeId, 1)
             measuringProgress = pane.controller.measuresProgress(targetNodeId)
         }
+        Menu {
+            objectName: "mindmapAddToPlanMenu"
+            title: "Add to plan"
+            enabled: pane.controller && pane.controller.selectedIds.length > 0
+            MenuItem {
+                objectName: "mindmapAddToPlanReady"
+                text: pane.controller ? pane.controller.planReadyLabel : "Ready (0 tasks)"
+                onTriggered: {
+                    pane.controller.addSelectedToReady()
+                    pane.focusMap()
+                }
+            }
+            MenuSeparator {}
+            Repeater {
+                model: pane.controller ? pane.controller.planHourOptions : []
+                delegate: MenuItem {
+                    required property var modelData
+                    objectName: "mindmapAddToPlan_" + modelData.hour
+                    text: modelData.label
+                    onTriggered: {
+                        pane.controller.addSelectedToPlan(modelData.hour)
+                        pane.focusMap()
+                    }
+                }
+            }
+        }
+        MenuSeparator {}
         MenuItem {
             objectName: "mindmapSetReminder"
             text: nodeMenu.reminderData.reminderActive ? "Update Reminder" : "Set Reminder"
@@ -994,6 +1033,7 @@ FocusScope {
         onRejected: { titleField.text = ""; noteField.text = ""; pane.focusMap() }
     }
     Shortcut { sequence: "Ctrl+B"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.toggleBold() }
+    Shortcut { sequence: "Ctrl+C"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.copySelected() }
     Shortcut { sequence: "Ctrl+X"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.cutSelected() }
     Shortcut { sequence: "Ctrl+V"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.pasteSelected() }
     Shortcut { sequence: "Escape"; enabled: pane.shortcutsEnabled && (pane.searching || pane.controller.canPaste); onActivated: { if (pane.searching) pane.controller.clearSearch(); else pane.controller.cancelCut() } }

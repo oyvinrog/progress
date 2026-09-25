@@ -48,6 +48,79 @@ def test_weight_normalization(value, expected):
     assert normalize_priority_weight(value) == expected
 
 
+def test_deflate_values_spreads_included_tabs_and_preserves_state(project):
+    _, tabs, _, _ = project
+    source = [
+        Tab(name='Low', tasks={'tasks': []}, diagram={'items': [], 'edges': [], 'strokes': []},
+            priority_subjective_value=8, priority_time_hours=2),
+        Tab(name='Middle', tasks={'tasks': []}, diagram={'items': [], 'edges': [], 'strokes': []},
+            priority_subjective_value=9, priority_time_hours=4),
+        Tab(name='High', tasks={'tasks': []}, diagram={'items': [], 'edges': [], 'strokes': []},
+            priority_subjective_value=10, priority_time_hours=6),
+        Tab(name='Excluded', tasks={'tasks': []}, diagram={'items': [], 'edges': [], 'strokes': []},
+            priority_subjective_value=100, priority_time_hours=7, include_in_priority_plot=False),
+    ]
+    tabs.setTabs(source)
+    tabs.setCurrentTab(1)
+    active_id = tabs.getCurrentTabData().id
+    original_times = {tab.id: tab.priority_time_hours for tab in tabs.getAllTabs()}
+
+    tabs.deflatePriorityValues()
+
+    by_name = {tab.name: tab for tab in tabs.getAllTabs()}
+    assert {name: by_name[name].priority_subjective_value
+            for name in ('Low', 'Middle', 'High')} == pytest.approx({
+                'Low': 2, 'Middle': 5, 'High': 8,
+            })
+    assert by_name['Excluded'].priority_subjective_value == 100
+    assert {tab.id: tab.priority_time_hours for tab in tabs.getAllTabs()} == original_times
+    assert tabs.getCurrentTabData().id == active_id
+    for tab in tabs.getAllTabs():
+        expected = (compute_priority_score(tab.priority_subjective_value, tab.priority_time_hours)
+                    if tab.include_in_priority_plot else 0)
+        assert tab.priority_score == pytest.approx(expected)
+
+
+@pytest.mark.parametrize('values', [[0.01, 0.02], [100, 200], [2, 8]])
+def test_deflate_low_high_and_existing_target_ranges(values):
+    tabs = TabModel()
+    tabs.setTabs([
+        Tab(name=str(index), tasks={'tasks': []}, diagram={'items': [], 'edges': [], 'strokes': []},
+            priority_subjective_value=value, priority_time_hours=math.e)
+        for index, value in enumerate(values)
+    ])
+
+    tabs.deflatePriorityValues()
+
+    assert sorted(tab.priority_subjective_value for tab in tabs.getAllTabs()) == pytest.approx([2, 8])
+
+
+@pytest.mark.parametrize('values', [[9], [9, 9, 9]])
+def test_deflate_equal_or_single_values_centers_them(values):
+    tabs = TabModel()
+    tabs.setTabs([
+        Tab(name=str(index), tasks={'tasks': []}, diagram={'items': [], 'edges': [], 'strokes': []},
+            priority_subjective_value=value)
+        for index, value in enumerate(values)
+    ])
+
+    tabs.deflatePriorityValues()
+
+    assert [tab.priority_subjective_value for tab in tabs.getAllTabs()] == [5] * len(values)
+
+
+def test_deflate_no_included_tabs_is_a_noop():
+    tabs = TabModel()
+    only = Tab(name='Excluded', tasks={'tasks': []}, diagram={'items': [], 'edges': [], 'strokes': []},
+               priority_subjective_value=10, include_in_priority_plot=False)
+    tabs.setTabs([only])
+
+    tabs.deflatePriorityValues()
+
+    assert not tabs.hasIncludedPriorityTabs
+    assert tabs.getAllTabs()[0].priority_subjective_value == 10
+
+
 def test_live_scores_ties_exclusion_and_restored_tabs(project):
     pm, tabs, _, _ = project
     active_id = tabs.getCurrentTabData().id
@@ -104,6 +177,25 @@ def test_adjustment_encrypted_roundtrip_and_legacy_switch(project, tmp_path, mon
     assert not pm.hasUnsavedChanges()
 
 
+def test_deflated_values_mark_dirty_and_roundtrip(project, tmp_path, monkeypatch):
+    pm, tabs, _, _ = project
+    credentials = EncryptionCredentials(passphrase='priority-deflation-test')
+    monkeypatch.setattr(pm, '_prompt_encryption_credentials', lambda *args: credentials)
+    path = tmp_path / 'deflated.progress'
+    assert pm.saveProject(str(path))
+    assert not pm.hasUnsavedChanges()
+
+    tabs.deflatePriorityValues()
+    expected = {tab.id: tab.priority_subjective_value for tab in tabs.getAllTabs()}
+    assert pm.hasUnsavedChanges()
+    assert pm.saveProject(str(path))
+
+    tabs.setPriorityPoint(0, math.e, 10)
+    pm.loadProject(str(path))
+    assert {tab.id: tab.priority_subjective_value for tab in tabs.getAllTabs()} == pytest.approx(expected)
+    assert not pm.hasUnsavedChanges()
+
+
 @pytest.mark.parametrize('settings,expected', [
     ({'value_weight': 'bad', 'time_weight': None}, (1, 1)),
     ({'value_weight': -1, 'time_weight': 4}, (0, 2)),
@@ -144,6 +236,9 @@ def test_qml_adjustments_keep_selection_and_matching_ranks(project, app):
     value = plot.findChild(QObject, 'priorityValueWeightSlider')
     time = plot.findChild(QObject, 'priorityTimeWeightSlider')
     reset = plot.findChild(QObject, 'priorityAdjustmentReset')
+    deflate = plot.findChild(QObject, 'priorityDeflateValueButton')
+    deflate_dialog = plot.findChild(QObject, 'priorityDeflateValueDialog')
+    deflate_explanation = plot.findChild(QObject, 'priorityDeflateValueExplanation')
     try:
         value.forceActiveFocus()
         QTest.keyClick(plot, Qt.Key_Right)
@@ -173,6 +268,30 @@ def test_qml_adjustments_keep_selection_and_matching_ranks(project, app):
         assert (tabs.priorityValueWeight, tabs.priorityTimeWeight) == (1, 1)
         assert (value.property('value'), time.property('value')) == (1, 1)
         assert tabs.getAllTabs()[plot.property('selectedTabIndex')].id == selected_id
+        assert deflate.property('text') == 'Deflate Value'
+        assert '2–8 range' in deflate_explanation.property('text')
+        before = {tab.id: tab.priority_subjective_value for tab in tabs.getAllTabs()}
+        deflate.forceActiveFocus()
+        QTest.keyClick(plot, Qt.Key_Space)
+        QTest.qWait(20)
+        assert deflate_dialog.property('visible')
+        QMetaObject.invokeMethod(deflate_dialog, 'reject')
+        assert {tab.id: tab.priority_subjective_value for tab in tabs.getAllTabs()} == before
+        deflate.forceActiveFocus()
+        QTest.keyClick(plot, Qt.Key_Space)
+        QTest.qWait(20)
+        QMetaObject.invokeMethod(deflate_dialog, 'accept')
+        QTest.qWait(20)
+        values_by_name = {tab.name: tab.priority_subjective_value for tab in tabs.getAllTabs()}
+        assert values_by_name == pytest.approx({'Quick': 2, 'Valuable': 8})
+        assert tabs.getAllTabs()[plot.property('selectedTabIndex')].id == selected_id
+        assert tabs.getCurrentTabData().id == active_id
+        included_ids = [tab.id for tab in tabs.getAllTabs() if tab.include_in_priority_plot]
+        for tab_id in included_ids:
+            index = next(i for i, tab in enumerate(tabs.getAllTabs()) if tab.id == tab_id)
+            tabs.setIncludeInPriorityPlot(index, False)
+        QTest.qWait(20)
+        assert not deflate.property('enabled')
         assert not warnings
     finally:
         plot.close()
