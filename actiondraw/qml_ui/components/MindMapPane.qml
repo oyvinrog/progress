@@ -845,6 +845,24 @@ FocusScope {
             canMoveDown = pane.controller.canReorderNode(targetNodeId, 1)
             measuringProgress = pane.controller.measuresProgress(targetNodeId)
         }
+        Menu {
+            objectName: "mindmapAddToPlanMenu"
+            title: "Add to plan"
+            enabled: pane.controller && pane.controller.selectedIds.length > 0
+            Repeater {
+                model: pane.controller ? pane.controller.planHourOptions : []
+                delegate: MenuItem {
+                    required property var modelData
+                    objectName: "mindmapAddToPlan_" + modelData.hour
+                    text: modelData.label
+                    onTriggered: {
+                        pane.controller.addSelectedToPlan(modelData.hour)
+                        pane.focusMap()
+                    }
+                }
+            }
+        }
+        MenuSeparator {}
         MenuItem {
             objectName: "mindmapSetReminder"
             text: nodeMenu.reminderData.reminderActive ? "Update Reminder" : "Set Reminder"

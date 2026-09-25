@@ -3,6 +3,7 @@ import copy
 import json
 import math
 import time
+from pathlib import Path
 import uuid
 
 import pytest
@@ -3136,3 +3137,107 @@ def test_qml_double_click_tab_safeguards(project, app):
     assert m.selectedId == ordinary.id and not activated
     QTest.keyClick(window, Qt.Key_Escape)
     window.close()
+
+
+def test_mindmap_add_selected_to_plan_mixes_nodes_and_tabs_without_duplicates(project):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    node_id = thought(m, 'Write launch brief')
+    tab_node_id = next(iter(m.links))
+    m.select(node_id)
+    m.select(tab_node_id, 'toggle')
+
+    assert m.addSelectedToPlan(13)
+    items = pm.getKanbanItems()
+    planned = [item for item in items if item['kanbanStatus'] == 'in_progress'
+               and item['kanbanSlotHour'] == 13]
+    assert {item['sourceType'] for item in planned} == {'node', 'tab'}
+    assert {item['name'] for item in planned} == {'Write launch brief', tabs.getAllTabs()[0].name}
+    assert next(option for option in m.planHourOptions if option['hour'] == 13)['label'] == '13:00 (2 tasks)'
+
+    assert m.addSelectedToPlan(14)
+    items = pm.getKanbanItems()
+    assert len([item for item in items if item['sourceId'] == node_id]) == 1
+    assert len([item for item in items if item['sourceId'] == tabs.getAllTabs()[0].id]) == 1
+    assert next(option for option in m.planHourOptions if option['hour'] == 13)['count'] == 0
+    assert next(option for option in m.planHourOptions if option['hour'] == 14)['label'] == '14:00 (2 tasks)'
+
+
+def test_mindmap_plan_roundtrip_delete_cleanup_and_undo(project):
+    _, tabs, _, _ = project
+    m = project[0].mindmap
+    node_id = thought(m, 'Persisted plan item')
+    assert m.addSelectedToPlan(15)
+    payload = m.to_dict()
+
+    restored = MindMapController(tabs)
+    restored.load(payload)
+    assert restored._kanban[node_id] == {'status': 'in_progress', 'slot_hour': 15}
+    assert restored.plannedNodeItems()[0]['name'] == 'Persisted plan item'
+
+    restored.select(node_id)
+    restored.deleteSelected()
+    assert node_id not in restored._kanban
+    restored.undo()
+    assert restored._kanban[node_id] == {'status': 'in_progress', 'slot_hour': 15}
+
+
+def test_mixed_kanban_lane_actions_and_unschedule_preserve_sources(project):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    node_id = thought(m, 'Move through board')
+    tab_node_id = next(iter(m.links))
+    m.select(node_id)
+    m.select(tab_node_id, 'toggle')
+    assert m.addSelectedToPlan(15)
+
+    assert pm.postponeKanbanItems(15)
+    scheduled = [item for item in pm.getKanbanItems()
+                 if item['kanbanStatus'] == 'in_progress']
+    assert {item['kanbanSlotHour'] for item in scheduled} == {16}
+    assert pm.moveKanbanItemsBack('in_progress', 16)
+    assert all(item['kanbanStatus'] == 'ready' for item in pm.getKanbanItems())
+    assert pm.clearKanbanItems('ready', -1)
+    assert all(item['kanbanStatus'] == 'todo' for item in pm.getKanbanItems())
+
+    tab_id = tabs.getAllTabs()[0].id
+    assert pm.removeKanbanItem('node:' + node_id)
+    assert pm.removeKanbanItem('tab:' + tab_id)
+    assert m.map.find(node_id) is not None
+    assert tabs.getAllTabs()[0].id == tab_id
+    assert pm.getKanbanItems() == []
+
+
+def test_add_to_plan_qml_exposes_live_hour_menu_and_mixed_board_api():
+    qml_dir = Path(__file__).parents[1] / 'actiondraw' / 'qml_ui'
+    pane_qml = (qml_dir / 'components' / 'MindMapPane.qml').read_text(encoding='utf-8')
+    board_qml = (qml_dir / 'KanbanWindow.qml').read_text(encoding='utf-8')
+
+    assert 'title: "Add to plan"' in pane_qml
+    assert 'pane.controller.planHourOptions' in pane_qml
+    assert 'pane.controller.addSelectedToPlan(modelData.hour)' in pane_qml
+    assert 'model: root.boardItems' in board_qml
+    assert 'projectManagerRef.removeKanbanItem' in board_qml
+    assert 'projectManagerRef.openKanbanItem' in board_qml
+    assert 'modelData.sourceLabel' in board_qml
+
+
+def test_open_kanban_node_reveals_full_mindmap_and_back_returns_to_board(project):
+    pm, _, _, _ = project
+    m = pm.mindmap
+    node_id = thought(m, 'Navigate from kanban')
+    m.map.root.folded = True
+    assert m.addSelectedToPlan(13)
+    reopened = []
+    pm.kanbanBoardRequested.connect(lambda: reopened.append(True))
+
+    pm.openKanbanItem('node:' + node_id)
+
+    assert pm.mindmapVisible
+    assert not m.tabScoped
+    assert m.selectedId == node_id
+    assert not m.map.root.folded
+    assert pm.canGoBack
+
+    pm.goBack()
+    assert reopened == [True]

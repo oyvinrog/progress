@@ -3468,11 +3468,11 @@ class TestActionDrawQmlTaskInteractions:
         assert 'text: "Kanban Board..."' in menu_qml
         assert "root.openKanbanWindow()" in menu_qml
         assert 'title: "Kanban Board"' in kanban_qml
-        assert "setKanbanPlacement" in kanban_qml
+        assert "setKanbanItemPlacement" in kanban_qml
         assert "createTabAtKanbanPlacement" in kanban_qml
-        assert "postponeInProgressFromSlot" in kanban_qml
-        assert "clearKanbanLane" in kanban_qml
-        assert "moveKanbanLaneBack" in kanban_qml
+        assert "postponeKanbanItems" in kanban_qml
+        assert "clearKanbanItems" in kanban_qml
+        assert "moveKanbanItemsBack" in kanban_qml
         assert 'text: "+1h"' in kanban_qml
         assert 'text: "Back"' in kanban_qml
         assert 'text: "Clear"' in kanban_qml
@@ -3482,13 +3482,13 @@ class TestActionDrawQmlTaskInteractions:
         assert '"kanbanClearButton_"' in kanban_qml
         assert '"kanbanInProgressMoveBackButton"' in kanban_qml
         assert '"kanbanInProgressClearAllButton"' in kanban_qml
-        assert "projectManagerRef.removeTab" in kanban_qml
+        assert "projectManagerRef.removeKanbanItem" in kanban_qml
         assert "Drag.active: cardDragHandler.active" in kanban_qml
         assert "drop.acceptProposedAction()" in kanban_qml
-        assert "function dropTabAt(" in kanban_qml
+        assert "function dropItemAt(" in kanban_qml
         assert "root.registerDropZone(sectionRoot)" in kanban_qml
         assert "function beginCardDrag(" in kanban_qml
-        assert "projectManagerRef.openKanbanTab(tabIndex)" in kanban_qml
+        assert "projectManagerRef.openKanbanItem" in kanban_qml
         assert "function onKanbanBoardRequested()" in actiondraw_qml
         assert "root.openKanbanWindow()" in actiondraw_qml
         assert "function endCardDrag()" in kanban_qml
