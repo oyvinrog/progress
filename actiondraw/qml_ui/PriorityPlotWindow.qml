@@ -177,6 +177,14 @@ Window {
                         color: "#9ec6e2"
                     }
                     Button {
+                        objectName: "priorityDeflateValueButton"
+                        text: "Deflate Value"
+                        enabled: !!root.tabModelRef && root.tabModelRef.hasIncludedPriorityTabs
+                        Accessible.name: "Deflate Value"
+                        Accessible.description: "Rebalance included task values and leave room for future priorities"
+                        onClicked: deflateValueDialog.open()
+                    }
+                    Button {
                         objectName: "priorityAdjustmentReset"
                         text: "Reset"
                         enabled: !!root.tabModelRef
@@ -215,8 +223,9 @@ Window {
                 }
 
                 Label {
+                    objectName: "priorityDeflateValueExplanation"
                     Layout.fillWidth: true
-                    text: "Higher value importance favors higher-value tasks; higher time importance favors shorter tasks. 0 ignores a factor. Changes apply live and are saved with the project."
+                    text: "Higher value importance favors higher-value tasks; higher time importance favors shorter tasks. 0 ignores a factor. Deflate Value rebalances included values into a 2–8 range, preserves their order, and leaves room for future tasks. Changes apply live and are saved with the project."
                     wrapMode: Text.WordWrap
                     font.pixelSize: 12
                     color: "#9ec6e2"
@@ -385,6 +394,40 @@ Window {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    Dialog {
+        id: deflateValueDialog
+        objectName: "priorityDeflateValueDialog"
+        implicitWidth: 340
+        title: "Deflate Priority Values"
+        modal: true
+        standardButtons: Dialog.Yes | Dialog.No
+        anchors.centerIn: parent
+        onAccepted: {
+            if (root.tabModelRef && root.tabModelRef.deflatePriorityValues)
+                root.tabModelRef.deflatePriorityValues()
+        }
+
+        contentItem: Column {
+            width: 300
+            spacing: 8
+
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                color: "#d9efff"
+                text: "Rebalance included task values into a 2–8 range?"
+            }
+
+            Text {
+                width: parent.width
+                wrapMode: Text.WordWrap
+                color: "#9fc6de"
+                font.pixelSize: 11
+                text: "This preserves their relative order and leaves room for future priorities. Values, scores, and priority ordering may change."
             }
         }
     }

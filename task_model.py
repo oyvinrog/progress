@@ -1527,6 +1527,11 @@ class TabModel(QAbstractListModel):
     def priorityTimeWeight(self):
         return self._priority_time_weight
 
+    @Property(bool, notify=priorityRanksChanged)
+    def hasIncludedPriorityTabs(self):
+        """Return whether the priority plot has any included tabs."""
+        return any(tab.include_in_priority_plot for tab in self._tabs)
+
     @Slot(float, float)
     def setPriorityWeights(self, value_weight, time_weight):
         weights = (normalize_priority_weight(value_weight), normalize_priority_weight(time_weight))
@@ -2130,6 +2135,26 @@ class TabModel(QAbstractListModel):
             return
         tab.priority_time_hours = clamp_time_hours(time_hours)
         tab.priority_subjective_value = clamp_subjective_value(subjective_value)
+        self.recomputeAndSortPriorities()
+
+    @Slot()
+    def deflatePriorityValues(self) -> None:
+        """Spread included subjective values over 2–8 and leave excluded tabs alone."""
+        included_tabs = [tab for tab in self._tabs if tab.include_in_priority_plot]
+        if not included_tabs:
+            return
+
+        values = [tab.priority_subjective_value for tab in included_tabs]
+        minimum = min(values)
+        maximum = max(values)
+        if math.isclose(minimum, maximum, rel_tol=0.0, abs_tol=1e-12):
+            for tab in included_tabs:
+                tab.priority_subjective_value = 5.0
+        else:
+            scale = 6.0 / (maximum - minimum)
+            for tab in included_tabs:
+                tab.priority_subjective_value = 2.0 + (tab.priority_subjective_value - minimum) * scale
+
         self.recomputeAndSortPriorities()
 
     @Slot(int, bool)
