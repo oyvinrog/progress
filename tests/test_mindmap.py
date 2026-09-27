@@ -3338,3 +3338,165 @@ def test_qml_add_to_plan_ready_action_is_instantiated(project):
         assert ready_action.property('text') == 'Ready (0 tasks)'
     finally:
         window.close()
+
+
+def test_deadline_state_persistence_history_and_completion(project, monkeypatch):
+    m = project[0].mindmap
+    node = m.map.root.add_child('Deadline')
+    monkeypatch.setattr('actiondraw.mindmap.time.time', lambda: 1000.0)
+    assert m.setDeadline(node.id, 25)
+    saved = m.to_dict()
+    assert saved['deadlines'][node.id] == {'start': 1000.0, 'duration': 1500}
+    assert next(n for n in m.nodes if n['id'] == node.id)['deadlineActive']
+    restored = MindMapController()
+    restored.load(saved)
+    assert restored.deadlines == m.deadlines
+    legacy = copy.deepcopy(saved)
+    del legacy['deadlines']
+    restored.load(legacy)
+    assert restored.deadlines == {}
+    m.select(node.id)
+    m.toggleCompleted()
+    assert m.deadlines == saved['deadlines']
+    monkeypatch.setattr('actiondraw.mindmap.time.time', lambda: 2000.0)
+    m.setDeadline(node.id, 10)
+    assert m.deadlines[node.id] == {'start': 2000.0, 'duration': 600}
+    m.undo()
+    assert m.deadlines == saved['deadlines']
+    m.redo()
+    assert m.deadlines[node.id]['start'] == 2000
+    m.clearDeadline(node.id)
+    assert node.id not in m.deadlines
+    m.undo()
+    assert node.id in m.deadlines
+    m.deleteSelected()
+    assert node.id not in m.deadlines
+    m.undo()
+    assert node.id in m.deadlines
+
+
+@pytest.mark.parametrize('minutes', [0, -1, 1.5, True, '25', 2147483648])
+def test_deadline_rejects_invalid_duration(project, minutes):
+    m = project[0].mindmap
+    before = m.to_dict()
+    assert not m.setDeadline(m.map.root.id, minutes)
+    assert not m.setDeadline('missing', 25)
+    assert m.to_dict() == before
+
+
+@pytest.mark.parametrize('deadline', [
+    None, {}, {'start': True, 'duration': 60},
+    {'start': float('nan'), 'duration': 60},
+    {'start': 0, 'duration': float('inf')},
+    {'start': 0, 'duration': 0}, {'start': 0, 'duration': -60},
+    {'start': 10**400, 'duration': 60},
+])
+def test_deadline_rejects_malformed_saved_state(project, deadline):
+    m = project[0].mindmap
+    saved = m.to_dict()
+    saved['deadlines'] = {m.map.root.id: deadline}
+    with pytest.raises(ValueError, match='deadline'):
+        m.decode(saved)
+
+
+def test_qml_deadline_menu_countdown_and_badge_layout(project, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    node = m.map.root.add_child('Timed node')
+    other = m.map.root.add_child('Second timer')
+    m.set_reminder(node.id, time.time() + 3600)
+    m.toggleMeasureProgress(node.id)
+    m.setDeadline(other.id, 10)
+    saved = m.to_dict()
+    # Simulate reopening after the second timer elapsed while the app was closed.
+    saved['deadlines'][other.id]['start'] -= 601
+    m.load(saved)
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+
+    def visual(name, item=None):
+        item = item or window.contentItem()
+        if item.objectName() == name:
+            return item
+        for child in item.childItems():
+            found = visual(name, child)
+            if found is not None:
+                return found
+        return None
+
+    def invoke(obj, method):
+        assert QMetaObject.invokeMethod(obj, method)
+
+    try:
+        pane = window.findChild(QObject, 'mindmapPane')
+        assert visual('mindmapDeadlineText_' + other.id).property('text') == '0:00'
+        menu = window.findChild(QObject, 'mindmapNodeMenu')
+        action = window.findChild(QObject, 'mindmapSetDeadline')
+        dialog = window.findChild(QObject, 'mindmapDeadlineDialog')
+        field = window.findChild(QObject, 'mindmapDeadlineMinutes')
+        menu.setProperty('targetNodeId', node.id)
+        invoke(menu, 'open')
+        QTest.qWait(30)
+        assert action.property('text') == 'Set deadline'
+        invoke(action, 'triggered')
+        invoke(menu, 'close')
+        QTest.qWait(30)
+        assert field.property('text') == '25'
+        invoke(dialog, 'reject')
+        assert node.id not in m.deadlines
+        invoke(action, 'triggered')
+        QTest.qWait(30)
+        field.setProperty('text', '0')
+        assert not field.property('acceptableInput')
+        field.setProperty('text', '25')
+        invoke(dialog, 'accept')
+        QTest.qWait(30)
+        assert m.deadlines[node.id]['duration'] == 1500
+        text_name = 'mindmapDeadlineText_' + node.id
+        bar_name = 'mindmapDeadlineBar_' + node.id
+        assert visual(text_name).property('text') == '25:00'
+        assert visual(bar_name).property('timerColor').name() == '#2ecc71'
+        m.setDeadline(other.id, 10)
+        QTest.qWait(30)
+        start = m.deadlines[node.id]['start']
+        history = len(m._undo)
+        scene_events = []
+        m.sceneChanged.connect(lambda: scene_events.append(True))
+        pane.setProperty('deadlineNow', start + 900)
+        assert visual(text_name).property('text') == '10:00'
+        assert visual(bar_name).property('progress') == pytest.approx(0.4)
+        assert visual(bar_name).property('timerColor').name() == '#f39c12'
+        pane.setProperty('deadlineNow', start + 1501)
+        assert visual(text_name).property('text') == '0:00'
+        assert visual(bar_name).property('timerColor').name() == '#e74c3c'
+        assert visual('mindmapDeadlineFill_' + node.id).width() == 0
+        assert visual(bar_name).isVisible()
+        assert len(m._undo) == history
+        assert scene_events == []
+        reminder = visual('mindmapReminderBadge_' + node.id)
+        progress = visual('mindmapProgressBadge_' + node.id)
+        assert progress.y() + progress.height() <= reminder.y()
+        assert reminder.y() + reminder.height() <= visual(bar_name).y()
+        pane.setProperty('deadlineNow', start)
+        QTest.qWait(1100)
+        assert pane.property('deadlineNow') > start
+        assert len(m._undo) == history
+        assert scene_events == []
+        invoke(menu, 'open')
+        QTest.qWait(30)
+        assert action.property('text') == 'Update deadline'
+        invoke(action, 'triggered')
+        invoke(menu, 'close')
+        QTest.qWait(30)
+        field.setProperty('text', '5')
+        invoke(dialog, 'accept')
+        assert m.deadlines[node.id]['duration'] == 300
+        invoke(window.findChild(QObject, 'mindmapClearDeadline'), 'triggered')
+        QTest.qWait(30)
+        assert not visual(bar_name).isVisible()
+        assert other.id in m.deadlines
+    finally:
+        window.close()

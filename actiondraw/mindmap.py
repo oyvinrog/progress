@@ -1,6 +1,7 @@
 """Project-owned mindmap with stable tab references and a QML-facing editor API."""
 import copy
 import math
+import time
 import weakref
 from datetime import datetime
 from pathlib import Path
@@ -40,6 +41,7 @@ class MindMapController(QObject):
         self._completed = set()
         self._measure_progress = set()
         self.reminders = {}
+        self.deadlines = {}
         self._bookmarks = []
         self._kanban = {}
         self._scope_tab = None
@@ -264,6 +266,7 @@ class MindMapController(QObject):
         self._measure_progress.intersection_update(nodes)
         self._bookmarks = [key for key in self._bookmarks if key in nodes]
         self.reminders = {key: value for key, value in self.reminders.items() if key in nodes}
+        self.deadlines = {key: value for key, value in self.deadlines.items() if key in nodes}
         old_kanban = self._kanban
         self._kanban = {key: value for key, value in self._kanban.items()
                         if key in nodes and key not in self.links}
@@ -282,6 +285,7 @@ class MindMapController(QObject):
                 'tab_links': dict(self.links), 'completed': sorted(self._completed),
                 'reminders': copy.deepcopy(self.reminders), 'bookmarks': list(self._bookmarks),
                 'measure_progress': sorted(self._measure_progress),
+                'deadlines': copy.deepcopy(self.deadlines),
                 'kanban': copy.deepcopy(self._kanban)}
 
     @staticmethod
@@ -335,6 +339,24 @@ class MindMapController(QObject):
                 datetime.fromtimestamp(reminder['at'])
             except (ValueError, OverflowError, OSError) as exc:
                 raise ValueError('Malformed mindmap reminder date') from exc
+        deadlines = payload.get('deadlines', {})
+        if not isinstance(deadlines, dict):
+            raise ValueError('Malformed mindmap deadlines')
+        for node_id, deadline in deadlines.items():
+            if (not isinstance(node_id, str) or mindmap.find(node_id) is None
+                    or not isinstance(deadline, dict)
+                    or any(type(deadline.get(key)) not in (int, float)
+                           for key in ('start', 'duration'))):
+                raise ValueError('Malformed mindmap deadline')
+            try:
+                valid = (math.isfinite(deadline['start'])
+                         and math.isfinite(deadline['duration'])
+                         and deadline['duration'] > 0
+                         and math.isfinite(deadline['start'] + deadline['duration']))
+            except OverflowError:
+                valid = False
+            if not valid:
+                raise ValueError('Malformed mindmap deadline')
         kanban = payload.get('kanban', {})
         if not isinstance(kanban, dict):
             raise ValueError('Malformed mindmap kanban data')
@@ -359,6 +381,7 @@ class MindMapController(QObject):
         self._completed = set((payload or {}).get('completed', []))
         self._measure_progress = set((payload or {}).get('measure_progress', []))
         self.reminders = copy.deepcopy((payload or {}).get('reminders', {}))
+        self.deadlines = copy.deepcopy((payload or {}).get('deadlines', {}))
         self._bookmarks = list((payload or {}).get('bookmarks', []))
         self._kanban = copy.deepcopy((payload or {}).get('kanban', {}))
         self._scope_tab = None
@@ -482,6 +505,26 @@ class MindMapController(QObject):
         return {'reminderActive': reminder is not None,
                 'reminderAt': datetime.fromtimestamp(reminder['at']).strftime('%Y-%m-%d %H:%M') if reminder else '',
                 'reminderSendNotification': reminder['send_notification'] if reminder else False}
+
+    @Slot(str, result='QVariantMap')
+    def deadlineData(self, node_id):
+        deadline = self.deadlines.get(node_id)
+        return {'deadlineActive': deadline is not None,
+                'deadlineStart': deadline['start'] if deadline else 0,
+                'deadlineDuration': deadline['duration'] if deadline else 0}
+
+    @Slot(str, int, result=bool)
+    def setDeadline(self, node_id, minutes):
+        if (self.map.find(node_id) is None or type(minutes) is not int
+                or not 1 <= minutes <= 2147483647):
+            return False
+        return self._commit(lambda: self.deadlines.update({
+            node_id: {'start': time.time(), 'duration': minutes * 60}}))
+
+    @Slot(str)
+    def clearDeadline(self, node_id):
+        if node_id in self.deadlines:
+            self._commit(lambda: self.deadlines.pop(node_id, None))
 
     def set_reminder(self, node_id, timestamp, send_notification=False):
         if self.map.find(node_id) is None:
@@ -639,7 +682,8 @@ class MindMapController(QObject):
             if node.id in self.reminders:
                 width = max(width, 210.0)
             sizes[node] = (width, 40.0 + (24.0 if node.id in self.reminders else 0.0)
-                           + (24.0 if node.id in self._measure_progress else 0.0))
+                           + (24.0 if node.id in self._measure_progress else 0.0)
+                           + (28.0 if node.id in self.deadlines else 0.0))
         # Layout only needs a root; keep the canonical tree's parent links intact.
         if self._priority_filter == 1:
             return layout(SimpleNamespace(root=self.view_root), sizes)
@@ -668,6 +712,7 @@ class MindMapController(QObject):
                  'progressPercent': (math.floor(100 * sum(child.id in self._completed for child in n.children)
                                                   / len(n.children) + 0.5) if n.children else 0),
                  **self.reminderData(n.id),
+                 **self.deadlineData(n.id),
                  **priorities.get(self.links.get(n.id), {'priorityScore': None, 'priorityLevel': 0,
                                                        'priorityRank': 0})}
                 for n, b in self._layout(priorities).items()]
@@ -1005,6 +1050,7 @@ class MindMapController(QObject):
             self._measure_progress.intersection_update(live)
             self._bookmarks = [key for key in self._bookmarks if key in live]
             self.reminders = {key: value for key, value in self.reminders.items() if key in live}
+            self.deadlines = {key: value for key, value in self.deadlines.items() if key in live}
             self._kanban = {key: value for key, value in self._kanban.items()
                             if key in live and key not in self.links}
         except (ValueError, IndexError) as exc:
@@ -1012,6 +1058,7 @@ class MindMapController(QObject):
             self._completed = set(before.get('completed', []))
             self._measure_progress = set(before.get('measure_progress', []))
             self.reminders = copy.deepcopy(before.get('reminders', {}))
+            self.deadlines = copy.deepcopy(before.get('deadlines', {}))
             self._bookmarks = list(before.get('bookmarks', []))
             self._kanban = copy.deepcopy(before.get('kanban', {}))
             self._restore_selection(selected)
@@ -1308,6 +1355,7 @@ class MindMapController(QObject):
         self._completed = set(payload.get('completed', []))
         self._measure_progress = set(payload.get('measure_progress', []))
         self.reminders = copy.deepcopy(payload.get('reminders', {}))
+        self.deadlines = copy.deepcopy(payload.get('deadlines', {}))
         self._bookmarks = list(payload.get('bookmarks', []))
         self._kanban = copy.deepcopy(payload.get('kanban', {}))
         if tab_state is not None:

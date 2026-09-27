@@ -21,6 +21,13 @@ FocusScope {
     property real bookmarkHighlightOpacity: 0
     property string hoveredNodeId: ""
     property bool nodePressed: false
+    property double deadlineNow: Date.now() / 1000
+    Timer {
+        interval: 1000
+        repeat: true
+        running: pane.visible
+        onTriggered: pane.deadlineNow = Date.now() / 1000
+    }
     Timer {
         id: insertionHoverExit
         interval: 120
@@ -32,7 +39,7 @@ FocusScope {
             pane.hoveredNodeId = ""
         }
     }
-    readonly property bool shortcutsEnabled: visible && activeFocus && !editor.visible && !nodeMenu.visible && !actionsButton.activeFocus && !prioritySlider.activeFocus && !actionsMenu.visible && !helpDialog.visible && !reminderDialogOpen
+    readonly property bool shortcutsEnabled: visible && activeFocus && !editor.visible && !nodeMenu.visible && !actionsButton.activeFocus && !prioritySlider.activeFocus && !actionsMenu.visible && !helpDialog.visible && !deadlineDialog.visible && !reminderDialogOpen
     readonly property bool searching: controller && controller.searchQuery.length > 0
     onShortcutsEnabledChanged: if (!shortcutsEnabled && controller) controller.clearSearch()
 
@@ -149,6 +156,7 @@ FocusScope {
         editNode()
     }
     onVisibleChanged: if (visible) {
+        deadlineNow = Date.now() / 1000
         forceActiveFocus()
         if (!initialized) Qt.callLater(fitMap)
     }
@@ -302,7 +310,7 @@ FocusScope {
                     MenuSeparator {}
                     MenuItem { objectName: "mindmapHelpAction"; text: "Shortcuts and legend…"; onTriggered: helpDialog.open() }
                     onClosed: Qt.callLater(function() {
-                        if (!editor.visible && !helpDialog.visible && !pane.reminderDialogOpen) pane.focusMap()
+                        if (!editor.visible && !helpDialog.visible && !deadlineDialog.visible && !pane.reminderDialogOpen) pane.focusMap()
                     })
                 }
             }
@@ -507,6 +515,7 @@ FocusScope {
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
                                                           - (nodeItem.modelData.measureProgress ? 12 : 0)
+                                                          - (nodeItem.modelData.deadlineActive ? 14 : 0)
                             text: "\uD83D\uDCDD"
                             font.pixelSize: 15
                             z: 2
@@ -530,6 +539,7 @@ FocusScope {
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
                                                           - (nodeItem.modelData.measureProgress ? 12 : 0)
+                                                          - (nodeItem.modelData.deadlineActive ? 14 : 0)
                             text: "\uD83D\uDD16"
                             font.pixelSize: 15
                             Accessible.role: Accessible.StaticText
@@ -540,6 +550,7 @@ FocusScope {
                             anchors.fill: parent
                             anchors.bottomMargin: (nodeItem.modelData.reminderActive ? 24 : 0)
                                                   + (nodeItem.modelData.measureProgress ? 24 : 0)
+                                                  + (nodeItem.modelData.deadlineActive ? 28 : 0)
                             anchors.leftMargin: 9 + (nodeItem.modelData.hasNote ? 20 : 0)
                                                    + (nodeItem.modelData.bookmarked ? 20 : 0)
                             anchors.rightMargin: (nodeItem.modelData.priorityLevel > 0 ? 48 : 18)
@@ -559,6 +570,7 @@ FocusScope {
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
                                                           - (nodeItem.modelData.measureProgress ? 12 : 0)
+                                                          - (nodeItem.modelData.deadlineActive ? 14 : 0)
                             color: rank === 1 ? "#f2c75c" : rank === 2 ? "#c8d3df" : "#d99b6c"
                             border.color: "#e5f0fa"
                             Accessible.role: Accessible.StaticText
@@ -577,6 +589,7 @@ FocusScope {
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
                                                           - (nodeItem.modelData.measureProgress ? 12 : 0)
+                                                          - (nodeItem.modelData.deadlineActive ? 14 : 0)
                             level: nodeItem.modelData.priorityLevel
                             visible: level > 0
                         }
@@ -585,6 +598,7 @@ FocusScope {
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
                                                           - (nodeItem.modelData.measureProgress ? 12 : 0)
+                                                          - (nodeItem.modelData.deadlineActive ? 14 : 0)
                             text: nodeItem.modelData.hasChildren ? (nodeItem.modelData.folded ? "+" : "−") : ""
                             color: "#a5d9ff"
                         }
@@ -679,13 +693,59 @@ FocusScope {
                                       + (nodeItem.modelData.note ? "\n\n" + nodeItem.modelData.note : "")
                             }
                         }
+                        Item {
+                            id: deadlineBar
+                            objectName: "mindmapDeadlineBar_" + nodeItem.modelData.id
+                            visible: nodeItem.modelData.deadlineActive
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 6
+                            height: 22
+                            readonly property real remaining: visible
+                                ? Math.max(0, Math.min(nodeItem.modelData.deadlineDuration,
+                                    nodeItem.modelData.deadlineStart + nodeItem.modelData.deadlineDuration - pane.deadlineNow)) : 0
+                            readonly property real progress: nodeItem.modelData.deadlineDuration > 0
+                                ? remaining / nodeItem.modelData.deadlineDuration : 0
+                            readonly property color timerColor: progress > 0.5 ? "#2ecc71"
+                                : progress > 0.25 ? "#f39c12" : "#e74c3c"
+                            Text {
+                                objectName: "mindmapDeadlineText_" + nodeItem.modelData.id
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                text: {
+                                    var seconds = Math.ceil(deadlineBar.remaining)
+                                    return Math.floor(seconds / 60) + ":" + (seconds % 60 < 10 ? "0" : "") + seconds % 60
+                                }
+                                color: deadlineBar.timerColor
+                                font.pixelSize: 12
+                                Accessible.role: Accessible.StaticText
+                                Accessible.name: "Deadline: " + text
+                            }
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                height: 4
+                                radius: 2
+                                color: "#1a2230"
+                                Rectangle {
+                                    objectName: "mindmapDeadlineFill_" + nodeItem.modelData.id
+                                    width: parent.width * deadlineBar.progress
+                                    height: parent.height
+                                    radius: 2
+                                    color: deadlineBar.timerColor
+                                }
+                            }
+                        }
                         Rectangle {
                             objectName: "mindmapProgressBadge_" + nodeItem.modelData.id
                             visible: nodeItem.modelData.measureProgress
                             anchors.left: parent.left
                             anchors.right: parent.right
                             anchors.bottom: parent.bottom
-                            anchors.bottomMargin: nodeItem.modelData.reminderActive ? 28 : 4
+                            anchors.bottomMargin: 4 + (nodeItem.modelData.reminderActive ? 24 : 0)
+                                                    + (nodeItem.modelData.deadlineActive ? 28 : 0)
                             anchors.leftMargin: 4
                             anchors.rightMargin: 4
                             height: 20
@@ -703,6 +763,7 @@ FocusScope {
                         }
                         Rectangle {
                             objectName: "mindmapReminderBadge_" + nodeItem.modelData.id
+                            anchors.bottomMargin: 4 + (nodeItem.modelData.deadlineActive ? 28 : 0)
                             visible: nodeItem.modelData.reminderActive
                             anchors.left: parent.left
                             anchors.right: parent.right
@@ -745,7 +806,7 @@ FocusScope {
                 }
                 visible: !!targetNode && !pane.nodePressed && !canvasMouse.pressed
                          && !editor.visible && !nodeMenu.visible && !actionsMenu.visible
-                         && !helpDialog.visible && !pane.reminderDialogOpen
+                         && !helpDialog.visible && !deadlineDialog.visible && !pane.reminderDialogOpen
                 Repeater {
                     model: 2
                     id: insertionButtons
@@ -841,11 +902,52 @@ FocusScope {
             }
         }
     }
+    Dialog {
+        id: deadlineDialog
+        objectName: "mindmapDeadlineDialog"
+        title: "Set deadline"
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(320, pane.width - 20)
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        property string targetNodeId: ""
+        onOpened: {
+            deadlineMinutes.forceActiveFocus()
+            deadlineMinutes.selectAll()
+            standardButton(Dialog.Ok).enabled = deadlineMinutes.acceptableInput
+        }
+        onAccepted: {
+            if (pane.controller && deadlineMinutes.acceptableInput) {
+                pane.deadlineNow = Date.now() / 1000
+                pane.controller.setDeadline(targetNodeId, Number(deadlineMinutes.text))
+            }
+        }
+        onClosed: pane.focusMap()
+        ColumnLayout {
+            anchors.fill: parent
+            Label { text: "Duration in minutes"; color: "#e5f0fa" }
+            TextField {
+                id: deadlineMinutes
+                objectName: "mindmapDeadlineMinutes"
+                Layout.fillWidth: true
+                text: "25"
+                validator: IntValidator { bottom: 1; top: 2147483647 }
+                inputMethodHints: Qt.ImhDigitsOnly
+                onAcceptableInputChanged: {
+                    var button = deadlineDialog.standardButton(Dialog.Ok)
+                    if (button) button.enabled = acceptableInput
+                }
+                Keys.onReturnPressed: if (acceptableInput) deadlineDialog.accept()
+                Keys.onEnterPressed: if (acceptableInput) deadlineDialog.accept()
+            }
+        }
+    }
     Menu {
         id: nodeMenu
         objectName: "mindmapNodeMenu"
         property string targetNodeId: ""
         property var reminderData: ({})
+        property var deadlineData: ({})
         property bool canMoveUp: false
         property bool canMoveDown: false
         property bool measuringProgress: false
@@ -853,6 +955,7 @@ FocusScope {
                                ? pane.controller.measuresProgress(targetNodeId) : false
         onAboutToShow: {
             reminderData = pane.controller.reminderData(targetNodeId)
+            deadlineData = pane.controller.deadlineData(targetNodeId)
             canMoveUp = pane.controller.canReorderNode(targetNodeId, -1)
             canMoveDown = pane.controller.canReorderNode(targetNodeId, 1)
             measuringProgress = pane.controller.measuresProgress(targetNodeId)
@@ -884,6 +987,23 @@ FocusScope {
             }
         }
         MenuSeparator {}
+        MenuItem {
+            objectName: "mindmapSetDeadline"
+            text: nodeMenu.deadlineData.deadlineActive ? "Update deadline" : "Set deadline"
+            onTriggered: {
+                deadlineDialog.targetNodeId = nodeMenu.targetNodeId
+                deadlineDialog.title = text
+                deadlineMinutes.text = nodeMenu.deadlineData.deadlineActive
+                    ? String(Math.max(1, Math.ceil(nodeMenu.deadlineData.deadlineDuration / 60))) : "25"
+                deadlineDialog.open()
+            }
+        }
+        MenuItem {
+            objectName: "mindmapClearDeadline"
+            text: "Clear deadline"
+            visible: !!nodeMenu.deadlineData.deadlineActive
+            onTriggered: pane.controller.clearDeadline(nodeMenu.targetNodeId)
+        }
         MenuItem {
             objectName: "mindmapSetReminder"
             text: nodeMenu.reminderData.reminderActive ? "Update Reminder" : "Set Reminder"
