@@ -185,3 +185,31 @@ It does not load or save project files.
 The mindmap reuses the MIT-licensed [PyPlane](https://github.com/oyvinrog/pyplane)
 core, bundled with its [license](actiondraw/_vendor/pyplane/LICENSE) and
 [source revision](actiondraw/_vendor/pyplane/UPSTREAM.md).
+
+### Causal models
+
+Open **Causal Model** beside Action Paint to build a causal diagram for the
+current tab. Double-click empty canvas space to add a variable, action, or
+outcome node there. Drag a node's **→** handle onto another node to connect the
+cause to its effect; a preview arrow follows the pointer. Drop on empty space
+or press Escape to cancel. Connections must form a directed
+acyclic graph; represent feedback with separate nodes for successive times.
+
+Drag nodes to arrange the canvas. Double-click a node to edit its label, type,
+or notes; double-click an arrow to edit its optional likelihood (0–100%) and explanation.
+Click a node or arrow to select it, then press **Delete** (or use the toolbar's
+**Delete** button) to remove it. Deleting a node also removes its connections;
+Undo restores them together.
+Use **Assumptions / conclusions** to record the model's context. Undo and redo
+cover graph edits, node movements, and action ordering.
+
+Use **+ Add action** to create a task node directly, or select an existing node
+and choose **Make action**. Action nodes are yellow and numbered, and appear in
+the **Action order** list. Drag its **≡** handles (or use the up/down arrows) to
+choose execution order, then **Add to ActionDraw** or **Add to mindmap** to copy their titles in
+that order. These copies are independent of the model, and the causal edges
+stay in the causal editor. Each tab's model is saved with the project.
+
+Edge percentages record your estimated likelihoods. They need not sum to 100%,
+and they do not calculate outcome probabilities. Numerical causal question
+answering is reserved for a later version with explicit probability rules.

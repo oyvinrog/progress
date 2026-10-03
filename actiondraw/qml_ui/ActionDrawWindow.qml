@@ -76,6 +76,7 @@ ApplicationWindow {
     property var priorityPlotWindowRef: null
     property var kanbanWindowRef: null
     property var actionPaintWindowRef: null
+    property var causalModelWindowRef: null
     property bool yubiKeyPromptVisible: false
     property string yubiKeyPromptText: "Touch your YubiKey to continue."
     property bool suppressClosePrompt: false
@@ -220,6 +221,27 @@ ApplicationWindow {
 
     function actionPaintImportPosition() {
         return root.viewportPointToDiagram(viewport.width / 2, viewport.height / 2)
+    }
+
+    function openCausalModelWindow() {
+        if (causalModelWindowRef) {
+            causalModelWindowRef.show()
+            causalModelWindowRef.raise()
+            causalModelWindowRef.requestActivate()
+            return
+        }
+        var component = Qt.createComponent(Qt.resolvedUrl("CausalModelWindow.qml"))
+        if (component.status === Component.Error) {
+            console.log(component.errorString())
+            return
+        }
+        var win = component.createObject(root, { "modelRef": causalModel, "hostRoot": root })
+        if (!win) return
+        causalModelWindowRef = win
+        win.closing.connect(function() { causalModelWindowRef = null })
+        win.show()
+        win.raise()
+        win.requestActivate()
     }
 
     function openActionPaintWindow() {

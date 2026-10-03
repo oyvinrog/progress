@@ -461,6 +461,11 @@ class Tab:
         "elements": [], "actions": [], "last_imported_signature": ""
     })
 
+    causal_model: Dict[str, Any] = field(default_factory=lambda: {
+        "version": 1, "nodes": [], "edges": [], "description": "",
+        "action_order": [], "last_imported_signature": ""
+    })
+
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
 
 
@@ -2303,6 +2308,8 @@ class TabModel(QAbstractListModel):
             from actiondraw.actionpaint import normalize_action_paint_state
 
             tab.action_paint = normalize_action_paint_state(getattr(tab, "action_paint", None))
+            from actiondraw.causal_model import normalize_causal_model_state
+            tab.causal_model = normalize_causal_model_state(getattr(tab, "causal_model", None))
             tab.markdown_tabs = normalize_editor_tabs(getattr(tab, "markdown_tabs", []), fallback_text="")
             tab.priority_time_hours = clamp_time_hours(getattr(tab, "priority_time_hours", 1.01))
             tab.priority_subjective_value = clamp_subjective_value(getattr(tab, "priority_subjective_value", 1.0))
@@ -2323,13 +2330,12 @@ class TabModel(QAbstractListModel):
                 tab.kanban_status,
                 getattr(tab, "kanban_slot_hour", -1),
             )
-        self.endResetModel()
-
-        # Validate and set active tab index
+        # Reset observers must see the new tabs and their valid active index together.
         if active_tab < 0 or active_tab >= len(self._tabs):
             active_tab = 0
         self._current_tab_index = active_tab
         self._recent_tab_indices = []
+        self.endResetModel()
 
         self.priorityWeightsChanged.emit()
         self.tabsChanged.emit()
@@ -2555,6 +2561,22 @@ class ProjectManager(QObject):
             return []
         parent_id = next((key for key, value in self.mindmap.links.items() if value == tab.id), None)
         if parent_id is None:
+            return []
+        self.showTabMindmap()
+        return self.mindmap.add_siblings(parent_id, titles)
+
+    @Slot(result='QStringList')
+    def addCausalModelToMindmap(self):
+        """Copy ordered causal actions into the active tab's mindmap."""
+        if self._tab_model is None:
+            return []
+        from actiondraw.causal_model import normalize_causal_model_state
+        tab = self._tab_model.getCurrentTabData()
+        state = normalize_causal_model_state(tab.causal_model)
+        labels = {node['id']: node['label'] for node in state['nodes']}
+        titles = [labels[key] for key in state['action_order']]
+        parent_id = next((key for key, value in self.mindmap.links.items() if value == tab.id), None)
+        if not titles or parent_id is None:
             return []
         self.showTabMindmap()
         return self.mindmap.add_siblings(parent_id, titles)
@@ -3564,6 +3586,7 @@ class ProjectManager(QObject):
                     "tasks": current_tasks if index == current_tab_index else tab.tasks,
                     "diagram": current_diagram if index == current_tab_index else tab.diagram,
                     "action_paint": copy.deepcopy(getattr(tab, "action_paint", {})),
+                    "causal_model": copy.deepcopy(getattr(tab, "causal_model", {})),
                     "markdown_tabs": normalize_editor_tabs(tab.markdown_tabs, fallback_text=""),
                     "priority": tab.priority,
                     "priority_time_hours": tab.priority_time_hours,
@@ -3597,6 +3620,7 @@ class ProjectManager(QObject):
                 "tasks": self._task_model.to_dict(),
                 "diagram": self._diagram_model.to_dict(),
                 "action_paint": {"elements": [], "actions": [], "last_imported_signature": ""},
+                "causal_model": {"version": 1, "nodes": [], "edges": [], "description": "", "action_order": [], "last_imported_signature": ""},
             }],
             "active_tab": 0,
             "workspace_markdown_tabs": normalize_editor_tabs(self._workspace_markdown_tabs, fallback_text=""),
@@ -4090,6 +4114,7 @@ class ProjectManager(QObject):
                         tasks=tab_data.get("tasks", {"tasks": []}),
                         diagram=tab_data.get("diagram", {"items": [], "edges": [], "strokes": []}),
                         action_paint=tab_data.get("action_paint", {}),
+                        causal_model=tab_data.get("causal_model", {}),
                         markdown_tabs=normalize_editor_tabs(tab_data.get("markdown_tabs"), fallback_text=""),
                         priority=tab_data.get("priority", 0),
                         priority_time_hours=tab_data.get("priority_time_hours", 1.01),

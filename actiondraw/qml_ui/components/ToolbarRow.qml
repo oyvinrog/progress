@@ -133,6 +133,11 @@ Rectangle {
         }
 
         Button {
+            text: "Causal Model"
+            onClicked: if (root) root.openCausalModelWindow()
+        }
+
+        Button {
             id: actionPaintButton
             text: "▣ Action Paint"
             flat: true
