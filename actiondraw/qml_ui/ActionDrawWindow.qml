@@ -1321,6 +1321,11 @@ ApplicationWindow {
         MindMapPane {
             id: mindmapPane
             objectName: "mindmapPane"
+            tabModel: root.tabModelRef
+            toolDialogOpen: dialogs.assessmentDialog.visible
+            onAssessmentRequested: dialogs.assessmentDialog.open()
+            onActionPaintRequested: root.openActionPaintWindow()
+            onCausalDiagramRequested: root.openCausalModelWindow()
             onCanvasRequested: root.projectManagerRef.showTabCanvas()
             Layout.fillWidth: true
             Layout.fillHeight: true

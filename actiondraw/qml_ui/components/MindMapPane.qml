@@ -5,6 +5,73 @@ import QtQuick.Layouts 1.15
 
 FocusScope {
     id: pane
+    signal assessmentRequested()
+    signal actionPaintRequested()
+    signal causalDiagramRequested()
+    property var tabModel: null
+    property int assessmentLevel: 0
+    property bool toolDialogOpen: false
+    function refreshAssessment() {
+        assessmentLevel = tabModel && tabModel.currentTabIndex >= 0
+            ? tabModel.getAssessmentLevel(tabModel.currentTabIndex) : 0
+    }
+    Component.onCompleted: {
+        refreshAssessment()
+        Qt.callLater(function() { if (pane.visible) pane.focusMap() })
+    }
+    Connections {
+        target: pane.tabModel
+        function onCurrentTabChanged() { pane.refreshAssessment() }
+        function onCurrentTabIndexChanged() { pane.refreshAssessment() }
+        function onAssessmentChanged(tabIndex) {
+            if (tabIndex === pane.tabModel.currentTabIndex) pane.refreshAssessment()
+        }
+    }
+    onToolDialogOpenChanged: if (!toolDialogOpen && visible) Qt.callLater(focusMap)
+    component IconMenuItem: MenuItem {
+        property string iconKey: ""
+        icon.source: Qt.resolvedUrl("../icons/" + iconKey + ".svg")
+        icon.width: 16
+        icon.height: 16
+        icon.color: enabled ? palette.text : palette.mid
+    }
+    component CompanionButton: ToolButton {
+        id: companion
+        property string label: ""
+        property string iconKey: ""
+        property bool assessment: false
+        readonly property real labeledWidth: labelMetrics.width + 40
+        implicitWidth: mindmapToolbar.compactTools ? 32 : labeledWidth
+        implicitHeight: 32
+        enabled: !!pane.tabModel && pane.tabModel.currentTabIndex >= 0
+        Accessible.name: label
+        ToolTip.visible: hovered
+        readonly property string toolTipText: label + " — " + (pane.tabModel ? pane.tabModel.currentTabName : "")
+        ToolTip.text: toolTipText
+        contentItem: Row {
+            spacing: 6
+            AssessmentSmiley {
+                visible: companion.assessment
+                width: 20; height: 20
+                anchors.verticalCenter: parent.verticalCenter
+                level: pane.assessmentLevel
+            }
+            Image {
+                visible: !companion.assessment
+                width: 16; height: 16
+                anchors.verticalCenter: parent.verticalCenter
+                source: companion.iconKey ? "../icons/" + companion.iconKey + ".svg" : ""
+            }
+            Text {
+                visible: !mindmapToolbar.compactTools
+                text: companion.label
+                font: companion.font
+                color: "#d6e2ee"
+                anchors.verticalCenter: parent.verticalCenter
+            }
+        }
+        TextMetrics { id: labelMetrics; font: companion.font; text: companion.label }
+    }
     signal canvasRequested()
     signal branchOpmlExportRequested(string nodeId)
     signal reminderRequested(string nodeId)
@@ -39,7 +106,7 @@ FocusScope {
             pane.hoveredNodeId = ""
         }
     }
-    readonly property bool shortcutsEnabled: visible && activeFocus && !editor.visible && !nodeMenu.visible && !actionsButton.activeFocus && !prioritySlider.activeFocus && !actionsMenu.visible && !helpDialog.visible && !deadlineDialog.visible && !reminderDialogOpen
+    readonly property bool shortcutsEnabled: visible && activeFocus && !toolDialogOpen && !editor.visible && !nodeMenu.visible && !actionsButton.activeFocus && !prioritySlider.activeFocus && !actionsMenu.visible && !helpDialog.visible && !deadlineDialog.visible && !reminderDialogOpen
     readonly property bool searching: controller && controller.searchQuery.length > 0
     onShortcutsEnabledChanged: if (!shortcutsEnabled && controller) controller.clearSearch()
 
@@ -158,7 +225,7 @@ FocusScope {
     onVisibleChanged: if (visible) {
         deadlineNow = Date.now() / 1000
         forceActiveFocus()
-        if (!initialized) Qt.callLater(fitMap)
+        if (!initialized) Qt.callLater(function() { if (pane.visible && !pane.initialized) pane.fitMap() })
     }
     Timer {
         id: bookmarkHold
@@ -207,10 +274,13 @@ FocusScope {
         anchors.margins: 10
         spacing: 8
         RowLayout {
+            id: mindmapToolbar
             objectName: "mindmapToolbar"
+            readonly property bool compactTools: width < assessmentTool.labeledWidth + paintTool.labeledWidth + causalTool.labeledWidth + actionsButton.implicitWidth + (canvasButton.visible ? canvasButton.implicitWidth + 5 : 0) + 490
             Layout.fillWidth: true
             spacing: 5
             Button {
+                id: canvasButton
                 objectName: "tabMindmapCanvas"
                 text: "Canvas"
                 visible: pane.controller && pane.controller.tabScoped
@@ -314,12 +384,38 @@ FocusScope {
                     })
                 }
             }
-            Item { Layout.fillWidth: true }
+            CompanionButton {
+                id: assessmentTool
+                objectName: "mindmapAssessmentButton"
+                label: "Assessment"
+                assessment: true
+                onClicked: pane.assessmentRequested()
+            }
+            CompanionButton {
+                id: paintTool
+                objectName: "mindmapActionPaintButton"
+                label: "Action Paint"
+                iconKey: "paint"
+                onClicked: { pane.focusMap(); pane.actionPaintRequested() }
+            }
+            CompanionButton {
+                id: causalTool
+                objectName: "mindmapCausalDiagramButton"
+                label: "Causal Diagram"
+                iconKey: "causal"
+                onClicked: { pane.focusMap(); pane.causalDiagramRequested() }
+            }
+            Item { Layout.fillWidth: true; Layout.minimumWidth: 0 }
             ColumnLayout {
                 spacing: 0
                 Layout.preferredWidth: 190
+                Layout.minimumWidth: 65
+                Layout.fillWidth: true
+                Layout.maximumWidth: 190
                 Label {
                     text: "Top priority → All priorities"
+                    Layout.fillWidth: true
+                    elide: Text.ElideRight
                     color: "#a9bfd1"
                     font.pixelSize: 12
                 }
@@ -341,7 +437,8 @@ FocusScope {
                 objectName: "mindmapPriorityFilterText"
                 text: pane.controller ? pane.controller.priorityFilterText : "All"
                 color: "#a9bfd1"
-                Layout.preferredWidth: 105
+                Layout.preferredWidth: mindmapToolbar.compactTools ? 45 : 105
+                Layout.minimumWidth: 0
                 elide: Text.ElideRight
             }
             ToolButton { text: "−"; Accessible.name: "Zoom out"; ToolTip.visible: hovered; ToolTip.text: "Zoom out"; onClicked: { pane.zoomBy(1 / 1.2); pane.focusMap() } }
@@ -945,6 +1042,7 @@ FocusScope {
     Menu {
         id: nodeMenu
         objectName: "mindmapNodeMenu"
+        width: 280
         property string targetNodeId: ""
         property var reminderData: ({})
         property var deadlineData: ({})
@@ -963,8 +1061,13 @@ FocusScope {
         Menu {
             objectName: "mindmapAddToPlanMenu"
             title: "Add to plan"
+            icon.source: Qt.resolvedUrl("../icons/calendar.svg")
+            icon.width: 16
+            icon.height: 16
+            icon.color: palette.text
             enabled: pane.controller && pane.controller.selectedIds.length > 0
-            MenuItem {
+            IconMenuItem {
+                iconKey: "calendar"
                 objectName: "mindmapAddToPlanReady"
                 text: pane.controller ? pane.controller.planReadyLabel : "Ready (0 tasks)"
                 onTriggered: {
@@ -975,7 +1078,8 @@ FocusScope {
             MenuSeparator {}
             Repeater {
                 model: pane.controller ? pane.controller.planHourOptions : []
-                delegate: MenuItem {
+                delegate: IconMenuItem {
+                    iconKey: "calendar"
                     required property var modelData
                     objectName: "mindmapAddToPlan_" + modelData.hour
                     text: modelData.label
@@ -987,7 +1091,8 @@ FocusScope {
             }
         }
         MenuSeparator {}
-        MenuItem {
+        IconMenuItem {
+            iconKey: "timer"
             objectName: "mindmapSetDeadline"
             text: nodeMenu.deadlineData.deadlineActive ? "Update deadline" : "Set deadline"
             onTriggered: {
@@ -998,13 +1103,15 @@ FocusScope {
                 deadlineDialog.open()
             }
         }
-        MenuItem {
+        IconMenuItem {
+            iconKey: "timer"
             objectName: "mindmapClearDeadline"
             text: "Clear deadline"
             visible: !!nodeMenu.deadlineData.deadlineActive
             onTriggered: pane.controller.clearDeadline(nodeMenu.targetNodeId)
         }
-        MenuItem {
+        IconMenuItem {
+            iconKey: "bell"
             objectName: "mindmapSetReminder"
             text: nodeMenu.reminderData.reminderActive ? "Update Reminder" : "Set Reminder"
             onTriggered: pane.reminderRequested(nodeMenu.targetNodeId)
@@ -1012,51 +1119,64 @@ FocusScope {
         Menu {
             objectName: "mindmapQuickReminderMenu"
             title: "Quick reminder"
-            MenuItem {
+            icon.source: Qt.resolvedUrl("../icons/bell.svg")
+            icon.width: 16
+            icon.height: 16
+            icon.color: palette.text
+            IconMenuItem {
+                iconKey: "bell"
                 objectName: "mindmapQuickReminder10Minutes"
                 text: "10 minutes"
                 onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 10)
             }
-            MenuItem {
+            IconMenuItem {
+                iconKey: "bell"
                 objectName: "mindmapQuickReminder20Minutes"
                 text: "20 minutes"
                 onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 20)
             }
-            MenuItem {
+            IconMenuItem {
+                iconKey: "bell"
                 objectName: "mindmapQuickReminder1Hour"
                 text: "1 hour"
                 onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 60)
             }
-            MenuItem {
+            IconMenuItem {
+                iconKey: "bell"
                 objectName: "mindmapQuickReminder24Hours"
                 text: "24 hours"
                 onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 24 * 60)
             }
-            MenuItem {
+            IconMenuItem {
+                iconKey: "bell"
                 objectName: "mindmapQuickReminder2Days"
                 text: "2 days"
                 onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 2 * 24 * 60)
             }
-            MenuItem {
+            IconMenuItem {
+                iconKey: "bell"
                 objectName: "mindmapQuickReminder7Days"
                 text: "7 days"
                 onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 7 * 24 * 60)
             }
         }
-        MenuItem {
+        IconMenuItem {
+            iconKey: "bell"
             objectName: "mindmapClearReminder"
             text: "Clear Reminder"
             visible: !!nodeMenu.reminderData.reminderActive
             onTriggered: pane.clearReminderRequested(nodeMenu.targetNodeId)
         }
         MenuSeparator {}
-        MenuItem {
+        IconMenuItem {
+            iconKey: "bookmark"
             objectName: "mindmapBookmarkMenuItem"
             text: pane.controller && pane.controller.bookmarks.some(function(b) { return b.id === nodeMenu.targetNodeId })
                   ? "Remove bookmark" : "Bookmark"
             onTriggered: { pane.controller.toggleBookmark(nodeMenu.targetNodeId); pane.focusMap() }
         }
-        MenuItem {
+        IconMenuItem {
+            iconKey: "progress"
             objectName: "mindmapMeasureProgressMenuItem"
             text: nodeMenu.measuringProgress ? "Stop measuring progress" : "Measure progress"
             onTriggered: {
@@ -1065,54 +1185,64 @@ FocusScope {
                 pane.focusMap()
             }
         }
-        MenuItem {
+        IconMenuItem {
+            iconKey: "up"
             objectName: "mindmapMoveUp"
             text: "Move up"
             enabled: nodeMenu.canMoveUp
             onTriggered: { pane.controller.reorderNode(nodeMenu.targetNodeId, -1); pane.focusMap() }
         }
-        MenuItem {
+        IconMenuItem {
+            iconKey: "down"
             objectName: "mindmapMoveDown"
             text: "Move down"
             enabled: nodeMenu.canMoveDown
             onTriggered: { pane.controller.reorderNode(nodeMenu.targetNodeId, 1); pane.focusMap() }
         }
         MenuSeparator {}
-        MenuItem { text: "Cut branches"; enabled: pane.controller && pane.controller.canCut; onTriggered: pane.controller.cutSelected() }
-        MenuItem { objectName: "mindmapContextPaste"; text: "Paste beneath selected node"; enabled: pane.controller && (pane.controller.canPaste || pane.controller.canPasteClipboardText); onTriggered: pane.controller.pasteSelected() }
+        IconMenuItem { iconKey: "cut"; text: "Cut branches"; enabled: pane.controller && pane.controller.canCut; onTriggered: pane.controller.cutSelected() }
+        IconMenuItem { iconKey: "clipboard"; objectName: "mindmapContextPaste"; text: "Paste beneath selected node"; enabled: pane.controller && (pane.controller.canPaste || pane.controller.canPasteClipboardText); onTriggered: pane.controller.pasteSelected() }
         Menu {
             objectName: "mindmapContextExportMenu"
             title: "Export branch"
-            MenuItem {
+            icon.source: Qt.resolvedUrl("../icons/export.svg")
+            icon.width: 16
+            icon.height: 16
+            icon.color: palette.text
+            IconMenuItem {
+                iconKey: "export"
                 objectName: "mindmapContextSaveBranchOpml"
                 text: "Save as OPML…"
                 onTriggered: pane.branchOpmlExportRequested(nodeMenu.targetNodeId)
             }
-            MenuItem {
+            IconMenuItem {
+                iconKey: "clipboard"
                 objectName: "mindmapContextCopyBranchOpml"
                 text: "Copy as OPML XML"
                 onTriggered: { pane.controller.copyBranchAsOpml(nodeMenu.targetNodeId); pane.focusMap() }
             }
-            MenuItem {
+            IconMenuItem {
+                iconKey: "clipboard"
                 objectName: "mindmapContextCopyBranchText"
                 text: "Copy as indented text"
                 onTriggered: { pane.controller.copyBranchAsText(nodeMenu.targetNodeId); pane.focusMap() }
             }
         }
         MenuSeparator {}
-        MenuItem { text: "Add child"; onTriggered: pane.addThought(false) }
-        MenuItem { text: "Add sibling"; onTriggered: pane.addThought(true) }
-        MenuItem { text: "Edit / Notes"; onTriggered: pane.editNode() }
-        MenuItem {
+        IconMenuItem { iconKey: "child"; text: "Add child"; onTriggered: pane.addThought(false) }
+        IconMenuItem { iconKey: "sibling"; text: "Add sibling"; onTriggered: pane.addThought(true) }
+        IconMenuItem { iconKey: "notes"; text: "Edit / Notes"; onTriggered: pane.editNode() }
+        IconMenuItem {
+            iconKey: "tab"
             text: "Create tab"
             enabled: pane.controller && pane.controller.canCreateTab
             onTriggered: { pane.controller.createTabFromSelected(); pane.focusMap() }
         }
-        MenuItem { text: "Complete"; enabled: pane.controller && pane.controller.selectedIds.length > 0; onTriggered: pane.controller.toggleCompleted() }
-        MenuItem { text: "Fold / Unfold"; onTriggered: pane.controller.toggleFold() }
-        MenuItem { text: "Branch on left"; onTriggered: pane.controller.setSide("left") }
-        MenuItem { text: "Branch on right"; onTriggered: pane.controller.setSide("right") }
-        MenuItem { text: "Delete branch"; onTriggered: pane.controller.deleteSelected() }
+        IconMenuItem { iconKey: "check"; text: "Complete"; enabled: pane.controller && pane.controller.selectedIds.length > 0; onTriggered: pane.controller.toggleCompleted() }
+        IconMenuItem { iconKey: "fold"; text: "Fold / Unfold"; onTriggered: pane.controller.toggleFold() }
+        IconMenuItem { iconKey: "left"; text: "Branch on left"; onTriggered: pane.controller.setSide("left") }
+        IconMenuItem { iconKey: "right"; text: "Branch on right"; onTriggered: pane.controller.setSide("right") }
+        IconMenuItem { iconKey: "trash"; text: "Delete branch"; onTriggered: pane.controller.deleteSelected() }
     }
     Dialog {
         id: editor

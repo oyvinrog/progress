@@ -53,5 +53,5 @@ packages = ["actiondraw", "actiondraw.priorityplot", "actiondraw._vendor", "acti
 py-modules = ["task_model", "markdown_note_editor", "progress_crypto", "eff_diceware"]
 
 [tool.setuptools.package-data]
-actiondraw = ["qml_ui/**/*.qml"]
+actiondraw = ["qml_ui/**/*.qml", "qml_ui/icons/*.svg"]
 "actiondraw._vendor.pyplane" = ["LICENSE", "UPSTREAM.md"]

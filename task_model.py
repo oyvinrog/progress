@@ -2476,7 +2476,7 @@ class ProjectManager(QObject):
         self._cached_key_material: Optional[DerivedKeyMaterial] = None
         self._cached_encryption_file_path: str = ""
         self._workspace_markdown_tabs = normalize_editor_tabs([], fallback_text="")
-        self._mindmap_visible = False
+        self._mindmap_visible = True
         self.mindmap = MindMapController(self._tab_model, self)
         self.mindmap.exchange_tabs = self._exchangeMindmapTabs
         self.mindmap.tabActivated.connect(self.openMindmapTab)
@@ -2583,10 +2583,8 @@ class ProjectManager(QObject):
 
     def _defaultTabView(self) -> None:
         tab = self._tab_model.getCurrentTabData()
-        node = next((self.mindmap.map.find(key) for key, value in self.mindmap.links.items()
-                     if value == tab.id), None)
         self.mindmap.set_scope(tab.id)
-        self._setMindmapVisible(bool(node and node.children))
+        self._setMindmapVisible(True)
 
     @Slot(str)
     def openMindmapTab(self, tab_id: str) -> None:
@@ -2645,6 +2643,8 @@ class ProjectManager(QObject):
 
     def _restoreNavigationSnapshot(self, snapshot: NavigationSnapshot) -> None:
         if snapshot.view_kind == "mindmap":
+            if self._tab_model is not None and 0 <= snapshot.tab_index < self._tab_model.tabCount:
+                self.switchTab(snapshot.tab_index)
             self.showMindmap()
             return
         if snapshot.view_kind == "kanban":
@@ -4166,10 +4166,8 @@ class ProjectManager(QObject):
                                         priority_scoring=project_data.get("priority_scoring") or {})
 
             self.mindmap.load(project_data.get("mindmap"))
-            if self._tab_model is not None:
-                self._defaultTabView()
-            else:
-                self._setMindmapVisible(False)
+            self.mindmap.set_scope()
+            self._setMindmapVisible(True)
 
             # Load the active tab's data into the models
             active_tab_data = tabs[active_tab]
@@ -4225,11 +4223,11 @@ class ProjectManager(QObject):
     @Slot(int, int)
     def openTabTask(self, tab_index: int, task_index: int) -> None:
         """Open a tab and focus a task index within that tab."""
-        if self._shouldCaptureNavigation(tab_index, task_index):
+        if self._tab_model is not None and not 0 <= tab_index < self._tab_model.tabCount:
+            return
+        if self._mindmap_visible or self._shouldCaptureNavigation(tab_index, task_index):
             self._pushNavigationSnapshot(self._currentNavigationSnapshot())
         if self._tab_model is not None:
-            if tab_index < 0 or tab_index >= self._tab_model.tabCount:
-                return
             if self._tab_model.currentTabIndex != tab_index:
                 self.switchTab(tab_index)
         self.showTabCanvas()

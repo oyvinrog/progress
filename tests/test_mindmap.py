@@ -1273,7 +1273,7 @@ def test_encrypted_roundtrip_dirty_and_scrub(project, tmp_path, monkeypatch):
     assert pm.mindmap.map.find(node_id).note == 'Secret note'
     assert tabs.getAllTabs()[0].id == tab_id
     assert not pm.hasUnsavedChanges()
-    assert pm.mindmapVisible and pm.mindmap.view_root.id == tab_root
+    assert pm.mindmapVisible and not pm.mindmap.tabScoped
     pm.mindmap.select(node_id)
     pm.mindmap.editSelected('Changed', 'Changed note')
     assert pm.hasUnsavedChanges()
@@ -1303,6 +1303,7 @@ def test_legacy_project_migration(project, tmp_path, payload):
     assert set(pm.mindmap.links.values()) == set(ids)
     assert not pm.hasUnsavedChanges()
     assert tabs.currentTabIndex == payload.get('active_tab', 0)
+    assert pm.mindmapVisible and not pm.mindmap.tabScoped
 
 
 @pytest.mark.parametrize('bad', [{}, {'version': 9}, {'version': 1, 'xml': '<bad>', 'tab_links': {}}, None])
@@ -1382,7 +1383,7 @@ def test_qml_click_drag_back_and_shortcut_isolation(project, app):
     assert pm.mindmapVisible and m.selectedId == node_id
     QTest.mouseDClick(window, Qt.LeftButton, Qt.NoModifier, center(node_id))
     QTest.qWait(30)
-    assert not pm.mindmapVisible
+    assert pm.mindmapVisible and m.tabScoped
     assert tabs.getCurrentTabData().id == tab_id
     pm.goBack()
     QTest.qWait(30)
@@ -2059,7 +2060,7 @@ def test_tab_views_nested_navigation_and_canvas(project):
     assert pm.mindmapVisible and m.view_root.id == second
     pm.switchTab(0)
     pm.switchTab(1)
-    assert not pm.mindmapVisible
+    assert pm.mindmapVisible and m.tabScoped
     pm.showTabMindmap()
     assert {n['id'] for n in m.nodes} == {second}
     pm.removeTab(1)
@@ -3133,8 +3134,8 @@ def test_qml_priority_filter_slider_and_creation(project, app):
     label = window.findChild(QObject, 'mindmapPriorityFilterText')
     pane.setProperty('zoom', 0.8)
     pan = (pane.property('panX'), pane.property('panY'))
-    start = slider.mapToScene(QPoint(int(slider.width()) - 8, int(slider.height() / 2))).toPoint()
-    end = slider.mapToScene(QPoint(8, int(slider.height() / 2))).toPoint()
+    start = slider.mapToScene(QPoint(int(slider.width()) - 1, int(slider.height() / 2))).toPoint()
+    end = slider.mapToScene(QPoint(1, int(slider.height() / 2))).toPoint()
     QTest.mousePress(window, Qt.LeftButton, Qt.NoModifier, start)
     QTest.mouseMove(window, end, 30)
     QTest.mouseRelease(window, Qt.LeftButton, Qt.NoModifier, end)
@@ -3500,3 +3501,110 @@ def test_qml_deadline_menu_countdown_and_badge_layout(project, app):
         assert other.id in m.deadlines
     finally:
         window.close()
+
+
+def test_startup_empty_tab_and_explicit_canvas_navigation(project):
+    pm, tabs, tasks, diagram = project
+    assert pm.mindmapVisible and not pm.mindmap.tabScoped
+    assert not pm.hasUnsavedChanges()
+    tabs.addTab('Empty')
+    pm.switchTab(1)
+    assert pm.mindmapVisible and pm.mindmap.tabScoped
+    assert pm.mindmap.view_root.id in pm.mindmap.links
+    assert not pm.mindmap.view_root.children
+    pm.showTabCanvas()
+    assert not pm.mindmapVisible
+    pm.switchTab(0)
+    tasks.addTask('Task', -1)
+    diagram.addTask(0, 20, 20)
+    pm.showMindmap()
+    pm.openTabTask(0, 0)
+    assert not pm.mindmapVisible and diagram.currentTaskIndex == 0
+    pm.goBack()
+    assert pm.mindmapVisible and not pm.mindmap.tabScoped
+    # Reopening the already-focused task still records the view transition.
+    pm.openTabTask(0, 0)
+    assert not pm.mindmapVisible and pm.canGoBack
+    pm.goBack()
+    assert pm.mindmapVisible and not pm.mindmap.tabScoped
+
+
+def test_mindmap_companion_tools_responsive_and_live_assessment(project, app):
+    pm, tabs, tasks, diagram = project
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    warnings = []
+    engine.warnings.connect(lambda messages: warnings.extend(m.toString() for m in messages))
+    window = engine.rootObjects()[0]
+    window.show()
+    pane = window.findChild(QObject, 'mindmapPane')
+    toolbar = window.findChild(QObject, 'mindmapToolbar')
+    buttons = [window.findChild(QObject, name) for name in (
+        'mindmapAssessmentButton', 'mindmapActionPaintButton', 'mindmapCausalDiagramButton')]
+    heights = []
+    for width, compact in [(1440, False), (1100, True), (800, True)]:
+        window.resize(width, 760)
+        QTest.qWait(80)
+        assert toolbar.property('compactTools') == compact
+        heights.append(toolbar.height())
+        visible_children = sorted((c for c in toolbar.childItems() if c.isVisible() and c.width() > 0), key=lambda c: c.x())
+        assert all(c.x() >= 0 and c.x() + c.width() <= toolbar.width() + 1 for c in visible_children)
+        assert all(a.x() + a.width() <= b.x() + 1 for a, b in zip(visible_children, visible_children[1:]))
+        assert all(b.isVisible() and b.width() >= 32 for b in buttons)
+    assert max(heights) == min(heights) and max(heights) < 60
+    assert pane.hasActiveFocus()
+    tabs.setAssessment(0, 10, 10, True)
+    assert pane.property('assessmentLevel') == tabs.getAssessmentLevel(0) == 4
+    tabs.addTab('Second')
+    pm.switchTab(1)
+    assert pane.property('assessmentLevel') == tabs.getAssessmentLevel(1) == 0
+    assert 'Second' in buttons[0].property('toolTipText')
+    pm.showMindmap()
+    window.resize(1440, 760)
+    QTest.qWait(80)
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                     buttons[0].mapToScene(buttons[0].boundingRect().center()).toPoint())
+    QTest.qWait(30)
+    assert pane.property('toolDialogOpen') and not pane.property('shortcutsEnabled')
+    QMetaObject.invokeMethod(window.findChild(QObject, 'assessmentDialog'), 'close')
+    QTest.qWait(30)
+    assert pane.hasActiveFocus() and pane.property('shortcutsEnabled')
+    for button, ref in zip(buttons[1:], ('actionPaintWindowRef', 'causalModelWindowRef')):
+        QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                         button.mapToScene(button.boundingRect().center()).toPoint())
+        QTest.qWait(30)
+        companion = window.property(ref)
+        assert companion is not None and companion.isVisible()
+        companion.close()
+        window.requestActivate()
+        QTest.qWait(30)
+        assert pane.hasActiveFocus()
+    assert not warnings
+    window.setProperty('suppressClosePrompt', True)
+    window.close()
+    engine.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+
+def test_mindmap_context_menu_bundled_icons(project, app):
+    pm, tabs, tasks, diagram = project
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    menu = window.findChild(QObject, 'mindmapNodeMenu')
+    menu.setProperty('targetNodeId', pm.mindmap.selectedId)
+    QMetaObject.invokeMethod(menu, 'open')
+    app.processEvents()
+    for name, icon in [('mindmapSetDeadline', 'timer'), ('mindmapSetReminder', 'bell'),
+                       ('mindmapBookmarkMenuItem', 'bookmark'), ('mindmapMoveUp', 'up'),
+                       ('mindmapAddToPlanMenu', 'calendar'), ('mindmapContextExportMenu', 'export')]:
+        item = window.findChild(QObject, name)
+        source = QQmlProperty.read(item, 'icon.source')
+        assert source.toLocalFile().endswith('/' + icon + '.svg')
+        assert Path(source.toLocalFile()).is_file()
+        assert QQmlProperty.read(item, 'icon.width') == 16
+    move = window.findChild(QObject, 'mindmapMoveUp')
+    assert not move.property('enabled')
+    assert QQmlProperty.read(move, 'icon.color') != QQmlProperty.read(window.findChild(QObject, 'mindmapSetDeadline'), 'icon.color')
+    QMetaObject.invokeMethod(menu, 'close')
+    window.close()
+    engine.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
