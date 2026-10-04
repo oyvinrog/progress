@@ -3,7 +3,7 @@ import copy
 import math
 import time
 import weakref
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -141,6 +141,7 @@ class MindMapController(QObject):
         self.deadlines = {}
         self._bookmarks = []
         self._kanban = {}
+        self.plan_schedules = {}
         self._scope_tab = None
         self._view_selections = {}
         self._selected = self.map.root.id
@@ -161,6 +162,7 @@ class MindMapController(QObject):
             tab_model.tabsChanged.connect(self.reconcile)
             tab_model.priorityRanksChanged.connect(self.reconcile)
             tab_model.kanbanChanged.connect(self.planChanged)
+        self.planChanged.connect(self.sceneChanged)
         self.reconcile()
 
     @property
@@ -348,7 +350,7 @@ class MindMapController(QObject):
         return {'status': normalized_status, 'slot_hour': hour}
 
     def _tab_index(self, tab_id):
-        if self._tabs is None:
+        if self._tabs is None or tab_id is None:
             return -1
         return next((index for index, tab in enumerate(self._tabs.getAllTabs())
                      if tab.id == tab_id), -1)
@@ -383,26 +385,101 @@ class MindMapController(QObject):
             return False
         changed = False
         for node_id in dict.fromkeys(self.sourceNodeId(key) for key in self._selected_ids):
-            node = self._find(node_id)
-            if node is None:
-                continue
-            tab_id = self.links.get(node_id)
-            if tab_id is not None:
-                tab_index = self._tab_index(tab_id)
-                if tab_index >= 0:
-                    tab = self._tabs.getAllTabs()[tab_index]
-                    changed = changed or (tab.kanban_status != placement['status']
-                                          or tab.kanban_slot_hour != placement['slot_hour'])
-                    self._tabs.setKanbanPlacement(
-                        tab_index, placement['status'], placement['slot_hour'])
-                continue
-            if self._kanban.get(node_id) != placement:
-                self._kanban[node_id] = dict(placement)
-                changed = True
-        if changed:
-            self.changed.emit()
-            self.planChanged.emit()
+            before = self._plan_placement(node_id)
+            if self._place_plan_node(node_id, status, slot_hour):
+                changed = changed or before != self._plan_placement(node_id)
         return changed
+
+    def _place_plan_node(self, node_id, status, slot_hour=-1):
+        tab_id = self.links.get(node_id)
+        if tab_id is not None:
+            index = self._tab_index(tab_id)
+            return index >= 0 and self._tabs.setKanbanPlacement(index, status, slot_hour)
+        return self.setNodeKanbanPlacement(node_id, status, slot_hour)
+
+    @staticmethod
+    def _weekday_at(weekday, now=None):
+        now = datetime.fromtimestamp(time.time()) if now is None else now
+        day = now.date() + timedelta(days=(weekday - now.weekday()) % 7)
+        return datetime.combine(day, datetime.min.time()).replace(hour=8).timestamp()
+
+    @Property('QVariantList', notify=planChanged)
+    def planWeekdayOptions(self):
+        now = datetime.fromtimestamp(time.time())
+        options = []
+        for weekday in range(7):
+            at = self._weekday_at(weekday, now)
+            date = datetime.fromtimestamp(at)
+            count = sum(datetime.fromtimestamp(value['at']).date() == date.date()
+                        for value in self.plan_schedules.values())
+            options.append({'weekday': weekday, 'at': at, 'count': count,
+                            'label': f"{date:%A} {date.day} {date:%b} ({count} "
+                                     f"{'task' if count == 1 else 'tasks'})"})
+        return options
+
+    @Slot(int, result=bool)
+    def scheduleSelectedToWeekday(self, weekday):
+        return self._schedule_nodes(self._selected_ids, weekday)
+
+    @Slot(str, int, result=bool)
+    def scheduleNodeToWeekday(self, node_id, weekday):
+        return self._schedule_nodes([node_id], weekday)
+
+    def _schedule_nodes(self, node_ids, weekday):
+        if type(weekday) is not int or not 0 <= weekday <= 6:
+            return False
+        ids = {self.sourceNodeId(key) for key in node_ids}
+        ids = {key for key in ids if self.map.find(key) is not None}
+        if not ids:
+            return False
+        at = self._weekday_at(weekday)
+        return self._commit(lambda: self.plan_schedules.update(
+            {key: {'at': at} for key in ids}))
+
+    @Slot(str)
+    def cancelPlanSchedule(self, node_id):
+        node_id = self.sourceNodeId(node_id)
+        if node_id in self.plan_schedules:
+            self._commit(lambda: self.plan_schedules.pop(node_id, None))
+
+    def consume_plan_schedule(self, node_id):
+        # Delivery is external to editing history and must never be replayed by undo.
+        self.plan_schedules.pop(node_id, None)
+        for payload, _, _ in self._undo + self._redo:
+            payload.get('plan_schedules', {}).pop(node_id, None)
+        self.changed.emit()
+        self.planChanged.emit()
+
+    def _plan_placement(self, node_id):
+        tab_index = self._tab_index(self.links.get(node_id))
+        if tab_index >= 0:
+            tab = self._tabs.getAllTabs()[tab_index]
+            return {'status': tab.kanban_status, 'slot_hour': tab.kanban_slot_hour,
+                    'added_at': tab.kanban_added_at}
+        return self._kanban.get(node_id, {})
+
+    @Slot(str, result='QVariantMap')
+    def planData(self, node_id):
+        node_id = self.sourceNodeId(node_id)
+        placement = self._plan_placement(node_id)
+        status = placement.get('status', 'unscheduled')
+        on_board = status != 'unscheduled'
+        schedule = self.plan_schedules.get(node_id)
+        lines = []
+        if on_board:
+            location = {'todo': 'To Do', 'ready': 'Ready', 'done': 'Done',
+                        'in_progress': 'In Progress'}.get(status, status)
+            hour = placement.get('slot_hour', -1)
+            if status == 'in_progress' and hour >= 0:
+                location += f' · {hour:02d}:00'
+            lines.append('Kanban → ' + location)
+            if placement.get('added_at') is not None:
+                lines.append('Added ' + datetime.fromtimestamp(placement['added_at']).strftime('%Y-%m-%d %H:%M'))
+        if schedule:
+            lines.append('Scheduled → Ready · ' + datetime.fromtimestamp(schedule['at']).strftime('%A %Y-%m-%d %H:%M'))
+        return {'planVisible': on_board or schedule is not None,
+                'planState': 'combined' if on_board and schedule else 'board' if on_board else 'pending',
+                'planTooltip': '\n'.join(lines)}
 
     @Slot(int, result=bool)
     def addSelectedToPlan(self, hour):
@@ -419,7 +496,12 @@ class MindMapController(QObject):
         placement = self._normalize_kanban_placement(status, slot_hour)
         if node is None or node_id in self.links or placement is None:
             return False
-        if self._kanban.get(node_id) == placement:
+        previous = self._kanban.get(node_id)
+        if previous is None:
+            placement['added_at'] = time.time()
+        elif 'added_at' in previous:
+            placement['added_at'] = previous['added_at']
+        if previous == placement:
             return True
         self._kanban[node_id] = placement
         self.changed.emit()
@@ -481,6 +563,7 @@ class MindMapController(QObject):
         seen = set()
         for node_id, tab_id in list(self.links.items()):
             if node_id not in nodes or tab_id not in live or tab_id in seen:
+                self.plan_schedules.pop(node_id, None)
                 del self.links[node_id]
             else:
                 nodes[node_id].text = live[tab_id].name
@@ -495,7 +578,7 @@ class MindMapController(QObject):
         self._bookmarks = [key for key in self._bookmarks if key in nodes]
         self.reminders = {key: value for key, value in self.reminders.items() if key in nodes}
         self.deadlines = {key: value for key, value in self.deadlines.items() if key in nodes}
-        old_kanban = self._kanban
+        self.plan_schedules = {key: value for key, value in self.plan_schedules.items() if key in nodes}
         self._kanban = {key: value for key, value in self._kanban.items()
                         if key in nodes and key not in self.links}
         self._selected_ids = [key for key in self._selected_ids if self._in_scope(self._find(key))]
@@ -505,8 +588,7 @@ class MindMapController(QObject):
         self._sync_filter_selection()
         self.sceneChanged.emit()
         self.changed.emit()
-        if self._kanban != old_kanban:
-            self.planChanged.emit()
+        self.planChanged.emit()
 
     def to_dict(self):
         return {'version': 1, 'xml': dumps(self.map).decode('utf-8'),
@@ -514,7 +596,8 @@ class MindMapController(QObject):
                 'reminders': copy.deepcopy(self.reminders), 'bookmarks': list(self._bookmarks),
                 'measure_progress': sorted(self._measure_progress),
                 'deadlines': copy.deepcopy(self.deadlines),
-                'kanban': copy.deepcopy(self._kanban)}
+                'kanban': copy.deepcopy(self._kanban),
+                'plan_schedules': copy.deepcopy(self.plan_schedules)}
 
     @staticmethod
     def decode(payload):
@@ -601,7 +684,28 @@ class MindMapController(QObject):
                     or (status == 'in_progress' and not 8 <= slot_hour <= 17)
                     or (status != 'in_progress' and slot_hour != -1)):
                 raise ValueError('Malformed mindmap kanban slot')
+        schedules = payload.get('plan_schedules', {})
+        if not isinstance(schedules, dict):
+            raise ValueError('Malformed plan schedules')
+        for node_id, schedule in schedules.items():
+            if (not isinstance(node_id, str) or mindmap.find(node_id) is None
+                    or node_id in payload.get('tab_references', {})
+                    or not isinstance(schedule, dict)):
+                raise ValueError('Malformed plan schedule')
+            MindMapController._validate_plan_timestamp(schedule.get('at'))
+        for placement in kanban.values():
+            if 'added_at' in placement:
+                MindMapController._validate_plan_timestamp(placement['added_at'])
         return mindmap, dict(links)
+
+    @staticmethod
+    def _validate_plan_timestamp(value):
+        try:
+            if type(value) not in (int, float) or not math.isfinite(value):
+                raise ValueError('Invalid plan timestamp')
+            datetime.fromtimestamp(value)
+        except (ValueError, OverflowError, OSError) as exc:
+            raise ValueError('Invalid plan timestamp') from exc
 
     def load(self, payload=None):
         self.map, self.links = self.decode(payload) if payload is not None else (MindMap('Project'), {})
@@ -614,6 +718,7 @@ class MindMapController(QObject):
         self.deadlines = copy.deepcopy((payload or {}).get('deadlines', {}))
         self._bookmarks = list((payload or {}).get('bookmarks', []))
         self._kanban = copy.deepcopy((payload or {}).get('kanban', {}))
+        self.plan_schedules = copy.deepcopy((payload or {}).get('plan_schedules', {}))
         self._scope_tab = None
         self._view_selections.clear()
         self._undo.clear()
@@ -920,6 +1025,8 @@ class MindMapController(QObject):
                 padding += 20.0
             if _content(node).id in self._bookmarks:
                 padding += 20.0
+            if self.planData(node.id)['planVisible']:
+                padding += 20.0
             if self._tab_id(node) in priorities:
                 padding += 30.0
                 if priorities[self._tab_id(node)]['priorityRank'] > 0:
@@ -962,6 +1069,7 @@ class MindMapController(QObject):
                  'measureProgress': _content(n).id in self._measure_progress,
                  'progressPercent': (math.floor(100 * sum(_content(child).id in self._completed for child in n.children)
                                                   / len(n.children) + 0.5) if n.children else 0),
+                 **self.planData(n.id),
                  **self.reminderData(n.id),
                  **self.deadlineData(n.id),
                  **priorities.get(self._tab_id(n), {'priorityScore': None, 'priorityLevel': 0,
@@ -1310,6 +1418,7 @@ class MindMapController(QObject):
             self._completed.intersection_update(live)
             self._measure_progress.intersection_update(live)
             self._bookmarks = [key for key in self._bookmarks if key in live]
+            self.plan_schedules = {key: value for key, value in self.plan_schedules.items() if key in live}
             self.reminders = {key: value for key, value in self.reminders.items() if key in live}
             self.deadlines = {key: value for key, value in self.deadlines.items() if key in live}
             self._kanban = {key: value for key, value in self._kanban.items()
@@ -1323,6 +1432,7 @@ class MindMapController(QObject):
             self.deadlines = copy.deepcopy(before.get('deadlines', {}))
             self._bookmarks = list(before.get('bookmarks', []))
             self._kanban = copy.deepcopy(before.get('kanban', {}))
+            self.plan_schedules = copy.deepcopy(before.get('plan_schedules', {}))
             self._restore_selection(selected)
             self.errorOccurred.emit(str(exc))
             self.changed.emit()
@@ -1340,7 +1450,8 @@ class MindMapController(QObject):
         self._sync_filter_selection()
         self.sceneChanged.emit()
         self.changed.emit()
-        if before.get('kanban', {}) != self._kanban:
+        if (before.get('kanban', {}) != self._kanban
+                or before.get('plan_schedules', {}) != self.plan_schedules):
             self.planChanged.emit()
         return True
 
@@ -1665,6 +1776,7 @@ class MindMapController(QObject):
         self.deadlines = copy.deepcopy(payload.get('deadlines', {}))
         self._bookmarks = list(payload.get('bookmarks', []))
         self._kanban = copy.deepcopy(payload.get('kanban', {}))
+        self.plan_schedules = copy.deepcopy(payload.get('plan_schedules', {}))
         if tab_state is not None:
             live = {tab.id for tab in self._tabs.getAllTabs()}
             self._view_selections = {key: value for key, value in self._view_selections.items()

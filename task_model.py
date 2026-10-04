@@ -458,6 +458,7 @@ class Tab:
     })
     kanban_status: str = "todo"
     kanban_slot_hour: int = -1
+    kanban_added_at: Optional[float] = field(default_factory=time.time)
     action_paint: Dict[str, Any] = field(default_factory=lambda: {
         "elements": [], "actions": [], "last_imported_signature": ""
     })
@@ -1887,6 +1888,10 @@ class TabModel(QAbstractListModel):
         tab = self._tabs[index]
         if tab.kanban_status == normalized_status and tab.kanban_slot_hour == normalized_slot:
             return True
+        if normalized_status == 'unscheduled':
+            tab.kanban_added_at = None
+        elif tab.kanban_status == 'unscheduled':
+            tab.kanban_added_at = time.time()
         tab.kanban_status = normalized_status
         tab.kanban_slot_hour = normalized_slot
         model_index = self.index(index, 0)
@@ -2751,6 +2756,12 @@ class ProjectManager(QObject):
         self._checkBackgroundTabReminders()
         self._checkStandaloneReminders()
         self._checkMindmapReminders()
+        self._checkPlanSchedules()
+        # Refresh weekday dates/counts across local midnight, even while idle.
+        day = datetime.now().date()
+        if getattr(self, "_plan_options_day", None) != day:
+            self._plan_options_day = day
+            self.mindmap.planChanged.emit()
 
     def _onCurrentTabReminderDue(self, task_index: int, task_title: str, send_notification: bool) -> None:
         tab_index = self._tab_model.currentTabIndex if self._tab_model is not None else 0
@@ -2872,6 +2883,30 @@ class ProjectManager(QObject):
         self._saveCurrentTabState()
         self._setMindmapVisible(True)
         self.mindmap.reveal_reminder(node_id)
+
+    @staticmethod
+    def _loaded_kanban_added_at(value):
+        if value is not None:
+            MindMapController._validate_plan_timestamp(value)
+        return value
+
+    def _checkPlanSchedules(self) -> None:
+        now = time.time()
+        due = [(node_id, schedule.copy()) for node_id, schedule in self.mindmap.plan_schedules.items()
+               if schedule['at'] <= now]
+        delivered = False
+        for node_id, schedule in due:
+            node = self.mindmap.map.find(node_id)
+            if node is not None and not self.mindmap._place_plan_node(node_id, 'ready'):
+                continue
+            self.mindmap.consume_plan_schedule(node_id)
+            delivered = True
+            if node is not None:
+                title = node.text + ' → Kanban Ready'
+                self._publishReminderNotification(0, title, scope_label="Plan")
+                self.mindmapReminderDue.emit(node_id, title, True)
+        if delivered:
+            self._save_after_reminder()
 
     def _checkMindmapReminders(self) -> None:
         now = time.time()
@@ -3071,6 +3106,16 @@ class ProjectManager(QObject):
                 kind="mindmap", title=node.text, tab_index=-1, tab_name="Mindmap",
                 task_index=-1, standalone_index=-1, reminder_ts=reminder['at'],
                 send_notification=reminder['send_notification'], is_current_tab=False, now=now)
+            entry['nodeId'] = node_id
+            reminders.append(entry)
+        for node_id, schedule in self.mindmap.plan_schedules.items():
+            node = self.mindmap.map.find(node_id)
+            if node is None:
+                continue
+            entry = self._build_active_reminder_payload(
+                kind="kanban_schedule", title=node.text, tab_index=-1,
+                tab_name="Add to Kanban → Ready", task_index=-1, standalone_index=-1,
+                reminder_ts=schedule['at'], send_notification=True, is_current_tab=False, now=now)
             entry['nodeId'] = node_id
             reminders.append(entry)
         reminders.extend(self.getActiveStandaloneReminders())
@@ -3601,6 +3646,7 @@ class ProjectManager(QObject):
                     "assessment": TabModel._normalizeAssessment(tab.assessment),
                     "kanban_status": tab.kanban_status,
                     "kanban_slot_hour": tab.kanban_slot_hour,
+                    "kanban_added_at": tab.kanban_added_at,
                 })
 
             return {
@@ -4045,7 +4091,7 @@ class ProjectManager(QObject):
         """
         tasks_data = project_data.get("tasks", {"tasks": []})
         diagram_data = project_data.get("diagram", {"items": [], "edges": [], "strokes": []})
-        return [Tab(name="Main", tasks=tasks_data, diagram=diagram_data)]
+        return [Tab(name="Main", tasks=tasks_data, diagram=diagram_data, kanban_added_at=None)]
 
     @Slot(str)
     def loadProject(self, file_path: str) -> None:
@@ -4121,6 +4167,7 @@ class ProjectManager(QObject):
                         pinned=tab_data.get("pinned", False),
                         goals=tab_data.get("goals", []),
                         assessment=TabModel._normalizeAssessment(tab_data.get("assessment")),
+                        kanban_added_at=self._loaded_kanban_added_at(tab_data.get("kanban_added_at")),
                         kanban_status=TabModel._normalizeKanbanStatus(tab_data.get("kanban_status", "todo")),
                         kanban_slot_hour=TabModel._normalizeKanbanSlotHour(
                             TabModel._normalizeKanbanStatus(tab_data.get("kanban_status", "todo")),

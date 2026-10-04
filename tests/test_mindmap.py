@@ -3257,14 +3257,20 @@ def test_mindmap_plan_roundtrip_delete_cleanup_and_undo(project):
 
     restored = MindMapController(tabs)
     restored.load(payload)
-    assert restored._kanban[node_id] == {'status': 'in_progress', 'slot_hour': 15}
+    assert restored._kanban[node_id] == payload['kanban'][node_id]
+    assert restored._kanban[node_id]['status'] == 'in_progress'
+    assert restored._kanban[node_id]['slot_hour'] == 15
+    assert restored._kanban[node_id]['added_at'] > 0
     assert restored.plannedNodeItems()[0]['name'] == 'Persisted plan item'
 
     restored.select(node_id)
     restored.deleteSelected()
     assert node_id not in restored._kanban
     restored.undo()
-    assert restored._kanban[node_id] == {'status': 'in_progress', 'slot_hour': 15}
+    assert restored._kanban[node_id] == payload['kanban'][node_id]
+    assert restored._kanban[node_id]['status'] == 'in_progress'
+    assert restored._kanban[node_id]['slot_hour'] == 15
+    assert restored._kanban[node_id]['added_at'] > 0
 
 
 def test_mixed_kanban_lane_actions_and_unschedule_preserve_sources(project):
@@ -3801,3 +3807,301 @@ def test_qml_fold_buttons_and_view_toolbar(project, app):
         assert m.map.find(root_id).folded == folded
         assert m.map.find(child.id).folded == folded
     window.close()
+
+
+@pytest.mark.parametrize('now, weekday, expected', [
+    ('2026-10-04 12:00', 0, '2026-10-05 08:00'),
+    ('2026-10-04 07:00', 6, '2026-10-04 08:00'),
+    ('2026-10-04 12:00', 6, '2026-10-04 08:00'),
+    ('2026-10-05 12:00', 6, '2026-10-11 08:00'),
+    ('2026-03-28 12:00', 6, '2026-03-29 08:00'),
+    ('2026-10-24 12:00', 6, '2026-10-25 08:00'),
+])
+def test_plan_weekdays_local_calendar_and_dst(now, weekday, expected, monkeypatch):
+    from datetime import datetime
+    old_tz = __import__('os').environ.get('TZ')
+    monkeypatch.setenv('TZ', 'Europe/Oslo')
+    time.tzset()
+    try:
+        current = datetime.strptime(now, '%Y-%m-%d %H:%M')
+        result = MindMapController._weekday_at(weekday, current)
+        assert datetime.fromtimestamp(result).strftime('%Y-%m-%d %H:%M') == expected
+    finally:
+        if old_tz is None:
+            monkeypatch.delenv('TZ')
+        else:
+            monkeypatch.setenv('TZ', old_tz)
+        time.tzset()
+
+
+def test_plan_schedules_replace_coexist_count_and_history(project, monkeypatch):
+    from datetime import datetime
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    monkeypatch.setattr('actiondraw.mindmap.time.time', lambda: datetime(2026, 10, 4, 12).timestamp())
+    node_id = thought(m, 'Write report')
+    linked = next(iter(m.links))
+    m._set_selection([node_id, linked])
+    assert m.set_reminder(node_id, datetime(2026, 10, 8, 12).timestamp(), False)
+    original = copy.deepcopy(m.reminders)
+    assert m.scheduleSelectedToWeekday(0)
+    assert len(m.plan_schedules) == 2
+    assert m.planWeekdayOptions[0]['label'] == 'Monday 5 Oct (2 tasks)'
+    assert not m._kanban
+    assert tabs.getAllTabs()[0].kanban_status == 'todo'
+    entries = pm.getActiveReminders()
+    assert len(entries) == 3
+    assert sum(e['kind'] == 'kanban_schedule' and e['sendNotification'] for e in entries) == 2
+    assert m.planData(node_id)['planState'] == 'pending'
+    assert m.planData(linked)['planState'] == 'combined'
+    assert m.scheduleSelectedToWeekday(1)
+    assert m.planWeekdayOptions[0]['count'] == 0
+    assert m.planWeekdayOptions[1]['count'] == 2
+    m.undo()
+    assert m.planWeekdayOptions[0]['count'] == 2
+    m.redo()
+    assert m.planWeekdayOptions[1]['count'] == 2
+    m.cancelPlanSchedule(node_id)
+    assert node_id not in m.plan_schedules
+    assert m.reminders == original
+    m.undo()
+    assert node_id in m.plan_schedules
+    m.select(node_id)
+    m.deleteSelected()
+    assert node_id not in m.plan_schedules
+    m.undo()
+    assert node_id in m.plan_schedules
+    assert not m.scheduleNodeToWeekday('missing', 1)
+    assert not m.scheduleSelectedToWeekday(7)
+
+
+def test_plan_schedule_delivery_catchup_and_no_undo_replay(project, monkeypatch):
+    from datetime import datetime
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    node_id = thought(m, 'Due task')
+    linked = next(iter(m.links))
+    now = [datetime(2026, 10, 4, 12).timestamp()]
+    monkeypatch.setattr('actiondraw.mindmap.time.time', lambda: now[0])
+    m._set_selection([node_id, linked])
+    m.scheduleSelectedToWeekday(0)
+    m.addSelectedToPlan(14)
+    added = m._kanban[node_id]['added_at']
+    assert m.planData(node_id)['planState'] == 'combined'
+    sent, due, saved = [], [], []
+    monkeypatch.setattr(pm, '_publishReminderNotification', lambda *args, **kwargs: sent.append((args, kwargs)))
+    monkeypatch.setattr(pm, '_save_after_reminder', lambda: saved.append(True))
+    pm.mindmapReminderDue.connect(lambda *args: due.append(args))
+    pm._checkPlanSchedules()
+    assert not due
+    # A project loaded after its due date catches up through the normal timer.
+    payload = m.to_dict()
+    m.load(payload)
+    now[0] = datetime(2026, 10, 6, 10).timestamp()
+    pm._processReminderTimers()
+    assert not m.plan_schedules
+    assert m._kanban[node_id]['status'] == 'ready'
+    assert m._kanban[node_id]['added_at'] == added
+    assert tabs.getAllTabs()[0].kanban_status == 'ready'
+    assert len(due) == len(sent) == 2
+    assert all(event[2] is True for event in due)
+    assert saved == [True]
+    pm._processReminderTimers()
+    assert len(due) == 2
+    # Same-day scheduling after 08:00 delivers, and history cannot revive it.
+    m.select(node_id)
+    m.scheduleSelectedToWeekday(1)
+    m.editSelected('Edited due task', '')
+    pm._checkPlanSchedules()
+    assert len(due) == 3
+    for _ in range(3):
+        m.undo()
+        assert not m.plan_schedules
+        pm._checkPlanSchedules()
+    for _ in range(3):
+        m.redo()
+        assert not m.plan_schedules
+        pm._checkPlanSchedules()
+    assert len(due) == 3
+
+
+def test_plan_persistence_legacy_and_entry_timestamps(project, monkeypatch):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    node_id = thought(m)
+    clock = [1000.0]
+    monkeypatch.setattr('actiondraw.mindmap.time.time', lambda: clock[0])
+    m.addSelectedToReady()
+    m.scheduleSelectedToWeekday(0)
+    payload = m.to_dict()
+    restored = MindMapController(tabs)
+    restored.load(payload)
+    assert restored.plan_schedules == m.plan_schedules
+    assert restored._kanban == m._kanban
+    assert 'Added ' in restored.planData(node_id)['planTooltip']
+    clock[0] = 2000
+    m.setNodeKanbanPlacement(node_id, 'in_progress', 10)
+    assert m._kanban[node_id]['added_at'] == 1000
+    assert '10:00' in m.planData(node_id)['planTooltip']
+    m.removeNodeFromPlan(node_id)
+    assert m.planData(node_id)['planState'] == 'pending'
+    m.addSelectedToReady()
+    assert m._kanban[node_id]['added_at'] == 2000
+    del payload['plan_schedules']
+    del payload['kanban'][node_id]['added_at']
+    restored.load(payload)
+    restored.setNodeKanbanPlacement(node_id, 'done')
+    assert not restored.plan_schedules
+    assert 'Added ' not in restored.planData(node_id)['planTooltip']
+    tab = tabs.getAllTabs()[0]
+    tabs.setKanbanPlacement(0, 'unscheduled')
+    assert tab.kanban_added_at is None
+    tabs.setKanbanPlacement(0, 'ready')
+    assert tab.kanban_added_at == 2000
+    clock[0] = 3000
+    tabs.setKanbanPlacement(0, 'in_progress', 12)
+    assert tab.kanban_added_at == 2000
+    assert pm._build_project_data()['tabs'][0]['kanban_added_at'] == 2000
+    assert ProjectManager._loaded_kanban_added_at(None) is None
+
+
+@pytest.mark.parametrize('value', [None, True, 'tomorrow', float('nan'), float('inf'), 1e300])
+def test_plan_schedule_rejects_invalid_saved_timestamps(project, value):
+    m = project[0].mindmap
+    node_id = thought(m)
+    payload = m.to_dict()
+    payload['plan_schedules'] = {node_id: {'at': value}}
+    with pytest.raises(ValueError, match='timestamp'):
+        MindMapController.decode(payload)
+
+
+def test_plan_badge_reserves_width_only_and_reacts_to_board_changes(project):
+    m = project[0].mindmap
+    node_id = thought(m, 'A moderately long node title', '')
+    before = next(n for n in m.nodes if n['id'] == node_id)
+    m.scheduleSelectedToWeekday(0)
+    pending = next(n for n in m.nodes if n['id'] == node_id)
+    assert pending['height'] == before['height']
+    assert pending['width'] == before['width'] + 20
+    m.addSelectedToReady()
+    both = next(n for n in m.nodes if n['id'] == node_id)
+    assert both['width'] == pending['width']
+    assert both['height'] == pending['height']
+    assert both['planState'] == 'combined'
+    m.cancelPlanSchedule(node_id)
+    assert m.planData(node_id)['planState'] == 'board'
+    m.removeNodeFromPlan(node_id)
+    assert not m.planData(node_id)['planVisible']
+
+
+def test_qml_weekday_actions_reminder_reschedule_cancel_and_badge(project, app, tmp_path, actiondraw_window):
+    from datetime import datetime
+    pm, tabs, tasks, diagram = project
+    pm._reminder_timer.stop()
+    m = pm.mindmap
+    node_id = thought(m, 'Prepare launch checklist', 'Discuss the release timeline')
+    m.toggleBookmark(node_id)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    warnings = []
+    engine.warnings.connect(lambda messages: warnings.extend(message.toString() for message in messages))
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(100)
+
+    def find(item, name):
+        if item.objectName() == name:
+            return item
+        for child in item.childItems():
+            found = find(child, name)
+            if found is not None:
+                return found
+
+    try:
+        weekday = (datetime.now().weekday() + 1) % 7
+        node = find(window.contentItem(), 'mindmapNode_' + node_id)
+        QTest.mouseClick(window, Qt.RightButton, Qt.NoModifier,
+                         node.mapToScene(node.boundingRect().center()).toPoint())
+        QTest.qWait(30)
+        node_menu = window.findChild(QObject, 'mindmapNodeMenu')
+        assert node_menu.property('visible')
+        menu = window.findChild(QObject, 'mindmapAddToPlanMenu')
+        QMetaObject.invokeMethod(menu, 'open')
+        QTest.qWait(30)
+        assert menu.property('visible')
+        window.grabWindow().save(str(tmp_path / 'weekday-menu.png'))
+        QMetaObject.invokeMethod(menu, 'close')
+        QMetaObject.invokeMethod(node_menu, 'close')
+        for day in range(7):
+            menu = window.findChild(QObject, 'mindmapAddToPlanMenu')
+            action = find(menu.property('contentItem'), 'mindmapAddToWeekday_' + str(day))
+            assert action is not None
+            assert action.property('text') == m.planWeekdayOptions[day]['label']
+        action = find(menu.property('contentItem'), 'mindmapAddToWeekday_' + str(weekday))
+        QMetaObject.invokeMethod(action, 'triggered')
+        QTest.qWait(50)
+        assert node_id in m.plan_schedules
+        badge = find(window.contentItem(), 'mindmapPlanBadge_' + node_id)
+        assert badge and badge.isVisible()
+        label = find(window.contentItem(), 'mindmapNodeText_' + node_id)
+        assert badge.x() + badge.width() <= label.x()
+        row = find(window.contentItem(), 'reminderRow_plan_' + node_id)
+        assert row and row.isVisible()
+        edit = find(window.contentItem(), 'editReminder_plan_' + node_id)
+        assert edit.property('text') == 'Reschedule'
+        QMetaObject.invokeMethod(edit, 'clicked')
+        QTest.qWait(30)
+        menu = row.findChild(QObject, 'reschedulePlanMenu_' + node_id)
+        assert menu and menu.property('visible')
+        next_day = (weekday + 1) % 7
+        target = find(menu.property('contentItem'), 'reschedulePlanWeekday_' + node_id + '_' + str(next_day))
+        assert target is not None
+        QMetaObject.invokeMethod(target, 'triggered')
+        QTest.qWait(30)
+        assert datetime.fromtimestamp(m.plan_schedules[node_id]['at']).weekday() == next_day
+        # A pending schedule and an ordinary reminder remain independently actionable.
+        m.set_reminder(node_id, time.time() + 86400, False)
+        m.addSelectedToPlan(10)
+        QTest.qWait(50)
+        assert m.planData(node_id)['planState'] == 'combined'
+        window.grabWindow().save(str(tmp_path / 'weekday-planning.png'))
+        cancel = find(window.contentItem(), 'clearReminder_plan_' + node_id)
+        QMetaObject.invokeMethod(cancel, 'clicked')
+        QTest.qWait(30)
+        assert node_id not in m.plan_schedules
+        assert node_id in m.reminders
+        assert m._kanban[node_id]['status'] == 'in_progress'
+        assert not warnings
+    finally:
+        window.close()
+
+
+def test_plan_encrypted_project_roundtrip_and_persisted_delivery(project, tmp_path, monkeypatch):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    node_id = thought(m, 'Saved scheduled task')
+    linked = next(iter(m.links))
+    m._set_selection([node_id, linked])
+    m.scheduleSelectedToWeekday(0)
+    m.addSelectedToReady()
+    credentials = EncryptionCredentials(passphrase='weekday-plan-test')
+    monkeypatch.setattr(pm, '_prompt_encryption_credentials', lambda *args: credentials)
+    monkeypatch.setattr(pm, '_publishReminderNotification', lambda *args, **kwargs: None)
+    path = tmp_path / 'weekday.progress'
+    expected = m.to_dict()
+    tab_added = tabs.getAllTabs()[0].kanban_added_at
+    assert pm.saveProject(str(path))
+    m.cancelPlanSchedule(node_id)
+    pm.loadProject(str(path))
+    assert m.plan_schedules == expected['plan_schedules']
+    assert m._kanban == expected['kanban']
+    assert tabs.getAllTabs()[0].kanban_added_at == tab_added
+    due_at = m.plan_schedules[node_id]['at']
+    monkeypatch.setattr('actiondraw.mindmap.time.time', lambda: due_at + 10)
+    pm._checkPlanSchedules()
+    saved = decrypt_project_data(json.loads(path.read_text()), credentials)
+    assert saved['mindmap']['plan_schedules'] == {}
+    assert saved['mindmap']['kanban'][node_id]['status'] == 'ready'
+    assert saved['tabs'][0]['kanban_status'] == 'ready'
+    pm.loadProject(str(path))
+    assert not m.plan_schedules

@@ -413,3 +413,26 @@ def test_bulk_folding_repeated_reference_placements(project):
     m.toggleNodeFold(first)
     assert m.map.find(child).folded
     assert all(n['folded'] for n in m.nodes if n['sourceId'] == child)
+
+
+def test_plan_scheduling_references_deduplicate_and_share_badges(project):
+    pm, tabs, _, _, daily, lunch, roots, child = project
+    m = pm.mindmap
+    ref = reference(project)
+    projected = occurrence(m, child, ref)
+    m.set_scope(None)
+    m._set_selection([ref, roots[lunch], child, projected])
+    assert m.scheduleSelectedToWeekday(0)
+    assert set(m.plan_schedules) == {roots[lunch], child}
+    assert m.planWeekdayOptions[0]['count'] == 2
+    assert m.planData(ref) == m.planData(roots[lunch])
+    assert m.planData(projected) == m.planData(child)
+    m.select(ref)
+    m.deleteSelected()
+    assert set(m.plan_schedules) == {roots[lunch], child}
+    m.undo()
+    m.cancelPlanSchedule(ref)
+    assert set(m.plan_schedules) == {child}
+    m.scheduleNodeToWeekday(roots[lunch], 0)
+    tabs.removeTab(next(i for i, tab in enumerate(tabs.getAllTabs()) if tab.id == lunch))
+    assert roots[lunch] not in m.plan_schedules

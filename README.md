@@ -162,6 +162,19 @@ Completing or deleting a node cancels its reminder; undo restores it. Reminders
 that have already fired stay cleared through undo/redo. Use **Renew** in the
 due alert to schedule another one.
 
+**Add to plan** offers Ready, hourly slots, and Monday–Sunday with dates and
+pending task counts. Choosing a weekday schedules a one-time move to Kanban
+Ready at 08:00 local time, including today (immediately if 08:00 has passed).
+A separate **Add to Kanban → Ready** reminder lets you reschedule or cancel;
+ordinary reminders remain independent. Choosing another day replaces the
+pending schedule. Due schedules show an in-app alert and use the configured
+`ntfy` notifications; missed schedules run when the app next opens the project.
+
+A small calendar badge marks planned nodes without adding a row: amber means
+scheduled, blue means on Kanban, and a blue badge with an amber dot means both.
+Hover for the current column/hour, board-entry time when known, and scheduled
+date. Moving a card preserves its entry time; removing and re-adding resets it.
+
 ### 4. Reorganize as the plan changes
 
 **Ctrl+click** toggles nodes in the selection without opening tabs.

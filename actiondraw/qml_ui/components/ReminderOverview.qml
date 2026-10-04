@@ -8,6 +8,7 @@ Column {
     property var windowRoot
     property var projectManager
     property var dialogs
+    property var planController
     spacing: 6
 
     Rectangle {
@@ -68,12 +69,28 @@ Column {
                 delegate: Rectangle {
                     id: reminderRow
                     required property var modelData
-                    objectName: "reminderRow_" + (modelData.nodeId || modelData.kind)
+                    readonly property bool isPlan: modelData.kind === "kanban_schedule"
+                    objectName: "reminderRow_" + (isPlan ? "plan_" : "") + (modelData.nodeId || modelData.kind)
                     width: reminderRows.width
                     height: rowContent.implicitHeight + 12
                     radius: 6
                     color: "#2e261f"
                     border.color: "#8d6948"
+
+                    Menu {
+                        id: rescheduleMenu
+                        objectName: "reschedulePlanMenu_" + reminderRow.modelData.nodeId
+                        Repeater {
+                            model: overview.planController ? overview.planController.planWeekdayOptions : []
+                            delegate: MenuItem {
+                                required property var modelData
+                                objectName: "reschedulePlanWeekday_" + reminderRow.modelData.nodeId + "_" + modelData.weekday
+                                text: modelData.label
+                                onTriggered: overview.planController.scheduleNodeToWeekday(
+                                    reminderRow.modelData.nodeId, modelData.weekday)
+                            }
+                        }
+                    }
 
                     GridLayout {
                         id: rowContent
@@ -107,7 +124,7 @@ Column {
                             }
                             Text {
                                 width: parent.width
-                                text: "Remind at " + reminderRow.modelData.reminderText
+                                text: (reminderRow.isPlan ? "Add and notify at " : "Remind at ") + reminderRow.modelData.reminderText
                                 color: "#f1c892"
                                 font.pixelSize: 10
                                 elide: Text.ElideRight
@@ -116,23 +133,25 @@ Column {
                         RowLayout {
                             spacing: 6
                             Button {
-                                objectName: "openReminder_" + (reminderRow.modelData.nodeId || reminderRow.modelData.kind)
-                                text: reminderRow.modelData.kind === "mindmap" ? "Open Node" : "Open Task"
+                                objectName: "openReminder_" + (reminderRow.isPlan ? "plan_" : "") + (reminderRow.modelData.nodeId || reminderRow.modelData.kind)
+                                text: reminderRow.isPlan || reminderRow.modelData.kind === "mindmap" ? "Open Node" : "Open Task"
                                 visible: reminderRow.modelData.kind !== "standalone"
                                 onClicked: {
                                     var data = reminderRow.modelData
-                                    if (data.kind === "mindmap")
+                                    if (reminderRow.isPlan || data.kind === "mindmap")
                                         overview.projectManager.openMindmapReminder(data.nodeId)
                                     else
                                         overview.projectManager.openTabTask(Number(data.tabIndex), Number(data.taskIndex))
                                 }
                             }
                             Button {
-                                objectName: "editReminder_" + (reminderRow.modelData.nodeId || reminderRow.modelData.kind)
-                                text: "Edit"
+                                objectName: "editReminder_" + (reminderRow.isPlan ? "plan_" : "") + (reminderRow.modelData.nodeId || reminderRow.modelData.kind)
+                                text: reminderRow.isPlan ? "Reschedule" : "Edit"
                                 onClicked: {
                                     var data = reminderRow.modelData
-                                    if (data.kind === "mindmap")
+                                    if (reminderRow.isPlan)
+                                        rescheduleMenu.popup()
+                                    else if (data.kind === "mindmap")
                                         overview.dialogs.openMindmapReminderDialog(data.nodeId, data.reminderText, data.sendNotification)
                                     else if (data.kind === "standalone")
                                         overview.dialogs.openStandaloneReminderEditDialog(Number(data.standaloneIndex), data.title || data.taskTitle, data.reminderText, data.sendNotification || false)
@@ -141,13 +160,15 @@ Column {
                                 }
                             }
                             Button {
-                                objectName: "clearReminder_" + (reminderRow.modelData.nodeId || reminderRow.modelData.kind)
-                                text: "Clear"
+                                objectName: "clearReminder_" + (reminderRow.isPlan ? "plan_" : "") + (reminderRow.modelData.nodeId || reminderRow.modelData.kind)
+                                text: reminderRow.isPlan ? "Cancel" : "Clear"
                                 onClicked: {
                                     var data = reminderRow.modelData
                                     var host = overview.windowRoot
                                     var manager = overview.projectManager
-                                    if (data.kind === "mindmap")
+                                    if (reminderRow.isPlan)
+                                        overview.planController.cancelPlanSchedule(data.nodeId)
+                                    else if (data.kind === "mindmap")
                                         manager.clearMindmapReminder(data.nodeId)
                                     else if (data.kind === "standalone")
                                         manager.clearStandaloneReminder(Number(data.standaloneIndex))
