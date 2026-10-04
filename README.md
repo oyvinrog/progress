@@ -48,6 +48,12 @@ another node to nest it, or onto its top or bottom edge to reorder it. Use the
 right-click menu to place a branch on the left or right. Scroll to zoom, drag
 the background to pan, and choose **Fit** to see the whole map.
 
+Click **−** on a node to fold its branch, or **+** to unfold it. The map toolbar
+also offers **Fold all** and **Unfold all** for the current view. Fold all keeps
+the view root and its immediate children visible; unfold all opens every nested
+branch. In a focused branch view these actions affect that branch. Each action
+can be undone with **Ctrl+Z**.
+
 Blue shades and one, two, or three filled bars show lower, middle, or higher
 relative priority for tabs included in the priority plot. Numbered badges mark
 the top three; hover over a node for its score. The scale compares all included

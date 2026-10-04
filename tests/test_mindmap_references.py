@@ -390,3 +390,26 @@ def test_reference_root_metadata_and_sidebar_removal(project):
     assert not m.references
     assert m.map.find(ref) is None
     assert m.nodes
+
+
+def test_bulk_folding_repeated_reference_placements(project):
+    m = project[0].mindmap
+    a, b = reference(project), reference(project)
+    child = project[-1]
+    m.map.find(child).add_child('Nested leaf')
+    original = m.to_dict()
+    history = len(m._undo)
+    m.foldAll()
+    assert m.map.find(a).folded and m.map.find(b).folded
+    assert m.map.find(child).folded
+    assert not m.map.find(project[6][project[5]]).folded
+    assert len(m._undo) == history + 1
+    m.undo()
+    assert m.to_dict() == original
+    m.redo()
+    m.unfoldAll()
+    assert not any(m.map.find(key).folded for key in (a, b, child))
+    first = occurrence(m, child, a)
+    m.toggleNodeFold(first)
+    assert m.map.find(child).folded
+    assert all(n['folded'] for n in m.nodes if n['sourceId'] == child)

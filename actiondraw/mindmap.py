@@ -11,7 +11,7 @@ from PySide6.QtCore import QObject, Property, QUrl, Signal, Slot
 from PySide6.QtGui import QFont, QFontMetricsF, QGuiApplication
 
 from ._vendor.pyplane.model import MindMap, Node
-from ._vendor.pyplane.layout import assigned_sides, layout
+from ._vendor.pyplane.layout import Box, assigned_sides, layout
 from ._vendor.pyplane.mm import dumps, loads
 from .outline_clipboard import (
     looks_like_opml,
@@ -914,6 +914,8 @@ class MindMapController(QObject):
         sizes = {}
         for node in self.view_root.walk():
             padding = 74.0 if _content(node).id in self._completed else 52.0
+            if node.children:
+                padding += 22.0
             if node.note and node.note.strip():
                 padding += 20.0
             if _content(node).id in self._bookmarks:
@@ -929,6 +931,9 @@ class MindMapController(QObject):
             sizes[node] = (width, 40.0 + (24.0 if _content(node).id in self.reminders else 0.0)
                            + (24.0 if _content(node).id in self._measure_progress else 0.0)
                            + (28.0 if _content(node).id in self.deadlines else 0.0))
+        if self.view_root.folded:
+            width, height = sizes[self.view_root]
+            return {self.view_root: Box(-width / 2, -height / 2, width, height)}
         # Layout only needs a root; keep the canonical tree's parent links intact.
         if self._priority_filter == 1:
             return layout(SimpleNamespace(root=self.view_root), sizes)
@@ -1475,11 +1480,50 @@ class MindMapController(QObject):
             node.note = note or None
         self._commit(mutate)
 
+    def _apply_fold_states(self, states):
+        # Reference occurrences can share the same persisted placement.
+        states = {node.id: (node, folded) for node, folded in states}
+        if not any(node.folded != folded for node, folded in states.values()):
+            return
+
+        def mutate():
+            for node, folded in states.values():
+                node.folded = folded
+            visible = self._layout()
+            ids = []
+            primary = None
+            for key in self._selected_ids:
+                node = self._find(key)
+                while node is not None and node not in visible:
+                    node = node.parent
+                key_visible = (node or self.view_root).id
+                ids.append(key_visible)
+                if key == self._selected:
+                    primary = key_visible
+            self._set_selection(ids, primary)
+
+        self._commit(mutate)
+
+    @Slot(str)
+    def toggleNodeFold(self, node_id):
+        node = self._find(node_id)
+        if self._in_scope(node) and node.children:
+            self._apply_fold_states([(_placement(node), not node.folded)])
+
     @Slot()
     def toggleFold(self):
-        node = self._find(self._selected)
-        if node and node.children:
-            self._commit(lambda: setattr(node, 'folded', not node.folded))
+        self.toggleNodeFold(self._selected)
+
+    @Slot()
+    def foldAll(self):
+        root = self.view_root
+        self._apply_fold_states([(_placement(node), node is not root)
+                                 for node in root.walk() if node.children])
+
+    @Slot()
+    def unfoldAll(self):
+        self._apply_fold_states([(_placement(node), False)
+                                 for node in self.view_root.walk() if node.children])
 
     @Slot()
     def deleteSelected(self):

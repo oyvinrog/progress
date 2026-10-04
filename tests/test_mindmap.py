@@ -2863,7 +2863,8 @@ def test_mindmap_compact_menu_keyboard_and_help(project, app):
     menu = window.findChild(QObject, 'mindmapActionsMenu')
     help_dialog = window.findChild(QObject, 'mindmapHelpDialog')
     assert toolbar.height() < 60
-    assert viewport.height() > pane.height() - 90
+    view_toolbar = window.findChild(QObject, 'mindmapViewToolbar')
+    assert viewport.height() > pane.height() - 90 - view_toolbar.height() - 8
     button.forceActiveFocus()
     QTest.keyClick(window, Qt.Key_Space)
     QTest.qWait(40)
@@ -3656,3 +3657,147 @@ def test_mindmap_context_menu_bundled_icons(project, app):
     window.close()
     engine.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+
+def test_bulk_folding_history_selection_and_persistence(project):
+    m = project[0].mindmap
+    root = m.map.root
+    branch = root.add_child('Branch')
+    nested = branch.add_child('Nested')
+    leaf = nested.add_child('Leaf')
+    other = root.add_child('Other')
+    m.select(leaf.id)
+    m.select(other.id, 'add')
+    before = m.to_dict()
+    history = len(m._undo)
+    m.foldAll()
+    assert not root.folded and branch.folded and nested.folded
+    assert set(m.selectedIds) == {branch.id, other.id}
+    assert len(m._undo) == history + 1
+    folded = m.to_dict()
+    decoded, _ = m.decode(folded)
+    assert decoded.find(branch.id).folded
+    m.foldAll()
+    assert len(m._undo) == history + 1
+    m.undo()
+    assert m.to_dict() == before
+    assert set(m.selectedIds) == {leaf.id, other.id}
+    m.redo()
+    assert m.to_dict() == folded
+    m.unfoldAll()
+    assert all(not node.folded for node in m.map.walk())
+    history = len(m._undo)
+    m.unfoldAll()
+    assert len(m._undo) == history
+    m.toggleNodeFold(root.id)
+    assert m.map.root.folded and m.selectedIds == [root.id]
+    m.foldAll()
+    assert not m.map.root.folded and m.map.find(branch.id).folded
+
+
+def test_folding_scope_and_invalid_targets(project):
+    m = project[0].mindmap
+    root_id, tab_id = next(iter(m.links.items()))
+    branch = m.map.find(root_id)
+    nested = branch.add_child('Nested')
+    nested.add_child('Leaf')
+    outside = m.map.root.add_child('Outside')
+    outside.add_child('Other leaf')
+    m.set_scope(tab_id)
+    branch.folded = True
+    before = len(m._undo)
+    for key in [outside.id, 'missing', nested.children[0].id]:
+        m.toggleNodeFold(key)
+    assert len(m._undo) == before
+    m.foldAll()
+    assert not branch.folded and nested.folded and not outside.folded
+    outside.folded = True
+    m.unfoldAll()
+    assert not nested.folded and outside.folded
+
+
+def test_bulk_folding_preserves_filter_and_expands_hidden_branches(project):
+    m = project[0].mindmap
+    low, high = filter_tabs(project, [0, 10])
+    low_child = low.add_child('Low child')
+    high_child = high.add_child('High child')
+    low_child.add_child('Hidden leaf')
+    high_child.add_child('Visible leaf')
+    m.setPriorityFilter(0)
+    m.foldAll()
+    assert low.folded and low_child.folded and high.folded and high_child.folded
+    assert m.priorityFilter == 0
+    m.unfoldAll()
+    assert not any(node.folded for node in m.map.walk())
+    assert m.priorityFilter == 0
+    assert low not in m._layout() and high_child in m._layout()
+
+
+def test_empty_map_folding_is_noop(app):
+    m = MindMapController()
+    before = m.to_dict()
+    m.foldAll()
+    m.unfoldAll()
+    m.toggleNodeFold(m.view_root.id)
+    assert m.to_dict() == before and not m.canUndo
+
+
+def test_qml_fold_buttons_and_view_toolbar(project, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    root_id = next(iter(m.links))
+    branch = m.map.find(root_id)
+    branch.note = 'Notes alongside the fold control'
+    tabs.setAssessment(0, 10, 10, True)
+    child = branch.add_child('Child')
+    child.add_child('Leaf')
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+    pane = window.findChild(QObject, 'mindmapPane')
+
+    def visual_item(item, name):
+        if item.objectName() == name:
+            return item
+        for sub in item.childItems():
+            found = visual_item(sub, name)
+            if found is not None:
+                return found
+        return None
+
+    activated = []
+    m.tabActivated.connect(lambda *args: activated.append(args))
+    for folded in [True, False]:
+        button = visual_item(window.contentItem(), 'mindmapFold_' + root_id)
+        assert button.isVisible() and button.width() >= 32
+        bars = visual_item(window.contentItem(), 'mindmapPriority_' + root_id)
+        rank = visual_item(window.contentItem(), 'mindmapPriorityRank_' + root_id)
+        label = visual_item(window.contentItem(), 'mindmapNodeText_' + root_id)
+        assert bars.isVisible() and rank.isVisible()
+        assert bars.x() + bars.width() < button.x()
+        assert rank.x() + rank.width() <= bars.x()
+        assert label.x() + label.width() <= rank.x()
+        position = tuple(pane.property(key) for key in ('zoom', 'panX', 'panY'))
+        QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                         button.mapToScene(button.boundingRect().center()).toPoint())
+        QTest.qWait(30)
+        assert m.map.find(root_id).folded == folded
+        assert not activated and not pane.property('nodePressed')
+        assert tuple(pane.property(key) for key in ('zoom', 'panX', 'panY')) == position
+    for width in [1440, 1100, 800]:
+        window.resize(width, 760)
+        QTest.qWait(50)
+        toolbar = window.findChild(QObject, 'mindmapViewToolbar')
+        children = sorted((c for c in toolbar.childItems() if c.isVisible() and c.width() > 0), key=lambda c: c.x())
+        assert all(c.x() >= 0 and c.x() + c.width() <= toolbar.width() + 1 for c in children)
+        assert all(a.x() + a.width() <= b.x() + 1 for a, b in zip(children, children[1:]))
+    for name, folded in [('mindmapFoldAll', True), ('mindmapUnfoldAll', False)]:
+        button = window.findChild(QObject, name)
+        QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                         button.mapToScene(button.boundingRect().center()).toPoint())
+        QTest.qWait(30)
+        assert m.map.find(root_id).folded == folded
+        assert m.map.find(child.id).folded == folded
+    window.close()

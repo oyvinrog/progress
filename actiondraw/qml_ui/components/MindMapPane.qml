@@ -424,6 +424,26 @@ FocusScope {
                 onClicked: { pane.focusMap(); pane.thoughtWanderingRequested() }
             }
             Item { Layout.fillWidth: true; Layout.minimumWidth: 0 }
+        }
+        RowLayout {
+            objectName: "mindmapViewToolbar"
+            Layout.fillWidth: true
+            spacing: 5
+            ToolButton {
+                objectName: "mindmapFoldAll"
+                text: "Fold all"
+                palette.buttonText: "#e5f0fa"
+                enabled: !!pane.controller
+                onClicked: { pane.controller.foldAll(); pane.focusMap() }
+            }
+            ToolButton {
+                objectName: "mindmapUnfoldAll"
+                text: "Unfold all"
+                palette.buttonText: "#e5f0fa"
+                enabled: !!pane.controller
+                onClicked: { pane.controller.unfoldAll(); pane.focusMap() }
+            }
+            Item { Layout.fillWidth: true; Layout.minimumWidth: 0 }
             ColumnLayout {
                 spacing: 0
                 Layout.preferredWidth: 190
@@ -669,6 +689,7 @@ FocusScope {
                             anchors.leftMargin: 9 + (nodeItem.modelData.hasNote ? 20 : 0)
                                                    + (nodeItem.modelData.bookmarked ? 20 : 0)
                             anchors.rightMargin: (nodeItem.modelData.priorityLevel > 0 ? 48 : 18)
+                                                 + (nodeItem.modelData.hasChildren ? 22 : 0)
                                                  + (nodeItem.modelData.priorityRank > 0 ? 30 : 0)
                             verticalAlignment: Text.AlignVCenter
                             text: (nodeItem.modelData.completed ? "✓ " : "") + (nodeItem.modelData.isReference ? "↗ " : nodeItem.modelData.isTab ? "▣ " : "") + nodeItem.modelData.text
@@ -681,7 +702,7 @@ FocusScope {
                             readonly property int rank: nodeItem.modelData.priorityRank
                             visible: rank > 0
                             width: 24; height: 24; radius: 12
-                            anchors.right: parent.right; anchors.rightMargin: 48
+                            anchors.right: parent.right; anchors.rightMargin: 48 + (nodeItem.modelData.hasChildren ? 22 : 0)
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
                                                           - (nodeItem.modelData.measureProgress ? 12 : 0)
@@ -700,7 +721,7 @@ FocusScope {
                         }
                         PriorityBars {
                             objectName: "mindmapPriority_" + nodeItem.modelData.id
-                            anchors.right: parent.right; anchors.rightMargin: 20
+                            anchors.right: parent.right; anchors.rightMargin: 20 + (nodeItem.modelData.hasChildren ? 22 : 0)
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
                                                           - (nodeItem.modelData.measureProgress ? 12 : 0)
@@ -708,14 +729,31 @@ FocusScope {
                             level: nodeItem.modelData.priorityLevel
                             visible: level > 0
                         }
-                        Text {
-                            anchors.right: parent.right; anchors.rightMargin: 5
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
-                                                          - (nodeItem.modelData.measureProgress ? 12 : 0)
-                                                          - (nodeItem.modelData.deadlineActive ? 14 : 0)
-                            text: nodeItem.modelData.hasChildren ? (nodeItem.modelData.folded ? "+" : "−") : ""
-                            color: "#a5d9ff"
+                        ToolButton {
+                            id: foldButton
+                            objectName: "mindmapFold_" + nodeItem.modelData.id
+                            visible: nodeItem.modelData.hasChildren
+                            anchors.right: parent.right
+                            anchors.rightMargin: 3
+                            anchors.top: parent.top
+                            anchors.topMargin: 4
+                            width: 32; height: 32
+                            z: 3
+                            text: nodeItem.modelData.folded ? "+" : "−"
+                            font.pixelSize: 18
+                            palette.buttonText: "#e5f0fa"
+                            background: Rectangle {
+                                radius: 8
+                                color: foldButton.down ? "#42647c" : foldButton.hovered ? "#345265" : "#20394c"
+                                border.color: foldButton.activeFocus ? "#e5f0fa" : "#6288a5"
+                            }
+                            Accessible.name: (nodeItem.modelData.folded ? "Unfold " : "Fold ") + nodeItem.modelData.text
+                            ToolTip.visible: hovered
+                            ToolTip.text: nodeItem.modelData.folded ? "Unfold branch" : "Fold branch"
+                            onClicked: {
+                                pane.controller.toggleNodeFold(nodeItem.modelData.id)
+                                pane.focusMap()
+                            }
                         }
                         MouseArea {
                             id: nodeMouse
