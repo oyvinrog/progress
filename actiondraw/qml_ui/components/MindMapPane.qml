@@ -8,6 +8,7 @@ FocusScope {
     signal assessmentRequested()
     signal actionPaintRequested()
     signal causalDiagramRequested()
+    signal thoughtWanderingRequested()
     property var tabModel: null
     property int assessmentLevel: 0
     property bool toolDialogOpen: false
@@ -277,7 +278,7 @@ FocusScope {
         RowLayout {
             id: mindmapToolbar
             objectName: "mindmapToolbar"
-            readonly property bool compactTools: width < assessmentTool.labeledWidth + paintTool.labeledWidth + causalTool.labeledWidth + actionsButton.implicitWidth + (canvasButton.visible ? canvasButton.implicitWidth + 5 : 0) + 490
+            readonly property bool compactTools: width < assessmentTool.labeledWidth + paintTool.labeledWidth + causalTool.labeledWidth + wanderingTool.implicitWidth + 5 + actionsButton.implicitWidth + (canvasButton.visible ? canvasButton.implicitWidth + 5 : 0) + 490
             Layout.fillWidth: true
             spacing: 5
             Button {
@@ -405,6 +406,22 @@ FocusScope {
                 label: "Causal Diagram"
                 iconKey: "causal"
                 onClicked: { pane.focusMap(); pane.causalDiagramRequested() }
+            }
+            ToolButton {
+                id: wanderingTool
+                objectName: "mindmapThoughtWanderingButton"
+                implicitWidth: 32
+                implicitHeight: 32
+                enabled: !!pane.tabModel && pane.tabModel.tabCount > 1
+                Accessible.name: "Thought wandering"
+                ToolTip.visible: hovered
+                ToolTip.text: "Thought wandering"
+                icon.source: "../icons/dice.svg"
+                icon.width: 16
+                icon.height: 16
+                icon.color: enabled ? "#d6e2ee" : palette.mid
+                display: AbstractButton.IconOnly
+                onClicked: { pane.focusMap(); pane.thoughtWanderingRequested() }
             }
             Item { Layout.fillWidth: true; Layout.minimumWidth: 0 }
             ColumnLayout {

@@ -10,7 +10,7 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, QMetaObject, QObject, QPoint, Qt, QUrl
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtTest import QTest
-from PySide6.QtQml import QQmlProperty
+from PySide6.QtQml import QQmlProperty, qmlContext
 
 from actiondraw.model import DiagramModel
 from actiondraw.mindmap import MindMapController
@@ -3529,6 +3529,39 @@ def test_startup_empty_tab_and_explicit_canvas_navigation(project):
     assert pm.mindmapVisible and not pm.mindmap.tabScoped
 
 
+def test_thought_wandering_selection_and_state(project, monkeypatch):
+    pm, tabs, tasks, diagram = project
+    tabs.addTab('Second')
+    tabs.addTab('Third')
+    diagram.addBox(10, 20, 'Saved before wandering')
+    for target in (1, 2):
+        pm.switchTab(0)
+
+        def choose(candidates):
+            assert candidates == [1, 2]
+            return target
+
+        monkeypatch.setattr('task_model.random.choice', choose)
+        pm.openRandomTab()
+        assert tabs.currentTabIndex == target
+        assert diagram.count == 0
+    pm.switchTab(0)
+    assert diagram.count == 1
+    assert diagram.data(diagram.index(0, 0), diagram.TextRole) == 'Saved before wandering'
+
+
+def test_thought_wandering_without_alternatives(project, monkeypatch):
+    pm, tabs, tasks, diagram = project
+
+    def unexpected_choice(candidates):
+        pytest.fail('No random choice should occur without another tab')
+
+    monkeypatch.setattr('task_model.random.choice', unexpected_choice)
+    pm.openRandomTab()
+    assert tabs.currentTabIndex == 0
+    ProjectManager(tasks, diagram).openRandomTab()
+
+
 def test_mindmap_companion_tools_responsive_and_live_assessment(project, app):
     pm, tabs, tasks, diagram = project
     engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
@@ -3540,6 +3573,10 @@ def test_mindmap_companion_tools_responsive_and_live_assessment(project, app):
     toolbar = window.findChild(QObject, 'mindmapToolbar')
     buttons = [window.findChild(QObject, name) for name in (
         'mindmapAssessmentButton', 'mindmapActionPaintButton', 'mindmapCausalDiagramButton')]
+    wandering = window.findChild(QObject, 'mindmapThoughtWanderingButton')
+    assert not wandering.property('enabled')
+    assert QQmlProperty(wandering, 'Accessible.name', qmlContext(wandering)).read() == 'Thought wandering'
+    assert QQmlProperty(wandering, 'ToolTip.text', qmlContext(wandering)).read() == 'Thought wandering'
     heights = []
     for width, compact in [(1440, False), (1100, True), (800, True)]:
         window.resize(width, 760)
@@ -3550,11 +3587,22 @@ def test_mindmap_companion_tools_responsive_and_live_assessment(project, app):
         assert all(c.x() >= 0 and c.x() + c.width() <= toolbar.width() + 1 for c in visible_children)
         assert all(a.x() + a.width() <= b.x() + 1 for a, b in zip(visible_children, visible_children[1:]))
         assert all(b.isVisible() and b.width() >= 32 for b in buttons)
+        assert wandering.isVisible() and wandering.width() == 32
+        assert wandering.x() >= buttons[-1].x() + buttons[-1].width()
     assert max(heights) == min(heights) and max(heights) < 60
     assert pane.hasActiveFocus()
     tabs.setAssessment(0, 10, 10, True)
     assert pane.property('assessmentLevel') == tabs.getAssessmentLevel(0) == 4
     tabs.addTab('Second')
+    diagram.addBox(10, 20, 'Wandering preserves this')
+    assert wandering.property('enabled')
+    for expected in (1, 0):
+        QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                        wandering.mapToScene(wandering.boundingRect().center()).toPoint())
+        QTest.qWait(30)
+        assert tabs.currentTabIndex == expected
+    assert diagram.count == 1
+    assert diagram.data(diagram.index(0, 0), diagram.TextRole) == 'Wandering preserves this'
     pm.switchTab(1)
     assert pane.property('assessmentLevel') == tabs.getAssessmentLevel(1) == 0
     assert 'Second' in buttons[0].property('toolTipText')

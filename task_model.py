@@ -10,6 +10,7 @@ import uuid
 import json
 import math
 import os
+import random
 import subprocess
 import sys
 import threading
@@ -4484,6 +4485,17 @@ class ProjectManager(QObject):
             return ""
         created_item_id = add_task_from_text(tab_name, x, y)
         return str(created_item_id or "")
+
+    @Slot()
+    def openRandomTab(self) -> None:
+        """Wander to another tab using the normal state-saving switch flow."""
+        if self._tab_model is None or self._tab_model.tabCount < 2:
+            return
+        candidates = [
+            index for index in range(self._tab_model.tabCount)
+            if index != self._tab_model.currentTabIndex
+        ]
+        self.switchTab(random.choice(candidates))
 
     @Slot(int)
     def switchTab(self, index: int) -> None:

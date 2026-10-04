@@ -1326,6 +1326,7 @@ ApplicationWindow {
             onAssessmentRequested: dialogs.assessmentDialog.open()
             onActionPaintRequested: root.openActionPaintWindow()
             onCausalDiagramRequested: root.openCausalModelWindow()
+            onThoughtWanderingRequested: root.projectManagerRef.openRandomTab()
             onCanvasRequested: root.projectManagerRef.showTabCanvas()
             Layout.fillWidth: true
             Layout.fillHeight: true
