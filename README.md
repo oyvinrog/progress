@@ -1,13 +1,65 @@
 # ActionDraw
 
-**Your whole plan. One canvas.**
+**Private plans. Encrypted projects. One canvas.**
 
-ActionDraw is a desktop app for turning ideas into plans you can act on. Organize
-projects in a mindmap, open a branch to focus on the next steps, and use visual
-canvases, notes, priorities, and reminders to carry the work forward. Save your
-work in an encrypted project file.
+ActionDraw is a security-focused desktop planning app. Turn ideas into mindmaps,
+visual task diagrams, and actionable plans while keeping saved project content
+in encrypted `.progress` files. Choose a passphrase, a YubiKey, or both to
+protect your work.
+
+**AES-256-GCM encryption · Argon2id key derivation · Optional YubiKey protection**
+
+[Get started](#quick-start) · [Security](#security-at-the-core) ·
+[Mindmap walkthrough](#plan-a-project-with-the-mindmap) ·
+[Features](#beyond-the-mindmap) · [Development](#run-from-source)
 
 <img src="https://github.com/oyvinrog/progress/blob/master/assets/mindmap-overview.png?raw=1" alt="ActionDraw project mindmap showing an autumn launch, with website work, customer research, and a launch checklist" width="1000">
+
+| Plan with clarity | Protect your work | Keep moving |
+| --- | --- | --- |
+| Map projects, focus on branches, and connect ideas on a visual canvas. | Save encrypted projects with passphrase and optional hardware-key protection. | Keep notes, priorities, completion marks, and reminders beside your tasks. |
+
+## Security at the core
+
+Encryption is part of the project save workflow. ActionDraw saves project
+content locally in encrypted `.progress` files, with three protection modes:
+**Passphrase only**, **YubiKey only**, and **Passphrase + YubiKey**.
+
+| Protection | How ActionDraw uses it |
+| --- | --- |
+| **Authenticated encryption** | AES-256-GCM encrypts project content and detects changes to authenticated data when the file is opened. |
+| **Memory-hard key derivation** | Argon2id derives the encryption key from your chosen credentials and a random salt. |
+| **Hardware-key support** | Optional YubiKey HMAC challenge-response can be used on its own or combined with a passphrase. |
+| **Fresh encryption on save** | Each save uses a fresh random nonce and an HKDF-derived subkey. |
+
+On your first save, choose a protection mode and supply its credentials.
+**Save As** prompts for a protection mode again. Opening an encrypted project
+requires the credentials for that file; subsequent saves in the same session
+reuse cached key material.
+
+<img src="https://github.com/oyvinrog/progress/blob/master/assets/img2.png?raw=1" alt="ActionDraw encrypted project storage interface" width="700">
+
+### Optional YubiKey support
+
+Install the hardware-key dependency with:
+
+```bash
+pip install "actiondraw[yubikey]"
+```
+
+Use a YubiKey with HMAC challenge-response configured in slot 1 or 2. Choose
+**Passphrase + YubiKey** when you want both credentials required to open the
+project.
+
+### What encryption covers
+
+Encryption protects the saved project content. The outer file includes format
+and encryption metadata so ActionDraw can decrypt it. While a project is open,
+its content and cached key material are available to the running application.
+
+Optional `ntfy` notifications send reminder titles and tab or scope labels to
+the configured server. Enable them only for content you intend to share with
+that service. See [Notifications](#notifications) for configuration.
 
 ## Quick start
 
@@ -24,10 +76,11 @@ To run the standalone priority plot:
 priorityplot
 ```
 
-[Mindmap walkthrough](#plan-a-project-with-the-mindmap) ·
-[Keyboard shortcuts](#mindmap-shortcuts) ·
-[Other tools](#beyond-the-mindmap) ·
-[Development](#run-from-source)
+Start a project, add your first tabs, and choose **Mindmap** to connect the
+plan. Save the project to select its encryption mode.
+
+[Follow the walkthrough](#plan-a-project-with-the-mindmap) ·
+[View keyboard shortcuts](#mindmap-shortcuts)
 
 ## Plan a project with the mindmap
 
@@ -157,9 +210,37 @@ These shortcuts apply while the mindmap has focus, outside dialogs and menus.
 - **Obstacles and wishes** — use dedicated shapes for blockers and goals.
 - **Free drawing and images** — sketch on the canvas and paste external graphics.
 - **Action Paint** — sketch a scene, arrange numbered actions, then add them as a connected task chain in the diagram or as nodes in a tab's mindmap.
-- **Encrypted storage** — protect project data with Argon2id key derivation, with optional YubiKey challenge-response.
+- **Causal models** — map causes and effects, record assumptions, and turn ordered actions into tasks.
 
-<img src="https://github.com/oyvinrog/progress/blob/master/assets/img2.png?raw=1" alt="ActionDraw encrypted storage" width="700">
+### Causal models
+
+Open **Causal Model** beside Action Paint to build a causal diagram for the
+current tab. Double-click empty canvas space to add a variable, action, or
+outcome node there. Drag a node's **→** handle onto another node to connect the
+cause to its effect; a preview arrow follows the pointer. Drop on empty space
+or press Escape to cancel. Connections must form a directed
+acyclic graph; represent feedback with separate nodes for successive times.
+
+Drag nodes to arrange the canvas. Double-click a node to edit its label, type,
+or notes; double-click an arrow to edit its optional likelihood (0–100%) and explanation.
+Click a node or arrow to select it, then press **Delete** (or use the toolbar's
+**Delete** button) to remove it. Deleting a node also removes its connections;
+Undo restores them together.
+Use **Assumptions / conclusions** to record the model's context. Undo and redo
+cover graph edits, node movements, and action ordering.
+
+Use **+ Add action** to create a task node directly, or select an existing node
+and choose **Make action**. Action nodes are yellow and numbered, and appear in
+the **Action order** list. Drag its **≡** handles (or use the up/down arrows) to
+choose execution order, then **Add to ActionDraw** or **Add to mindmap** to copy their titles in
+that order. These copies are independent of the model, and the causal edges
+stay in the causal editor. Each tab's model is saved with the project.
+
+Edge percentages record your estimated likelihoods. They need not sum to 100%,
+and they do not calculate outcome probabilities. Numerical causal question
+answering is reserved for a later version with explicit probability rules.
+
+### Notifications
 
 Configure `ntfy` under **Tools > Notification Settings...** for notifications.
 `PROGRESS_NTFY_TOPIC`, `PROGRESS_NTFY_SERVER`, and `PROGRESS_NTFY_TOKEN` also work
@@ -197,31 +278,3 @@ It does not load or save project files.
 The mindmap reuses the MIT-licensed [PyPlane](https://github.com/oyvinrog/pyplane)
 core, bundled with its [license](actiondraw/_vendor/pyplane/LICENSE) and
 [source revision](actiondraw/_vendor/pyplane/UPSTREAM.md).
-
-### Causal models
-
-Open **Causal Model** beside Action Paint to build a causal diagram for the
-current tab. Double-click empty canvas space to add a variable, action, or
-outcome node there. Drag a node's **→** handle onto another node to connect the
-cause to its effect; a preview arrow follows the pointer. Drop on empty space
-or press Escape to cancel. Connections must form a directed
-acyclic graph; represent feedback with separate nodes for successive times.
-
-Drag nodes to arrange the canvas. Double-click a node to edit its label, type,
-or notes; double-click an arrow to edit its optional likelihood (0–100%) and explanation.
-Click a node or arrow to select it, then press **Delete** (or use the toolbar's
-**Delete** button) to remove it. Deleting a node also removes its connections;
-Undo restores them together.
-Use **Assumptions / conclusions** to record the model's context. Undo and redo
-cover graph edits, node movements, and action ordering.
-
-Use **+ Add action** to create a task node directly, or select an existing node
-and choose **Make action**. Action nodes are yellow and numbered, and appear in
-the **Action order** list. Drag its **≡** handles (or use the up/down arrows) to
-choose execution order, then **Add to ActionDraw** or **Add to mindmap** to copy their titles in
-that order. These copies are independent of the model, and the causal edges
-stay in the causal editor. Each tab's model is saved with the project.
-
-Edge percentages record your estimated likelihoods. They need not sum to 100%,
-and they do not calculate outcome probabilities. Numerical causal question
-answering is reserved for a later version with explicit probability rules.
