@@ -8,7 +8,6 @@ from PySide6.QtTest import QTest
 
 from actiondraw.causal_model import CausalModelModel, empty_causal_model_state, normalize_causal_model_state
 from actiondraw.model import DiagramModel
-from actiondraw.ui import create_actiondraw_window
 from progress_crypto import EncryptionCredentials
 from task_model import ProjectManager, Tab, TabModel, TaskModel
 
@@ -221,9 +220,9 @@ def test_import_destinations_and_undo(app):
     assert model.imported
 
 
-def test_qml_companion_opens_and_tracks_tabs(app):
+def test_qml_companion_opens_and_tracks_tabs(app, actiondraw_window):
     tasks, diagram, tabs, manager, model = project()
-    engine = create_actiondraw_window(diagram, tasks, manager, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, manager, tab_model=tabs)
     errors = []
     engine.warnings.connect(lambda warnings: errors.extend(w.toString() for w in warnings))
     assert engine.rootObjects()
@@ -479,7 +478,3 @@ def test_qml_companion_opens_and_tracks_tabs(app):
     root.setProperty("suppressClosePrompt", True)
     root.close()
     app.processEvents()
-    # Destroy QML while all Python context objects are still alive.
-    import shiboken6
-    shiboken6.delete(engine._markdown_note_manager._editor._engine)
-    shiboken6.delete(engine)

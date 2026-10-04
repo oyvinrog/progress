@@ -26,3 +26,27 @@ def app():
     # Keep teardown empty: several CI PySide/Python combinations segfault if
     # we touch the application, clipboard, or event loop during fixture cleanup.
     return instance
+
+
+@pytest.fixture
+def actiondraw_window(app):
+    """Destroy QML engines before releasing their Python context objects."""
+    import shiboken6
+    from actiondraw.ui import create_actiondraw_window
+
+    windows = []
+
+    def create(*args, **kwargs):
+        engine = create_actiondraw_window(*args, **kwargs)
+        # Retain the supplied models as well as the engine until teardown.
+        windows.append((engine, args, kwargs))
+        return engine
+
+    yield create
+
+    for engine, args, kwargs in reversed(windows):
+        editor_engine = engine._markdown_note_manager._editor._engine
+        if shiboken6.isValid(editor_engine):
+            shiboken6.delete(editor_engine)
+        if shiboken6.isValid(engine):
+            shiboken6.delete(engine)
