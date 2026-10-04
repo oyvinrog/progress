@@ -2815,6 +2815,7 @@ Item {
 
     Dialog {
         id: assessmentDialog
+        objectName: "assessmentDialog"
         modal: true
         title: "Readiness Assessment"
         anchors.centerIn: parent

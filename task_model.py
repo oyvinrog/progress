@@ -10,6 +10,7 @@ import uuid
 import json
 import math
 import os
+import random
 import subprocess
 import sys
 import threading
@@ -459,6 +460,11 @@ class Tab:
     kanban_slot_hour: int = -1
     action_paint: Dict[str, Any] = field(default_factory=lambda: {
         "elements": [], "actions": [], "last_imported_signature": ""
+    })
+
+    causal_model: Dict[str, Any] = field(default_factory=lambda: {
+        "version": 1, "nodes": [], "edges": [], "description": "",
+        "action_order": [], "last_imported_signature": ""
     })
 
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
@@ -2303,6 +2309,8 @@ class TabModel(QAbstractListModel):
             from actiondraw.actionpaint import normalize_action_paint_state
 
             tab.action_paint = normalize_action_paint_state(getattr(tab, "action_paint", None))
+            from actiondraw.causal_model import normalize_causal_model_state
+            tab.causal_model = normalize_causal_model_state(getattr(tab, "causal_model", None))
             tab.markdown_tabs = normalize_editor_tabs(getattr(tab, "markdown_tabs", []), fallback_text="")
             tab.priority_time_hours = clamp_time_hours(getattr(tab, "priority_time_hours", 1.01))
             tab.priority_subjective_value = clamp_subjective_value(getattr(tab, "priority_subjective_value", 1.0))
@@ -2323,13 +2331,12 @@ class TabModel(QAbstractListModel):
                 tab.kanban_status,
                 getattr(tab, "kanban_slot_hour", -1),
             )
-        self.endResetModel()
-
-        # Validate and set active tab index
+        # Reset observers must see the new tabs and their valid active index together.
         if active_tab < 0 or active_tab >= len(self._tabs):
             active_tab = 0
         self._current_tab_index = active_tab
         self._recent_tab_indices = []
+        self.endResetModel()
 
         self.priorityWeightsChanged.emit()
         self.tabsChanged.emit()
@@ -2470,7 +2477,7 @@ class ProjectManager(QObject):
         self._cached_key_material: Optional[DerivedKeyMaterial] = None
         self._cached_encryption_file_path: str = ""
         self._workspace_markdown_tabs = normalize_editor_tabs([], fallback_text="")
-        self._mindmap_visible = False
+        self._mindmap_visible = True
         self.mindmap = MindMapController(self._tab_model, self)
         self.mindmap.exchange_tabs = self._exchangeMindmapTabs
         self.mindmap.tabActivated.connect(self.openMindmapTab)
@@ -2559,12 +2566,26 @@ class ProjectManager(QObject):
         self.showTabMindmap()
         return self.mindmap.add_siblings(parent_id, titles)
 
+    @Slot(result='QStringList')
+    def addCausalModelToMindmap(self):
+        """Copy ordered causal actions into the active tab's mindmap."""
+        if self._tab_model is None:
+            return []
+        from actiondraw.causal_model import normalize_causal_model_state
+        tab = self._tab_model.getCurrentTabData()
+        state = normalize_causal_model_state(tab.causal_model)
+        labels = {node['id']: node['label'] for node in state['nodes']}
+        titles = [labels[key] for key in state['action_order']]
+        parent_id = next((key for key, value in self.mindmap.links.items() if value == tab.id), None)
+        if not titles or parent_id is None:
+            return []
+        self.showTabMindmap()
+        return self.mindmap.add_siblings(parent_id, titles)
+
     def _defaultTabView(self) -> None:
         tab = self._tab_model.getCurrentTabData()
-        node = next((self.mindmap.map.find(key) for key, value in self.mindmap.links.items()
-                     if value == tab.id), None)
         self.mindmap.set_scope(tab.id)
-        self._setMindmapVisible(bool(node and node.children))
+        self._setMindmapVisible(True)
 
     @Slot(str)
     def openMindmapTab(self, tab_id: str) -> None:
@@ -2623,6 +2644,8 @@ class ProjectManager(QObject):
 
     def _restoreNavigationSnapshot(self, snapshot: NavigationSnapshot) -> None:
         if snapshot.view_kind == "mindmap":
+            if self._tab_model is not None and 0 <= snapshot.tab_index < self._tab_model.tabCount:
+                self.switchTab(snapshot.tab_index)
             self.showMindmap()
             return
         if snapshot.view_kind == "kanban":
@@ -3564,6 +3587,7 @@ class ProjectManager(QObject):
                     "tasks": current_tasks if index == current_tab_index else tab.tasks,
                     "diagram": current_diagram if index == current_tab_index else tab.diagram,
                     "action_paint": copy.deepcopy(getattr(tab, "action_paint", {})),
+                    "causal_model": copy.deepcopy(getattr(tab, "causal_model", {})),
                     "markdown_tabs": normalize_editor_tabs(tab.markdown_tabs, fallback_text=""),
                     "priority": tab.priority,
                     "priority_time_hours": tab.priority_time_hours,
@@ -3597,6 +3621,7 @@ class ProjectManager(QObject):
                 "tasks": self._task_model.to_dict(),
                 "diagram": self._diagram_model.to_dict(),
                 "action_paint": {"elements": [], "actions": [], "last_imported_signature": ""},
+                "causal_model": {"version": 1, "nodes": [], "edges": [], "description": "", "action_order": [], "last_imported_signature": ""},
             }],
             "active_tab": 0,
             "workspace_markdown_tabs": normalize_editor_tabs(self._workspace_markdown_tabs, fallback_text=""),
@@ -4041,8 +4066,9 @@ class ProjectManager(QObject):
             self.errorOccurred.emit(f"File not found: {file_path}")
             return
 
-        # Scrub previous project's plaintext data before loading new data.
-        self.scrubProjectData()
+        # Validate incoming data before replacing the open project.
+        key_material = None
+        credentials = None
 
         try:
             with open(file_path, "r", encoding="utf-8") as f:
@@ -4061,13 +4087,6 @@ class ProjectManager(QObject):
                 finally:
                     if credentials.use_yubikey:
                         self._end_yubikey_interaction()
-                self._cached_encryption_file_path = file_path
-                self._cached_key_material = key_material
-                self._cached_encryption_credentials = EncryptionCredentials(
-                    passphrase=credentials.passphrase,
-                    use_yubikey=credentials.use_yubikey,
-                    yubikey_slot=credentials.yubikey_slot,
-                )
 
             if "mindmap" in project_data:
                 MindMapController.decode(project_data["mindmap"])
@@ -4090,6 +4109,7 @@ class ProjectManager(QObject):
                         tasks=tab_data.get("tasks", {"tasks": []}),
                         diagram=tab_data.get("diagram", {"items": [], "edges": [], "strokes": []}),
                         action_paint=tab_data.get("action_paint", {}),
+                        causal_model=tab_data.get("causal_model", {}),
                         markdown_tabs=normalize_editor_tabs(tab_data.get("markdown_tabs"), fallback_text=""),
                         priority=tab_data.get("priority", 0),
                         priority_time_hours=tab_data.get("priority_time_hours", 1.01),
@@ -4123,6 +4143,23 @@ class ProjectManager(QObject):
                     raise ValueError("Duplicate tab ID")
                 seen_tab_ids.add(tab.id)
 
+            references = project_data.get("mindmap", {}).get("tab_references", {})
+            if any(tab_id not in seen_tab_ids for tab_id in references.values()):
+                raise ValueError("Mindmap reference points to a missing tab")
+
+            # Only now discard the old project and its key. Until validation
+            # succeeds, cancellation/corrupt input leaves the open project intact.
+            self.scrubProjectData()
+            if key_material is not None:
+                self._cached_encryption_file_path = file_path
+                self._cached_key_material = key_material
+                key_material = None  # ownership transferred to the project
+                self._cached_encryption_credentials = EncryptionCredentials(
+                    passphrase=credentials.passphrase,
+                    use_yubikey=credentials.use_yubikey,
+                    yubikey_slot=credentials.yubikey_slot,
+                )
+
             self._workspace_markdown_tabs = normalize_editor_tabs(
                 project_data.get("workspace_markdown_tabs"),
                 fallback_text="",
@@ -4141,10 +4178,8 @@ class ProjectManager(QObject):
                                         priority_scoring=project_data.get("priority_scoring") or {})
 
             self.mindmap.load(project_data.get("mindmap"))
-            if self._tab_model is not None:
-                self._defaultTabView()
-            else:
-                self._setMindmapVisible(False)
+            self.mindmap.set_scope()
+            self._setMindmapVisible(True)
 
             # Load the active tab's data into the models
             active_tab_data = tabs[active_tab]
@@ -4175,6 +4210,9 @@ class ProjectManager(QObject):
             error_msg = f"Failed to load project: {e}"
             self.errorOccurred.emit(error_msg)
             print(error_msg)
+        finally:
+            if key_material is not None:
+                key_material.scrub()
 
     @Slot(int)
     def drillToTask(self, task_index: int) -> None:
@@ -4200,11 +4238,11 @@ class ProjectManager(QObject):
     @Slot(int, int)
     def openTabTask(self, tab_index: int, task_index: int) -> None:
         """Open a tab and focus a task index within that tab."""
-        if self._shouldCaptureNavigation(tab_index, task_index):
+        if self._tab_model is not None and not 0 <= tab_index < self._tab_model.tabCount:
+            return
+        if self._mindmap_visible or self._shouldCaptureNavigation(tab_index, task_index):
             self._pushNavigationSnapshot(self._currentNavigationSnapshot())
         if self._tab_model is not None:
-            if tab_index < 0 or tab_index >= self._tab_model.tabCount:
-                return
             if self._tab_model.currentTabIndex != tab_index:
                 self.switchTab(tab_index)
         self.showTabCanvas()
@@ -4447,6 +4485,17 @@ class ProjectManager(QObject):
             return ""
         created_item_id = add_task_from_text(tab_name, x, y)
         return str(created_item_id or "")
+
+    @Slot()
+    def openRandomTab(self) -> None:
+        """Wander to another tab using the normal state-saving switch flow."""
+        if self._tab_model is None or self._tab_model.tabCount < 2:
+            return
+        candidates = [
+            index for index in range(self._tab_model.tabCount)
+            if index != self._tab_model.currentTabIndex
+        ]
+        self.switchTab(random.choice(candidates))
 
     @Slot(int)
     def switchTab(self, index: int) -> None:

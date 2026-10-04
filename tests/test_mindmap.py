@@ -10,7 +10,7 @@ import pytest
 from PySide6.QtCore import QCoreApplication, QEvent, QMetaObject, QObject, QPoint, Qt, QUrl
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtTest import QTest
-from PySide6.QtQml import QQmlProperty
+from PySide6.QtQml import QQmlProperty, qmlContext
 
 from actiondraw.model import DiagramModel
 from actiondraw.mindmap import MindMapController
@@ -1273,7 +1273,7 @@ def test_encrypted_roundtrip_dirty_and_scrub(project, tmp_path, monkeypatch):
     assert pm.mindmap.map.find(node_id).note == 'Secret note'
     assert tabs.getAllTabs()[0].id == tab_id
     assert not pm.hasUnsavedChanges()
-    assert pm.mindmapVisible and pm.mindmap.view_root.id == tab_root
+    assert pm.mindmapVisible and not pm.mindmap.tabScoped
     pm.mindmap.select(node_id)
     pm.mindmap.editSelected('Changed', 'Changed note')
     assert pm.hasUnsavedChanges()
@@ -1303,6 +1303,7 @@ def test_legacy_project_migration(project, tmp_path, payload):
     assert set(pm.mindmap.links.values()) == set(ids)
     assert not pm.hasUnsavedChanges()
     assert tabs.currentTabIndex == payload.get('active_tab', 0)
+    assert pm.mindmapVisible and not pm.mindmap.tabScoped
 
 
 @pytest.mark.parametrize('bad', [{}, {'version': 9}, {'version': 1, 'xml': '<bad>', 'tab_links': {}}, None])
@@ -1382,7 +1383,7 @@ def test_qml_click_drag_back_and_shortcut_isolation(project, app):
     assert pm.mindmapVisible and m.selectedId == node_id
     QTest.mouseDClick(window, Qt.LeftButton, Qt.NoModifier, center(node_id))
     QTest.qWait(30)
-    assert not pm.mindmapVisible
+    assert pm.mindmapVisible and m.tabScoped
     assert tabs.getCurrentTabData().id == tab_id
     pm.goBack()
     QTest.qWait(30)
@@ -2059,7 +2060,7 @@ def test_tab_views_nested_navigation_and_canvas(project):
     assert pm.mindmapVisible and m.view_root.id == second
     pm.switchTab(0)
     pm.switchTab(1)
-    assert not pm.mindmapVisible
+    assert pm.mindmapVisible and m.tabScoped
     pm.showTabMindmap()
     assert {n['id'] for n in m.nodes} == {second}
     pm.removeTab(1)
@@ -2862,7 +2863,8 @@ def test_mindmap_compact_menu_keyboard_and_help(project, app):
     menu = window.findChild(QObject, 'mindmapActionsMenu')
     help_dialog = window.findChild(QObject, 'mindmapHelpDialog')
     assert toolbar.height() < 60
-    assert viewport.height() > pane.height() - 90
+    view_toolbar = window.findChild(QObject, 'mindmapViewToolbar')
+    assert viewport.height() > pane.height() - 90 - view_toolbar.height() - 8
     button.forceActiveFocus()
     QTest.keyClick(window, Qt.Key_Space)
     QTest.qWait(40)
@@ -3133,8 +3135,8 @@ def test_qml_priority_filter_slider_and_creation(project, app):
     label = window.findChild(QObject, 'mindmapPriorityFilterText')
     pane.setProperty('zoom', 0.8)
     pan = (pane.property('panX'), pane.property('panY'))
-    start = slider.mapToScene(QPoint(int(slider.width()) - 8, int(slider.height() / 2))).toPoint()
-    end = slider.mapToScene(QPoint(8, int(slider.height() / 2))).toPoint()
+    start = slider.mapToScene(QPoint(int(slider.width()) - 1, int(slider.height() / 2))).toPoint()
+    end = slider.mapToScene(QPoint(1, int(slider.height() / 2))).toPoint()
     QTest.mousePress(window, Qt.LeftButton, Qt.NoModifier, start)
     QTest.mouseMove(window, end, 30)
     QTest.mouseRelease(window, Qt.LeftButton, Qt.NoModifier, end)
@@ -3338,3 +3340,464 @@ def test_qml_add_to_plan_ready_action_is_instantiated(project):
         assert ready_action.property('text') == 'Ready (0 tasks)'
     finally:
         window.close()
+
+
+def test_deadline_state_persistence_history_and_completion(project, monkeypatch):
+    m = project[0].mindmap
+    node = m.map.root.add_child('Deadline')
+    monkeypatch.setattr('actiondraw.mindmap.time.time', lambda: 1000.0)
+    assert m.setDeadline(node.id, 25)
+    saved = m.to_dict()
+    assert saved['deadlines'][node.id] == {'start': 1000.0, 'duration': 1500}
+    assert next(n for n in m.nodes if n['id'] == node.id)['deadlineActive']
+    restored = MindMapController()
+    restored.load(saved)
+    assert restored.deadlines == m.deadlines
+    legacy = copy.deepcopy(saved)
+    del legacy['deadlines']
+    restored.load(legacy)
+    assert restored.deadlines == {}
+    m.select(node.id)
+    m.toggleCompleted()
+    assert m.deadlines == saved['deadlines']
+    monkeypatch.setattr('actiondraw.mindmap.time.time', lambda: 2000.0)
+    m.setDeadline(node.id, 10)
+    assert m.deadlines[node.id] == {'start': 2000.0, 'duration': 600}
+    m.undo()
+    assert m.deadlines == saved['deadlines']
+    m.redo()
+    assert m.deadlines[node.id]['start'] == 2000
+    m.clearDeadline(node.id)
+    assert node.id not in m.deadlines
+    m.undo()
+    assert node.id in m.deadlines
+    m.deleteSelected()
+    assert node.id not in m.deadlines
+    m.undo()
+    assert node.id in m.deadlines
+
+
+@pytest.mark.parametrize('minutes', [0, -1, 1.5, True, '25', 2147483648])
+def test_deadline_rejects_invalid_duration(project, minutes):
+    m = project[0].mindmap
+    before = m.to_dict()
+    assert not m.setDeadline(m.map.root.id, minutes)
+    assert not m.setDeadline('missing', 25)
+    assert m.to_dict() == before
+
+
+@pytest.mark.parametrize('deadline', [
+    None, {}, {'start': True, 'duration': 60},
+    {'start': float('nan'), 'duration': 60},
+    {'start': 0, 'duration': float('inf')},
+    {'start': 0, 'duration': 0}, {'start': 0, 'duration': -60},
+    {'start': 10**400, 'duration': 60},
+])
+def test_deadline_rejects_malformed_saved_state(project, deadline):
+    m = project[0].mindmap
+    saved = m.to_dict()
+    saved['deadlines'] = {m.map.root.id: deadline}
+    with pytest.raises(ValueError, match='deadline'):
+        m.decode(saved)
+
+
+def test_qml_deadline_menu_countdown_and_badge_layout(project, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    node = m.map.root.add_child('Timed node')
+    other = m.map.root.add_child('Second timer')
+    m.set_reminder(node.id, time.time() + 3600)
+    m.toggleMeasureProgress(node.id)
+    m.setDeadline(other.id, 10)
+    saved = m.to_dict()
+    # Simulate reopening after the second timer elapsed while the app was closed.
+    saved['deadlines'][other.id]['start'] -= 601
+    m.load(saved)
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+
+    def visual(name, item=None):
+        item = item or window.contentItem()
+        if item.objectName() == name:
+            return item
+        for child in item.childItems():
+            found = visual(name, child)
+            if found is not None:
+                return found
+        return None
+
+    def invoke(obj, method):
+        assert QMetaObject.invokeMethod(obj, method)
+
+    try:
+        pane = window.findChild(QObject, 'mindmapPane')
+        assert visual('mindmapDeadlineText_' + other.id).property('text') == '0:00'
+        menu = window.findChild(QObject, 'mindmapNodeMenu')
+        action = window.findChild(QObject, 'mindmapSetDeadline')
+        dialog = window.findChild(QObject, 'mindmapDeadlineDialog')
+        field = window.findChild(QObject, 'mindmapDeadlineMinutes')
+        menu.setProperty('targetNodeId', node.id)
+        invoke(menu, 'open')
+        QTest.qWait(30)
+        assert action.property('text') == 'Set deadline'
+        invoke(action, 'triggered')
+        invoke(menu, 'close')
+        QTest.qWait(30)
+        assert field.property('text') == '25'
+        invoke(dialog, 'reject')
+        assert node.id not in m.deadlines
+        invoke(action, 'triggered')
+        QTest.qWait(30)
+        field.setProperty('text', '0')
+        assert not field.property('acceptableInput')
+        field.setProperty('text', '25')
+        invoke(dialog, 'accept')
+        QTest.qWait(30)
+        assert m.deadlines[node.id]['duration'] == 1500
+        text_name = 'mindmapDeadlineText_' + node.id
+        bar_name = 'mindmapDeadlineBar_' + node.id
+        assert visual(text_name).property('text') == '25:00'
+        assert visual(bar_name).property('timerColor').name() == '#2ecc71'
+        m.setDeadline(other.id, 10)
+        QTest.qWait(30)
+        start = m.deadlines[node.id]['start']
+        history = len(m._undo)
+        scene_events = []
+        m.sceneChanged.connect(lambda: scene_events.append(True))
+        pane.setProperty('deadlineNow', start + 900)
+        assert visual(text_name).property('text') == '10:00'
+        assert visual(bar_name).property('progress') == pytest.approx(0.4)
+        assert visual(bar_name).property('timerColor').name() == '#f39c12'
+        pane.setProperty('deadlineNow', start + 1501)
+        assert visual(text_name).property('text') == '0:00'
+        assert visual(bar_name).property('timerColor').name() == '#e74c3c'
+        assert visual('mindmapDeadlineFill_' + node.id).width() == 0
+        assert visual(bar_name).isVisible()
+        assert len(m._undo) == history
+        assert scene_events == []
+        reminder = visual('mindmapReminderBadge_' + node.id)
+        progress = visual('mindmapProgressBadge_' + node.id)
+        assert progress.y() + progress.height() <= reminder.y()
+        assert reminder.y() + reminder.height() <= visual(bar_name).y()
+        pane.setProperty('deadlineNow', start)
+        QTest.qWait(1100)
+        assert pane.property('deadlineNow') > start
+        assert len(m._undo) == history
+        assert scene_events == []
+        invoke(menu, 'open')
+        QTest.qWait(30)
+        assert action.property('text') == 'Update deadline'
+        invoke(action, 'triggered')
+        invoke(menu, 'close')
+        QTest.qWait(30)
+        field.setProperty('text', '5')
+        invoke(dialog, 'accept')
+        assert m.deadlines[node.id]['duration'] == 300
+        invoke(window.findChild(QObject, 'mindmapClearDeadline'), 'triggered')
+        QTest.qWait(30)
+        assert not visual(bar_name).isVisible()
+        assert other.id in m.deadlines
+    finally:
+        window.close()
+
+
+def test_startup_empty_tab_and_explicit_canvas_navigation(project):
+    pm, tabs, tasks, diagram = project
+    assert pm.mindmapVisible and not pm.mindmap.tabScoped
+    assert not pm.hasUnsavedChanges()
+    tabs.addTab('Empty')
+    pm.switchTab(1)
+    assert pm.mindmapVisible and pm.mindmap.tabScoped
+    assert pm.mindmap.view_root.id in pm.mindmap.links
+    assert not pm.mindmap.view_root.children
+    pm.showTabCanvas()
+    assert not pm.mindmapVisible
+    pm.switchTab(0)
+    tasks.addTask('Task', -1)
+    diagram.addTask(0, 20, 20)
+    pm.showMindmap()
+    pm.openTabTask(0, 0)
+    assert not pm.mindmapVisible and diagram.currentTaskIndex == 0
+    pm.goBack()
+    assert pm.mindmapVisible and not pm.mindmap.tabScoped
+    # Reopening the already-focused task still records the view transition.
+    pm.openTabTask(0, 0)
+    assert not pm.mindmapVisible and pm.canGoBack
+    pm.goBack()
+    assert pm.mindmapVisible and not pm.mindmap.tabScoped
+
+
+def test_thought_wandering_selection_and_state(project, monkeypatch):
+    pm, tabs, tasks, diagram = project
+    tabs.addTab('Second')
+    tabs.addTab('Third')
+    diagram.addBox(10, 20, 'Saved before wandering')
+    for target in (1, 2):
+        pm.switchTab(0)
+
+        def choose(candidates):
+            assert candidates == [1, 2]
+            return target
+
+        monkeypatch.setattr('task_model.random.choice', choose)
+        pm.openRandomTab()
+        assert tabs.currentTabIndex == target
+        assert diagram.count == 0
+    pm.switchTab(0)
+    assert diagram.count == 1
+    assert diagram.data(diagram.index(0, 0), diagram.TextRole) == 'Saved before wandering'
+
+
+def test_thought_wandering_without_alternatives(project, monkeypatch):
+    pm, tabs, tasks, diagram = project
+
+    def unexpected_choice(candidates):
+        pytest.fail('No random choice should occur without another tab')
+
+    monkeypatch.setattr('task_model.random.choice', unexpected_choice)
+    pm.openRandomTab()
+    assert tabs.currentTabIndex == 0
+    ProjectManager(tasks, diagram).openRandomTab()
+
+
+def test_mindmap_companion_tools_responsive_and_live_assessment(project, app):
+    pm, tabs, tasks, diagram = project
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    warnings = []
+    engine.warnings.connect(lambda messages: warnings.extend(m.toString() for m in messages))
+    window = engine.rootObjects()[0]
+    window.show()
+    pane = window.findChild(QObject, 'mindmapPane')
+    toolbar = window.findChild(QObject, 'mindmapToolbar')
+    buttons = [window.findChild(QObject, name) for name in (
+        'mindmapAssessmentButton', 'mindmapActionPaintButton', 'mindmapCausalDiagramButton')]
+    wandering = window.findChild(QObject, 'mindmapThoughtWanderingButton')
+    assert not wandering.property('enabled')
+    assert QQmlProperty(wandering, 'Accessible.name', qmlContext(wandering)).read() == 'Thought wandering'
+    assert QQmlProperty(wandering, 'ToolTip.text', qmlContext(wandering)).read() == 'Thought wandering'
+    heights = []
+    for width, compact in [(1440, False), (1100, True), (800, True)]:
+        window.resize(width, 760)
+        QTest.qWait(80)
+        assert toolbar.property('compactTools') == compact
+        heights.append(toolbar.height())
+        visible_children = sorted((c for c in toolbar.childItems() if c.isVisible() and c.width() > 0), key=lambda c: c.x())
+        assert all(c.x() >= 0 and c.x() + c.width() <= toolbar.width() + 1 for c in visible_children)
+        assert all(a.x() + a.width() <= b.x() + 1 for a, b in zip(visible_children, visible_children[1:]))
+        assert all(b.isVisible() and b.width() >= 32 for b in buttons)
+        assert wandering.isVisible() and wandering.width() == 32
+        assert wandering.x() >= buttons[-1].x() + buttons[-1].width()
+    assert max(heights) == min(heights) and max(heights) < 60
+    assert pane.hasActiveFocus()
+    tabs.setAssessment(0, 10, 10, True)
+    assert pane.property('assessmentLevel') == tabs.getAssessmentLevel(0) == 4
+    tabs.addTab('Second')
+    diagram.addBox(10, 20, 'Wandering preserves this')
+    assert wandering.property('enabled')
+    for expected in (1, 0):
+        QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                        wandering.mapToScene(wandering.boundingRect().center()).toPoint())
+        QTest.qWait(30)
+        assert tabs.currentTabIndex == expected
+    assert diagram.count == 1
+    assert diagram.data(diagram.index(0, 0), diagram.TextRole) == 'Wandering preserves this'
+    pm.switchTab(1)
+    assert pane.property('assessmentLevel') == tabs.getAssessmentLevel(1) == 0
+    assert 'Second' in buttons[0].property('toolTipText')
+    pm.showMindmap()
+    window.resize(1440, 760)
+    QTest.qWait(80)
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                     buttons[0].mapToScene(buttons[0].boundingRect().center()).toPoint())
+    QTest.qWait(30)
+    assert pane.property('toolDialogOpen') and not pane.property('shortcutsEnabled')
+    QMetaObject.invokeMethod(window.findChild(QObject, 'assessmentDialog'), 'close')
+    QTest.qWait(30)
+    assert pane.hasActiveFocus() and pane.property('shortcutsEnabled')
+    for button, ref in zip(buttons[1:], ('actionPaintWindowRef', 'causalModelWindowRef')):
+        QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                         button.mapToScene(button.boundingRect().center()).toPoint())
+        QTest.qWait(30)
+        companion = window.property(ref)
+        assert companion is not None and companion.isVisible()
+        companion.close()
+        window.requestActivate()
+        QTest.qWait(30)
+        assert pane.hasActiveFocus()
+    assert not warnings
+    window.setProperty('suppressClosePrompt', True)
+    window.close()
+    engine.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+
+def test_mindmap_context_menu_bundled_icons(project, app):
+    pm, tabs, tasks, diagram = project
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    menu = window.findChild(QObject, 'mindmapNodeMenu')
+    menu.setProperty('targetNodeId', pm.mindmap.selectedId)
+    QMetaObject.invokeMethod(menu, 'open')
+    app.processEvents()
+    for name, icon in [('mindmapSetDeadline', 'timer'), ('mindmapSetReminder', 'bell'),
+                       ('mindmapBookmarkMenuItem', 'bookmark'), ('mindmapMoveUp', 'up'),
+                       ('mindmapAddToPlanMenu', 'calendar'), ('mindmapContextExportMenu', 'export')]:
+        item = window.findChild(QObject, name)
+        source = QQmlProperty.read(item, 'icon.source')
+        assert source.toLocalFile().endswith('/' + icon + '.svg')
+        assert Path(source.toLocalFile()).is_file()
+        assert QQmlProperty.read(item, 'icon.width') == 16
+    move = window.findChild(QObject, 'mindmapMoveUp')
+    assert not move.property('enabled')
+    assert QQmlProperty.read(move, 'icon.color') != QQmlProperty.read(window.findChild(QObject, 'mindmapSetDeadline'), 'icon.color')
+    QMetaObject.invokeMethod(menu, 'close')
+    window.close()
+    engine.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+
+
+def test_bulk_folding_history_selection_and_persistence(project):
+    m = project[0].mindmap
+    root = m.map.root
+    branch = root.add_child('Branch')
+    nested = branch.add_child('Nested')
+    leaf = nested.add_child('Leaf')
+    other = root.add_child('Other')
+    m.select(leaf.id)
+    m.select(other.id, 'add')
+    before = m.to_dict()
+    history = len(m._undo)
+    m.foldAll()
+    assert not root.folded and branch.folded and nested.folded
+    assert set(m.selectedIds) == {branch.id, other.id}
+    assert len(m._undo) == history + 1
+    folded = m.to_dict()
+    decoded, _ = m.decode(folded)
+    assert decoded.find(branch.id).folded
+    m.foldAll()
+    assert len(m._undo) == history + 1
+    m.undo()
+    assert m.to_dict() == before
+    assert set(m.selectedIds) == {leaf.id, other.id}
+    m.redo()
+    assert m.to_dict() == folded
+    m.unfoldAll()
+    assert all(not node.folded for node in m.map.walk())
+    history = len(m._undo)
+    m.unfoldAll()
+    assert len(m._undo) == history
+    m.toggleNodeFold(root.id)
+    assert m.map.root.folded and m.selectedIds == [root.id]
+    m.foldAll()
+    assert not m.map.root.folded and m.map.find(branch.id).folded
+
+
+def test_folding_scope_and_invalid_targets(project):
+    m = project[0].mindmap
+    root_id, tab_id = next(iter(m.links.items()))
+    branch = m.map.find(root_id)
+    nested = branch.add_child('Nested')
+    nested.add_child('Leaf')
+    outside = m.map.root.add_child('Outside')
+    outside.add_child('Other leaf')
+    m.set_scope(tab_id)
+    branch.folded = True
+    before = len(m._undo)
+    for key in [outside.id, 'missing', nested.children[0].id]:
+        m.toggleNodeFold(key)
+    assert len(m._undo) == before
+    m.foldAll()
+    assert not branch.folded and nested.folded and not outside.folded
+    outside.folded = True
+    m.unfoldAll()
+    assert not nested.folded and outside.folded
+
+
+def test_bulk_folding_preserves_filter_and_expands_hidden_branches(project):
+    m = project[0].mindmap
+    low, high = filter_tabs(project, [0, 10])
+    low_child = low.add_child('Low child')
+    high_child = high.add_child('High child')
+    low_child.add_child('Hidden leaf')
+    high_child.add_child('Visible leaf')
+    m.setPriorityFilter(0)
+    m.foldAll()
+    assert low.folded and low_child.folded and high.folded and high_child.folded
+    assert m.priorityFilter == 0
+    m.unfoldAll()
+    assert not any(node.folded for node in m.map.walk())
+    assert m.priorityFilter == 0
+    assert low not in m._layout() and high_child in m._layout()
+
+
+def test_empty_map_folding_is_noop(app):
+    m = MindMapController()
+    before = m.to_dict()
+    m.foldAll()
+    m.unfoldAll()
+    m.toggleNodeFold(m.view_root.id)
+    assert m.to_dict() == before and not m.canUndo
+
+
+def test_qml_fold_buttons_and_view_toolbar(project, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    root_id = next(iter(m.links))
+    branch = m.map.find(root_id)
+    branch.note = 'Notes alongside the fold control'
+    tabs.setAssessment(0, 10, 10, True)
+    child = branch.add_child('Child')
+    child.add_child('Leaf')
+    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+    pane = window.findChild(QObject, 'mindmapPane')
+
+    def visual_item(item, name):
+        if item.objectName() == name:
+            return item
+        for sub in item.childItems():
+            found = visual_item(sub, name)
+            if found is not None:
+                return found
+        return None
+
+    activated = []
+    m.tabActivated.connect(lambda *args: activated.append(args))
+    for folded in [True, False]:
+        button = visual_item(window.contentItem(), 'mindmapFold_' + root_id)
+        assert button.isVisible() and button.width() >= 32
+        bars = visual_item(window.contentItem(), 'mindmapPriority_' + root_id)
+        rank = visual_item(window.contentItem(), 'mindmapPriorityRank_' + root_id)
+        label = visual_item(window.contentItem(), 'mindmapNodeText_' + root_id)
+        assert bars.isVisible() and rank.isVisible()
+        assert bars.x() + bars.width() < button.x()
+        assert rank.x() + rank.width() <= bars.x()
+        assert label.x() + label.width() <= rank.x()
+        position = tuple(pane.property(key) for key in ('zoom', 'panX', 'panY'))
+        QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                         button.mapToScene(button.boundingRect().center()).toPoint())
+        QTest.qWait(30)
+        assert m.map.find(root_id).folded == folded
+        assert not activated and not pane.property('nodePressed')
+        assert tuple(pane.property(key) for key in ('zoom', 'panX', 'panY')) == position
+    for width in [1440, 1100, 800]:
+        window.resize(width, 760)
+        QTest.qWait(50)
+        toolbar = window.findChild(QObject, 'mindmapViewToolbar')
+        children = sorted((c for c in toolbar.childItems() if c.isVisible() and c.width() > 0), key=lambda c: c.x())
+        assert all(c.x() >= 0 and c.x() + c.width() <= toolbar.width() + 1 for c in children)
+        assert all(a.x() + a.width() <= b.x() + 1 for a, b in zip(children, children[1:]))
+    for name, folded in [('mindmapFoldAll', True), ('mindmapUnfoldAll', False)]:
+        button = window.findChild(QObject, name)
+        QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                         button.mapToScene(button.boundingRect().center()).toPoint())
+        QTest.qWait(30)
+        assert m.map.find(root_id).folded == folded
+        assert m.map.find(child.id).folded == folded
+    window.close()

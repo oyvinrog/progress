@@ -5,6 +5,74 @@ import QtQuick.Layouts 1.15
 
 FocusScope {
     id: pane
+    signal assessmentRequested()
+    signal actionPaintRequested()
+    signal causalDiagramRequested()
+    signal thoughtWanderingRequested()
+    property var tabModel: null
+    property int assessmentLevel: 0
+    property bool toolDialogOpen: false
+    function refreshAssessment() {
+        assessmentLevel = tabModel && tabModel.currentTabIndex >= 0
+            ? tabModel.getAssessmentLevel(tabModel.currentTabIndex) : 0
+    }
+    Component.onCompleted: {
+        refreshAssessment()
+        Qt.callLater(function() { if (pane.visible) pane.focusMap() })
+    }
+    Connections {
+        target: pane.tabModel
+        function onCurrentTabChanged() { pane.refreshAssessment() }
+        function onCurrentTabIndexChanged() { pane.refreshAssessment() }
+        function onAssessmentChanged(tabIndex) {
+            if (tabIndex === pane.tabModel.currentTabIndex) pane.refreshAssessment()
+        }
+    }
+    onToolDialogOpenChanged: if (!toolDialogOpen && visible) Qt.callLater(focusMap)
+    component IconMenuItem: MenuItem {
+        property string iconKey: ""
+        icon.source: Qt.resolvedUrl("../icons/" + iconKey + ".svg")
+        icon.width: 16
+        icon.height: 16
+        icon.color: enabled ? palette.text : palette.mid
+    }
+    component CompanionButton: ToolButton {
+        id: companion
+        property string label: ""
+        property string iconKey: ""
+        property bool assessment: false
+        readonly property real labeledWidth: labelMetrics.width + 40
+        implicitWidth: mindmapToolbar.compactTools ? 32 : labeledWidth
+        implicitHeight: 32
+        enabled: !!pane.tabModel && pane.tabModel.currentTabIndex >= 0
+        Accessible.name: label
+        ToolTip.visible: hovered
+        readonly property string toolTipText: label + " — " + (pane.tabModel ? pane.tabModel.currentTabName : "")
+        ToolTip.text: toolTipText
+        contentItem: Row {
+            spacing: 6
+            AssessmentSmiley {
+                visible: companion.assessment
+                width: 20; height: 20
+                anchors.verticalCenter: parent.verticalCenter
+                level: pane.assessmentLevel
+            }
+            Image {
+                visible: !companion.assessment
+                width: 16; height: 16
+                anchors.verticalCenter: parent.verticalCenter
+                source: companion.iconKey ? "../icons/" + companion.iconKey + ".svg" : ""
+            }
+            Text {
+                visible: !mindmapToolbar.compactTools
+                text: companion.label
+                font: companion.font
+                color: "#d6e2ee"
+                anchors.verticalCenter: parent.verticalCenter
+            }
+        }
+        TextMetrics { id: labelMetrics; font: companion.font; text: companion.label }
+    }
     signal canvasRequested()
     signal branchOpmlExportRequested(string nodeId)
     signal reminderRequested(string nodeId)
@@ -21,6 +89,13 @@ FocusScope {
     property real bookmarkHighlightOpacity: 0
     property string hoveredNodeId: ""
     property bool nodePressed: false
+    property double deadlineNow: Date.now() / 1000
+    Timer {
+        interval: 1000
+        repeat: true
+        running: pane.visible
+        onTriggered: pane.deadlineNow = Date.now() / 1000
+    }
     Timer {
         id: insertionHoverExit
         interval: 120
@@ -32,7 +107,7 @@ FocusScope {
             pane.hoveredNodeId = ""
         }
     }
-    readonly property bool shortcutsEnabled: visible && activeFocus && !editor.visible && !nodeMenu.visible && !actionsButton.activeFocus && !prioritySlider.activeFocus && !actionsMenu.visible && !helpDialog.visible && !reminderDialogOpen
+    readonly property bool shortcutsEnabled: visible && activeFocus && !toolDialogOpen && !editor.visible && !nodeMenu.visible && !actionsButton.activeFocus && !prioritySlider.activeFocus && !actionsMenu.visible && !helpDialog.visible && !deadlineDialog.visible && !tabReferenceDialog.visible && !reminderDialogOpen
     readonly property bool searching: controller && controller.searchQuery.length > 0
     onShortcutsEnabledChanged: if (!shortcutsEnabled && controller) controller.clearSearch()
 
@@ -98,19 +173,20 @@ FocusScope {
     function jumpBookmark(nodeId) {
         var currentZoom = zoom
         controller.jumpToBookmark(nodeId)
+        var occurrenceId = controller.selectedId
         zoom = currentZoom
         initialized = true
         forceActiveFocus()
         Qt.callLater(function() {
-            if (!pane.visible || !pane.controller || pane.controller.selectedId !== nodeId) return
+            if (!pane.visible || !pane.controller || pane.controller.selectedId !== occurrenceId) return
             var nodes = pane.controller.nodes
             for (var i = 0; i < nodes.length; ++i) {
                 var n = nodes[i]
-                if (n.id !== nodeId) continue
+                if (n.id !== occurrenceId) continue
                 pane.panX = -(n.x + n.width / 2) * pane.zoom
                 pane.panY = -(n.y + n.height / 2) * pane.zoom
                 bookmarkFade.stop()
-                pane.bookmarkHighlightId = nodeId
+                pane.bookmarkHighlightId = occurrenceId
                 pane.bookmarkHighlightOpacity = 1
                 bookmarkHold.restart()
                 return
@@ -149,8 +225,9 @@ FocusScope {
         editNode()
     }
     onVisibleChanged: if (visible) {
+        deadlineNow = Date.now() / 1000
         forceActiveFocus()
-        if (!initialized) Qt.callLater(fitMap)
+        if (!initialized) Qt.callLater(function() { if (pane.visible && !pane.initialized) pane.fitMap() })
     }
     Timer {
         id: bookmarkHold
@@ -199,10 +276,13 @@ FocusScope {
         anchors.margins: 10
         spacing: 8
         RowLayout {
+            id: mindmapToolbar
             objectName: "mindmapToolbar"
+            readonly property bool compactTools: width < assessmentTool.labeledWidth + paintTool.labeledWidth + causalTool.labeledWidth + wanderingTool.implicitWidth + 5 + actionsButton.implicitWidth + (canvasButton.visible ? canvasButton.implicitWidth + 5 : 0) + 490
             Layout.fillWidth: true
             spacing: 5
             Button {
+                id: canvasButton
                 objectName: "tabMindmapCanvas"
                 text: "Canvas"
                 visible: pane.controller && pane.controller.tabScoped
@@ -302,16 +382,78 @@ FocusScope {
                     MenuSeparator {}
                     MenuItem { objectName: "mindmapHelpAction"; text: "Shortcuts and legend…"; onTriggered: helpDialog.open() }
                     onClosed: Qt.callLater(function() {
-                        if (!editor.visible && !helpDialog.visible && !pane.reminderDialogOpen) pane.focusMap()
+                        if (!editor.visible && !helpDialog.visible && !deadlineDialog.visible && !pane.reminderDialogOpen) pane.focusMap()
                     })
                 }
             }
-            Item { Layout.fillWidth: true }
+            CompanionButton {
+                id: assessmentTool
+                objectName: "mindmapAssessmentButton"
+                label: "Assessment"
+                assessment: true
+                onClicked: pane.assessmentRequested()
+            }
+            CompanionButton {
+                id: paintTool
+                objectName: "mindmapActionPaintButton"
+                label: "Action Paint"
+                iconKey: "paint"
+                onClicked: { pane.focusMap(); pane.actionPaintRequested() }
+            }
+            CompanionButton {
+                id: causalTool
+                objectName: "mindmapCausalDiagramButton"
+                label: "Causal Diagram"
+                iconKey: "causal"
+                onClicked: { pane.focusMap(); pane.causalDiagramRequested() }
+            }
+            ToolButton {
+                id: wanderingTool
+                objectName: "mindmapThoughtWanderingButton"
+                implicitWidth: 32
+                implicitHeight: 32
+                enabled: !!pane.tabModel && pane.tabModel.tabCount > 1
+                Accessible.name: "Thought wandering"
+                ToolTip.visible: hovered
+                ToolTip.text: "Thought wandering"
+                icon.source: "../icons/dice.svg"
+                icon.width: 16
+                icon.height: 16
+                icon.color: enabled ? "#d6e2ee" : palette.mid
+                display: AbstractButton.IconOnly
+                onClicked: { pane.focusMap(); pane.thoughtWanderingRequested() }
+            }
+            Item { Layout.fillWidth: true; Layout.minimumWidth: 0 }
+        }
+        RowLayout {
+            objectName: "mindmapViewToolbar"
+            Layout.fillWidth: true
+            spacing: 5
+            ToolButton {
+                objectName: "mindmapFoldAll"
+                text: "Fold all"
+                palette.buttonText: "#e5f0fa"
+                enabled: !!pane.controller
+                onClicked: { pane.controller.foldAll(); pane.focusMap() }
+            }
+            ToolButton {
+                objectName: "mindmapUnfoldAll"
+                text: "Unfold all"
+                palette.buttonText: "#e5f0fa"
+                enabled: !!pane.controller
+                onClicked: { pane.controller.unfoldAll(); pane.focusMap() }
+            }
+            Item { Layout.fillWidth: true; Layout.minimumWidth: 0 }
             ColumnLayout {
                 spacing: 0
                 Layout.preferredWidth: 190
+                Layout.minimumWidth: 65
+                Layout.fillWidth: true
+                Layout.maximumWidth: 190
                 Label {
                     text: "Top priority → All priorities"
+                    Layout.fillWidth: true
+                    elide: Text.ElideRight
                     color: "#a9bfd1"
                     font.pixelSize: 12
                 }
@@ -333,7 +475,8 @@ FocusScope {
                 objectName: "mindmapPriorityFilterText"
                 text: pane.controller ? pane.controller.priorityFilterText : "All"
                 color: "#a9bfd1"
-                Layout.preferredWidth: 105
+                Layout.preferredWidth: mindmapToolbar.compactTools ? 45 : 105
+                Layout.minimumWidth: 0
                 elide: Text.ElideRight
             }
             ToolButton { text: "−"; Accessible.name: "Zoom out"; ToolTip.visible: hovered; ToolTip.text: "Zoom out"; onClicked: { pane.zoomBy(1 / 1.2); pane.focusMap() } }
@@ -507,6 +650,7 @@ FocusScope {
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
                                                           - (nodeItem.modelData.measureProgress ? 12 : 0)
+                                                          - (nodeItem.modelData.deadlineActive ? 14 : 0)
                             text: "\uD83D\uDCDD"
                             font.pixelSize: 15
                             z: 2
@@ -530,6 +674,7 @@ FocusScope {
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
                                                           - (nodeItem.modelData.measureProgress ? 12 : 0)
+                                                          - (nodeItem.modelData.deadlineActive ? 14 : 0)
                             text: "\uD83D\uDD16"
                             font.pixelSize: 15
                             Accessible.role: Accessible.StaticText
@@ -540,12 +685,14 @@ FocusScope {
                             anchors.fill: parent
                             anchors.bottomMargin: (nodeItem.modelData.reminderActive ? 24 : 0)
                                                   + (nodeItem.modelData.measureProgress ? 24 : 0)
+                                                  + (nodeItem.modelData.deadlineActive ? 28 : 0)
                             anchors.leftMargin: 9 + (nodeItem.modelData.hasNote ? 20 : 0)
                                                    + (nodeItem.modelData.bookmarked ? 20 : 0)
                             anchors.rightMargin: (nodeItem.modelData.priorityLevel > 0 ? 48 : 18)
+                                                 + (nodeItem.modelData.hasChildren ? 22 : 0)
                                                  + (nodeItem.modelData.priorityRank > 0 ? 30 : 0)
                             verticalAlignment: Text.AlignVCenter
-                            text: (nodeItem.modelData.completed ? "✓ " : "") + (nodeItem.modelData.isTab ? "▣ " : "") + nodeItem.modelData.text
+                            text: (nodeItem.modelData.completed ? "✓ " : "") + (nodeItem.modelData.isReference ? "↗ " : nodeItem.modelData.isTab ? "▣ " : "") + nodeItem.modelData.text
                             font.pixelSize: 14
                             font.bold: nodeItem.modelData.bold
                             color: "#e5f0fa"; elide: Text.ElideRight
@@ -555,10 +702,11 @@ FocusScope {
                             readonly property int rank: nodeItem.modelData.priorityRank
                             visible: rank > 0
                             width: 24; height: 24; radius: 12
-                            anchors.right: parent.right; anchors.rightMargin: 48
+                            anchors.right: parent.right; anchors.rightMargin: 48 + (nodeItem.modelData.hasChildren ? 22 : 0)
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
                                                           - (nodeItem.modelData.measureProgress ? 12 : 0)
+                                                          - (nodeItem.modelData.deadlineActive ? 14 : 0)
                             color: rank === 1 ? "#f2c75c" : rank === 2 ? "#c8d3df" : "#d99b6c"
                             border.color: "#e5f0fa"
                             Accessible.role: Accessible.StaticText
@@ -573,20 +721,39 @@ FocusScope {
                         }
                         PriorityBars {
                             objectName: "mindmapPriority_" + nodeItem.modelData.id
-                            anchors.right: parent.right; anchors.rightMargin: 20
+                            anchors.right: parent.right; anchors.rightMargin: 20 + (nodeItem.modelData.hasChildren ? 22 : 0)
                             anchors.verticalCenter: parent.verticalCenter
                             anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
                                                           - (nodeItem.modelData.measureProgress ? 12 : 0)
+                                                          - (nodeItem.modelData.deadlineActive ? 14 : 0)
                             level: nodeItem.modelData.priorityLevel
                             visible: level > 0
                         }
-                        Text {
-                            anchors.right: parent.right; anchors.rightMargin: 5
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
-                                                          - (nodeItem.modelData.measureProgress ? 12 : 0)
-                            text: nodeItem.modelData.hasChildren ? (nodeItem.modelData.folded ? "+" : "−") : ""
-                            color: "#a5d9ff"
+                        ToolButton {
+                            id: foldButton
+                            objectName: "mindmapFold_" + nodeItem.modelData.id
+                            visible: nodeItem.modelData.hasChildren
+                            anchors.right: parent.right
+                            anchors.rightMargin: 3
+                            anchors.top: parent.top
+                            anchors.topMargin: 4
+                            width: 32; height: 32
+                            z: 3
+                            text: nodeItem.modelData.folded ? "+" : "−"
+                            font.pixelSize: 18
+                            palette.buttonText: "#e5f0fa"
+                            background: Rectangle {
+                                radius: 8
+                                color: foldButton.down ? "#42647c" : foldButton.hovered ? "#345265" : "#20394c"
+                                border.color: foldButton.activeFocus ? "#e5f0fa" : "#6288a5"
+                            }
+                            Accessible.name: (nodeItem.modelData.folded ? "Unfold " : "Fold ") + nodeItem.modelData.text
+                            ToolTip.visible: hovered
+                            ToolTip.text: nodeItem.modelData.folded ? "Unfold branch" : "Fold branch"
+                            onClicked: {
+                                pane.controller.toggleNodeFold(nodeItem.modelData.id)
+                                pane.focusMap()
+                            }
                         }
                         MouseArea {
                             id: nodeMouse
@@ -679,13 +846,59 @@ FocusScope {
                                       + (nodeItem.modelData.note ? "\n\n" + nodeItem.modelData.note : "")
                             }
                         }
+                        Item {
+                            id: deadlineBar
+                            objectName: "mindmapDeadlineBar_" + nodeItem.modelData.id
+                            visible: nodeItem.modelData.deadlineActive
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.bottom: parent.bottom
+                            anchors.margins: 6
+                            height: 22
+                            readonly property real remaining: visible
+                                ? Math.max(0, Math.min(nodeItem.modelData.deadlineDuration,
+                                    nodeItem.modelData.deadlineStart + nodeItem.modelData.deadlineDuration - pane.deadlineNow)) : 0
+                            readonly property real progress: nodeItem.modelData.deadlineDuration > 0
+                                ? remaining / nodeItem.modelData.deadlineDuration : 0
+                            readonly property color timerColor: progress > 0.5 ? "#2ecc71"
+                                : progress > 0.25 ? "#f39c12" : "#e74c3c"
+                            Text {
+                                objectName: "mindmapDeadlineText_" + nodeItem.modelData.id
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                text: {
+                                    var seconds = Math.ceil(deadlineBar.remaining)
+                                    return Math.floor(seconds / 60) + ":" + (seconds % 60 < 10 ? "0" : "") + seconds % 60
+                                }
+                                color: deadlineBar.timerColor
+                                font.pixelSize: 12
+                                Accessible.role: Accessible.StaticText
+                                Accessible.name: "Deadline: " + text
+                            }
+                            Rectangle {
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                height: 4
+                                radius: 2
+                                color: "#1a2230"
+                                Rectangle {
+                                    objectName: "mindmapDeadlineFill_" + nodeItem.modelData.id
+                                    width: parent.width * deadlineBar.progress
+                                    height: parent.height
+                                    radius: 2
+                                    color: deadlineBar.timerColor
+                                }
+                            }
+                        }
                         Rectangle {
                             objectName: "mindmapProgressBadge_" + nodeItem.modelData.id
                             visible: nodeItem.modelData.measureProgress
                             anchors.left: parent.left
                             anchors.right: parent.right
                             anchors.bottom: parent.bottom
-                            anchors.bottomMargin: nodeItem.modelData.reminderActive ? 28 : 4
+                            anchors.bottomMargin: 4 + (nodeItem.modelData.reminderActive ? 24 : 0)
+                                                    + (nodeItem.modelData.deadlineActive ? 28 : 0)
                             anchors.leftMargin: 4
                             anchors.rightMargin: 4
                             height: 20
@@ -703,6 +916,7 @@ FocusScope {
                         }
                         Rectangle {
                             objectName: "mindmapReminderBadge_" + nodeItem.modelData.id
+                            anchors.bottomMargin: 4 + (nodeItem.modelData.deadlineActive ? 28 : 0)
                             visible: nodeItem.modelData.reminderActive
                             anchors.left: parent.left
                             anchors.right: parent.right
@@ -745,7 +959,7 @@ FocusScope {
                 }
                 visible: !!targetNode && !pane.nodePressed && !canvasMouse.pressed
                          && !editor.visible && !nodeMenu.visible && !actionsMenu.visible
-                         && !helpDialog.visible && !pane.reminderDialogOpen
+                         && !helpDialog.visible && !deadlineDialog.visible && !pane.reminderDialogOpen
                 Repeater {
                     model: 2
                     id: insertionButtons
@@ -841,11 +1055,53 @@ FocusScope {
             }
         }
     }
+    Dialog {
+        id: deadlineDialog
+        objectName: "mindmapDeadlineDialog"
+        title: "Set deadline"
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(320, pane.width - 20)
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        property string targetNodeId: ""
+        onOpened: {
+            deadlineMinutes.forceActiveFocus()
+            deadlineMinutes.selectAll()
+            standardButton(Dialog.Ok).enabled = deadlineMinutes.acceptableInput
+        }
+        onAccepted: {
+            if (pane.controller && deadlineMinutes.acceptableInput) {
+                pane.deadlineNow = Date.now() / 1000
+                pane.controller.setDeadline(targetNodeId, Number(deadlineMinutes.text))
+            }
+        }
+        onClosed: pane.focusMap()
+        ColumnLayout {
+            anchors.fill: parent
+            Label { text: "Duration in minutes"; color: "#e5f0fa" }
+            TextField {
+                id: deadlineMinutes
+                objectName: "mindmapDeadlineMinutes"
+                Layout.fillWidth: true
+                text: "25"
+                validator: IntValidator { bottom: 1; top: 2147483647 }
+                inputMethodHints: Qt.ImhDigitsOnly
+                onAcceptableInputChanged: {
+                    var button = deadlineDialog.standardButton(Dialog.Ok)
+                    if (button) button.enabled = acceptableInput
+                }
+                Keys.onReturnPressed: if (acceptableInput) deadlineDialog.accept()
+                Keys.onEnterPressed: if (acceptableInput) deadlineDialog.accept()
+            }
+        }
+    }
     Menu {
         id: nodeMenu
         objectName: "mindmapNodeMenu"
+        width: 280
         property string targetNodeId: ""
         property var reminderData: ({})
+        property var deadlineData: ({})
         property bool canMoveUp: false
         property bool canMoveDown: false
         property bool measuringProgress: false
@@ -853,6 +1109,7 @@ FocusScope {
                                ? pane.controller.measuresProgress(targetNodeId) : false
         onAboutToShow: {
             reminderData = pane.controller.reminderData(targetNodeId)
+            deadlineData = pane.controller.deadlineData(targetNodeId)
             canMoveUp = pane.controller.canReorderNode(targetNodeId, -1)
             canMoveDown = pane.controller.canReorderNode(targetNodeId, 1)
             measuringProgress = pane.controller.measuresProgress(targetNodeId)
@@ -860,8 +1117,13 @@ FocusScope {
         Menu {
             objectName: "mindmapAddToPlanMenu"
             title: "Add to plan"
+            icon.source: Qt.resolvedUrl("../icons/calendar.svg")
+            icon.width: 16
+            icon.height: 16
+            icon.color: palette.text
             enabled: pane.controller && pane.controller.selectedIds.length > 0
-            MenuItem {
+            IconMenuItem {
+                iconKey: "calendar"
                 objectName: "mindmapAddToPlanReady"
                 text: pane.controller ? pane.controller.planReadyLabel : "Ready (0 tasks)"
                 onTriggered: {
@@ -872,7 +1134,8 @@ FocusScope {
             MenuSeparator {}
             Repeater {
                 model: pane.controller ? pane.controller.planHourOptions : []
-                delegate: MenuItem {
+                delegate: IconMenuItem {
+                    iconKey: "calendar"
                     required property var modelData
                     objectName: "mindmapAddToPlan_" + modelData.hour
                     text: modelData.label
@@ -884,7 +1147,27 @@ FocusScope {
             }
         }
         MenuSeparator {}
-        MenuItem {
+        IconMenuItem {
+            iconKey: "timer"
+            objectName: "mindmapSetDeadline"
+            text: nodeMenu.deadlineData.deadlineActive ? "Update deadline" : "Set deadline"
+            onTriggered: {
+                deadlineDialog.targetNodeId = nodeMenu.targetNodeId
+                deadlineDialog.title = text
+                deadlineMinutes.text = nodeMenu.deadlineData.deadlineActive
+                    ? String(Math.max(1, Math.ceil(nodeMenu.deadlineData.deadlineDuration / 60))) : "25"
+                deadlineDialog.open()
+            }
+        }
+        IconMenuItem {
+            iconKey: "timer"
+            objectName: "mindmapClearDeadline"
+            text: "Clear deadline"
+            visible: !!nodeMenu.deadlineData.deadlineActive
+            onTriggered: pane.controller.clearDeadline(nodeMenu.targetNodeId)
+        }
+        IconMenuItem {
+            iconKey: "bell"
             objectName: "mindmapSetReminder"
             text: nodeMenu.reminderData.reminderActive ? "Update Reminder" : "Set Reminder"
             onTriggered: pane.reminderRequested(nodeMenu.targetNodeId)
@@ -892,51 +1175,64 @@ FocusScope {
         Menu {
             objectName: "mindmapQuickReminderMenu"
             title: "Quick reminder"
-            MenuItem {
+            icon.source: Qt.resolvedUrl("../icons/bell.svg")
+            icon.width: 16
+            icon.height: 16
+            icon.color: palette.text
+            IconMenuItem {
+                iconKey: "bell"
                 objectName: "mindmapQuickReminder10Minutes"
                 text: "10 minutes"
                 onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 10)
             }
-            MenuItem {
+            IconMenuItem {
+                iconKey: "bell"
                 objectName: "mindmapQuickReminder20Minutes"
                 text: "20 minutes"
                 onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 20)
             }
-            MenuItem {
+            IconMenuItem {
+                iconKey: "bell"
                 objectName: "mindmapQuickReminder1Hour"
                 text: "1 hour"
                 onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 60)
             }
-            MenuItem {
+            IconMenuItem {
+                iconKey: "bell"
                 objectName: "mindmapQuickReminder24Hours"
                 text: "24 hours"
                 onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 24 * 60)
             }
-            MenuItem {
+            IconMenuItem {
+                iconKey: "bell"
                 objectName: "mindmapQuickReminder2Days"
                 text: "2 days"
                 onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 2 * 24 * 60)
             }
-            MenuItem {
+            IconMenuItem {
+                iconKey: "bell"
                 objectName: "mindmapQuickReminder7Days"
                 text: "7 days"
                 onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 7 * 24 * 60)
             }
         }
-        MenuItem {
+        IconMenuItem {
+            iconKey: "bell"
             objectName: "mindmapClearReminder"
             text: "Clear Reminder"
             visible: !!nodeMenu.reminderData.reminderActive
             onTriggered: pane.clearReminderRequested(nodeMenu.targetNodeId)
         }
         MenuSeparator {}
-        MenuItem {
+        IconMenuItem {
+            iconKey: "bookmark"
             objectName: "mindmapBookmarkMenuItem"
-            text: pane.controller && pane.controller.bookmarks.some(function(b) { return b.id === nodeMenu.targetNodeId })
+            text: pane.controller && pane.controller.bookmarks.some(function(b) { return b.id === pane.controller.sourceNodeId(nodeMenu.targetNodeId) })
                   ? "Remove bookmark" : "Bookmark"
             onTriggered: { pane.controller.toggleBookmark(nodeMenu.targetNodeId); pane.focusMap() }
         }
-        MenuItem {
+        IconMenuItem {
+            iconKey: "progress"
             objectName: "mindmapMeasureProgressMenuItem"
             text: nodeMenu.measuringProgress ? "Stop measuring progress" : "Measure progress"
             onTriggered: {
@@ -945,54 +1241,151 @@ FocusScope {
                 pane.focusMap()
             }
         }
-        MenuItem {
+        IconMenuItem {
+            iconKey: "up"
             objectName: "mindmapMoveUp"
             text: "Move up"
             enabled: nodeMenu.canMoveUp
             onTriggered: { pane.controller.reorderNode(nodeMenu.targetNodeId, -1); pane.focusMap() }
         }
-        MenuItem {
+        IconMenuItem {
+            iconKey: "down"
             objectName: "mindmapMoveDown"
             text: "Move down"
             enabled: nodeMenu.canMoveDown
             onTriggered: { pane.controller.reorderNode(nodeMenu.targetNodeId, 1); pane.focusMap() }
         }
         MenuSeparator {}
-        MenuItem { text: "Cut branches"; enabled: pane.controller && pane.controller.canCut; onTriggered: pane.controller.cutSelected() }
-        MenuItem { objectName: "mindmapContextPaste"; text: "Paste beneath selected node"; enabled: pane.controller && (pane.controller.canPaste || pane.controller.canPasteClipboardText); onTriggered: pane.controller.pasteSelected() }
+        IconMenuItem { iconKey: "cut"; text: "Cut branches"; enabled: pane.controller && pane.controller.canCut; onTriggered: pane.controller.cutSelected() }
+        IconMenuItem { iconKey: "clipboard"; objectName: "mindmapContextPaste"; text: "Paste beneath selected node"; enabled: pane.controller && (pane.controller.canPaste || pane.controller.canPasteClipboardText); onTriggered: pane.controller.pasteSelected() }
         Menu {
             objectName: "mindmapContextExportMenu"
             title: "Export branch"
-            MenuItem {
+            icon.source: Qt.resolvedUrl("../icons/export.svg")
+            icon.width: 16
+            icon.height: 16
+            icon.color: palette.text
+            IconMenuItem {
+                iconKey: "export"
                 objectName: "mindmapContextSaveBranchOpml"
                 text: "Save as OPML…"
                 onTriggered: pane.branchOpmlExportRequested(nodeMenu.targetNodeId)
             }
-            MenuItem {
+            IconMenuItem {
+                iconKey: "clipboard"
                 objectName: "mindmapContextCopyBranchOpml"
                 text: "Copy as OPML XML"
                 onTriggered: { pane.controller.copyBranchAsOpml(nodeMenu.targetNodeId); pane.focusMap() }
             }
-            MenuItem {
+            IconMenuItem {
+                iconKey: "clipboard"
                 objectName: "mindmapContextCopyBranchText"
                 text: "Copy as indented text"
                 onTriggered: { pane.controller.copyBranchAsText(nodeMenu.targetNodeId); pane.focusMap() }
             }
         }
         MenuSeparator {}
-        MenuItem { text: "Add child"; onTriggered: pane.addThought(false) }
-        MenuItem { text: "Add sibling"; onTriggered: pane.addThought(true) }
-        MenuItem { text: "Edit / Notes"; onTriggered: pane.editNode() }
-        MenuItem {
+        IconMenuItem {
+            iconKey: "tab"
+            objectName: "mindmapAddTab"
+            text: "Add tab…"
+            onTriggered: {
+                tabReferenceDialog.targetNodeId = nodeMenu.targetNodeId
+                tabReferenceDialog.open()
+            }
+        }
+        IconMenuItem { iconKey: "child"; text: "Add child"; onTriggered: pane.addThought(false) }
+        IconMenuItem { iconKey: "sibling"; text: "Add sibling"; onTriggered: pane.addThought(true) }
+        IconMenuItem { iconKey: "notes"; text: "Edit / Notes"; onTriggered: pane.editNode() }
+        IconMenuItem {
+            iconKey: "tab"
             text: "Create tab"
             enabled: pane.controller && pane.controller.canCreateTab
             onTriggered: { pane.controller.createTabFromSelected(); pane.focusMap() }
         }
-        MenuItem { text: "Complete"; enabled: pane.controller && pane.controller.selectedIds.length > 0; onTriggered: pane.controller.toggleCompleted() }
-        MenuItem { text: "Fold / Unfold"; onTriggered: pane.controller.toggleFold() }
-        MenuItem { text: "Branch on left"; onTriggered: pane.controller.setSide("left") }
-        MenuItem { text: "Branch on right"; onTriggered: pane.controller.setSide("right") }
-        MenuItem { text: "Delete branch"; onTriggered: pane.controller.deleteSelected() }
+        IconMenuItem { iconKey: "check"; text: "Complete"; enabled: pane.controller && pane.controller.selectedIds.length > 0; onTriggered: pane.controller.toggleCompleted() }
+        IconMenuItem { iconKey: "fold"; text: "Fold / Unfold"; onTriggered: pane.controller.toggleFold() }
+        IconMenuItem { iconKey: "left"; text: "Branch on left"; onTriggered: pane.controller.setSide("left") }
+        IconMenuItem { iconKey: "right"; text: "Branch on right"; onTriggered: pane.controller.setSide("right") }
+        IconMenuItem { iconKey: "trash"; text: pane.controller && pane.controller.selectedNode.isReference ? "Remove tab reference" : "Delete branch"; onTriggered: pane.controller.deleteSelected() }
+    }
+    Dialog {
+        id: tabReferenceDialog
+        objectName: "mindmapTabReferenceDialog"
+        title: "Add tab"
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(600, pane.width - 20)
+        height: Math.min(440, pane.height - 20)
+        standardButtons: Dialog.Cancel
+        property string targetNodeId: ""
+        property var options: []
+        property string errorText: ""
+        function refresh() {
+            options = pane.controller ? pane.controller.tabReferenceOptions(tabReferenceSearch.text) : []
+            tabReferenceList.currentIndex = options.length ? 0 : -1
+        }
+        function insert(index) {
+            if (index < 0 || index >= options.length) return
+            if (pane.controller.addTabReference(targetNodeId, options[index].tabId)) close()
+        }
+        onOpened: {
+            errorText = ""
+            tabReferenceSearch.text = ""
+            refresh()
+            tabReferenceSearch.forceActiveFocus()
+        }
+        onClosed: pane.focusMap()
+        Connections {
+            target: pane.controller
+            function onChanged() { if (tabReferenceDialog.visible) tabReferenceDialog.refresh() }
+            function onErrorOccurred(message) {
+                if (tabReferenceDialog.visible) tabReferenceDialog.errorText = message
+            }
+        }
+        ColumnLayout {
+            anchors.fill: parent
+            TextField {
+                id: tabReferenceSearch
+                objectName: "mindmapTabReferenceSearch"
+                Layout.fillWidth: true
+                placeholderText: "Search tabs…"
+                onTextChanged: tabReferenceDialog.refresh()
+                onAccepted: tabReferenceDialog.insert(tabReferenceList.currentIndex)
+                Keys.onDownPressed: tabReferenceList.currentIndex = Math.min(tabReferenceList.count - 1, tabReferenceList.currentIndex + 1)
+                Keys.onUpPressed: tabReferenceList.currentIndex = Math.max(0, tabReferenceList.currentIndex - 1)
+            }
+            ListView {
+                id: tabReferenceList
+                objectName: "mindmapTabReferenceList"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                model: tabReferenceDialog.options
+                ScrollBar.vertical: ScrollBar {}
+                delegate: ItemDelegate {
+                    required property var modelData
+                    required property int index
+                    objectName: "mindmapTabOption_" + modelData.tabId
+                    width: tabReferenceList.width
+                    highlighted: tabReferenceList.currentIndex === index
+                    text: modelData.name + "\n" + modelData.path
+                    onClicked: tabReferenceDialog.insert(index)
+                }
+                Label {
+                    anchors.centerIn: parent
+                    visible: tabReferenceList.count === 0
+                    text: "No matching tabs"
+                }
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: tabReferenceDialog.errorText.length > 0
+                text: tabReferenceDialog.errorText
+                wrapMode: Text.Wrap
+                color: "#ffb4a9"
+            }
+        }
     }
     Dialog {
         id: editor

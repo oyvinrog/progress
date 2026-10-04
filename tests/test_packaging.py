@@ -120,3 +120,22 @@ def test_bundled_pyplane_and_mindmap_resources_are_packaged():
     assert '"LICENSE", "UPSTREAM.md"' in pyproject
     assert Path("actiondraw/_vendor/pyplane/LICENSE").is_file()
     assert Path("actiondraw/qml_ui/components/MindMapPane.qml").is_file()
+
+
+def test_mindmap_svg_assets_are_valid_and_included_in_distributions():
+    import xml.etree.ElementTree as ET
+
+    config = Path('pyproject.toml').read_text().split('[tool.setuptools.package-data]', 1)[1]
+    package = Path('actiondraw')
+    match = re.search(r'actiondraw\s*=\s*\[(.*?)\]', config, re.DOTALL)
+    assert match is not None
+    patterns = re.findall(r'"([^"]+)"', match.group(1))
+    packaged = {path for pattern in patterns for path in package.glob(pattern)}
+    icons = set((package / 'qml_ui' / 'icons').glob('*.svg'))
+    assert icons and icons <= packaged
+    manifest = Path('MANIFEST.in').read_text()
+    assert 'recursive-include actiondraw/qml_ui *.svg' in manifest
+    for icon in icons:
+        svg = ET.parse(icon).getroot()
+        assert svg.tag == '{http://www.w3.org/2000/svg}svg'
+        assert svg.get('viewBox') == '0 0 24 24'

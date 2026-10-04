@@ -2,7 +2,6 @@
 
 from actiondraw.actionpaint import ActionPaintModel, empty_action_paint_state
 from actiondraw.model import DiagramModel
-from actiondraw.ui import create_actiondraw_window
 from progress_crypto import EncryptionCredentials
 from task_model import ProjectManager, TabModel, TaskModel
 
@@ -261,7 +260,7 @@ def test_actionpaint_mindmap_sequence_persists(app, tmp_path, monkeypatch):
     assert not manager.hasUnsavedChanges()
 
 
-def test_integrated_actionpaint_window_opens(app):
+def test_integrated_actionpaint_window_opens(app, actiondraw_window):
     from PySide6.QtCore import QObject, QPoint, QPointF, Qt
     from PySide6.QtTest import QTest
 
@@ -269,7 +268,7 @@ def test_integrated_actionpaint_window_opens(app):
     diagram_model = DiagramModel(task_model=task_model)
     tab_model = TabModel()
     manager = ProjectManager(task_model, diagram_model, tab_model)
-    engine = create_actiondraw_window(diagram_model, task_model, manager, tab_model=tab_model)
+    engine = actiondraw_window(diagram_model, task_model, manager, tab_model=tab_model)
     root = engine.rootObjects()[0]
 
     root.openActionPaintWindow()
@@ -312,7 +311,7 @@ def test_integrated_actionpaint_window_opens(app):
     paint_window.close()
 
 
-def test_actionpaint_add_to_mindmap_button(app):
+def test_actionpaint_add_to_mindmap_button(app, actiondraw_window):
     from PySide6.QtCore import QObject, Qt
     from PySide6.QtTest import QTest
 
@@ -320,7 +319,7 @@ def test_actionpaint_add_to_mindmap_button(app):
     diagram = DiagramModel(task_model=tasks)
     tabs = TabModel()
     manager = ProjectManager(tasks, diagram, tabs)
-    engine = create_actiondraw_window(diagram, tasks, manager, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, manager, tab_model=tabs)
     root = engine.rootObjects()[0]
     root.openActionPaintWindow()
     window = root.property('actionPaintWindowRef')
