@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from PySide6.QtCore import QObject, Property, QUrl, Signal, Slot
 from PySide6.QtGui import QFont, QFontMetricsF, QGuiApplication
 
-from ._vendor.pyplane.model import MindMap
+from ._vendor.pyplane.model import MindMap, Node
 from ._vendor.pyplane.layout import assigned_sides, layout
 from ._vendor.pyplane.mm import dumps, loads
 from .outline_clipboard import (
@@ -20,6 +20,100 @@ from .outline_clipboard import (
     parse_opml_text,
     parse_text_hierarchy,
 )
+
+
+class _Occurrence:
+    """A display placement; edits go to its canonical content or physical edge.
+
+    The persisted model remains a tree. Reference expansion only happens here,
+    so removing a placement never traverses into the referenced tab's content.
+    """
+
+    def __init__(self, placement, content, path=(), parent=None, reference=False):
+        self.placement = placement
+        self.content = content
+        self.path = path
+        self.id = '/'.join((*path, placement.id)) if path else placement.id
+        self.parent = parent
+        self.children = []
+        self.reference = reference
+
+    @property
+    def child_path(self):
+        return (*self.path, self.placement.id) if self.reference else self.path
+
+    def __getattr__(self, name):
+        return getattr(self.content, name)
+
+    @property
+    def text(self):
+        return self.content.text
+
+    @text.setter
+    def text(self, value):
+        self.content.text = value
+
+    @property
+    def note(self):
+        return self.content.note
+
+    @note.setter
+    def note(self, value):
+        self.content.note = value
+
+    @property
+    def folded(self):
+        return self.placement.folded
+
+    @folded.setter
+    def folded(self, value):
+        self.placement.folded = value
+
+    @property
+    def side(self):
+        return self.placement.side
+
+    @side.setter
+    def side(self, value):
+        self.placement.side = value
+
+    def walk(self):
+        yield self
+        for child in self.children:
+            yield from child.walk()
+
+    def ancestors(self):
+        parent = self.parent
+        while parent is not None:
+            yield parent
+            parent = parent.parent
+
+    def add_child(self, text='', **kwargs):
+        node = self.content.add_child(text, **kwargs)
+        child = _Occurrence(node, node, self.child_path, self)
+        self.children.append(child)
+        return child
+
+    def move_to(self, parent, index=None):
+        self.placement.move_to(_content(parent), index)
+        self.parent = parent
+        self.path = parent.child_path if isinstance(parent, _Occurrence) else ()
+        self.id = '/'.join((*self.path, self.placement.id)) if self.path else self.placement.id
+
+    def remove(self):
+        self.placement.remove()
+
+    def __copy__(self):
+        return Node(text=self.text, id=self.id, folded=self.folded,
+                    side=self.side, note=self.note, style=self.style)
+
+
+def _content(node):
+    return node.content if isinstance(node, _Occurrence) else node
+
+
+def _placement(node):
+    return node.placement if isinstance(node, _Occurrence) else node
 
 
 class MindMapController(QObject):
@@ -38,6 +132,9 @@ class MindMapController(QObject):
         self._tabs = tab_model
         self.map = MindMap('Project')
         self.links = {}
+        self.references = {}
+        self._projection_key = None
+        self._projection_nodes = {}
         self._completed = set()
         self._measure_progress = set()
         self.reminders = {}
@@ -77,12 +174,139 @@ class MindMapController(QObject):
         self._tab_history_handler = weakref.WeakMethod(handler) if handler else None
 
     @property
-    def view_root(self):
+    def _canonical_root(self):
         if self._scope_tab:
             for node_id, tab_id in self.links.items():
                 if tab_id == self._scope_tab:
                     return self.map.find(node_id) or self.map.root
         return self.map.root
+
+    @property
+    def view_root(self):
+        root = self._canonical_root
+        if not self.references:
+            self._projection_key = None
+            self._projection_nodes = {}
+            self._projection_root = None
+            return root
+        # Include topology in the cache key: callers may also edit the model
+        # directly (imports and existing integrations do this).
+        key = (id(self.map), root.id, tuple(self.links.items()),
+               tuple(self.references.items()),
+               tuple((n.id, tuple(c.id for c in n.children)) for n in self.map.walk()))
+        if key != self._projection_key:
+            targets = {tab: self.map.find(key) for key, tab in self.links.items()}
+            nodes = {}
+
+            def expand(node, path=(), parent=None, active=frozenset()):
+                if node.id in active:
+                    raise ValueError('A tab reference would create a circular mindmap.')
+                target = targets.get(self.references.get(node.id), node)
+                occurrence = _Occurrence(node, target, path, parent, node.id in self.references)
+                nodes[occurrence.id] = occurrence
+                active = active | {node.id, target.id}
+                occurrence.children = [expand(child, occurrence.child_path, occurrence, active)
+                                       for child in target.children]
+                return occurrence
+
+            self._projection_root = expand(root)
+            self._projection_nodes = nodes
+            self._projection_key = key
+        return self._projection_root
+
+    def _find(self, node_id):
+        if self.references:
+            self.view_root
+            if node_id in self._projection_nodes:
+                return self._projection_nodes[node_id]
+        return self.map.find(node_id)
+
+    @Slot(str, result=str)
+    def sourceNodeId(self, node_id):
+        node = self._find(node_id)
+        return _content(node).id if node is not None else node_id
+
+    def _tab_id(self, node):
+        return self.links.get(_content(node).id) if node is not None else None
+
+    @staticmethod
+    def _validate_references(mindmap, links, references):
+        if not isinstance(references, dict):
+            raise ValueError('Malformed mindmap tab references')
+        nodes = {n.id: n for n in mindmap.walk()}
+        targets = {tab: key for key, tab in links.items()}
+        for key, tab in references.items():
+            if (not isinstance(key, str) or not isinstance(tab, str)
+                    or key not in nodes or tab not in targets or key in links
+                    or key == mindmap.root.id or nodes[key].children):
+                raise ValueError('Malformed mindmap tab reference')
+        # Iterative three-colour DFS includes physical children and reference
+        # edges. A finished node may be visited from any number of placements.
+        finished, active = set(), set()
+        stack = [(mindmap.root.id, False)]
+        while stack:
+            key, leaving = stack.pop()
+            if leaving:
+                active.remove(key)
+                finished.add(key)
+                continue
+            if key in active:
+                raise ValueError('A tab reference would create a circular mindmap.')
+            if key in finished:
+                continue
+            active.add(key)
+            stack.append((key, True))
+            children = [n.id for n in nodes[key].children]
+            if key in references:
+                children.append(targets[references[key]])
+            stack.extend((child, False) for child in reversed(children))
+
+    def _prune_references(self):
+        targets = set(self.links.values())
+        for key, tab in list(self.references.items()):
+            node = self.map.find(key)
+            if node is None or tab not in targets:
+                if node is not None:
+                    node.remove()
+                del self.references[key]
+            elif node is not None:
+                target_id = next(k for k, v in self.links.items() if v == tab)
+                node.text = self.map.find(target_id).text
+
+    @Slot(str, result='QVariantList')
+    def tabReferenceOptions(self, query):
+        query = query.strip().casefold()
+        result = []
+        for key, tab in self.links.items():
+            node = self.map.find(key)
+            path = ' / '.join(n.text for n in [*reversed(list(node.ancestors())), node])
+            if not query or query in node.text.casefold() or query in path.casefold():
+                result.append({'tabId': tab, 'name': node.text, 'path': path})
+        return result
+
+    @Slot(str, str, result=bool)
+    def addTabReference(self, parent_id, tab_id):
+        parent = self._find(parent_id)
+        if not self._in_scope(parent) or tab_id not in self.links.values():
+            self.errorOccurred.emit('The destination or tab no longer exists.')
+            return False
+        created = []
+
+        def mutate():
+            target_id = next(key for key, tab in self.links.items() if tab == tab_id)
+            node = parent.add_child(self.map.find(target_id).text)
+            self.references[_placement(node).id] = tab_id
+            parent.folded = False
+            created.append(node.id)
+            # Do not expand the new edge until graph validation succeeds.
+
+        if not self._commit(mutate):
+            return False
+        self._set_selection(created)
+        self.clearSearch()
+        self.changed.emit()
+        self.revealNode.emit(created[0])
+        return True
 
     @Property(bool, notify=changed)
     def tabScoped(self):
@@ -99,7 +323,7 @@ class MindMapController(QObject):
         self._set_selection([self.view_root.id])
         if tab_id in self._view_selections:
             self._restore_selection(self._view_selections[tab_id])
-            ids = [key for key in self._selected_ids if self._in_scope(self.map.find(key))]
+            ids = [key for key in self._selected_ids if self._in_scope(self._find(key))]
             self._set_selection(ids or [self.view_root.id])
         self._cut_ids = []
         self.sceneChanged.emit()
@@ -158,8 +382,8 @@ class MindMapController(QObject):
         if placement is None:
             return False
         changed = False
-        for node_id in list(self._selected_ids):
-            node = self.map.find(node_id)
+        for node_id in dict.fromkeys(self.sourceNodeId(key) for key in self._selected_ids):
+            node = self._find(node_id)
             if node is None:
                 continue
             tab_id = self.links.get(node_id)
@@ -190,7 +414,8 @@ class MindMapController(QObject):
 
     @Slot(str, str, int, result=bool)
     def setNodeKanbanPlacement(self, node_id, status, slot_hour=-1):
-        node = self.map.find(node_id)
+        node_id = self.sourceNodeId(node_id)
+        node = self._find(node_id)
         placement = self._normalize_kanban_placement(status, slot_hour)
         if node is None or node_id in self.links or placement is None:
             return False
@@ -203,6 +428,7 @@ class MindMapController(QObject):
 
     @Slot(str, result=bool)
     def removeNodeFromPlan(self, node_id):
+        node_id = self.sourceNodeId(node_id)
         if node_id not in self._kanban:
             return False
         del self._kanban[node_id]
@@ -234,7 +460,7 @@ class MindMapController(QObject):
 
     @Slot()
     def toggleCompleted(self):
-        ids = set(self._selected_ids)
+        ids = {self.sourceNodeId(key) for key in self._selected_ids}
         if not ids:
             return
         def mutate():
@@ -262,6 +488,8 @@ class MindMapController(QObject):
         for tab in tabs:
             if tab.id not in seen:
                 self.links[self.map.root.add_child(tab.name).id] = tab.id
+        self._prune_references()
+        nodes = {node.id: node for node in self.map.walk()}
         self._completed.intersection_update(nodes)
         self._measure_progress.intersection_update(nodes)
         self._bookmarks = [key for key in self._bookmarks if key in nodes]
@@ -270,7 +498,7 @@ class MindMapController(QObject):
         old_kanban = self._kanban
         self._kanban = {key: value for key, value in self._kanban.items()
                         if key in nodes and key not in self.links}
-        self._selected_ids = [key for key in self._selected_ids if self._in_scope(self.map.find(key))]
+        self._selected_ids = [key for key in self._selected_ids if self._in_scope(self._find(key))]
         if not self._selected_ids or self._selected not in self._selected_ids:
             self._set_selection(self._selected_ids or [self.view_root.id])
         self._cut_ids = [key for key in self._cut_ids if key in nodes]
@@ -282,7 +510,7 @@ class MindMapController(QObject):
 
     def to_dict(self):
         return {'version': 1, 'xml': dumps(self.map).decode('utf-8'),
-                'tab_links': dict(self.links), 'completed': sorted(self._completed),
+                'tab_links': dict(self.links), 'tab_references': dict(self.references), 'completed': sorted(self._completed),
                 'reminders': copy.deepcopy(self.reminders), 'bookmarks': list(self._bookmarks),
                 'measure_progress': sorted(self._measure_progress),
                 'deadlines': copy.deepcopy(self.deadlines),
@@ -308,6 +536,7 @@ class MindMapController(QObject):
             raise ValueError('Malformed mindmap tab links')
         if mindmap.root.id in links or len(set(links.values())) != len(links):
             raise ValueError('Duplicate tab links or linked mindmap root')
+        MindMapController._validate_references(mindmap, links, payload.get('tab_references', {}))
         completed = payload.get('completed', [])
         if (not isinstance(completed, list)
                 or any(not isinstance(key, str) or mindmap.find(key) is None for key in completed)
@@ -376,6 +605,7 @@ class MindMapController(QObject):
 
     def load(self, payload=None):
         self.map, self.links = self.decode(payload) if payload is not None else (MindMap('Project'), {})
+        self.references = dict((payload or {}).get('tab_references', {}))
         self._search_query = ''
         self._priority_filter = 1.0
         self._completed = set((payload or {}).get('completed', []))
@@ -447,14 +677,15 @@ class MindMapController(QObject):
 
     @Property('QVariantMap', notify=changed)
     def selectedNode(self):
-        node = self.map.find(self._selected)
+        node = self._find(self._selected)
         if node is None:
             return {}
-        return {'id': node.id, 'text': node.text, 'note': node.note or '',
-                'isTab': node.id in self.links, 'folded': node.folded,
-                'isViewRoot': node is self.view_root, 'completed': node.id in self._completed,
-                'bookmarked': node.id in self._bookmarks,
-                'measureProgress': node.id in self._measure_progress,
+        return {'id': node.id, 'sourceId': _content(node).id,
+                'isReference': _placement(node).id in self.references, 'text': node.text, 'note': node.note or '',
+                'isTab': self._tab_id(node) is not None, 'folded': node.folded,
+                'isViewRoot': node is self.view_root, 'completed': _content(node).id in self._completed,
+                'bookmarked': _content(node).id in self._bookmarks,
+                'measureProgress': _content(node).id in self._measure_progress,
                 **self.reminderData(node.id)}
 
     @Property('QVariantList', notify=changed)
@@ -470,7 +701,8 @@ class MindMapController(QObject):
 
     @Slot(str)
     def toggleBookmark(self, node_id):
-        if self.map.find(node_id) is None:
+        node_id = self.sourceNodeId(node_id)
+        if self._find(node_id) is None:
             return
         def mutate():
             if node_id in self._bookmarks:
@@ -481,7 +713,8 @@ class MindMapController(QObject):
 
     @Slot(str)
     def toggleMeasureProgress(self, node_id):
-        if self.map.find(node_id) is None:
+        node_id = self.sourceNodeId(node_id)
+        if self._find(node_id) is None:
             return
         def mutate():
             if node_id in self._measure_progress:
@@ -492,6 +725,7 @@ class MindMapController(QObject):
 
     @Slot(str, result=bool)
     def measuresProgress(self, node_id):
+        node_id = self.sourceNodeId(node_id)
         return node_id in self._measure_progress
 
     @Slot(str)
@@ -501,6 +735,7 @@ class MindMapController(QObject):
 
     @Slot(str, result='QVariantMap')
     def reminderData(self, node_id):
+        node_id = self.sourceNodeId(node_id)
         reminder = self.reminders.get(node_id)
         return {'reminderActive': reminder is not None,
                 'reminderAt': datetime.fromtimestamp(reminder['at']).strftime('%Y-%m-%d %H:%M') if reminder else '',
@@ -508,6 +743,7 @@ class MindMapController(QObject):
 
     @Slot(str, result='QVariantMap')
     def deadlineData(self, node_id):
+        node_id = self.sourceNodeId(node_id)
         deadline = self.deadlines.get(node_id)
         return {'deadlineActive': deadline is not None,
                 'deadlineStart': deadline['start'] if deadline else 0,
@@ -515,7 +751,8 @@ class MindMapController(QObject):
 
     @Slot(str, int, result=bool)
     def setDeadline(self, node_id, minutes):
-        if (self.map.find(node_id) is None or type(minutes) is not int
+        node_id = self.sourceNodeId(node_id)
+        if (self._find(node_id) is None or type(minutes) is not int
                 or not 1 <= minutes <= 2147483647):
             return False
         return self._commit(lambda: self.deadlines.update({
@@ -523,17 +760,20 @@ class MindMapController(QObject):
 
     @Slot(str)
     def clearDeadline(self, node_id):
+        node_id = self.sourceNodeId(node_id)
         if node_id in self.deadlines:
             self._commit(lambda: self.deadlines.pop(node_id, None))
 
     def set_reminder(self, node_id, timestamp, send_notification=False):
-        if self.map.find(node_id) is None:
+        node_id = self.sourceNodeId(node_id)
+        if self._find(node_id) is None:
             return False
         return self._commit(lambda: self.reminders.update({
             node_id: {'at': timestamp, 'send_notification': bool(send_notification)}}))
 
     @Slot(str)
     def clearReminder(self, node_id):
+        node_id = self.sourceNodeId(node_id)
         if node_id in self.reminders:
             self._commit(lambda: self.reminders.pop(node_id, None))
 
@@ -550,18 +790,23 @@ class MindMapController(QObject):
         self.changed.emit()
 
     def reveal_reminder(self, node_id):
-        node = self.map.find(node_id)
+        source_id = self.sourceNodeId(node_id)
+        node = next((n for n in self.view_root.walk() if n.id == node_id), None)
         if node is None:
-            return False
-        if not self._in_scope(node):
+            node = next((n for n in self.view_root.walk()
+                         if _content(n).id == source_id), None)
+        if node is None:
+            if self.map.find(source_id) is None:
+                return False
             self.set_scope()
+            node = self._find(source_id)
         if node not in self._priority_nodes():
             self.setPriorityFilter(1.0)
         for ancestor in node.ancestors():
             ancestor.folded = False
-        self.select(node_id)
+        self.select(node.id)
         self.sceneChanged.emit()
-        self.revealNode.emit(node_id)
+        self.revealNode.emit(node.id)
         return True
 
     def _priority_data(self):
@@ -589,8 +834,8 @@ class MindMapController(QObject):
         return result
 
     def _scope_scores(self, priorities):
-        return [priorities[self.links[n.id]]['priorityScore'] for n in self.view_root.walk()
-                if self.links.get(n.id) in priorities]
+        return [priorities[self._tab_id(n)]['priorityScore'] for n in self.view_root.walk()
+                if self._tab_id(n) in priorities]
 
     @Property(float, notify=changed)
     def priorityFilter(self):
@@ -618,8 +863,8 @@ class MindMapController(QObject):
         retained = {root}
         matching = {}
         for node in root.walk():
-            if node.id in self.links:
-                data = priorities.get(self.links[node.id])
+            if self._tab_id(node) is not None:
+                data = priorities.get(self._tab_id(node))
                 matching[node] = data is not None and data['priorityScore'] >= cutoff
             else:
                 matching[node] = matching.get(node.parent, False)
@@ -641,10 +886,10 @@ class MindMapController(QObject):
             self._priority_filter = 1.0
             return
         visible = self._layout()
-        ids = [key for key in self._selected_ids if self.map.find(key) in visible]
+        ids = [key for key in self._selected_ids if self._find(key) in visible]
         if self._selected in ids and ids == self._selected_ids:
             return
-        node = self.map.find(self._selected)
+        node = self._find(self._selected)
         while node is not None and node not in visible:
             node = node.parent
         self._set_selection(ids or [(node or self.view_root).id], self._selected)
@@ -668,22 +913,22 @@ class MindMapController(QObject):
         bold_metrics = QFontMetricsF(font)
         sizes = {}
         for node in self.view_root.walk():
-            padding = 74.0 if node.id in self._completed else 52.0
+            padding = 74.0 if _content(node).id in self._completed else 52.0
             if node.note and node.note.strip():
                 padding += 20.0
-            if node.id in self._bookmarks:
+            if _content(node).id in self._bookmarks:
                 padding += 20.0
-            if self.links.get(node.id) in priorities:
+            if self._tab_id(node) in priorities:
                 padding += 30.0
-                if priorities[self.links[node.id]]['priorityRank'] > 0:
+                if priorities[self._tab_id(node)]['priorityRank'] > 0:
                     padding += 30.0
             node_metrics = bold_metrics if node.style.bold else metrics
             width = max(110.0, min(380.0, node_metrics.horizontalAdvance(node.text) + padding))
-            if node.id in self.reminders:
+            if _content(node).id in self.reminders:
                 width = max(width, 210.0)
-            sizes[node] = (width, 40.0 + (24.0 if node.id in self.reminders else 0.0)
-                           + (24.0 if node.id in self._measure_progress else 0.0)
-                           + (28.0 if node.id in self.deadlines else 0.0))
+            sizes[node] = (width, 40.0 + (24.0 if _content(node).id in self.reminders else 0.0)
+                           + (24.0 if _content(node).id in self._measure_progress else 0.0)
+                           + (28.0 if _content(node).id in self.deadlines else 0.0))
         # Layout only needs a root; keep the canonical tree's parent links intact.
         if self._priority_filter == 1:
             return layout(SimpleNamespace(root=self.view_root), sizes)
@@ -702,18 +947,19 @@ class MindMapController(QObject):
     @Property('QVariantList', notify=sceneChanged)
     def nodes(self):
         priorities = self._priority_data()
-        return [{'id': n.id, 'text': n.text, 'note': n.note or '', 'x': b.x, 'y': b.y,
-                 'width': b.width, 'height': b.height, 'isTab': n.id in self.links,
+        return [{'id': n.id, 'sourceId': _content(n).id,
+                 'isReference': _placement(n).id in self.references, 'text': n.text, 'note': n.note or '', 'x': b.x, 'y': b.y,
+                 'width': b.width, 'height': b.height, 'isTab': self._tab_id(n) is not None,
                  'hasNote': bool(n.note and n.note.strip()),
                  'folded': n.folded, 'hasChildren': bool(n.children), 'bold': bool(n.style.bold),
-                 'isViewRoot': n is self.view_root, 'completed': n.id in self._completed,
-                 'bookmarked': n.id in self._bookmarks,
-                 'measureProgress': n.id in self._measure_progress,
-                 'progressPercent': (math.floor(100 * sum(child.id in self._completed for child in n.children)
+                 'isViewRoot': n is self.view_root, 'completed': _content(n).id in self._completed,
+                 'bookmarked': _content(n).id in self._bookmarks,
+                 'measureProgress': _content(n).id in self._measure_progress,
+                 'progressPercent': (math.floor(100 * sum(_content(child).id in self._completed for child in n.children)
                                                   / len(n.children) + 0.5) if n.children else 0),
                  **self.reminderData(n.id),
                  **self.deadlineData(n.id),
-                 **priorities.get(self.links.get(n.id), {'priorityScore': None, 'priorityLevel': 0,
+                 **priorities.get(self._tab_id(n), {'priorityScore': None, 'priorityLevel': 0,
                                                        'priorityRank': 0})}
                 for n, b in self._layout(priorities).items()]
 
@@ -774,7 +1020,7 @@ class MindMapController(QObject):
         return parse_text_hierarchy(text) or None
 
     def _export_node(self, node_id):
-        node = self.map.find(node_id)
+        node = self._find(node_id)
         if node is None:
             self.errorOccurred.emit('The branch to export no longer exists.')
         return node
@@ -825,10 +1071,10 @@ class MindMapController(QObject):
 
     @Property(bool, notify=changed)
     def canCreateTab(self):
-        node = self.map.find(self._selected)
+        node = self._find(self._selected)
         return (self._tabs is not None and len(self._selected_ids) == 1
-                and node is not None and node is not self.map.root
-                and node.id not in self.links)
+                and node is not None and _content(node) is not self.map.root
+                and self._tab_id(node) is None)
 
     @Slot()
     def createTabFromSelected(self):
@@ -839,7 +1085,7 @@ class MindMapController(QObject):
         """
         if not self.canCreateTab:
             return
-        node = self.map.find(self._selected)
+        node = self._find(self._selected)
         # addTab emits tabsChanged synchronously. Defer reconciliation until the
         # new tab is linked here, otherwise it would get a duplicate root node.
         self._creating_tab = True
@@ -850,7 +1096,7 @@ class MindMapController(QObject):
         tab = self._tabs.getAllTabs()[-1]
 
         def mutate():
-            self.links[node.id] = tab.id
+            self.links[_content(node).id] = tab.id
             node.text = tab.name
 
         self._commit(mutate)
@@ -874,7 +1120,7 @@ class MindMapController(QObject):
     @Slot(str)
     @Slot(str, str)
     def select(self, node_id, mode='replace'):
-        if not self._in_scope(self.map.find(node_id)):
+        if not self._in_scope(self._find(node_id)):
             return
         anchor = self._selection_anchor
         if mode == 'toggle':
@@ -886,7 +1132,7 @@ class MindMapController(QObject):
             self._set_selection(ids, node_id)
         elif mode == 'range':
             visible = self._layout()
-            order = [node.id for node in self.map.walk() if node in visible]
+            order = [node.id for node in self.view_root.walk() if node in visible]
             if anchor in order and node_id in order:
                 start, end = sorted((order.index(anchor), order.index(node_id)))
                 self._set_selection(order[start:end + 1], node_id)
@@ -902,8 +1148,16 @@ class MindMapController(QObject):
 
     def _branch_roots(self, ids):
         selected = set(ids)
-        return [node for node in self.map.walk() if node.id in selected and self._in_scope(node)
+        return [node for node in self.view_root.walk() if node.id in selected and self._in_scope(node)
                 and not any(parent.id in selected for parent in node.ancestors())]
+
+    def _structural_roots(self, ids):
+        roots = self._branch_roots(ids)
+        unique = {}
+        for node in roots:
+            unique.setdefault(_placement(node), node)
+        return [node for placement, node in unique.items()
+                if not any(parent in unique for parent in placement.ancestors())]
 
     @Slot()
     def cutSelected(self):
@@ -932,9 +1186,9 @@ class MindMapController(QObject):
 
     @Slot(result=bool)
     def pasteSelected(self):
-        target = self.map.find(self._selected)
+        target = self._find(self._selected)
         if self._cut_ids:
-            roots = self._branch_roots(self._cut_ids)
+            roots = self._structural_roots(self._cut_ids)
             if not self._in_scope(target) or not roots or self.view_root in roots:
                 return False
             if any(node is target or node in target.ancestors() for node in roots):
@@ -993,7 +1247,7 @@ class MindMapController(QObject):
         if direction not in ('left', 'right', 'up', 'down'):
             return
         boxes = self._layout()
-        current = self.map.find(self._selected)
+        current = self._find(self._selected)
         while current is not None and current not in boxes:
             current = current.parent
         current = current or self.view_root
@@ -1045,6 +1299,8 @@ class MindMapController(QObject):
         try:
             mutation()
             self.map.validate()
+            self._prune_references()
+            self._validate_references(self.map, self.links, self.references)
             live = {n.id for n in self.map.walk()}
             self._completed.intersection_update(live)
             self._measure_progress.intersection_update(live)
@@ -1055,6 +1311,7 @@ class MindMapController(QObject):
                             if key in live and key not in self.links}
         except (ValueError, IndexError) as exc:
             self.map, self.links = self.decode(before)
+            self.references = dict(before.get('tab_references', {}))
             self._completed = set(before.get('completed', []))
             self._measure_progress = set(before.get('measure_progress', []))
             self.reminders = copy.deepcopy(before.get('reminders', {}))
@@ -1068,8 +1325,12 @@ class MindMapController(QObject):
         if self.to_dict() != before:
             self._undo.append((before, selected, tab_state))
             self._redo.clear()
+        valid_selection = [key for key in self._selected_ids if self._in_scope(self._find(key))]
+        self._set_selection(valid_selection or [self.view_root.id])
         retained = self._priority_nodes()
-        if any(n.id not in previous_ids and n not in retained for n in self.map.walk()):
+        retained_ids = {_placement(node).id for node in retained}
+        if any(n.id not in previous_ids and n.id not in retained_ids
+               for n in self.map.walk()):
             self._priority_filter = 1.0
         self._sync_filter_selection()
         self.sceneChanged.emit()
@@ -1080,7 +1341,7 @@ class MindMapController(QObject):
 
     def add_siblings(self, parent_id, titles):
         """Append actions vertically under one parent as a single undoable edit."""
-        parent = self.map.find(parent_id)
+        parent = self._find(parent_id)
         if parent is None or not self._in_scope(parent) or not titles:
             return []
         if any(not isinstance(title, str) or not title.strip() for title in titles):
@@ -1101,7 +1362,7 @@ class MindMapController(QObject):
 
     @Slot(bool)
     def addThought(self, sibling=False):
-        parent = self.map.find(self._selected) or self.view_root
+        parent = self._find(self._selected) or self.view_root
         if sibling and parent is not self.view_root and parent.parent:
             parent = parent.parent
         def mutate():
@@ -1167,7 +1428,7 @@ class MindMapController(QObject):
 
     @Slot(str, bool, result=bool)
     def addSiblingRelative(self, node_id, before):
-        target = self.map.find(node_id)
+        target = self._find(node_id)
         if not self._in_scope(target) or target is self.view_root:
             return False
         parent = target.parent
@@ -1190,8 +1451,8 @@ class MindMapController(QObject):
 
     @Slot()
     def toggleBold(self):
-        nodes = [self.map.find(key) for key in self._selected_ids]
-        nodes = [node for node in nodes if self._in_scope(node)]
+        nodes = [self._find(key) for key in self._selected_ids]
+        nodes = list(dict.fromkeys(_content(node) for node in nodes if self._in_scope(node)))
         if not nodes:
             return
         bold = not all(node.style.bold for node in nodes)
@@ -1205,27 +1466,28 @@ class MindMapController(QObject):
 
     @Slot(str, str)
     def editSelected(self, text, note):
-        node = self.map.find(self._selected)
+        node = self._find(self._selected)
         if node is None:
             return
         def mutate():
-            if node.id not in self.links:
+            if self._tab_id(node) is None:
                 node.text = text
             node.note = note or None
         self._commit(mutate)
 
     @Slot()
     def toggleFold(self):
-        node = self.map.find(self._selected)
+        node = self._find(self._selected)
         if node and node.children:
             self._commit(lambda: setattr(node, 'folded', not node.folded))
 
     @Slot()
     def deleteSelected(self):
-        roots = self._branch_roots(self._selected_ids)
+        roots = self._structural_roots(self._selected_ids)
         if not roots or self.view_root in roots:
             return
-        removed_ids = {n.id for node in roots for n in node.walk()}
+        placements = [_placement(node) for node in roots]
+        removed_ids = {n.id for node in placements for n in node.walk()}
         tab_ids = {self.links[key] for key in removed_ids if key in self.links}
         tab_state = None
         if tab_ids:
@@ -1244,17 +1506,17 @@ class MindMapController(QObject):
             self._set_selection([roots[0].parent.id])
             for key in removed_ids:
                 self.links.pop(key, None)
-            for node in roots:
+            for node in placements:
                 node.remove()
         if self._commit(mutate, tab_state):
-            self._cut_ids = [key for key in self._cut_ids if self.map.find(key)]
+            self._cut_ids = [key for key in self._cut_ids if self._find(key)]
             self._view_selections = {key: value for key, value in self._view_selections.items()
                                      if key not in tab_ids}
             self.changed.emit()
 
     @Slot(str, str, str)
     def moveNode(self, node_id, target_id, placement):
-        node, target = self.map.find(node_id), self.map.find(target_id)
+        node, target = self._find(node_id), self._find(target_id)
         if (not self._in_scope(node) or not self._in_scope(target)
                 or node is target or node is self.view_root):
             return
@@ -1264,7 +1526,7 @@ class MindMapController(QObject):
             index = None
             if parent is not target:
                 index = parent.children.index(target) + (placement == 'after')
-                if node.parent is parent and parent.children.index(node) < index:
+                if _content(node.parent) is _content(parent) and _content(parent).children.index(_placement(node)) < index:
                     index -= 1
             node.move_to(parent, index)
             parent.folded = False
@@ -1273,13 +1535,13 @@ class MindMapController(QObject):
 
     @Slot(str)
     def setSide(self, side):
-        node = self.map.find(self._selected)
+        node = self._find(self._selected)
         if node and node.parent is self.view_root and side in ('left', 'right'):
             if self._commit(lambda: setattr(node, 'side', side)):
                 self.revealNode.emit(node.id)
 
     def _reorder_context(self, node_id):
-        node = self.map.find(node_id)
+        node = self._find(node_id)
         boxes = self._layout()
         if node is self.view_root or node not in boxes or node.parent is None:
             return None, [], boxes
@@ -1352,6 +1614,7 @@ class MindMapController(QObject):
         self._restore_selection(selection)
         self._cut_ids = []
         self.map, self.links = self.decode(payload)
+        self.references = dict(payload.get('tab_references', {}))
         self._completed = set(payload.get('completed', []))
         self._measure_progress = set(payload.get('measure_progress', []))
         self.reminders = copy.deepcopy(payload.get('reminders', {}))
@@ -1376,5 +1639,6 @@ class MindMapController(QObject):
 
     @Slot(str)
     def activate(self, node_id):
-        if node_id in self.links and not (self.tabScoped and node_id == self.view_root.id):
-            self.tabActivated.emit(self.links[node_id])
+        tab_id = self._tab_id(self._find(node_id))
+        if tab_id and not (self.tabScoped and node_id == self.view_root.id):
+            self.tabActivated.emit(tab_id)

@@ -62,6 +62,12 @@ use **Canvas** to switch to that tab's diagram. The tab's **Mindmap** control
 opens or starts its branch, while the sidebar **Mindmap** returns to the full
 project map. **Alt+Left** returns to the previous view.
 
+To reuse a tab's branch elsewhere, right-click a node, choose **Add tab…**, and
+search for the existing tab. The ↗ reference shows the same children, and edits
+made inside it appear everywhere that branch is used. **Remove tab reference**
+removes only that placement; deleting a child changes the shared branch.
+Circular references are rejected, including those introduced by moving branches.
+
 <img src="https://github.com/oyvinrog/progress/blob/master/assets/mindmap-branch.png?raw=1" alt="Website launch branch showing content and quality work, a completed draft, and a scheduled design review" width="1000">
 
 Here, **Website launch** is the branch root. The finished homepage draft has a

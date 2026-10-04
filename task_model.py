@@ -4065,8 +4065,9 @@ class ProjectManager(QObject):
             self.errorOccurred.emit(f"File not found: {file_path}")
             return
 
-        # Scrub previous project's plaintext data before loading new data.
-        self.scrubProjectData()
+        # Validate incoming data before replacing the open project.
+        key_material = None
+        credentials = None
 
         try:
             with open(file_path, "r", encoding="utf-8") as f:
@@ -4085,13 +4086,6 @@ class ProjectManager(QObject):
                 finally:
                     if credentials.use_yubikey:
                         self._end_yubikey_interaction()
-                self._cached_encryption_file_path = file_path
-                self._cached_key_material = key_material
-                self._cached_encryption_credentials = EncryptionCredentials(
-                    passphrase=credentials.passphrase,
-                    use_yubikey=credentials.use_yubikey,
-                    yubikey_slot=credentials.yubikey_slot,
-                )
 
             if "mindmap" in project_data:
                 MindMapController.decode(project_data["mindmap"])
@@ -4148,6 +4142,23 @@ class ProjectManager(QObject):
                     raise ValueError("Duplicate tab ID")
                 seen_tab_ids.add(tab.id)
 
+            references = project_data.get("mindmap", {}).get("tab_references", {})
+            if any(tab_id not in seen_tab_ids for tab_id in references.values()):
+                raise ValueError("Mindmap reference points to a missing tab")
+
+            # Only now discard the old project and its key. Until validation
+            # succeeds, cancellation/corrupt input leaves the open project intact.
+            self.scrubProjectData()
+            if key_material is not None:
+                self._cached_encryption_file_path = file_path
+                self._cached_key_material = key_material
+                key_material = None  # ownership transferred to the project
+                self._cached_encryption_credentials = EncryptionCredentials(
+                    passphrase=credentials.passphrase,
+                    use_yubikey=credentials.use_yubikey,
+                    yubikey_slot=credentials.yubikey_slot,
+                )
+
             self._workspace_markdown_tabs = normalize_editor_tabs(
                 project_data.get("workspace_markdown_tabs"),
                 fallback_text="",
@@ -4198,6 +4209,9 @@ class ProjectManager(QObject):
             error_msg = f"Failed to load project: {e}"
             self.errorOccurred.emit(error_msg)
             print(error_msg)
+        finally:
+            if key_material is not None:
+                key_material.scrub()
 
     @Slot(int)
     def drillToTask(self, task_index: int) -> None:

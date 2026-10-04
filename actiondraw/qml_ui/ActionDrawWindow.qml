@@ -1338,7 +1338,7 @@ ApplicationWindow {
             }
             onReminderRequested: function(nodeId) {
                 var data = controller.reminderData(nodeId)
-                dialogs.openMindmapReminderDialog(nodeId, data.reminderAt, data.reminderSendNotification)
+                dialogs.openMindmapReminderDialog(controller.sourceNodeId(nodeId), data.reminderAt, data.reminderSendNotification)
             }
             onQuickReminderRequested: function(nodeId, minutesFromNow) {
                 var data = controller.reminderData(nodeId)

@@ -106,7 +106,7 @@ FocusScope {
             pane.hoveredNodeId = ""
         }
     }
-    readonly property bool shortcutsEnabled: visible && activeFocus && !toolDialogOpen && !editor.visible && !nodeMenu.visible && !actionsButton.activeFocus && !prioritySlider.activeFocus && !actionsMenu.visible && !helpDialog.visible && !deadlineDialog.visible && !reminderDialogOpen
+    readonly property bool shortcutsEnabled: visible && activeFocus && !toolDialogOpen && !editor.visible && !nodeMenu.visible && !actionsButton.activeFocus && !prioritySlider.activeFocus && !actionsMenu.visible && !helpDialog.visible && !deadlineDialog.visible && !tabReferenceDialog.visible && !reminderDialogOpen
     readonly property bool searching: controller && controller.searchQuery.length > 0
     onShortcutsEnabledChanged: if (!shortcutsEnabled && controller) controller.clearSearch()
 
@@ -172,19 +172,20 @@ FocusScope {
     function jumpBookmark(nodeId) {
         var currentZoom = zoom
         controller.jumpToBookmark(nodeId)
+        var occurrenceId = controller.selectedId
         zoom = currentZoom
         initialized = true
         forceActiveFocus()
         Qt.callLater(function() {
-            if (!pane.visible || !pane.controller || pane.controller.selectedId !== nodeId) return
+            if (!pane.visible || !pane.controller || pane.controller.selectedId !== occurrenceId) return
             var nodes = pane.controller.nodes
             for (var i = 0; i < nodes.length; ++i) {
                 var n = nodes[i]
-                if (n.id !== nodeId) continue
+                if (n.id !== occurrenceId) continue
                 pane.panX = -(n.x + n.width / 2) * pane.zoom
                 pane.panY = -(n.y + n.height / 2) * pane.zoom
                 bookmarkFade.stop()
-                pane.bookmarkHighlightId = nodeId
+                pane.bookmarkHighlightId = occurrenceId
                 pane.bookmarkHighlightOpacity = 1
                 bookmarkHold.restart()
                 return
@@ -653,7 +654,7 @@ FocusScope {
                             anchors.rightMargin: (nodeItem.modelData.priorityLevel > 0 ? 48 : 18)
                                                  + (nodeItem.modelData.priorityRank > 0 ? 30 : 0)
                             verticalAlignment: Text.AlignVCenter
-                            text: (nodeItem.modelData.completed ? "✓ " : "") + (nodeItem.modelData.isTab ? "▣ " : "") + nodeItem.modelData.text
+                            text: (nodeItem.modelData.completed ? "✓ " : "") + (nodeItem.modelData.isReference ? "↗ " : nodeItem.modelData.isTab ? "▣ " : "") + nodeItem.modelData.text
                             font.pixelSize: 14
                             font.bold: nodeItem.modelData.bold
                             color: "#e5f0fa"; elide: Text.ElideRight
@@ -1171,7 +1172,7 @@ FocusScope {
         IconMenuItem {
             iconKey: "bookmark"
             objectName: "mindmapBookmarkMenuItem"
-            text: pane.controller && pane.controller.bookmarks.some(function(b) { return b.id === nodeMenu.targetNodeId })
+            text: pane.controller && pane.controller.bookmarks.some(function(b) { return b.id === pane.controller.sourceNodeId(nodeMenu.targetNodeId) })
                   ? "Remove bookmark" : "Bookmark"
             onTriggered: { pane.controller.toggleBookmark(nodeMenu.targetNodeId); pane.focusMap() }
         }
@@ -1229,6 +1230,15 @@ FocusScope {
             }
         }
         MenuSeparator {}
+        IconMenuItem {
+            iconKey: "tab"
+            objectName: "mindmapAddTab"
+            text: "Add tab…"
+            onTriggered: {
+                tabReferenceDialog.targetNodeId = nodeMenu.targetNodeId
+                tabReferenceDialog.open()
+            }
+        }
         IconMenuItem { iconKey: "child"; text: "Add child"; onTriggered: pane.addThought(false) }
         IconMenuItem { iconKey: "sibling"; text: "Add sibling"; onTriggered: pane.addThought(true) }
         IconMenuItem { iconKey: "notes"; text: "Edit / Notes"; onTriggered: pane.editNode() }
@@ -1242,7 +1252,85 @@ FocusScope {
         IconMenuItem { iconKey: "fold"; text: "Fold / Unfold"; onTriggered: pane.controller.toggleFold() }
         IconMenuItem { iconKey: "left"; text: "Branch on left"; onTriggered: pane.controller.setSide("left") }
         IconMenuItem { iconKey: "right"; text: "Branch on right"; onTriggered: pane.controller.setSide("right") }
-        IconMenuItem { iconKey: "trash"; text: "Delete branch"; onTriggered: pane.controller.deleteSelected() }
+        IconMenuItem { iconKey: "trash"; text: pane.controller && pane.controller.selectedNode.isReference ? "Remove tab reference" : "Delete branch"; onTriggered: pane.controller.deleteSelected() }
+    }
+    Dialog {
+        id: tabReferenceDialog
+        objectName: "mindmapTabReferenceDialog"
+        title: "Add tab"
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(600, pane.width - 20)
+        height: Math.min(440, pane.height - 20)
+        standardButtons: Dialog.Cancel
+        property string targetNodeId: ""
+        property var options: []
+        property string errorText: ""
+        function refresh() {
+            options = pane.controller ? pane.controller.tabReferenceOptions(tabReferenceSearch.text) : []
+            tabReferenceList.currentIndex = options.length ? 0 : -1
+        }
+        function insert(index) {
+            if (index < 0 || index >= options.length) return
+            if (pane.controller.addTabReference(targetNodeId, options[index].tabId)) close()
+        }
+        onOpened: {
+            errorText = ""
+            tabReferenceSearch.text = ""
+            refresh()
+            tabReferenceSearch.forceActiveFocus()
+        }
+        onClosed: pane.focusMap()
+        Connections {
+            target: pane.controller
+            function onChanged() { if (tabReferenceDialog.visible) tabReferenceDialog.refresh() }
+            function onErrorOccurred(message) {
+                if (tabReferenceDialog.visible) tabReferenceDialog.errorText = message
+            }
+        }
+        ColumnLayout {
+            anchors.fill: parent
+            TextField {
+                id: tabReferenceSearch
+                objectName: "mindmapTabReferenceSearch"
+                Layout.fillWidth: true
+                placeholderText: "Search tabs…"
+                onTextChanged: tabReferenceDialog.refresh()
+                onAccepted: tabReferenceDialog.insert(tabReferenceList.currentIndex)
+                Keys.onDownPressed: tabReferenceList.currentIndex = Math.min(tabReferenceList.count - 1, tabReferenceList.currentIndex + 1)
+                Keys.onUpPressed: tabReferenceList.currentIndex = Math.max(0, tabReferenceList.currentIndex - 1)
+            }
+            ListView {
+                id: tabReferenceList
+                objectName: "mindmapTabReferenceList"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                model: tabReferenceDialog.options
+                ScrollBar.vertical: ScrollBar {}
+                delegate: ItemDelegate {
+                    required property var modelData
+                    required property int index
+                    objectName: "mindmapTabOption_" + modelData.tabId
+                    width: tabReferenceList.width
+                    highlighted: tabReferenceList.currentIndex === index
+                    text: modelData.name + "\n" + modelData.path
+                    onClicked: tabReferenceDialog.insert(index)
+                }
+                Label {
+                    anchors.centerIn: parent
+                    visible: tabReferenceList.count === 0
+                    text: "No matching tabs"
+                }
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: tabReferenceDialog.errorText.length > 0
+                text: tabReferenceDialog.errorText
+                wrapMode: Text.Wrap
+                color: "#ffb4a9"
+            }
+        }
     }
     Dialog {
         id: editor
