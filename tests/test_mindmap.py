@@ -3471,6 +3471,9 @@ def test_qml_deadline_menu_countdown_and_badge_layout(project, app):
         QTest.qWait(30)
         start = m.deadlines[node.id]['start']
         history = len(m._undo)
+        # Prime the reminder poll's initial date-label refresh before observing
+        # countdown-only updates; its first timer tick otherwise races this check.
+        pm._processReminderTimers()
         scene_events = []
         m.sceneChanged.connect(lambda: scene_events.append(True))
         pane.setProperty('deadlineNow', start + 900)

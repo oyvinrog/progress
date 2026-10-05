@@ -17,6 +17,82 @@ Window {
     property var projectManagerRef: projectManager
     property var slotHours: [8, 9, 10, 11, 12, 13, 14, 15, 16, 17]
     property var boardItems: []
+    property string feedback: ""
+    property string resizeItemId: ""
+    property int resizeStartHour: 8
+    property int resizeHours: 1
+    property real resizeSceneX: 0
+    property real resizeSceneY: 0
+    property int timelineHourHeight: 154
+    property int timelineGutterWidth: 156
+    property var timelineCards: buildTimelineCards()
+
+    function durationOf(item) { return Number(item.kanbanDurationHours || 1) }
+    function displayDuration(item) {
+        return item.itemId === resizeItemId ? resizeHours : durationOf(item)
+    }
+    function buildTimelineCards() {
+        var items = boardItems.filter(function(item) { return item.kanbanStatus === "in_progress" })
+        items.sort(function(a, b) {
+            return a.kanbanSlotHour - b.kanbanSlotHour || String(a.itemId).localeCompare(String(b.itemId))
+        })
+        var ends = [], result = []
+        for (var i = 0; i < items.length; ++i) {
+            var card = items[i], column = 0
+            while (column < ends.length && ends[column] > card.kanbanSlotHour) ++column
+            ends[column] = card.kanbanSlotHour + durationOf(card)
+            result.push({card: card, column: column})
+        }
+        return result
+    }
+    function timelineColumnCount() {
+        var count = 1
+        for (var i = 0; i < timelineCards.length; ++i)
+            count = Math.max(count, timelineCards[i].column + 1)
+        return count
+    }
+    function setDuration(itemId, hours) {
+        var ok = false
+        if (projectManagerRef && projectManagerRef.setKanbanItemDuration)
+            ok = projectManagerRef.setKanbanItemDuration(itemId, hours)
+        else if (tabModelRef) {
+            for (var i = 0; i < boardItems.length; ++i)
+                if (boardItems[i].itemId === itemId)
+                    ok = tabModelRef.setKanbanDuration(boardItems[i].tabIndex, hours)
+        }
+        feedback = ok ? "" : "The task must fit between 08:00 and 18:00."
+    }
+    function updateResize(sceneX, sceneY) {
+        resizeSceneX = sceneX
+        resizeSceneY = sceneY
+        var point = timelineSurface.mapFromItem(null, sceneX, sceneY)
+        var endHour = 8 + Math.round(point.y / timelineHourHeight)
+        resizeHours = Math.max(1, Math.min(18 - resizeStartHour, endHour - resizeStartHour))
+    }
+    function finishResize(commit) {
+        var itemId = resizeItemId, hours = resizeHours
+        resizeItemId = ""
+        if (commit && itemId.length) setDuration(itemId, hours)
+    }
+    Shortcut {
+        sequence: "Escape"
+        enabled: root.resizeItemId.length > 0
+        onActivated: root.finishResize(false)
+    }
+    Timer {
+        interval: 30
+        repeat: true
+        running: root.resizeItemId.length > 0
+        onTriggered: {
+            var point = timelineView.mapFromItem(null, root.resizeSceneX, root.resizeSceneY)
+            var delta = point.y < 36 ? -12 : (point.y > timelineView.height - 36 ? 12 : 0)
+            if (delta) {
+                timelineView.contentY = Math.max(0, Math.min(timelineView.contentHeight - timelineView.height,
+                                                            timelineView.contentY + delta))
+                root.updateResize(root.resizeSceneX, root.resizeSceneY)
+            }
+        }
+    }
     property string createStatus: "todo"
     property int createSlotHour: -1
     property string todoSearchText: ""
@@ -30,9 +106,6 @@ Window {
     property int kanbanSlotMinHeight: 154
     property int kanbanCardMinHeight: 70
     property int kanbanCardWithActiveMinHeight: 94
-    property int kanbanCardEstimatedHeight: 112
-    property int kanbanSectionChromeHeight: 58
-    property int kanbanCardSpacing: 8
     property int kanbanLayoutRevision: 0
 
     function refreshBoardItems() {
@@ -52,7 +125,8 @@ Window {
                                 completionPercent: summary.completionPercent || 0,
                                 activeTaskTitle: summary.activeTaskTitle || "",
                                 kanbanStatus: summary.kanbanStatus,
-                                kanbanSlotHour: summary.kanbanSlotHour })
+                                kanbanSlotHour: summary.kanbanSlotHour,
+                                kanbanDurationHours: summary.kanbanDurationHours || 1 })
             }
             boardItems = fallback
         }
@@ -96,22 +170,17 @@ Window {
         var count = 0
         for (var i = 0; i < boardItems.length; ++i) {
             var item = boardItems[i]
+            if (targetStatus === "in_progress") {
+                if (item.kanbanStatus === targetStatus && item.kanbanSlotHour <= targetSlotHour
+                        && targetSlotHour < item.kanbanSlotHour + durationOf(item)) count += 1
+                continue
+            }
             if (cardMatchesSection(item.kanbanStatus, item.kanbanSlotHour,
                                    item.name, item.sourceLabel,
                                    targetStatus, targetSlotHour))
                 count += 1
         }
         return count
-    }
-
-    function inProgressSlotHeight(slotHour) {
-        var revision = kanbanLayoutRevision
-        var count = sectionCardCount("in_progress", slotHour)
-        if (count <= 1)
-            return kanbanSlotMinHeight
-        return Math.max(kanbanSlotMinHeight,
-                        kanbanSectionChromeHeight + count * kanbanCardEstimatedHeight
-                        + Math.max(0, count - 1) * kanbanCardSpacing)
     }
 
     function inProgressCardCount() {
@@ -137,6 +206,14 @@ Window {
     }
 
     function setPlacement(itemId, status, slotHour) {
+        feedback = ""
+        for (var n = 0; n < boardItems.length; ++n) {
+            if (boardItems[n].itemId === itemId && status === "in_progress"
+                    && slotHour + durationOf(boardItems[n]) > 18) {
+                feedback = "This task would end after 18:00. Choose an earlier start."
+                return
+            }
+        }
         if (projectManagerRef && projectManagerRef.setKanbanItemPlacement) {
             projectManagerRef.setKanbanItemPlacement(String(itemId), status, Number(slotHour))
             return
@@ -150,6 +227,11 @@ Window {
     }
 
     function postponeInProgressFromSlot(startHour) {
+        var skipped = boardItems.filter(function(item) {
+            return item.kanbanStatus === "in_progress" && item.kanbanSlotHour >= startHour
+                && item.kanbanSlotHour + durationOf(item) >= 18
+        }).length
+        feedback = skipped ? skipped + " task(s) could not be postponed beyond 18:00." : ""
         if (projectManagerRef && projectManagerRef.postponeKanbanItems)
             projectManagerRef.postponeKanbanItems(Number(startHour))
         else if (tabModelRef)
@@ -164,6 +246,10 @@ Window {
     }
 
     function moveKanbanLaneBack(status, slotHour) {
+        var blocked = status === "done" && boardItems.some(function(item) {
+            return item.kanbanStatus === "done" && durationOf(item) > 1
+        })
+        feedback = blocked ? "Extended tasks cannot return at 17:00. Drag them to an earlier hour." : ""
         if (projectManagerRef && projectManagerRef.moveKanbanItemsBack)
             projectManagerRef.moveKanbanItemsBack(status, Number(slotHour))
         else if (tabModelRef)
@@ -188,6 +274,16 @@ Window {
     }
 
     function dropItemAt(itemId, sceneX, sceneY) {
+        var viewportPoint = timelineView.mapFromItem(null, sceneX, sceneY)
+        if (viewportPoint.x >= 0 && viewportPoint.x < timelineView.width
+                && viewportPoint.y >= 0 && viewportPoint.y < timelineView.height) {
+            var timelinePoint = timelineSurface.mapFromItem(null, sceneX, sceneY)
+            var hour = 8 + Math.floor(timelinePoint.y / timelineHourHeight)
+            if (hour >= 8 && hour < 18) {
+                setPlacement(itemId, "in_progress", hour)
+                return true
+            }
+        }
         for (var i = dropZones.length - 1; i >= 0; --i) {
             var zone = dropZones[i]
             if (!zone || !zone.visible)
@@ -310,6 +406,10 @@ Window {
             property string sourceLabel: ""
             property real completionPercent: 0
             property string activeTaskTitle: ""
+            property int startHour: -1
+            property int durationHours: 1
+            property bool timelineCard: startHour >= 8
+            property int shownHours: root.resizeItemId === itemId ? root.resizeHours : durationHours
             property bool dragging: cardMouse.dragging
             property real pressX: 0
             property real pressY: 0
@@ -321,7 +421,7 @@ Window {
                 activeTaskTitle.length > 0 ? root.kanbanCardWithActiveMinHeight : root.kanbanCardMinHeight,
                 cardContent.implicitHeight + 16
             )
-            height: implicitHeight
+            height: timelineCard ? shownHours * root.timelineHourHeight - 8 : implicitHeight
             radius: 8
             color: cardMouse.containsMouse ? "#203445" : "#172737"
             border.color: cardMouse.containsMouse ? "#72b8d8" : "#314b5f"
@@ -405,7 +505,7 @@ Window {
                 anchors.leftMargin: 12
                 anchors.rightMargin: 8
                 anchors.topMargin: 8
-                anchors.bottomMargin: 8
+                anchors.bottomMargin: itemCard.timelineCard ? 18 : 8
                 spacing: 8
 
                 Text {
@@ -418,7 +518,7 @@ Window {
 
                 ColumnLayout {
                     Layout.fillWidth: true
-                    Layout.fillHeight: true
+                    Layout.alignment: Qt.AlignTop
                     spacing: 3
                     Text {
                         text: itemName
@@ -428,6 +528,15 @@ Window {
                         wrapMode: Text.WordWrap
                         maximumLineCount: 2
                         elide: Text.ElideRight
+                        Layout.fillWidth: true
+                    }
+                    Text {
+                        visible: itemCard.timelineCard
+                        text: (itemCard.startHour < 10 ? "0" : "") + itemCard.startHour + ":00–"
+                              + (itemCard.startHour + itemCard.shownHours < 10 ? "0" : "")
+                              + (itemCard.startHour + itemCard.shownHours) + ":00"
+                        color: "#b4dded"
+                        font.pixelSize: 12
                         Layout.fillWidth: true
                     }
                     Text {
@@ -459,6 +568,7 @@ Window {
                 Rectangle {
                     Layout.preferredWidth: 28
                     Layout.preferredHeight: 26
+                    Layout.alignment: Qt.AlignTop
                     radius: 6
                     color: "#26394b"
                     border.color: "#3c5569"
@@ -471,6 +581,44 @@ Window {
                         font.bold: true
                     }
                 }
+            }
+            Rectangle {
+                anchors.bottom: parent.bottom
+                anchors.horizontalCenter: parent.horizontalCenter
+                anchors.bottomMargin: 5
+                width: 32
+                height: 3
+                radius: 2
+                color: "#8eabba"
+                visible: itemCard.timelineCard
+            }
+            MouseArea {
+                objectName: "kanbanResize_" + itemCard.itemId
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                height: 16
+                visible: itemCard.timelineCard
+                cursorShape: Qt.SizeVerCursor
+                hoverEnabled: true
+                ToolTip.visible: containsMouse && !pressed
+                ToolTip.text: "Drag to change the end time"
+                preventStealing: true
+                onPressed: function(mouse) {
+                    root.resizeItemId = itemCard.itemId
+                    root.resizeStartHour = itemCard.startHour
+                    root.resizeHours = itemCard.durationHours
+                    var point = mapToItem(null, mouse.x, mouse.y)
+                    root.resizeSceneX = point.x
+                    root.resizeSceneY = point.y
+                }
+                onPositionChanged: function(mouse) {
+                    if (!pressed || root.resizeItemId !== itemCard.itemId) return
+                    var point = mapToItem(null, mouse.x, mouse.y)
+                    root.updateResize(point.x, point.y)
+                }
+                onReleased: root.finishResize(true)
+                onCanceled: root.finishResize(false)
             }
         }
     }
@@ -679,6 +827,13 @@ Window {
             }
         }
 
+        Text {
+            text: root.feedback
+            visible: text.length > 0
+            color: "#ffd28a"
+            wrapMode: Text.WordWrap
+            Layout.fillWidth: true
+        }
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
@@ -754,34 +909,107 @@ Window {
                         }
                     }
 
-                    ScrollView {
+                    Flickable {
+                        id: timelineView
+                        objectName: "kanbanTimeline"
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         clip: true
-
-                        ColumnLayout {
-                            width: parent.width
-                            spacing: 8
-
+                        boundsBehavior: Flickable.StopAtBounds
+                        contentWidth: Math.max(width, root.timelineGutterWidth + root.timelineColumnCount() * 248)
+                        contentHeight: 10 * root.timelineHourHeight
+                        interactive: root.resizeItemId.length === 0 && !root.dragActive
+                        ScrollBar.vertical: ScrollBar {}
+                        ScrollBar.horizontal: ScrollBar {
+                            policy: timelineView.contentWidth > timelineView.width ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff
+                        }
+                        Item {
+                            id: timelineSurface
+                            width: timelineView.contentWidth
+                            height: timelineView.contentHeight
                             Repeater {
                                 model: root.slotHours
-
+                                delegate: Rectangle {
+                                    required property int modelData
+                                    objectName: "kanbanDrop_in_progress_" + modelData
+                                    y: (modelData - 8) * root.timelineHourHeight
+                                    width: timelineSurface.width
+                                    height: root.timelineHourHeight
+                                    color: modelData % 2 ? "#10202d" : "#132432"
+                                    border.color: "#2c4a5f"
+                                    Column {
+                                        x: 6
+                                        y: 10
+                                        spacing: 6
+                                        Text {
+                                            text: root.slotLabel(modelData)
+                                            color: "#e8f4ff"
+                                            font.bold: true
+                                        }
+                                        Text {
+                                            property int taskCount: root.sectionCardCount("in_progress", modelData)
+                                            text: taskCount + (taskCount === 1 ? " task" : " tasks")
+                                            color: "#8eabba"
+                                        }
+                                        Row {
+                                            spacing: 2
+                                            Button {
+                                                text: "+1h"
+                                                width: 48
+                                                objectName: "kanbanPostponeButton_" + modelData
+                                                enabled: modelData < 17
+                                                onClicked: root.postponeInProgressFromSlot(modelData)
+                                            }
+                                            Button {
+                                                text: "+"
+                                                width: 32
+                                                onClicked: root.openCreateDialog("in_progress", modelData)
+                                            }
+                                        }
+                                        Row {
+                                            spacing: 2
+                                            Button {
+                                                text: "Back"
+                                                width: 58
+                                                objectName: "kanbanMoveBackButton_in_progress_" + modelData
+                                                enabled: root.sectionCardCount("in_progress", modelData) > 0
+                                                onClicked: root.moveKanbanLaneBack("in_progress", modelData)
+                                            }
+                                            Button {
+                                                text: "Clear"
+                                                width: 58
+                                                objectName: "kanbanClearButton_in_progress_" + modelData
+                                                enabled: root.sectionCardCount("in_progress", modelData) > 0
+                                                onClicked: root.clearKanbanLane("in_progress", modelData)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            Repeater {
+                                model: root.timelineCards
                                 delegate: Loader {
-                                    property int slotHour: Number(modelData)
-                                    property real desiredHeight: root.kanbanLayoutRevision >= 0
-                                        ? root.inProgressSlotHeight(slotHour)
-                                        : root.kanbanSlotMinHeight
-                                    Layout.fillWidth: true
-                                    Layout.minimumHeight: desiredHeight
-                                    Layout.preferredHeight: desiredHeight
-                                    height: desiredHeight
-                                    sourceComponent: boardSectionComponent
+                                    required property var modelData
+                                    x: root.timelineGutterWidth + modelData.column * width
+                                    y: (modelData.card.kanbanSlotHour - 8) * root.timelineHourHeight + 4
+                                    width: (timelineSurface.width - root.timelineGutterWidth) / root.timelineColumnCount()
+                                    height: root.displayDuration(modelData.card) * root.timelineHourHeight - 8
+                                    z: root.resizeItemId === modelData.card.itemId ? 3 : 1
+                                    sourceComponent: kanbanCardComponent
                                     onLoaded: {
-                                        item.width = Qt.binding(function() { return width })
-                                        item.height = Qt.binding(function() { return desiredHeight })
-                                        item.sectionTitle = root.slotLabel(slotHour)
-                                        item.targetStatus = "in_progress"
-                                        item.targetSlotHour = slotHour
+                                        var card = modelData.card
+                                        item.width = Qt.binding(function() { return width - 8 })
+                                        item.itemId = card.itemId
+                                        item.itemName = card.name || ""
+                                        item.itemIcon = card.icon || ""
+                                        item.sourceType = card.sourceType || ""
+                                        item.tabIndex = card.tabIndex === undefined ? -1 : card.tabIndex
+                                        item.itemColor = card.color || ""
+                                        item.sourceLabel = card.sourceLabel || ""
+                                        item.completionPercent = card.completionPercent || 0
+                                        item.activeTaskTitle = card.activeTaskTitle || ""
+                                        item.startHour = card.kanbanSlotHour
+                                        item.durationHours = root.durationOf(card)
                                     }
                                 }
                             }

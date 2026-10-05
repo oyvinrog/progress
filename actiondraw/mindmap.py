@@ -370,10 +370,12 @@ class MindMapController(QObject):
         if self._tabs is not None:
             for tab in self._tabs.getAllTabs():
                 if tab.kanban_status == 'in_progress' and tab.kanban_slot_hour in counts:
-                    counts[tab.kanban_slot_hour] += 1
+                    for hour in range(tab.kanban_slot_hour, min(18, tab.kanban_slot_hour + tab.kanban_duration_hours)):
+                        counts[hour] += 1
         for placement in self._kanban.values():
             if placement['status'] == 'in_progress' and placement['slot_hour'] in counts:
-                counts[placement['slot_hour']] += 1
+                for hour in range(placement['slot_hour'], min(18, placement['slot_hour'] + placement.get('duration_hours', 1))):
+                    counts[hour] += 1
         return [{'hour': hour, 'count': counts[hour],
                  'label': f"{hour:02d}:00 ({counts[hour]} "
                           f"{'task' if counts[hour] == 1 else 'tasks'})"}
@@ -455,7 +457,7 @@ class MindMapController(QObject):
         if tab_index >= 0:
             tab = self._tabs.getAllTabs()[tab_index]
             return {'status': tab.kanban_status, 'slot_hour': tab.kanban_slot_hour,
-                    'added_at': tab.kanban_added_at}
+                    'added_at': tab.kanban_added_at, 'duration_hours': tab.kanban_duration_hours}
         return self._kanban.get(node_id, {})
 
     @Slot(str, result='QVariantMap')
@@ -497,6 +499,9 @@ class MindMapController(QObject):
         if node is None or node_id in self.links or placement is None:
             return False
         previous = self._kanban.get(node_id)
+        placement['duration_hours'] = (previous or {}).get('duration_hours', 1)
+        if placement['status'] == 'in_progress' and placement['slot_hour'] + placement['duration_hours'] > 18:
+            return False
         if previous is None:
             placement['added_at'] = time.time()
         elif 'added_at' in previous:
@@ -507,6 +512,18 @@ class MindMapController(QObject):
         self.changed.emit()
         self.planChanged.emit()
         return True
+
+    @Slot(str, int, result=bool)
+    def setNodeKanbanDuration(self, node_id, duration):
+        node_id = self.sourceNodeId(node_id)
+        placement = self._kanban.get(node_id)
+        if placement is None or type(duration) is not int or not 1 <= duration <= 10:
+            return False
+        if placement['status'] == 'in_progress' and placement['slot_hour'] + duration > 18:
+            return False
+        if placement.get('duration_hours', 1) == duration:
+            return True
+        return self._commit(lambda: placement.update(duration_hours=duration))
 
     @Slot(str, result=bool)
     def removeNodeFromPlan(self, node_id):
@@ -537,7 +554,8 @@ class MindMapController(QObject):
                           'icon': '◇', 'color': '#7f8fd6',
                           'completionPercent': 100 if node_id in self._completed else 0,
                           'activeTaskTitle': '', 'kanbanStatus': placement['status'],
-                          'kanbanSlotHour': placement['slot_hour']})
+                          'kanbanSlotHour': placement['slot_hour'],
+                          'kanbanDurationHours': placement.get('duration_hours', 1)})
         return items
 
     @Slot()
@@ -684,6 +702,10 @@ class MindMapController(QObject):
                     or (status == 'in_progress' and not 8 <= slot_hour <= 17)
                     or (status != 'in_progress' and slot_hour != -1)):
                 raise ValueError('Malformed mindmap kanban slot')
+            duration = placement.get('duration_hours', 1)
+            if (type(duration) is not int or not 1 <= duration <= 10
+                    or (status == 'in_progress' and slot_hour + duration > 18)):
+                raise ValueError('Malformed mindmap kanban duration')
         schedules = payload.get('plan_schedules', {})
         if not isinstance(schedules, dict):
             raise ValueError('Malformed plan schedules')

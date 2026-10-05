@@ -3500,9 +3500,9 @@ class TestActionDrawQmlTaskInteractions:
         assert "onPositionChanged" in kanban_qml
         assert "preventStealing: true" in kanban_qml
         assert "root.dragActive" in kanban_qml
-        assert "function inProgressSlotHeight(" in kanban_qml
-        assert "property real desiredHeight:" in kanban_qml
-        assert "root.inProgressSlotHeight(slotHour)" in kanban_qml
+        assert 'objectName: "kanbanTimeline"' in kanban_qml
+        assert "root.timelineColumnCount()" in kanban_qml
+        assert "root.timelineHourHeight" in kanban_qml
         assert "cardsColumn.forceLayout" in kanban_qml
         assert "wrapMode: Text.WordWrap" in kanban_qml
         assert "maximumLineCount: 2" in kanban_qml
@@ -3566,7 +3566,7 @@ class TestActionDrawQmlTaskInteractions:
             root.deleteLater()
             engine.deleteLater()
 
-    def test_kanban_in_progress_slot_expands_for_multiple_tabs(self, app):
+    def test_kanban_in_progress_places_overlapping_tabs_side_by_side(self, app):
         from task_model import TabModel
 
         def find_visual_item(root, object_name, visible=None):
@@ -3645,10 +3645,10 @@ class TestActionDrawQmlTaskInteractions:
             assert isinstance(slot, QQuickItem)
             assert isinstance(first_card, QQuickItem)
             assert isinstance(second_card, QQuickItem)
-            assert slot.height() > 154
+            assert slot.height() == 154
 
-            first_card = find_visual_item_descendant(slot, "kanbanCard_0", visible=True)
-            second_card = find_visual_item_descendant(slot, "kanbanCard_1", visible=True)
+            first_card = find_visual_item(root, "kanbanCard_0", visible=True)
+            second_card = find_visual_item(root, "kanbanCard_1", visible=True)
             assert isinstance(first_card, QQuickItem)
             assert isinstance(second_card, QQuickItem)
             first_bounds = item_bounds_in(first_card, slot)
@@ -3657,7 +3657,7 @@ class TestActionDrawQmlTaskInteractions:
             assert second_bounds[1] >= 0
             assert first_bounds[3] <= slot.height()
             assert second_bounds[3] <= slot.height()
-            assert first_bounds[3] <= second_bounds[1] or second_bounds[3] <= first_bounds[1]
+            assert first_bounds[2] <= second_bounds[0] or second_bounds[2] <= first_bounds[0]
             assert first_card.height() >= 70
             assert second_card.height() >= 70
         finally:
@@ -5784,8 +5784,8 @@ class TestTabModelKanban:
 
         model = TabModel()
 
-        assert model.setKanbanPlacement(0, "in_progress", 22) is True
-        assert model.getTabSummary(0)["kanbanStatus"] == "in_progress"
+        assert model.setKanbanPlacement(0, "in_progress", 22) is False
+        assert model.getTabSummary(0)["kanbanStatus"] == "todo"
         assert model.getTabSummary(0)["kanbanSlotHour"] == -1
 
     def test_create_tab_at_kanban_placement(self, app):

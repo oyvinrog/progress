@@ -457,6 +457,7 @@ class Tab:
         "ambitionRaised": False,
     })
     kanban_status: str = "todo"
+    kanban_duration_hours: int = 1
     kanban_slot_hour: int = -1
     kanban_added_at: Optional[float] = field(default_factory=time.time)
     action_paint: Dict[str, Any] = field(default_factory=lambda: {
@@ -1502,6 +1503,7 @@ class TabModel(QAbstractListModel):
     PinnedRole = Qt.UserRole + 12
     KanbanStatusRole = Qt.UserRole + 13
     KanbanSlotHourRole = Qt.UserRole + 14
+    KanbanDurationHoursRole = Qt.UserRole + 15
 
     tabsChanged = Signal()
     currentTabChanged = Signal()
@@ -1592,6 +1594,8 @@ class TabModel(QAbstractListModel):
             return tab.pinned
         if role == self.KanbanStatusRole:
             return tab.kanban_status
+        if role == self.KanbanDurationHoursRole:
+            return tab.kanban_duration_hours
         if role == self.KanbanSlotHourRole:
             return tab.kanban_slot_hour
         return None
@@ -1612,6 +1616,7 @@ class TabModel(QAbstractListModel):
             self.PinnedRole: b"pinned",
             self.KanbanStatusRole: b"kanbanStatus",
             self.KanbanSlotHourRole: b"kanbanSlotHour",
+            self.KanbanDurationHoursRole: b"kanbanDurationHours",
         }
 
     @staticmethod
@@ -1796,6 +1801,7 @@ class TabModel(QAbstractListModel):
             "pinned": tab.pinned,
             "kanbanStatus": tab.kanban_status,
             "kanbanSlotHour": tab.kanban_slot_hour,
+            "kanbanDurationHours": tab.kanban_duration_hours,
         }
 
     @Slot(str)
@@ -1886,6 +1892,8 @@ class TabModel(QAbstractListModel):
         normalized_status = self._normalizeKanbanStatus(status)
         normalized_slot = self._normalizeKanbanSlotHour(normalized_status, slot_hour)
         tab = self._tabs[index]
+        if normalized_status == 'in_progress' and (normalized_slot < 8 or normalized_slot + tab.kanban_duration_hours > 18):
+            return False
         if tab.kanban_status == normalized_status and tab.kanban_slot_hour == normalized_slot:
             return True
         if normalized_status == 'unscheduled':
@@ -1897,6 +1905,19 @@ class TabModel(QAbstractListModel):
         model_index = self.index(index, 0)
         self.dataChanged.emit(model_index, model_index, [self.KanbanStatusRole, self.KanbanSlotHourRole])
         self.kanbanChanged.emit()
+        return True
+
+    @Slot(int, int, result=bool)
+    def setKanbanDuration(self, index: int, duration: int) -> bool:
+        if not 0 <= index < len(self._tabs) or type(duration) is not int or not 1 <= duration <= 10:
+            return False
+        tab = self._tabs[index]
+        if tab.kanban_status == 'in_progress' and tab.kanban_slot_hour + duration > 18:
+            return False
+        if tab.kanban_duration_hours != duration:
+            tab.kanban_duration_hours = duration
+            self.dataChanged.emit(self.index(index, 0), self.index(index, 0), [self.KanbanDurationHoursRole])
+            self.kanbanChanged.emit()
         return True
 
     def _emitKanbanRowsChanged(self, rows: List[int]) -> None:
@@ -1921,7 +1942,7 @@ class TabModel(QAbstractListModel):
         for row, tab in enumerate(self._tabs):
             if tab.kanban_status != "in_progress":
                 continue
-            if tab.kanban_slot_hour < start or tab.kanban_slot_hour >= 17:
+            if tab.kanban_slot_hour < start or tab.kanban_slot_hour + tab.kanban_duration_hours >= 18:
                 continue
             tab.kanban_slot_hour += 1
             changed_rows.append(row)
@@ -1949,7 +1970,7 @@ class TabModel(QAbstractListModel):
             if (
                 normalized_status == "in_progress"
                 and not all_in_progress_slots
-                and tab.kanban_slot_hour != normalized_slot
+                and not tab.kanban_slot_hour <= normalized_slot < tab.kanban_slot_hour + tab.kanban_duration_hours
             ):
                 continue
             tab.kanban_status = "todo"
@@ -1989,10 +2010,12 @@ class TabModel(QAbstractListModel):
             if (
                 normalized_status == "in_progress"
                 and not all_in_progress_slots
-                and tab.kanban_slot_hour != normalized_slot
+                and not tab.kanban_slot_hour <= normalized_slot < tab.kanban_slot_hour + tab.kanban_duration_hours
             ):
                 continue
             if tab.kanban_status == target_status and tab.kanban_slot_hour == target_slot:
+                continue
+            if target_status == "in_progress" and target_slot + tab.kanban_duration_hours > 18:
                 continue
             tab.kanban_status = target_status
             tab.kanban_slot_hour = target_slot
@@ -2336,6 +2359,9 @@ class TabModel(QAbstractListModel):
                 tab.kanban_status,
                 getattr(tab, "kanban_slot_hour", -1),
             )
+            duration = getattr(tab, 'kanban_duration_hours', 1)
+            limit = 18 - tab.kanban_slot_hour if tab.kanban_status == 'in_progress' and tab.kanban_slot_hour >= 8 else 10
+            tab.kanban_duration_hours = duration if type(duration) is int and 1 <= duration <= limit else 1
         # Reset observers must see the new tabs and their valid active index together.
         if active_tab < 0 or active_tab >= len(self._tabs):
             active_tab = 0
@@ -3646,6 +3672,7 @@ class ProjectManager(QObject):
                     "assessment": TabModel._normalizeAssessment(tab.assessment),
                     "kanban_status": tab.kanban_status,
                     "kanban_slot_hour": tab.kanban_slot_hour,
+                    "kanban_duration_hours": tab.kanban_duration_hours,
                     "kanban_added_at": tab.kanban_added_at,
                 })
 
@@ -4167,6 +4194,7 @@ class ProjectManager(QObject):
                         pinned=tab_data.get("pinned", False),
                         goals=tab_data.get("goals", []),
                         assessment=TabModel._normalizeAssessment(tab_data.get("assessment")),
+                        kanban_duration_hours=tab_data.get("kanban_duration_hours", 1),
                         kanban_added_at=self._loaded_kanban_added_at(tab_data.get("kanban_added_at")),
                         kanban_status=TabModel._normalizeKanbanStatus(tab_data.get("kanban_status", "todo")),
                         kanban_slot_hour=TabModel._normalizeKanbanSlotHour(
@@ -4322,6 +4350,7 @@ class ProjectManager(QObject):
                     'activeTaskTitle': self._tab_model._getActiveTaskTitle(tab),
                     'kanbanStatus': tab.kanban_status,
                     'kanbanSlotHour': tab.kanban_slot_hour,
+                    'kanbanDurationHours': tab.kanban_duration_hours,
                 })
         items.extend(self.mindmap.plannedNodeItems())
         return items
@@ -4334,6 +4363,15 @@ class ProjectManager(QObject):
                         and self._tab_model.setKanbanPlacement(index, status, slot_hour))
         if item_id.startswith('node:'):
             return self.mindmap.setNodeKanbanPlacement(item_id[5:], status, slot_hour)
+        return False
+
+    @Slot(str, int, result=bool)
+    def setKanbanItemDuration(self, item_id: str, duration: int) -> bool:
+        if item_id.startswith('tab:'):
+            return bool(self._tab_model is not None and self._tab_model.setKanbanDuration(
+                self._kanbanTabIndex(item_id[4:]), duration))
+        if item_id.startswith('node:'):
+            return self.mindmap.setNodeKanbanDuration(item_id[5:], duration)
         return False
 
     @Slot(str, result=bool)
@@ -4353,7 +4391,7 @@ class ProjectManager(QObject):
             if item['kanbanStatus'] != status:
                 continue
             if status == 'in_progress' and requested_slot != -1:
-                if item['kanbanSlotHour'] != requested_slot:
+                if not item['kanbanSlotHour'] <= requested_slot < item['kanbanSlotHour'] + item['kanbanDurationHours']:
                     continue
             yield item
 
@@ -4368,7 +4406,7 @@ class ProjectManager(QObject):
         changed = False
         for item in list(self.getKanbanItems()):
             hour = item['kanbanSlotHour']
-            if item['kanbanStatus'] != 'in_progress' or hour < start or hour >= 17:
+            if item['kanbanStatus'] != 'in_progress' or hour < start or hour + item['kanbanDurationHours'] >= 18:
                 continue
             changed = self.setKanbanItemPlacement(
                 item['itemId'], 'in_progress', hour + 1) or changed
