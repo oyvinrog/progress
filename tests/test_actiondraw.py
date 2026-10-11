@@ -1167,7 +1167,7 @@ class TestCreateActionDrawWindow:
         dialogs_qml = (QML_DIR / "components" / "ActionDialogs.qml").read_text(encoding="utf-8")
         window_qml = (QML_DIR / "ActionDrawWindow.qml").read_text(encoding="utf-8")
 
-        assert 'function openStandaloneReminderDialog()' in dialogs_qml
+        assert 'function openStandaloneReminderDialog(selectedDate)' in dialogs_qml
         assert 'property bool standaloneMode: false' in dialogs_qml
         assert 'projectManager.addStandaloneReminder' in dialogs_qml
         assert 'projectManager.updateStandaloneReminder' in dialogs_qml

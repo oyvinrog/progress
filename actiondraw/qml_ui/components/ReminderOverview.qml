@@ -60,7 +60,7 @@ Column {
                 id: newReminderButton
                 objectName: "newStandaloneReminder"
                 text: "New Reminder"
-                onClicked: overview.dialogs.openStandaloneReminderDialog()
+                onClicked: overview.dialogs.openStandaloneReminderDialog(overview.selectedDate)
             }
             Button {
                 objectName: "toggleReminderOverview"

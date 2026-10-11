@@ -24,10 +24,13 @@ Window {
         property bool reminderOverviewExpanded: true
         property bool reminderOverviewTouched: false
         property string action: ""
+        property string savedReminder: ""
+        function presetTitle(name) { return name }
         function refreshActiveReminders() { action = "refresh" }
     }
     QtObject {
         id: manager
+        function addStandaloneReminder(title, date, notify) { host.savedReminder = date; return true }
         function openTabTask(tab, task) { host.action = "open-task" }
         function openMindmapReminder(node) { host.action = "open-node" }
         function clearReminder(tab, task) { host.action = "clear-task" }
@@ -76,10 +79,15 @@ def reminder(date, kind="task", node=""):
 
 
 @pytest.fixture
-def calendar_ui(app):
+def calendar_ui(app, request):
     engine = QQmlEngine()
     component = QQmlComponent(engine)
-    component.setData(WRAPPER.encode(), QUrl.fromLocalFile(str(COMPONENTS / "Test.qml")))
+    wrapper = WRAPPER
+    if getattr(request, "param", "mock") == "real":
+        start = wrapper.index("    QtObject {\n        id: dialogs")
+        end = wrapper.index("    QtObject {\n        id: plan", start)
+        wrapper = wrapper[:start] + '    ActionDialogs { id: dialogs; objectName: "dialogs"; root: host; projectManager: manager }\n' + wrapper[end:]
+    component.setData(wrapper.encode(), QUrl.fromLocalFile(str(COMPONENTS / "Test.qml")))
     root = component.create()
     assert root is not None, component.errorString()
     host = root.findChild(QObject, "host")
@@ -203,3 +211,30 @@ def test_other_reminder_actions_preserved(calendar_ui, kind, node, open_action, 
         assert host.property("action") == edit_action
     click("clearReminder_" + suffix)
     assert host.property("action") == "refresh"
+
+
+@pytest.mark.parametrize("calendar_ui", ["real"], indirect=True)
+def test_new_reminder_uses_selected_date_and_all_days_defaults(calendar_ui, app):
+    root, host, overview, _, _, click = calendar_ui
+    dialogs = root.findChild(QObject, "dialogs")
+    dialog = dialogs.findChild(QObject, "reminderDialog")
+    # A prior node reminder must not redirect the new project reminder to a node.
+    dialog.setProperty("nodeId", "previous-node")
+    click("reminderDay_2032-02-29")
+    click("newStandaloneReminder")
+    assert dialog.property("visible")
+    assert dialog.property("dateValue") == "2032-02-29"
+    assert dialog.property("timeValue")
+    assert dialog.property("nodeId") == ""
+    dialog.setProperty("standaloneTitle", "Future follow-up")
+    dialog.accept()
+    app.processEvents()
+    assert host.property("savedReminder").startswith("2032-02-29 ")
+    assert overview.property("selectedDate") == "2032-02-29"
+    click("reminderAllDays")
+    before = datetime.now().timestamp() + 3600
+    click("newStandaloneReminder")
+    after = datetime.now().timestamp() + 3600
+    actual = datetime.fromisoformat(dialog.property("dateValue") + "T" + dialog.property("timeValue")).timestamp()
+    assert before - 60 <= actual <= after
+    dialog.reject()

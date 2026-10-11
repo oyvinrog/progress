@@ -153,7 +153,8 @@ supports a reminder, including tab nodes and the project root.
 **Open Node** to reveal the relevant node, even inside a folded branch. The
 right-click menu lets you update or clear its reminder. A month calendar shows
 how many future reminders are waiting on each day, including later today.
-Select a date to filter the list, or choose **All days** to see everything.
+Select a date to filter the list; **New Reminder** prefills that selected date.
+Choose **All days** to see everything.
 Use the month arrows and **Today** to navigate; **Roll Up** collapses both
 the calendar and list.
 
