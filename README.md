@@ -151,7 +151,11 @@ supports a reminder, including tab nodes and the project root.
 
 **Waiting Reminders** stays visible above both the canvas and mindmap. Choose
 **Open Node** to reveal the relevant node, even inside a folded branch. The
-right-click menu lets you update or clear its reminder.
+right-click menu lets you update or clear its reminder. A month calendar shows
+how many future reminders are waiting on each day, including later today.
+Select a date to filter the list, or choose **All days** to see everything.
+Use the month arrows and **Today** to navigate; **Roll Up** collapses both
+the calendar and list.
 
 Use **Complete** or **F4** to mark selected nodes with a ✓. If all selected
 nodes are complete, the same action clears the marks. Completing a node does
