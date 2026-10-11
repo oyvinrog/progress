@@ -2,7 +2,6 @@
 
 import json
 import os
-import sys
 import time
 
 import pytest
@@ -19,7 +18,6 @@ from actiondraw import (
     DiagramModel,
     DrawingPoint,
     DrawingStroke,
-    create_actiondraw_window,
 )
 from actiondraw.markdown_tab_clipboard import MarkdownTabClipboard, parse_tabs_from_clipboard_text
 from actiondraw.qml import QML_DIR
@@ -1130,16 +1128,10 @@ class TestConnectAll:
 
 
 class TestCreateActionDrawWindow:
-    @pytest.mark.skipif(
-        sys.version_info[:2] == (3, 13),
-        reason=(
-            "PySide6 QML engine cyclic finalization can segfault on Python 3.13; "
-            "validate_actiondraw.py provides the equivalent window smoke test "
-            "in a dedicated process"
-        ),
-    )
-    def test_create_window(self, app, diagram_model_with_task_model):
-        engine = create_actiondraw_window(diagram_model_with_task_model, diagram_model_with_task_model._task_model)
+    def test_create_window(self, app, diagram_model_with_task_model, actiondraw_window):
+        # Explicit fixture teardown destroys both QML engines while their
+        # context models are alive, before a later project load forces GC.
+        engine = actiondraw_window(diagram_model_with_task_model, diagram_model_with_task_model._task_model)
         assert isinstance(engine, QQmlApplicationEngine)
         assert engine.rootObjects()
         assert getattr(engine, "_markdown_pdf_exporter", None) is not None
