@@ -9,7 +9,6 @@ from PySide6.QtTest import QTest
 
 from actiondraw.model import DiagramModel
 from actiondraw.priorityplot.model import compute_priority_score, normalize_priority_weight
-from actiondraw.ui import create_actiondraw_window
 from progress_crypto import EncryptionCredentials, decrypt_project_data
 from task_model import ProjectManager, Tab, TabModel, TaskModel
 
@@ -219,9 +218,9 @@ def find_item(item, name):
             return found
 
 
-def test_qml_adjustments_keep_selection_and_matching_ranks(project, app):
+def test_qml_adjustments_keep_selection_and_matching_ranks(project, app, actiondraw_window):
     pm, tabs, tasks, diagram = project
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     warnings = []
     engine.warnings.connect(lambda messages: warnings.extend(m.toString() for m in messages))
     window = engine.rootObjects()[0]

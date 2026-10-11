@@ -134,11 +134,12 @@ def find_visual(root, name):
 
 
 @pytest.fixture
-def board(project, app):
+def board(project, app, qml_cleanup):
     engine = QQmlEngine()
     component = QQmlComponent(engine, QUrl.fromLocalFile(str(
         Path(__file__).parents[1] / 'actiondraw/qml_ui/KanbanWindow.qml')))
     root = component.createWithInitialProperties({'tabModel': project[1], 'projectManager': project[0]})
+    qml_cleanup(engine, root, *project)
     assert root is not None, component.errorString()
     root.setWidth(1500)
     root.setHeight(950)
@@ -146,9 +147,6 @@ def board(project, app):
     QTest.qWait(30)
     yield root
     root.close()
-    root.deleteLater()
-    engine.deleteLater()
-    app.processEvents()
 
 
 @pytest.mark.parametrize('source', ['tab', 'node'])

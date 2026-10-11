@@ -3503,7 +3503,7 @@ class TestActionDrawQmlTaskInteractions:
         assert "placeMoveMode" not in kanban_qml
         assert "Choose destination for " not in kanban_qml
 
-    def test_kanban_mouse_drag_drops_tab_into_target_column(self, app):
+    def test_kanban_mouse_drag_drops_tab_into_target_column(self, app, qml_cleanup):
         from task_model import TabModel
 
         def find_visual_item(root, object_name, visible=None):
@@ -3523,6 +3523,7 @@ class TestActionDrawQmlTaskInteractions:
         engine = QQmlEngine()
         component = QQmlComponent(engine, QUrl.fromLocalFile(str(QML_DIR / "KanbanWindow.qml")))
         root = component.createWithInitialProperties({"tabModel": model})
+        qml_cleanup(engine, root, model)
         assert root is not None, component.errorString()
 
         try:
@@ -3555,10 +3556,8 @@ class TestActionDrawQmlTaskInteractions:
             assert moved_card.height() > 0
         finally:
             root.close()
-            root.deleteLater()
-            engine.deleteLater()
 
-    def test_kanban_in_progress_places_overlapping_tabs_side_by_side(self, app):
+    def test_kanban_in_progress_places_overlapping_tabs_side_by_side(self, app, qml_cleanup):
         from task_model import TabModel
 
         def find_visual_item(root, object_name, visible=None):
@@ -3602,6 +3601,7 @@ class TestActionDrawQmlTaskInteractions:
         engine = QQmlEngine()
         component = QQmlComponent(engine, QUrl.fromLocalFile(str(QML_DIR / "KanbanWindow.qml")))
         root = component.createWithInitialProperties({"tabModel": model})
+        qml_cleanup(engine, root, model)
         assert root is not None, component.errorString()
 
         try:
@@ -3654,10 +3654,8 @@ class TestActionDrawQmlTaskInteractions:
             assert second_card.height() >= 70
         finally:
             root.close()
-            root.deleteLater()
-            engine.deleteLater()
 
-    def test_kanban_todo_search_filters_only_todo_cards(self, app):
+    def test_kanban_todo_search_filters_only_todo_cards(self, app, qml_cleanup):
         from task_model import TabModel
 
         def find_visual_item(root, object_name, visible=None):
@@ -3682,6 +3680,7 @@ class TestActionDrawQmlTaskInteractions:
         engine = QQmlEngine()
         component = QQmlComponent(engine, QUrl.fromLocalFile(str(QML_DIR / "KanbanWindow.qml")))
         root = component.createWithInitialProperties({"tabModel": model})
+        qml_cleanup(engine, root, model)
         assert root is not None, component.errorString()
 
         try:
@@ -3715,10 +3714,8 @@ class TestActionDrawQmlTaskInteractions:
             assert find_visual_item(root, "kanbanCard_3", visible=True) is not None
         finally:
             root.close()
-            root.deleteLater()
-            engine.deleteLater()
 
-    def test_kanban_postpone_button_enabled_for_non_final_time_slots(self, app):
+    def test_kanban_postpone_button_enabled_for_non_final_time_slots(self, app, qml_cleanup):
         from task_model import TabModel
 
         def find_visual_item(root, object_name, visible=None):
@@ -3737,6 +3734,7 @@ class TestActionDrawQmlTaskInteractions:
         engine = QQmlEngine()
         component = QQmlComponent(engine, QUrl.fromLocalFile(str(QML_DIR / "KanbanWindow.qml")))
         root = component.createWithInitialProperties({"tabModel": model})
+        qml_cleanup(engine, root, model)
         assert root is not None, component.errorString()
 
         try:
@@ -3764,8 +3762,6 @@ class TestActionDrawQmlTaskInteractions:
             assert lane_clear.isEnabled()
         finally:
             root.close()
-            root.deleteLater()
-            engine.deleteLater()
 
     def test_toolbar_does_not_expose_workspace_markdown_button(self):
         qml = (QML_DIR / "components" / "ToolbarRow.qml").read_text(encoding="utf-8")
@@ -3912,20 +3908,17 @@ class _DummyRoot(QObject):
 
 class TestReminderDialogPresets:
     @pytest.fixture
-    def action_dialogs_component(self, app):
+    def action_dialogs_component(self, app, qml_cleanup):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         engine = QQmlEngine()
-        engine.rootContext().setContextProperty("markdownHighlighterBridge", QObject())
+        engine.rootContext().setContextProperty("markdownHighlighterBridge", QObject(engine))
         component = QQmlComponent(engine, QUrl.fromLocalFile(str(QML_DIR / "components" / "ActionDialogs.qml")))
-        instance = component.createWithInitialProperties({"root": _DummyRoot()})
+        instance = component.createWithInitialProperties({"root": _DummyRoot(engine)})
+        qml_cleanup(engine, instance)
         errors = [err.toString() for err in component.errors()]
         assert instance is not None, errors
         assert not component.isError(), errors
-        try:
-            yield instance
-        finally:
-            instance.deleteLater()
-            engine.deleteLater()
+        yield instance
 
     def test_reminder_dialog_exposes_named_preset_buttons(self):
         qml = (QML_DIR / "components" / "ActionDialogs.qml").read_text(encoding="utf-8")

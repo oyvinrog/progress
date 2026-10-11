@@ -3,7 +3,6 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-import shiboken6
 from PySide6.QtCore import QObject, Qt, QUrl
 from PySide6.QtQml import QQmlComponent, QQmlEngine
 from PySide6.QtTest import QTest
@@ -79,7 +78,7 @@ def reminder(date, kind="task", node=""):
 
 
 @pytest.fixture
-def calendar_ui(app, request):
+def calendar_ui(app, request, qml_cleanup):
     engine = QQmlEngine()
     component = QQmlComponent(engine)
     wrapper = WRAPPER
@@ -89,6 +88,7 @@ def calendar_ui(app, request):
         wrapper = wrapper[:start] + '    ActionDialogs { id: dialogs; objectName: "dialogs"; root: host; projectManager: manager }\n' + wrapper[end:]
     component.setData(wrapper.encode(), QUrl.fromLocalFile(str(COMPONENTS / "Test.qml")))
     root = component.create()
+    qml_cleanup(engine, root)
     assert root is not None, component.errorString()
     host = root.findChild(QObject, "host")
     overview = find(root, "reminderOverview")
@@ -112,7 +112,6 @@ def calendar_ui(app, request):
     refresh([])
     yield root, host, overview, calendar, refresh, click
     root.close()
-    shiboken6.delete(engine)
 
 
 def test_counts_local_dates_future_only_and_all_kinds(calendar_ui):
