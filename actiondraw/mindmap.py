@@ -572,6 +572,7 @@ class MindMapController(QObject):
                     self.reminders.pop(node_id, None)
         self._commit(mutate)
 
+    @Slot()
     def reconcile(self, *args):
         if self._creating_tab or self._changing_tabs:
             return

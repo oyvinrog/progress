@@ -33,6 +33,21 @@ def thought(controller, text='Secret thought', note='Secret note'):
     return controller.selectedId
 
 
+def test_tab_connections_keep_mindmap_metaobject_static(app):
+    tabs = TabModel()
+    controller = MindMapController(tabs)
+    # QML caches the controller's Qt API across instances and engines. Signal
+    # connections must not add an instance-specific dynamic metaobject.
+    meta = controller.metaObject()
+    static_meta = MindMapController.staticMetaObject
+    assert meta.methodOffset() == static_meta.methodOffset()
+    assert meta.methodCount() == static_meta.methodCount()
+    tabs.addTab('Connected tab')
+    tab = tabs.getAllTabs()[-1]
+    node_id = next(key for key, value in controller.links.items() if value == tab.id)
+    assert controller.map.find(node_id).text == tab.name
+
+
 def test_mindmap_nodes_report_non_blank_notes_and_reserve_icon_space(project):
     m = project[0].mindmap
     root = m.map.root
