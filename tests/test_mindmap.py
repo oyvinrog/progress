@@ -2511,7 +2511,16 @@ def test_qml_node_reminder_controls_and_overview(project, app, tmp_path, actiond
             node = find(window.contentItem(), 'mindmapNode_' + node_id)
             assert badge.x() >= 0 and badge.x() + badge.width() <= node.width()
             assert badge.y() >= 36 and badge.y() + badge.height() <= node.height()
-            assert overview.height() < window.height() / 2
+            # The calendar stacks above the reminder list in narrow windows.
+            # Keep the panel separate from the map and leave room for its node.
+            overview_bottom = overview.mapToScene(overview.boundingRect().bottomLeft()).y()
+            pane_top = pane.mapToScene(pane.boundingRect().topLeft()).y()
+            assert overview_bottom <= pane_top
+            viewport = window.findChild(QObject, 'mindmapViewport')
+            assert viewport.isVisible()
+            assert viewport.height() >= node.height() * zoom
+            viewport_bottom = viewport.mapToScene(viewport.boundingRect().bottomLeft()).y()
+            assert viewport_bottom <= window.height()
             window.grabWindow().save(str(tmp_path / f"mindmap-reminders-{width}-{zoom}.png"))
         window.grabWindow().save(str(tmp_path / 'mindmap-reminders.png'))
         click(find(window.contentItem(), 'clearReminder_' + node_id))
