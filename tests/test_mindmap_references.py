@@ -7,7 +7,6 @@ from PySide6.QtTest import QTest
 
 from actiondraw.mindmap import MindMapController
 from actiondraw.model import DiagramModel
-from actiondraw.ui import create_actiondraw_window
 from task_model import ProjectManager, TabModel, TaskModel
 
 
@@ -187,10 +186,10 @@ def test_search_export_navigation_and_local_fold(project):
     assert m.tabScoped and m.selectedNode['sourceId'] == child
 
 
-def test_qml_add_tab_search_and_edit(project, app):
+def test_qml_add_tab_search_and_edit(project, app, actiondraw_window):
     pm, tabs, tasks, diagram, daily, lunch, roots, child = project
     m = pm.mindmap
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     warnings = []
     engine.warnings.connect(lambda messages: warnings.extend(x.toString() for x in messages))
     window = engine.rootObjects()[0]
@@ -251,7 +250,6 @@ def test_qml_add_tab_search_and_edit(project, app):
         assert not warnings
     finally:
         window.close()
-        engine.deleteLater()
         QTest.qWait(20)
 
 
@@ -413,3 +411,26 @@ def test_bulk_folding_repeated_reference_placements(project):
     m.toggleNodeFold(first)
     assert m.map.find(child).folded
     assert all(n['folded'] for n in m.nodes if n['sourceId'] == child)
+
+
+def test_plan_scheduling_references_deduplicate_and_share_badges(project):
+    pm, tabs, _, _, daily, lunch, roots, child = project
+    m = pm.mindmap
+    ref = reference(project)
+    projected = occurrence(m, child, ref)
+    m.set_scope(None)
+    m._set_selection([ref, roots[lunch], child, projected])
+    assert m.scheduleSelectedToWeekday(0)
+    assert set(m.plan_schedules) == {roots[lunch], child}
+    assert m.planWeekdayOptions[0]['count'] == 2
+    assert m.planData(ref) == m.planData(roots[lunch])
+    assert m.planData(projected) == m.planData(child)
+    m.select(ref)
+    m.deleteSelected()
+    assert set(m.plan_schedules) == {roots[lunch], child}
+    m.undo()
+    m.cancelPlanSchedule(ref)
+    assert set(m.plan_schedules) == {child}
+    m.scheduleNodeToWeekday(roots[lunch], 0)
+    tabs.removeTab(next(i for i, tab in enumerate(tabs.getAllTabs()) if tab.id == lunch))
+    assert roots[lunch] not in m.plan_schedules

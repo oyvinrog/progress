@@ -14,7 +14,6 @@ from PySide6.QtQml import QQmlProperty, qmlContext
 
 from actiondraw.model import DiagramModel
 from actiondraw.mindmap import MindMapController
-from actiondraw.ui import create_actiondraw_window
 from progress_crypto import EncryptionCredentials, decrypt_project_data
 from task_model import ProjectManager, TabModel, TaskModel
 
@@ -32,6 +31,21 @@ def thought(controller, text='Secret thought', note='Secret note'):
     controller.addThought(False)
     controller.editSelected(text, note)
     return controller.selectedId
+
+
+def test_tab_connections_keep_mindmap_metaobject_static(app):
+    tabs = TabModel()
+    controller = MindMapController(tabs)
+    # QML caches the controller's Qt API across instances and engines. Signal
+    # connections must not add an instance-specific dynamic metaobject.
+    meta = controller.metaObject()
+    static_meta = MindMapController.staticMetaObject
+    assert meta.methodOffset() == static_meta.methodOffset()
+    assert meta.methodCount() == static_meta.methodCount()
+    tabs.addTab('Connected tab')
+    tab = tabs.getAllTabs()[-1]
+    node_id = next(key for key, value in controller.links.items() if value == tab.id)
+    assert controller.map.find(node_id).text == tab.name
 
 
 def test_mindmap_nodes_report_non_blank_notes_and_reserve_icon_space(project):
@@ -122,7 +136,7 @@ def test_copy_selected_exports_top_level_branches_for_paste(project, app):
     assert [node.text for node in m.map.root.children[-1].children] == ['Nested selection']
 
 
-def test_qml_branch_export_actions_use_toolbar_and_context_targets(project, app):
+def test_qml_branch_export_actions_use_toolbar_and_context_targets(project, app, actiondraw_window):
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
     toolbar_branch = m.map.root.add_child('Toolbar branch')
@@ -131,7 +145,7 @@ def test_qml_branch_export_actions_use_toolbar_and_context_targets(project, app)
     context_branch.add_child('Context child')
     m.select(toolbar_branch.id)
 
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
     window.show()
     pm.showMindmap()
@@ -215,14 +229,14 @@ def test_type_search_scope_and_reset(project):
     assert m.searchQuery == ''
 
 
-def test_qml_type_search_keyboard_and_focus(project, app):
+def test_qml_type_search_keyboard_and_focus(project, app, actiondraw_window):
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
     branch = m.map.root.add_child('People')
     first = branch.add_child('Guest one')
     second = branch.add_child('Guest two')
     branch.folded = True
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
     window.show()
     pm.showMindmap()
@@ -409,13 +423,13 @@ def test_mindmap_priority_scope_exclusion_and_updates(project):
     assert m.to_dict() == saved
 
 
-def test_qml_plot_and_mindmap_share_score_ranks_after_load_and_moves(project, app):
+def test_qml_plot_and_mindmap_share_score_ranks_after_load_and_moves(project, app, actiondraw_window):
     pm, tabs, tasks, diagram = project
     priority_tasks(tabs, [1, 9, 5, 3])
     # Saved and manually arranged tab orders need not be sorted by score.
     tabs.setTabs(list(reversed(tabs.getAllTabs())))
     assert tabs.priorityRanks == [4, 3, 2, 1]
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
     QMetaObject.invokeMethod(window, 'openPriorityPlotWindow')
     plot = window.property('priorityPlotWindowRef')
@@ -454,14 +468,14 @@ def test_qml_plot_and_mindmap_share_score_ranks_after_load_and_moves(project, ap
         window.close()
 
 
-def test_qml_mindmap_priority_rendering(project, app):
+def test_qml_mindmap_priority_rendering(project, app, actiondraw_window):
     pm, tabs, tasks, diagram = project
     ids = priority_tasks(tabs, [0, 3, 6])
     m = pm.mindmap
     linked = {tab_id: node_id for node_id, tab_id in m.links.items()}
     high = linked[ids[2]]
     m.map.find(high).note = 'Keep this note'
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     warnings = []
     engine.warnings.connect(lambda messages: warnings.extend(message.toString() for message in messages))
     window = engine.rootObjects()[0]
@@ -626,12 +640,12 @@ def test_redo_removing_current_scope_returns_to_project_map(project):
     assert m.view_root is m.map.root and m.selectedId == m.map.root.id
 
 
-def test_qml_linked_delete_updates_sidebar_and_boards(project, app):
+def test_qml_linked_delete_updates_sidebar_and_boards(project, app, actiondraw_window):
     pm, tabs, tasks, diagram = project
     name = 'Tab removed from every view'
     tabs.addTab(name)
     tab_id = tabs.getAllTabs()[1].id
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
     QMetaObject.invokeMethod(window, 'openPriorityPlotWindow')
     QMetaObject.invokeMethod(window, 'openKanbanWindow')
@@ -667,8 +681,6 @@ def test_qml_linked_delete_updates_sidebar_and_boards(project, app):
         board.deleteLater()
         QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
         window.close()
-        engine.deleteLater()
-        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
 
 def test_create_tab_preserves_thought_branch_and_history(project):
@@ -897,13 +909,13 @@ def test_reorder_keeps_automatic_and_explicit_sides(project):
 
 
 @pytest.mark.parametrize('zoom,pan', [(1.0, 0), (0.55, 35)])
-def test_qml_ctrl_drag_reorder_and_context_target(project, app, zoom, pan):
+def test_qml_ctrl_drag_reorder_and_context_target(project, app, zoom, pan, actiondraw_window):
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
     parent = m.map.find(next(iter(m.links)))
     siblings = [parent.add_child(text) for text in ('A', 'B', 'C')]
     a, b, c = siblings
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
     window.show()
     pm.showMindmap()
@@ -985,13 +997,13 @@ def test_qml_ctrl_drag_reorder_and_context_target(project, app, zoom, pan):
     window.close()
 
 
-def test_qml_ctrl_arrows_reorder_and_editor_isolation(project, app):
+def test_qml_ctrl_arrows_reorder_and_editor_isolation(project, app, actiondraw_window):
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
     parent = m.map.find(next(iter(m.links)))
     a, b, c = [parent.add_child(text) for text in ('A', 'B', 'C')]
     parent_id = parent.id
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
     window.show()
     pm.showMindmap()
@@ -1029,10 +1041,10 @@ def test_qml_ctrl_arrows_reorder_and_editor_isolation(project, app):
 
 
 @pytest.mark.parametrize('tab_scoped', [False, True])
-def test_qml_ctrl_left_right_moves_branch(project, app, tab_scoped):
+def test_qml_ctrl_left_right_moves_branch(project, app, tab_scoped, actiondraw_window):
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
     window.show()
     if tab_scoped:
@@ -1149,13 +1161,13 @@ def test_bookmark_payload_validation(project, value):
         m.decode(payload)
 
 
-def test_qml_bookmarks(project, app):
+def test_qml_bookmarks(project, app, actiondraw_window):
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
     tab = next(iter(m.links))
     m.select(tab)
     child = thought(m, 'Bookmarked child')
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     warnings = []
     engine.warnings.connect(lambda messages: warnings.extend(x.toString() for x in messages))
     window = engine.rootObjects()[0]
@@ -1327,10 +1339,10 @@ def test_payload_rejects_duplicate_links(project):
         MindMapController.decode(payload)
 
 
-def test_qml_click_drag_back_and_shortcut_isolation(project, app):
+def test_qml_click_drag_back_and_shortcut_isolation(project, app, actiondraw_window):
     pm, tabs, tasks, diagram = project
     tabs.addTab('Second')
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     warnings = []
     engine.warnings.connect(lambda messages: warnings.extend(m.toString() for m in messages))
     assert engine.rootObjects()
@@ -1478,8 +1490,6 @@ def test_qml_click_drag_back_and_shortcut_isolation(project, app):
     QTest.qWait(30)
     assert not warnings, warnings
     window.close()
-    engine.deleteLater()
-    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
 
 def test_notes_preserve_whitespace_in_save_and_history(project):
@@ -1838,14 +1848,14 @@ def test_multi_delete_is_atomic_and_undo_restores_selection(project):
     assert m.to_dict() == before
 
 
-def test_qml_multi_selection_cut_and_paste(project, app):
+def test_qml_multi_selection_cut_and_paste(project, app, actiondraw_window):
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
     tab_id = next(iter(m.links))
     m.map.find(tab_id).side = 'left'
     a, b, c = [m.map.root.add_child(label, side='right') for label in ('A', 'B', 'C')]
     m.reconcile()
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     warnings = []
     engine.warnings.connect(lambda messages: warnings.extend(message.toString() for message in messages))
     window = engine.rootObjects()[0]
@@ -1896,18 +1906,16 @@ def test_qml_multi_selection_cut_and_paste(project, app):
         pm.scrubProjectData()
         QTest.qWait(30)
         window.close()
-        engine.deleteLater()
-        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
 
-def test_qml_ctrl_c_then_ctrl_v_copies_selected_branch(project, app):
+def test_qml_ctrl_c_then_ctrl_v_copies_selected_branch(project, app, actiondraw_window):
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
     source = m.map.root.add_child('Copied branch')
     source.add_child('Copied child')
     destination = m.map.root.add_child('Destination')
     m.select(source.id)
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
     window.show()
     pm.showMindmap()
@@ -1934,16 +1942,14 @@ def test_qml_ctrl_c_then_ctrl_v_copies_selected_branch(project, app):
         pm.scrubProjectData()
         QTest.qWait(30)
         window.close()
-        engine.deleteLater()
-        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
 
-def test_qml_ctrl_v_imports_clipboard_text_and_updates_paste_actions(project, app):
+def test_qml_ctrl_v_imports_clipboard_text_and_updates_paste_actions(project, app, actiondraw_window):
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
     clipboard = QGuiApplication.clipboard()
     clipboard.clear()
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
     window.show()
     pm.showMindmap()
@@ -1975,8 +1981,6 @@ def test_qml_ctrl_v_imports_clipboard_text_and_updates_paste_actions(project, ap
         pm.scrubProjectData()
         QTest.qWait(30)
         window.close()
-        engine.deleteLater()
-        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
 
 def test_tab_scope_shared_edits_and_boundaries(project):
@@ -2177,7 +2181,7 @@ def test_measure_progress_persists_validates_and_follows_history(project):
     assert m.measuresProgress(tab)
 
 
-def test_qml_measure_progress_menu_and_badge(project, app):
+def test_qml_measure_progress_menu_and_badge(project, app, actiondraw_window):
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
     tab = next(iter(m.links))
@@ -2187,7 +2191,7 @@ def test_qml_measure_progress_menu_and_badge(project, app):
     m.editSelected(m.map.find(tab).text, 'Progress planning note')
     m.toggleBookmark(tab)
     assert pm.setMindmapReminder(tab, reminder_date(), False)
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     warnings = []
     engine.warnings.connect(lambda messages: warnings.extend(x.toString() for x in messages))
     window = engine.rootObjects()[0]
@@ -2263,13 +2267,13 @@ def test_qml_measure_progress_menu_and_badge(project, app):
         window.close()
 
 
-def test_qml_tab_switch_completion_and_editor_focus(project, app):
+def test_qml_tab_switch_completion_and_editor_focus(project, app, actiondraw_window):
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
     root_id = next(iter(m.links))
     m.select(root_id)
     child = thought(m)
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     warnings = []
     engine.warnings.connect(lambda messages: warnings.extend(x.toString() for x in messages))
     window = engine.rootObjects()[0]
@@ -2301,8 +2305,6 @@ def test_qml_tab_switch_completion_and_editor_focus(project, app):
     assert pm.mindmapVisible and m.view_root.id == root_id
     assert not warnings
     window.close()
-    engine.deleteLater()
-    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
 
 def reminder_date(minutes=60):
@@ -2453,11 +2455,11 @@ def test_open_node_reminder_unfolds_and_leaves_unrelated_scope(project):
     assert not m.map.find(branch).folded and not m.map.root.folded
 
 
-def test_qml_node_reminder_controls_and_overview(project, app, tmp_path):
+def test_qml_node_reminder_controls_and_overview(project, app, tmp_path, actiondraw_window):
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
     node_id = thought(m, 'Remember this thought')
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     warnings = []
     engine.warnings.connect(lambda messages: warnings.extend(message.toString() for message in messages))
     window = engine.rootObjects()[0]
@@ -2524,7 +2526,16 @@ def test_qml_node_reminder_controls_and_overview(project, app, tmp_path):
             node = find(window.contentItem(), 'mindmapNode_' + node_id)
             assert badge.x() >= 0 and badge.x() + badge.width() <= node.width()
             assert badge.y() >= 36 and badge.y() + badge.height() <= node.height()
-            assert overview.height() < window.height() / 2
+            # The calendar stacks above the reminder list in narrow windows.
+            # Keep the panel separate from the map and leave room for its node.
+            overview_bottom = overview.mapToScene(overview.boundingRect().bottomLeft()).y()
+            pane_top = pane.mapToScene(pane.boundingRect().topLeft()).y()
+            assert overview_bottom <= pane_top
+            viewport = window.findChild(QObject, 'mindmapViewport')
+            assert viewport.isVisible()
+            assert viewport.height() >= node.height() * zoom
+            viewport_bottom = viewport.mapToScene(viewport.boundingRect().bottomLeft()).y()
+            assert viewport_bottom <= window.height()
             window.grabWindow().save(str(tmp_path / f"mindmap-reminders-{width}-{zoom}.png"))
         window.grabWindow().save(str(tmp_path / 'mindmap-reminders.png'))
         click(find(window.contentItem(), 'clearReminder_' + node_id))
@@ -2537,11 +2548,11 @@ def test_qml_node_reminder_controls_and_overview(project, app, tmp_path):
         window.close()
 
 
-def test_qml_node_quick_reminder_offsets_and_notification_preservation(project, app):
+def test_qml_node_quick_reminder_offsets_and_notification_preservation(project, app, actiondraw_window):
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
     node_id = thought(m, 'Quick reminder thought')
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     warnings = []
     engine.warnings.connect(lambda messages: warnings.extend(message.toString() for message in messages))
     window = engine.rootObjects()[0]
@@ -2597,12 +2608,12 @@ def test_qml_node_quick_reminder_offsets_and_notification_preservation(project, 
         window.close()
 
 
-def test_qml_due_reminder_renewal_keeps_target_with_queued_alerts(project, app, monkeypatch):
+def test_qml_due_reminder_renewal_keeps_target_with_queued_alerts(project, app, monkeypatch, actiondraw_window):
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
     first = thought(m, 'First reminder')
     second = thought(m, 'Second reminder')
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     warnings = []
     engine.warnings.connect(lambda messages: warnings.extend(message.toString() for message in messages))
     window = engine.rootObjects()[0]
@@ -2727,13 +2738,13 @@ def test_add_thought_at_scope_and_tie(project):
 
 
 @pytest.mark.parametrize('zoom,pan', [(1.0, 0), (0.55, 35)])
-def test_qml_double_click_empty_canvas(project, app, zoom, pan):
+def test_qml_double_click_empty_canvas(project, app, zoom, pan, actiondraw_window):
     from PySide6.QtCore import QPointF
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
     parent = m.map.find(next(iter(m.links)))
     a, b = [parent.add_child(t) for t in ('A', 'B')]
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
     window.show()
     pm.showMindmap()
@@ -2810,12 +2821,12 @@ def test_bold_selection_history_and_persistence(project):
     assert not m.map.find(child.id).style.bold
 
 
-def test_qml_ctrl_b_toggles_node_font_and_respects_editor(project, app):
+def test_qml_ctrl_b_toggles_node_font_and_respects_editor(project, app, actiondraw_window):
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
     node = m.map.root.add_child('Medium length thought')
     normal_width = m._layout()[node].width
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
     window.show()
     pm.showMindmap()
@@ -2849,9 +2860,9 @@ def test_qml_ctrl_b_toggles_node_font_and_respects_editor(project, app):
     window.close()
 
 
-def test_mindmap_compact_menu_keyboard_and_help(project, app):
+def test_mindmap_compact_menu_keyboard_and_help(project, app, actiondraw_window):
     pm, tabs, tasks, diagram = project
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
     window.show()
     pm.showMindmap()
@@ -2936,12 +2947,12 @@ def test_add_sibling_relative_scope_validation(project):
 
 
 @pytest.mark.parametrize('zoom,before', [(0.6, True), (1.5, False)])
-def test_qml_sibling_insertion_controls(project, app, zoom, before):
+def test_qml_sibling_insertion_controls(project, app, zoom, before, actiondraw_window):
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
     a = m.map.root.add_child('Alpha', side='right')
     b = m.map.root.add_child('Beta', side='right')
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
     window.show()
     pm.showMindmap()
@@ -3121,11 +3132,11 @@ def test_priority_filter_creation_reveal_and_compaction(project):
     assert m.priorityFilter == 1 and m.selectedId == low.id
 
 
-def test_qml_priority_filter_slider_and_creation(project, app):
+def test_qml_priority_filter_slider_and_creation(project, app, actiondraw_window):
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
     low, high = filter_tabs(project, [0, 10])
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
     window.show()
     pm.showMindmap()
@@ -3171,12 +3182,12 @@ def test_qml_priority_filter_slider_and_creation(project, app):
     window.close()
 
 
-def test_qml_double_click_tab_safeguards(project, app):
+def test_qml_double_click_tab_safeguards(project, app, actiondraw_window):
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
     node_id, tab_id = next(iter(m.links.items()))
     ordinary = m.map.find(node_id).add_child('Thought')
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
     window.show()
     pm.showMindmap()
@@ -3257,14 +3268,20 @@ def test_mindmap_plan_roundtrip_delete_cleanup_and_undo(project):
 
     restored = MindMapController(tabs)
     restored.load(payload)
-    assert restored._kanban[node_id] == {'status': 'in_progress', 'slot_hour': 15}
+    assert restored._kanban[node_id] == payload['kanban'][node_id]
+    assert restored._kanban[node_id]['status'] == 'in_progress'
+    assert restored._kanban[node_id]['slot_hour'] == 15
+    assert restored._kanban[node_id]['added_at'] > 0
     assert restored.plannedNodeItems()[0]['name'] == 'Persisted plan item'
 
     restored.select(node_id)
     restored.deleteSelected()
     assert node_id not in restored._kanban
     restored.undo()
-    assert restored._kanban[node_id] == {'status': 'in_progress', 'slot_hour': 15}
+    assert restored._kanban[node_id] == payload['kanban'][node_id]
+    assert restored._kanban[node_id]['status'] == 'in_progress'
+    assert restored._kanban[node_id]['slot_hour'] == 15
+    assert restored._kanban[node_id]['added_at'] > 0
 
 
 def test_mixed_kanban_lane_actions_and_unschedule_preserve_sources(project):
@@ -3330,9 +3347,9 @@ def test_open_kanban_node_reveals_full_mindmap_and_back_returns_to_board(project
     assert reopened == [True]
 
 
-def test_qml_add_to_plan_ready_action_is_instantiated(project):
+def test_qml_add_to_plan_ready_action_is_instantiated(project, actiondraw_window):
     pm, tabs, tasks, diagram = project
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
     try:
         ready_action = window.findChild(QObject, 'mindmapAddToPlanReady')
@@ -3401,7 +3418,7 @@ def test_deadline_rejects_malformed_saved_state(project, deadline):
         m.decode(saved)
 
 
-def test_qml_deadline_menu_countdown_and_badge_layout(project, app):
+def test_qml_deadline_menu_countdown_and_badge_layout(project, app, actiondraw_window):
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
     node = m.map.root.add_child('Timed node')
@@ -3413,7 +3430,7 @@ def test_qml_deadline_menu_countdown_and_badge_layout(project, app):
     # Simulate reopening after the second timer elapsed while the app was closed.
     saved['deadlines'][other.id]['start'] -= 601
     m.load(saved)
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
     window.show()
     pm.showMindmap()
@@ -3465,6 +3482,9 @@ def test_qml_deadline_menu_countdown_and_badge_layout(project, app):
         QTest.qWait(30)
         start = m.deadlines[node.id]['start']
         history = len(m._undo)
+        # Prime the reminder poll's initial date-label refresh before observing
+        # countdown-only updates; its first timer tick otherwise races this check.
+        pm._processReminderTimers()
         scene_events = []
         m.sceneChanged.connect(lambda: scene_events.append(True))
         pane.setProperty('deadlineNow', start + 900)
@@ -3563,9 +3583,9 @@ def test_thought_wandering_without_alternatives(project, monkeypatch):
     ProjectManager(tasks, diagram).openRandomTab()
 
 
-def test_mindmap_companion_tools_responsive_and_live_assessment(project, app):
+def test_mindmap_companion_tools_responsive_and_live_assessment(project, app, actiondraw_window):
     pm, tabs, tasks, diagram = project
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     warnings = []
     engine.warnings.connect(lambda messages: warnings.extend(m.toString() for m in messages))
     window = engine.rootObjects()[0]
@@ -3630,13 +3650,11 @@ def test_mindmap_companion_tools_responsive_and_live_assessment(project, app):
     assert not warnings
     window.setProperty('suppressClosePrompt', True)
     window.close()
-    engine.deleteLater()
-    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
 
-def test_mindmap_context_menu_bundled_icons(project, app):
+def test_mindmap_context_menu_bundled_icons(project, app, actiondraw_window):
     pm, tabs, tasks, diagram = project
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
     menu = window.findChild(QObject, 'mindmapNodeMenu')
     menu.setProperty('targetNodeId', pm.mindmap.selectedId)
@@ -3655,8 +3673,6 @@ def test_mindmap_context_menu_bundled_icons(project, app):
     assert QQmlProperty.read(move, 'icon.color') != QQmlProperty.read(window.findChild(QObject, 'mindmapSetDeadline'), 'icon.color')
     QMetaObject.invokeMethod(menu, 'close')
     window.close()
-    engine.deleteLater()
-    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
 
 
 def test_bulk_folding_history_selection_and_persistence(project):
@@ -3742,7 +3758,7 @@ def test_empty_map_folding_is_noop(app):
     assert m.to_dict() == before and not m.canUndo
 
 
-def test_qml_fold_buttons_and_view_toolbar(project, app):
+def test_qml_fold_buttons_and_view_toolbar(project, app, actiondraw_window):
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
     root_id = next(iter(m.links))
@@ -3751,7 +3767,7 @@ def test_qml_fold_buttons_and_view_toolbar(project, app):
     tabs.setAssessment(0, 10, 10, True)
     child = branch.add_child('Child')
     child.add_child('Leaf')
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
     window.show()
     pm.showMindmap()
@@ -3801,3 +3817,301 @@ def test_qml_fold_buttons_and_view_toolbar(project, app):
         assert m.map.find(root_id).folded == folded
         assert m.map.find(child.id).folded == folded
     window.close()
+
+
+@pytest.mark.parametrize('now, weekday, expected', [
+    ('2026-10-04 12:00', 0, '2026-10-05 08:00'),
+    ('2026-10-04 07:00', 6, '2026-10-04 08:00'),
+    ('2026-10-04 12:00', 6, '2026-10-04 08:00'),
+    ('2026-10-05 12:00', 6, '2026-10-11 08:00'),
+    ('2026-03-28 12:00', 6, '2026-03-29 08:00'),
+    ('2026-10-24 12:00', 6, '2026-10-25 08:00'),
+])
+def test_plan_weekdays_local_calendar_and_dst(now, weekday, expected, monkeypatch):
+    from datetime import datetime
+    old_tz = __import__('os').environ.get('TZ')
+    monkeypatch.setenv('TZ', 'Europe/Oslo')
+    time.tzset()
+    try:
+        current = datetime.strptime(now, '%Y-%m-%d %H:%M')
+        result = MindMapController._weekday_at(weekday, current)
+        assert datetime.fromtimestamp(result).strftime('%Y-%m-%d %H:%M') == expected
+    finally:
+        if old_tz is None:
+            monkeypatch.delenv('TZ')
+        else:
+            monkeypatch.setenv('TZ', old_tz)
+        time.tzset()
+
+
+def test_plan_schedules_replace_coexist_count_and_history(project, monkeypatch):
+    from datetime import datetime
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    monkeypatch.setattr('actiondraw.mindmap.time.time', lambda: datetime(2026, 10, 4, 12).timestamp())
+    node_id = thought(m, 'Write report')
+    linked = next(iter(m.links))
+    m._set_selection([node_id, linked])
+    assert m.set_reminder(node_id, datetime(2026, 10, 8, 12).timestamp(), False)
+    original = copy.deepcopy(m.reminders)
+    assert m.scheduleSelectedToWeekday(0)
+    assert len(m.plan_schedules) == 2
+    assert m.planWeekdayOptions[0]['label'] == 'Monday 5 Oct (2 tasks)'
+    assert not m._kanban
+    assert tabs.getAllTabs()[0].kanban_status == 'todo'
+    entries = pm.getActiveReminders()
+    assert len(entries) == 3
+    assert sum(e['kind'] == 'kanban_schedule' and e['sendNotification'] for e in entries) == 2
+    assert m.planData(node_id)['planState'] == 'pending'
+    assert m.planData(linked)['planState'] == 'combined'
+    assert m.scheduleSelectedToWeekday(1)
+    assert m.planWeekdayOptions[0]['count'] == 0
+    assert m.planWeekdayOptions[1]['count'] == 2
+    m.undo()
+    assert m.planWeekdayOptions[0]['count'] == 2
+    m.redo()
+    assert m.planWeekdayOptions[1]['count'] == 2
+    m.cancelPlanSchedule(node_id)
+    assert node_id not in m.plan_schedules
+    assert m.reminders == original
+    m.undo()
+    assert node_id in m.plan_schedules
+    m.select(node_id)
+    m.deleteSelected()
+    assert node_id not in m.plan_schedules
+    m.undo()
+    assert node_id in m.plan_schedules
+    assert not m.scheduleNodeToWeekday('missing', 1)
+    assert not m.scheduleSelectedToWeekday(7)
+
+
+def test_plan_schedule_delivery_catchup_and_no_undo_replay(project, monkeypatch):
+    from datetime import datetime
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    node_id = thought(m, 'Due task')
+    linked = next(iter(m.links))
+    now = [datetime(2026, 10, 4, 12).timestamp()]
+    monkeypatch.setattr('actiondraw.mindmap.time.time', lambda: now[0])
+    m._set_selection([node_id, linked])
+    m.scheduleSelectedToWeekday(0)
+    m.addSelectedToPlan(14)
+    added = m._kanban[node_id]['added_at']
+    assert m.planData(node_id)['planState'] == 'combined'
+    sent, due, saved = [], [], []
+    monkeypatch.setattr(pm, '_publishReminderNotification', lambda *args, **kwargs: sent.append((args, kwargs)))
+    monkeypatch.setattr(pm, '_save_after_reminder', lambda: saved.append(True))
+    pm.mindmapReminderDue.connect(lambda *args: due.append(args))
+    pm._checkPlanSchedules()
+    assert not due
+    # A project loaded after its due date catches up through the normal timer.
+    payload = m.to_dict()
+    m.load(payload)
+    now[0] = datetime(2026, 10, 6, 10).timestamp()
+    pm._processReminderTimers()
+    assert not m.plan_schedules
+    assert m._kanban[node_id]['status'] == 'ready'
+    assert m._kanban[node_id]['added_at'] == added
+    assert tabs.getAllTabs()[0].kanban_status == 'ready'
+    assert len(due) == len(sent) == 2
+    assert all(event[2] is True for event in due)
+    assert saved == [True]
+    pm._processReminderTimers()
+    assert len(due) == 2
+    # Same-day scheduling after 08:00 delivers, and history cannot revive it.
+    m.select(node_id)
+    m.scheduleSelectedToWeekday(1)
+    m.editSelected('Edited due task', '')
+    pm._checkPlanSchedules()
+    assert len(due) == 3
+    for _ in range(3):
+        m.undo()
+        assert not m.plan_schedules
+        pm._checkPlanSchedules()
+    for _ in range(3):
+        m.redo()
+        assert not m.plan_schedules
+        pm._checkPlanSchedules()
+    assert len(due) == 3
+
+
+def test_plan_persistence_legacy_and_entry_timestamps(project, monkeypatch):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    node_id = thought(m)
+    clock = [1000.0]
+    monkeypatch.setattr('actiondraw.mindmap.time.time', lambda: clock[0])
+    m.addSelectedToReady()
+    m.scheduleSelectedToWeekday(0)
+    payload = m.to_dict()
+    restored = MindMapController(tabs)
+    restored.load(payload)
+    assert restored.plan_schedules == m.plan_schedules
+    assert restored._kanban == m._kanban
+    assert 'Added ' in restored.planData(node_id)['planTooltip']
+    clock[0] = 2000
+    m.setNodeKanbanPlacement(node_id, 'in_progress', 10)
+    assert m._kanban[node_id]['added_at'] == 1000
+    assert '10:00' in m.planData(node_id)['planTooltip']
+    m.removeNodeFromPlan(node_id)
+    assert m.planData(node_id)['planState'] == 'pending'
+    m.addSelectedToReady()
+    assert m._kanban[node_id]['added_at'] == 2000
+    del payload['plan_schedules']
+    del payload['kanban'][node_id]['added_at']
+    restored.load(payload)
+    restored.setNodeKanbanPlacement(node_id, 'done')
+    assert not restored.plan_schedules
+    assert 'Added ' not in restored.planData(node_id)['planTooltip']
+    tab = tabs.getAllTabs()[0]
+    tabs.setKanbanPlacement(0, 'unscheduled')
+    assert tab.kanban_added_at is None
+    tabs.setKanbanPlacement(0, 'ready')
+    assert tab.kanban_added_at == 2000
+    clock[0] = 3000
+    tabs.setKanbanPlacement(0, 'in_progress', 12)
+    assert tab.kanban_added_at == 2000
+    assert pm._build_project_data()['tabs'][0]['kanban_added_at'] == 2000
+    assert ProjectManager._loaded_kanban_added_at(None) is None
+
+
+@pytest.mark.parametrize('value', [None, True, 'tomorrow', float('nan'), float('inf'), 1e300])
+def test_plan_schedule_rejects_invalid_saved_timestamps(project, value):
+    m = project[0].mindmap
+    node_id = thought(m)
+    payload = m.to_dict()
+    payload['plan_schedules'] = {node_id: {'at': value}}
+    with pytest.raises(ValueError, match='timestamp'):
+        MindMapController.decode(payload)
+
+
+def test_plan_badge_reserves_width_only_and_reacts_to_board_changes(project):
+    m = project[0].mindmap
+    node_id = thought(m, 'A moderately long node title', '')
+    before = next(n for n in m.nodes if n['id'] == node_id)
+    m.scheduleSelectedToWeekday(0)
+    pending = next(n for n in m.nodes if n['id'] == node_id)
+    assert pending['height'] == before['height']
+    assert pending['width'] == before['width'] + 20
+    m.addSelectedToReady()
+    both = next(n for n in m.nodes if n['id'] == node_id)
+    assert both['width'] == pending['width']
+    assert both['height'] == pending['height']
+    assert both['planState'] == 'combined'
+    m.cancelPlanSchedule(node_id)
+    assert m.planData(node_id)['planState'] == 'board'
+    m.removeNodeFromPlan(node_id)
+    assert not m.planData(node_id)['planVisible']
+
+
+def test_qml_weekday_actions_reminder_reschedule_cancel_and_badge(project, app, tmp_path, actiondraw_window):
+    from datetime import datetime
+    pm, tabs, tasks, diagram = project
+    pm._reminder_timer.stop()
+    m = pm.mindmap
+    node_id = thought(m, 'Prepare launch checklist', 'Discuss the release timeline')
+    m.toggleBookmark(node_id)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    warnings = []
+    engine.warnings.connect(lambda messages: warnings.extend(message.toString() for message in messages))
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(100)
+
+    def find(item, name):
+        if item.objectName() == name:
+            return item
+        for child in item.childItems():
+            found = find(child, name)
+            if found is not None:
+                return found
+
+    try:
+        weekday = (datetime.now().weekday() + 1) % 7
+        node = find(window.contentItem(), 'mindmapNode_' + node_id)
+        QTest.mouseClick(window, Qt.RightButton, Qt.NoModifier,
+                         node.mapToScene(node.boundingRect().center()).toPoint())
+        QTest.qWait(30)
+        node_menu = window.findChild(QObject, 'mindmapNodeMenu')
+        assert node_menu.property('visible')
+        menu = window.findChild(QObject, 'mindmapAddToPlanMenu')
+        QMetaObject.invokeMethod(menu, 'open')
+        QTest.qWait(30)
+        assert menu.property('visible')
+        window.grabWindow().save(str(tmp_path / 'weekday-menu.png'))
+        QMetaObject.invokeMethod(menu, 'close')
+        QMetaObject.invokeMethod(node_menu, 'close')
+        for day in range(7):
+            menu = window.findChild(QObject, 'mindmapAddToPlanMenu')
+            action = find(menu.property('contentItem'), 'mindmapAddToWeekday_' + str(day))
+            assert action is not None
+            assert action.property('text') == m.planWeekdayOptions[day]['label']
+        action = find(menu.property('contentItem'), 'mindmapAddToWeekday_' + str(weekday))
+        QMetaObject.invokeMethod(action, 'triggered')
+        QTest.qWait(50)
+        assert node_id in m.plan_schedules
+        badge = find(window.contentItem(), 'mindmapPlanBadge_' + node_id)
+        assert badge and badge.isVisible()
+        label = find(window.contentItem(), 'mindmapNodeText_' + node_id)
+        assert badge.x() + badge.width() <= label.x()
+        row = find(window.contentItem(), 'reminderRow_plan_' + node_id)
+        assert row and row.isVisible()
+        edit = find(window.contentItem(), 'editReminder_plan_' + node_id)
+        assert edit.property('text') == 'Reschedule'
+        QMetaObject.invokeMethod(edit, 'clicked')
+        QTest.qWait(30)
+        menu = row.findChild(QObject, 'reschedulePlanMenu_' + node_id)
+        assert menu and menu.property('visible')
+        next_day = (weekday + 1) % 7
+        target = find(menu.property('contentItem'), 'reschedulePlanWeekday_' + node_id + '_' + str(next_day))
+        assert target is not None
+        QMetaObject.invokeMethod(target, 'triggered')
+        QTest.qWait(30)
+        assert datetime.fromtimestamp(m.plan_schedules[node_id]['at']).weekday() == next_day
+        # A pending schedule and an ordinary reminder remain independently actionable.
+        m.set_reminder(node_id, time.time() + 86400, False)
+        m.addSelectedToPlan(10)
+        QTest.qWait(50)
+        assert m.planData(node_id)['planState'] == 'combined'
+        window.grabWindow().save(str(tmp_path / 'weekday-planning.png'))
+        cancel = find(window.contentItem(), 'clearReminder_plan_' + node_id)
+        QMetaObject.invokeMethod(cancel, 'clicked')
+        QTest.qWait(30)
+        assert node_id not in m.plan_schedules
+        assert node_id in m.reminders
+        assert m._kanban[node_id]['status'] == 'in_progress'
+        assert not warnings
+    finally:
+        window.close()
+
+
+def test_plan_encrypted_project_roundtrip_and_persisted_delivery(project, tmp_path, monkeypatch):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    node_id = thought(m, 'Saved scheduled task')
+    linked = next(iter(m.links))
+    m._set_selection([node_id, linked])
+    m.scheduleSelectedToWeekday(0)
+    m.addSelectedToReady()
+    credentials = EncryptionCredentials(passphrase='weekday-plan-test')
+    monkeypatch.setattr(pm, '_prompt_encryption_credentials', lambda *args: credentials)
+    monkeypatch.setattr(pm, '_publishReminderNotification', lambda *args, **kwargs: None)
+    path = tmp_path / 'weekday.progress'
+    expected = m.to_dict()
+    tab_added = tabs.getAllTabs()[0].kanban_added_at
+    assert pm.saveProject(str(path))
+    m.cancelPlanSchedule(node_id)
+    pm.loadProject(str(path))
+    assert m.plan_schedules == expected['plan_schedules']
+    assert m._kanban == expected['kanban']
+    assert tabs.getAllTabs()[0].kanban_added_at == tab_added
+    due_at = m.plan_schedules[node_id]['at']
+    monkeypatch.setattr('actiondraw.mindmap.time.time', lambda: due_at + 10)
+    pm._checkPlanSchedules()
+    saved = decrypt_project_data(json.loads(path.read_text()), credentials)
+    assert saved['mindmap']['plan_schedules'] == {}
+    assert saved['mindmap']['kanban'][node_id]['status'] == 'ready'
+    assert saved['tabs'][0]['kanban_status'] == 'ready'
+    pm.loadProject(str(path))
+    assert not m.plan_schedules

@@ -211,14 +211,16 @@ Item {
         timePickerPopup.open()
     }
 
-    function openStandaloneReminderDialog() {
+    function openStandaloneReminderDialog(selectedDate) {
         reminderDialog.standaloneMode = true
         reminderDialog.editStandaloneIndex = -1
         reminderDialog.targetTabIndex = -1
         reminderDialog.taskIndex = -1
         reminderDialog.standaloneTitle = ""
-        reminderDialog.dateValue = ""
-        reminderDialog.timeValue = ""
+        reminderDialog.nodeId = ""
+        reminderDialog.setToOffsetMinutes(60)
+        if (selectedDate)
+            reminderDialog.dateValue = selectedDate
         reminderDialog.sendNotification = false
         reminderDialog.open()
     }

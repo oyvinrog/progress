@@ -2,7 +2,6 @@
 
 import json
 import os
-import sys
 import time
 
 import pytest
@@ -19,7 +18,6 @@ from actiondraw import (
     DiagramModel,
     DrawingPoint,
     DrawingStroke,
-    create_actiondraw_window,
 )
 from actiondraw.markdown_tab_clipboard import MarkdownTabClipboard, parse_tabs_from_clipboard_text
 from actiondraw.qml import QML_DIR
@@ -1130,16 +1128,10 @@ class TestConnectAll:
 
 
 class TestCreateActionDrawWindow:
-    @pytest.mark.skipif(
-        sys.version_info[:2] == (3, 13),
-        reason=(
-            "PySide6 QML engine cyclic finalization can segfault on Python 3.13; "
-            "validate_actiondraw.py provides the equivalent window smoke test "
-            "in a dedicated process"
-        ),
-    )
-    def test_create_window(self, app, diagram_model_with_task_model):
-        engine = create_actiondraw_window(diagram_model_with_task_model, diagram_model_with_task_model._task_model)
+    def test_create_window(self, app, diagram_model_with_task_model, actiondraw_window):
+        # Explicit fixture teardown destroys both QML engines while their
+        # context models are alive, before a later project load forces GC.
+        engine = actiondraw_window(diagram_model_with_task_model, diagram_model_with_task_model._task_model)
         assert isinstance(engine, QQmlApplicationEngine)
         assert engine.rootObjects()
         assert getattr(engine, "_markdown_pdf_exporter", None) is not None
@@ -1175,7 +1167,7 @@ class TestCreateActionDrawWindow:
         dialogs_qml = (QML_DIR / "components" / "ActionDialogs.qml").read_text(encoding="utf-8")
         window_qml = (QML_DIR / "ActionDrawWindow.qml").read_text(encoding="utf-8")
 
-        assert 'function openStandaloneReminderDialog()' in dialogs_qml
+        assert 'function openStandaloneReminderDialog(selectedDate)' in dialogs_qml
         assert 'property bool standaloneMode: false' in dialogs_qml
         assert 'projectManager.addStandaloneReminder' in dialogs_qml
         assert 'projectManager.updateStandaloneReminder' in dialogs_qml
@@ -1185,7 +1177,7 @@ class TestCreateActionDrawWindow:
         overview_qml = (QML_DIR / "components" / "ReminderOverview.qml").read_text(encoding="utf-8")
         assert 'ReminderOverview {' in window_qml
         assert 'text: "New Reminder"' in overview_qml
-        assert 'text: "Edit"' in overview_qml
+        assert 'text: reminderRow.isPlan ? "Reschedule" : "Edit"' in overview_qml
         assert 'dialogs.openStandaloneReminderEditDialog' in overview_qml
         assert 'dialogs.openTaskReminderEditDialog' in overview_qml
         assert 'clearStandaloneReminder(Number(data.standaloneIndex))' in overview_qml
@@ -1204,7 +1196,7 @@ class TestCreateActionDrawWindow:
         overview_qml = (QML_DIR / "components" / "ReminderOverview.qml").read_text(encoding="utf-8")
         assert 'ReminderOverview {' in window_qml
         assert 'text: "Due in " + (reminderRow.modelData.countdownText || "0:00")' in overview_qml
-        assert 'text: "Remind at " + reminderRow.modelData.reminderText' in overview_qml
+        assert 'text: (reminderRow.isPlan ? "Add and notify at " : "Remind at ") + reminderRow.modelData.reminderText' in overview_qml
 
 
 class TestMarkdownTabClipboard:
@@ -3500,9 +3492,9 @@ class TestActionDrawQmlTaskInteractions:
         assert "onPositionChanged" in kanban_qml
         assert "preventStealing: true" in kanban_qml
         assert "root.dragActive" in kanban_qml
-        assert "function inProgressSlotHeight(" in kanban_qml
-        assert "property real desiredHeight:" in kanban_qml
-        assert "root.inProgressSlotHeight(slotHour)" in kanban_qml
+        assert 'objectName: "kanbanTimeline"' in kanban_qml
+        assert "root.timelineColumnCount()" in kanban_qml
+        assert "root.timelineHourHeight" in kanban_qml
         assert "cardsColumn.forceLayout" in kanban_qml
         assert "wrapMode: Text.WordWrap" in kanban_qml
         assert "maximumLineCount: 2" in kanban_qml
@@ -3511,7 +3503,7 @@ class TestActionDrawQmlTaskInteractions:
         assert "placeMoveMode" not in kanban_qml
         assert "Choose destination for " not in kanban_qml
 
-    def test_kanban_mouse_drag_drops_tab_into_target_column(self, app):
+    def test_kanban_mouse_drag_drops_tab_into_target_column(self, app, qml_cleanup):
         from task_model import TabModel
 
         def find_visual_item(root, object_name, visible=None):
@@ -3531,6 +3523,7 @@ class TestActionDrawQmlTaskInteractions:
         engine = QQmlEngine()
         component = QQmlComponent(engine, QUrl.fromLocalFile(str(QML_DIR / "KanbanWindow.qml")))
         root = component.createWithInitialProperties({"tabModel": model})
+        qml_cleanup(engine, root, model)
         assert root is not None, component.errorString()
 
         try:
@@ -3563,10 +3556,8 @@ class TestActionDrawQmlTaskInteractions:
             assert moved_card.height() > 0
         finally:
             root.close()
-            root.deleteLater()
-            engine.deleteLater()
 
-    def test_kanban_in_progress_slot_expands_for_multiple_tabs(self, app):
+    def test_kanban_in_progress_places_overlapping_tabs_side_by_side(self, app, qml_cleanup):
         from task_model import TabModel
 
         def find_visual_item(root, object_name, visible=None):
@@ -3610,6 +3601,7 @@ class TestActionDrawQmlTaskInteractions:
         engine = QQmlEngine()
         component = QQmlComponent(engine, QUrl.fromLocalFile(str(QML_DIR / "KanbanWindow.qml")))
         root = component.createWithInitialProperties({"tabModel": model})
+        qml_cleanup(engine, root, model)
         assert root is not None, component.errorString()
 
         try:
@@ -3645,10 +3637,10 @@ class TestActionDrawQmlTaskInteractions:
             assert isinstance(slot, QQuickItem)
             assert isinstance(first_card, QQuickItem)
             assert isinstance(second_card, QQuickItem)
-            assert slot.height() > 154
+            assert slot.height() == 154
 
-            first_card = find_visual_item_descendant(slot, "kanbanCard_0", visible=True)
-            second_card = find_visual_item_descendant(slot, "kanbanCard_1", visible=True)
+            first_card = find_visual_item(root, "kanbanCard_0", visible=True)
+            second_card = find_visual_item(root, "kanbanCard_1", visible=True)
             assert isinstance(first_card, QQuickItem)
             assert isinstance(second_card, QQuickItem)
             first_bounds = item_bounds_in(first_card, slot)
@@ -3657,15 +3649,13 @@ class TestActionDrawQmlTaskInteractions:
             assert second_bounds[1] >= 0
             assert first_bounds[3] <= slot.height()
             assert second_bounds[3] <= slot.height()
-            assert first_bounds[3] <= second_bounds[1] or second_bounds[3] <= first_bounds[1]
+            assert first_bounds[2] <= second_bounds[0] or second_bounds[2] <= first_bounds[0]
             assert first_card.height() >= 70
             assert second_card.height() >= 70
         finally:
             root.close()
-            root.deleteLater()
-            engine.deleteLater()
 
-    def test_kanban_todo_search_filters_only_todo_cards(self, app):
+    def test_kanban_todo_search_filters_only_todo_cards(self, app, qml_cleanup):
         from task_model import TabModel
 
         def find_visual_item(root, object_name, visible=None):
@@ -3690,6 +3680,7 @@ class TestActionDrawQmlTaskInteractions:
         engine = QQmlEngine()
         component = QQmlComponent(engine, QUrl.fromLocalFile(str(QML_DIR / "KanbanWindow.qml")))
         root = component.createWithInitialProperties({"tabModel": model})
+        qml_cleanup(engine, root, model)
         assert root is not None, component.errorString()
 
         try:
@@ -3723,10 +3714,8 @@ class TestActionDrawQmlTaskInteractions:
             assert find_visual_item(root, "kanbanCard_3", visible=True) is not None
         finally:
             root.close()
-            root.deleteLater()
-            engine.deleteLater()
 
-    def test_kanban_postpone_button_enabled_for_non_final_time_slots(self, app):
+    def test_kanban_postpone_button_enabled_for_non_final_time_slots(self, app, qml_cleanup):
         from task_model import TabModel
 
         def find_visual_item(root, object_name, visible=None):
@@ -3745,6 +3734,7 @@ class TestActionDrawQmlTaskInteractions:
         engine = QQmlEngine()
         component = QQmlComponent(engine, QUrl.fromLocalFile(str(QML_DIR / "KanbanWindow.qml")))
         root = component.createWithInitialProperties({"tabModel": model})
+        qml_cleanup(engine, root, model)
         assert root is not None, component.errorString()
 
         try:
@@ -3772,8 +3762,6 @@ class TestActionDrawQmlTaskInteractions:
             assert lane_clear.isEnabled()
         finally:
             root.close()
-            root.deleteLater()
-            engine.deleteLater()
 
     def test_toolbar_does_not_expose_workspace_markdown_button(self):
         qml = (QML_DIR / "components" / "ToolbarRow.qml").read_text(encoding="utf-8")
@@ -3920,20 +3908,17 @@ class _DummyRoot(QObject):
 
 class TestReminderDialogPresets:
     @pytest.fixture
-    def action_dialogs_component(self, app):
+    def action_dialogs_component(self, app, qml_cleanup):
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         engine = QQmlEngine()
-        engine.rootContext().setContextProperty("markdownHighlighterBridge", QObject())
+        engine.rootContext().setContextProperty("markdownHighlighterBridge", QObject(engine))
         component = QQmlComponent(engine, QUrl.fromLocalFile(str(QML_DIR / "components" / "ActionDialogs.qml")))
-        instance = component.createWithInitialProperties({"root": _DummyRoot()})
+        instance = component.createWithInitialProperties({"root": _DummyRoot(engine)})
+        qml_cleanup(engine, instance)
         errors = [err.toString() for err in component.errors()]
         assert instance is not None, errors
         assert not component.isError(), errors
-        try:
-            yield instance
-        finally:
-            instance.deleteLater()
-            engine.deleteLater()
+        yield instance
 
     def test_reminder_dialog_exposes_named_preset_buttons(self):
         qml = (QML_DIR / "components" / "ActionDialogs.qml").read_text(encoding="utf-8")
@@ -5784,8 +5769,8 @@ class TestTabModelKanban:
 
         model = TabModel()
 
-        assert model.setKanbanPlacement(0, "in_progress", 22) is True
-        assert model.getTabSummary(0)["kanbanStatus"] == "in_progress"
+        assert model.setKanbanPlacement(0, "in_progress", 22) is False
+        assert model.getTabSummary(0)["kanbanStatus"] == "todo"
         assert model.getTabSummary(0)["kanbanSlotHour"] == -1
 
     def test_create_tab_at_kanban_placement(self, app):

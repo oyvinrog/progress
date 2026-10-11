@@ -1312,6 +1312,7 @@ ApplicationWindow {
             spacing: 10
 
             ReminderOverview {
+                planController: typeof mindmapController !== "undefined" ? mindmapController : null
                 Layout.fillWidth: true
                 windowRoot: root
                 projectManager: root.projectManagerRef

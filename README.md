@@ -151,7 +151,12 @@ supports a reminder, including tab nodes and the project root.
 
 **Waiting Reminders** stays visible above both the canvas and mindmap. Choose
 **Open Node** to reveal the relevant node, even inside a folded branch. The
-right-click menu lets you update or clear its reminder.
+right-click menu lets you update or clear its reminder. A month calendar shows
+how many future reminders are waiting on each day, including later today.
+Select a date to filter the list; **New Reminder** prefills that selected date.
+Choose **All days** to see everything.
+Use the month arrows and **Today** to navigate; **Roll Up** collapses both
+the calendar and list.
 
 Use **Complete** or **F4** to mark selected nodes with a ✓. If all selected
 nodes are complete, the same action clears the marks. Completing a node does
@@ -161,6 +166,19 @@ map are saved with the project.
 Completing or deleting a node cancels its reminder; undo restores it. Reminders
 that have already fired stay cleared through undo/redo. Use **Renew** in the
 due alert to schedule another one.
+
+**Add to plan** offers Ready, hourly slots, and Monday–Sunday with dates and
+pending task counts. Choosing a weekday schedules a one-time move to Kanban
+Ready at 08:00 local time, including today (immediately if 08:00 has passed).
+A separate **Add to Kanban → Ready** reminder lets you reschedule or cancel;
+ordinary reminders remain independent. Choosing another day replaces the
+pending schedule. Due schedules show an in-app alert and use the configured
+`ntfy` notifications; missed schedules run when the app next opens the project.
+
+A small calendar badge marks planned nodes without adding a row: amber means
+scheduled, blue means on Kanban, and a blue badge with an amber dot means both.
+Hover for the current column/hour, board-entry time when known, and scheduled
+date. Moving a card preserves its entry time; removing and re-adding resets it.
 
 ### 4. Reorganize as the plan changes
 
@@ -235,6 +253,19 @@ the **Action order** list. Drag its **≡** handles (or use the up/down arrows) 
 choose execution order, then **Add to ActionDraw** or **Add to mindmap** to copy their titles in
 that order. These copies are independent of the model, and the causal edges
 stay in the causal editor. Each tab's model is saved with the project.
+
+The action list also has **+ Add action** and a **Remove action** button on each
+row. Removing an action changes its node to a variable and preserves its label,
+notes, position, and connections; Undo restores its action status and order.
+Canvas **Delete** still removes the whole node and its connections.
+
+You can keep adding actions after importing. Each destination tracks imports
+separately and receives only actions it has not received before, in current list
+order. New ActionDraw batches form separate chains. Renaming, reordering, or
+removing and restoring an imported action does not copy it again or change its
+existing copies. Import history is saved with the project and survives graph
+Undo/Redo. For older projects, ActionDraw history is recovered from the last
+import signature; mindmap history starts empty because it was not recorded.
 
 Edge percentages record your estimated likelihoods. They need not sum to 100%,
 and they do not calculate outcome probabilities. Numerical causal question

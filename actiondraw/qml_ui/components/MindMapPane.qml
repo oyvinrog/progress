@@ -680,6 +680,41 @@ FocusScope {
                             Accessible.role: Accessible.StaticText
                             Accessible.name: "Bookmarked"
                         }
+                        Rectangle {
+                            objectName: "mindmapPlanBadge_" + nodeItem.modelData.id
+                            visible: nodeItem.modelData.planVisible
+                            width: 16; height: 18; radius: 3
+                            anchors.left: parent.left
+                            anchors.leftMargin: 9 + (nodeItem.modelData.hasNote ? 20 : 0)
+                                                   + (nodeItem.modelData.bookmarked ? 20 : 0)
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
+                                                          - (nodeItem.modelData.measureProgress ? 12 : 0)
+                                                          - (nodeItem.modelData.deadlineActive ? 14 : 0)
+                            color: nodeItem.modelData.planState === "pending" ? "#806125" : "#315e7b"
+                            z: 3
+                            Image {
+                                anchors.centerIn: parent
+                                width: 14; height: 14
+                                source: Qt.resolvedUrl("../icons/calendar.svg")
+                            }
+                            Rectangle {
+                                visible: nodeItem.modelData.planState === "combined"
+                                anchors.right: parent.right; anchors.top: parent.top
+                                width: 5; height: 5; radius: 3; color: "#ffcc66"
+                            }
+                            Accessible.role: Accessible.StaticText
+                            Accessible.name: nodeItem.modelData.planTooltip
+                            ToolTip.visible: planHover.containsMouse
+                            ToolTip.delay: 300
+                            ToolTip.text: nodeItem.modelData.planTooltip
+                            MouseArea {
+                                id: planHover
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                acceptedButtons: Qt.NoButton
+                            }
+                        }
                         Text {
                             objectName: "mindmapNodeText_" + nodeItem.modelData.id
                             anchors.fill: parent
@@ -688,6 +723,7 @@ FocusScope {
                                                   + (nodeItem.modelData.deadlineActive ? 28 : 0)
                             anchors.leftMargin: 9 + (nodeItem.modelData.hasNote ? 20 : 0)
                                                    + (nodeItem.modelData.bookmarked ? 20 : 0)
+                                                   + (nodeItem.modelData.planVisible ? 20 : 0)
                             anchors.rightMargin: (nodeItem.modelData.priorityLevel > 0 ? 48 : 18)
                                                  + (nodeItem.modelData.hasChildren ? 22 : 0)
                                                  + (nodeItem.modelData.priorityRank > 0 ? 30 : 0)
@@ -1141,6 +1177,20 @@ FocusScope {
                     text: modelData.label
                     onTriggered: {
                         pane.controller.addSelectedToPlan(modelData.hour)
+                        pane.focusMap()
+                    }
+                }
+            }
+            MenuSeparator {}
+            Repeater {
+                model: pane.controller ? pane.controller.planWeekdayOptions : []
+                delegate: IconMenuItem {
+                    iconKey: "calendar"
+                    required property var modelData
+                    objectName: "mindmapAddToWeekday_" + modelData.weekday
+                    text: modelData.label
+                    onTriggered: {
+                        pane.controller.scheduleSelectedToWeekday(modelData.weekday)
                         pane.focusMap()
                     }
                 }

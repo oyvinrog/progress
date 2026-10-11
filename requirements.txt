@@ -1,4 +1,6 @@
-PySide6>=6.6,<7
+# Avoid native PySide6 6.12.0 aborts on older Python runtimes.
+PySide6==6.10.1; python_version < "3.12"
+PySide6>=6.6,<7; python_version >= "3.12"
 Pygments>=2.17
 cryptography>=42.0.0
 argon2-cffi>=23.1.0

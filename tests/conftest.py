@@ -29,8 +29,39 @@ def app():
 
 
 @pytest.fixture
+def qml_cleanup(app):
+    """Release component roots after test-local item wrappers leave scope.
+
+    Keep context models alive until deletion, and finish deletion before a
+    subsequent project load forces garbage collection.
+    """
+    import shiboken6
+    from PySide6.QtCore import QObject
+
+    components = []
+
+    def retain(engine, root, *context_objects):
+        # Let the engine destroy its QML roots after releasing JS wrappers.
+        # Deleting roots first can leave stale wrappers in the engine.
+        if root is not None:
+            QObject.setParent(root, engine)
+        components.append((engine, root, context_objects))
+
+    yield retain
+
+    for engine, root, context_objects in reversed(components):
+        if shiboken6.isValid(engine):
+            shiboken6.delete(engine)
+
+
+@pytest.fixture
 def actiondraw_window(app):
-    """Destroy QML engines before releasing their Python context objects."""
+    """Destroy QML engines before releasing their Python context objects.
+
+    Closing a window only hides it. The markdown editor can keep its engine
+    alive in a Python cycle, so both engines need explicit teardown to keep
+    later garbage collection from calling into partially finalized models.
+    """
     import shiboken6
     from actiondraw.ui import create_actiondraw_window
 
