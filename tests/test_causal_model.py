@@ -87,7 +87,7 @@ def test_import_signature_and_serialization(app):
     model.undo()
     assert model.imported
     model.editNode(a, 'Raise concern again', 'action', '')
-    assert not model.imported
+    assert model.imported
     model.undo()
     assert model.imported
     restored = CausalModelModel()
@@ -95,7 +95,91 @@ def test_import_signature_and_serialization(app):
     assert restored.to_dict() == model.to_dict()
     assert restored.imported and not restored.canUndo
     model.moveAction(1, 0)
-    assert not model.imported
+    assert model.imported
+
+
+def test_remove_action_preserves_node_and_connections(app):
+    model, a, b, c, d = graph()
+    before = model.to_dict()
+    original = next(n for n in model.nodes if n['id'] == a)
+    assert model.removeAction(a)
+    assert next(n for n in model.nodes if n['id'] == a) == dict(original, type='variable')
+    assert model.edges == before['edges']
+    assert [(n['id'], n['order']) for n in model.actions] == [(c, 1)]
+    model.undo()
+    assert model.to_dict() == before
+    model.redo()
+    assert model.orderedTitles == ['Prepare evidence']
+    assert not model.removeAction(b)
+
+
+def test_incremental_import_history_survives_graph_history(app):
+    model, a, b, c, d = graph()
+    model.markActionsImported('actiondraw', [a])
+    assert [n['id'] for n in model.pendingActionDrawActions] == [c]
+    assert [n['id'] for n in model.pendingMindmapActions] == [a, c]
+    model.markActionsImported('mindmap', [c])
+    model.editNode(a, 'Renamed', 'action', 'Notes')
+    model.moveAction(1, 0)
+    model.removeAction(a)
+    model.editNode(a, 'Renamed', 'action', 'Notes')
+    assert [n['id'] for n in model.pendingActionDrawActions] == [c]
+    assert [n['id'] for n in model.pendingMindmapActions] == [a]
+    new = model.addNode('Renamed', 'action', 10, 20)
+    model.undo()
+    model.markActionsImported('actiondraw', [c])
+    model.redo()
+    assert [n['id'] for n in model.pendingActionDrawActions] == [new]
+    model.markActionsImported('actiondraw', [new, 'missing'])
+    model.undo()
+    model.redo()
+    assert model.imported
+    model.removeNode(a)
+    restored = CausalModelModel()
+    restored.from_dict(model.to_dict())
+    assert a in restored.to_dict()['imported_action_ids']['actiondraw']
+    assert restored.pendingActionDrawActions == []
+    assert [n['id'] for n in restored.pendingMindmapActions] == [new]
+
+
+def test_legacy_import_history_migration(app):
+    model, a, b, c, d = graph()
+    legacy = model.to_dict()
+    del legacy['imported_action_ids']
+    legacy['version'] = 1
+    legacy['last_imported_signature'] = json.dumps([[a, 'Old label'], [c, 'Evidence']])
+    model.from_dict(legacy)
+    assert model.imported
+    assert [n['id'] for n in model.pendingMindmapActions] == [a, c]
+    assert model.to_dict()['version'] == 2
+    for invalid in ['not json', '{}', 'null', '[[42, "bad"], ["id"], null]']:
+        legacy['last_imported_signature'] = invalid
+        assert normalize_causal_model_state(legacy)['imported_action_ids'] == {
+            'actiondraw': [], 'mindmap': []}
+    legacy['imported_action_ids'] = {'actiondraw': [a, a, None, 42, ''], 'mindmap': 'bad'}
+    assert normalize_causal_model_state(legacy)['imported_action_ids'] == {
+        'actiondraw': [a], 'mindmap': []}
+
+
+def test_mindmap_partial_import_records_only_successful_actions(app, monkeypatch):
+    tasks, diagram, tabs, manager, model = project()
+    first = model.addNode('One', 'action', 10, 20)
+    second = model.addNode('Two', 'action', 30, 20)
+    add_siblings = manager.mindmap.add_siblings
+    monkeypatch.setattr(manager.mindmap, 'add_siblings', lambda parent, titles: add_siblings(parent, titles[:1]))
+    assert len(manager.addCausalModelToMindmap([second, first, second, 'missing'])) == 1
+    assert [n['id'] for n in model.pendingMindmapActions] == [first]
+    assert [child.text for child in manager.mindmap.view_root.children] == ['Two']
+    monkeypatch.setattr(manager.mindmap, 'add_siblings', lambda parent, titles: [])
+    assert manager.addCausalModelToMindmap() == []
+    assert [n['id'] for n in model.pendingMindmapActions] == [first]
+    monkeypatch.setattr(manager.mindmap, 'add_siblings', add_siblings)
+    assert len(manager.addCausalModelToMindmap()) == 1
+    assert manager.addCausalModelToMindmap() == []
+    model.undo()
+    model.redo()
+    assert model.pendingMindmapActions == []
+    assert [child.text for child in manager.mindmap.view_root.children] == ['Two', 'One']
 
 
 def test_normalization_handles_damaged_and_legacy_data(app):
@@ -172,11 +256,13 @@ def test_project_round_trip_tabs_and_dirty_detection(app, tmp_path, monkeypatch,
     manager._last_saved_snapshot = manager._serialize_project_payload(manager._build_project_data())
     assert not manager.hasUnsavedChanges()
     a = model.addNode('First', 'action', 20, 30)
+    model.markActionsImported('actiondraw', [a])
     assert manager.hasUnsavedChanges()
     tabs.addTab('Other')
     manager.switchTab(1)
     assert model.nodes == []
     b = model.addNode('Second', 'action', 40, 50)
+    model.markActionsImported('mindmap', [b])
     model.addNode('Outcome', 'outcome', 100, 50)
     model.setDescription('Other assumptions')
     path = tmp_path / 'causal.progress'
@@ -188,9 +274,13 @@ def test_project_round_trip_tabs_and_dirty_detection(app, tmp_path, monkeypatch,
     loaded_manager.loadProject(str(path))
     assert loaded.orderedTitles == ['Second']
     assert loaded.description == 'Other assumptions'
+    assert loaded.pendingMindmapActions == []
+    assert len(loaded.pendingActionDrawActions) == 1
     loaded_manager.switchTab(0)
     assert loaded.orderedTitles == ['First']
     assert loaded.nodes[0]['id'] == a
+    assert loaded.pendingActionDrawActions == []
+    assert len(loaded.pendingMindmapActions) == 1
     duplicate = copy.deepcopy(loaded_tabs.getCurrentTabData())
     duplicate.causal_model['nodes'][0]['label'] = 'Independent copy'
     assert loaded_tabs.getCurrentTabData().causal_model['nodes'][0]['label'] == 'First'
@@ -216,8 +306,91 @@ def test_import_destinations_and_undo(app):
     model.markImported()
     ids = manager.addCausalModelToMindmap()
     assert [manager.mindmap.map.find(key).text for key in ids] == ['Two', 'One']
-    assert len(manager.addCausalModelToMindmap()) == 2
+    assert manager.addCausalModelToMindmap() == []
     assert model.imported
+
+
+def test_qml_sidebar_incremental_imports_and_removal(app, actiondraw_window, monkeypatch):
+    tasks, diagram, tabs, manager, _ = project()
+    engine = actiondraw_window(diagram, tasks, manager, tab_model=tabs)
+    errors = []
+    engine.warnings.connect(lambda warnings: errors.extend(w.toString() for w in warnings))
+    root = engine.rootObjects()[0]
+    QMetaObject.invokeMethod(root, 'openCausalModelWindow', Qt.DirectConnection)
+    app.processEvents()
+    window = root.property('causalModelWindowRef')
+    model = engine._causal_model
+    sidebar_add = window.findChild(QObject, 'causalSidebarAddAction')
+    add_draw = window.findChild(QObject, 'causalAddToActionDraw')
+    add_map = window.findChild(QObject, 'causalAddToMindmap')
+    label = window.findChild(QObject, 'causalNodeLabel')
+
+    def click(button):
+        button.forceActiveFocus()
+        QTest.keyClick(window, Qt.Key_Space)
+        QTest.qWait(30)
+
+    def add_action(title):
+        assert sidebar_add.property('enabled')
+        click(sidebar_add)
+        assert window.findChild(QObject, 'causalNodeType').property('currentText') == 'action'
+        label.setProperty('text', title)
+        QTest.keyClick(window, Qt.Key_Return)
+        QTest.qWait(30)
+        return model.actions[-1]['id']
+
+    assert not add_draw.property('enabled') and not add_map.property('enabled')
+    first = add_action('One')
+    click(add_draw)
+    assert not add_draw.property('enabled') and add_map.property('enabled')
+    click(add_map)
+    assert not add_map.property('enabled')
+    second = add_action('Two')
+    third = add_action('Three')
+    create_task = diagram.addTaskFromText
+    calls = []
+
+    def fail_second(title, x, y):
+        calls.append(title)
+        return create_task(title, x, y) if len(calls) == 1 else ''
+
+    monkeypatch.setattr(diagram, 'addTaskFromText', fail_second)
+    click(add_draw)
+    assert [n['id'] for n in model.pendingActionDrawActions] == [third]
+    assert add_draw.property('enabled')
+    monkeypatch.setattr(diagram, 'addTaskFromText', create_task)
+    click(add_draw)
+    assert [t['title'] for t in tasks.to_dict()['tasks']] == ['One', 'Two', 'Three']
+    assert not add_draw.property('enabled')
+    click(add_map)
+    assert [child.text for child in manager.mindmap.view_root.children] == ['One', 'Two', 'Three']
+    assert not add_map.property('enabled')
+
+    outcome = model.addNode('Result', 'outcome', 400, 200)
+    model.addEdge(second, outcome, '80', 'Preserve this')
+    app.processEvents()
+    before = model.to_dict()
+    remove = window.actionRemoveButtonAt(1)
+    click(remove)
+    assert next(n for n in model.nodes if n['id'] == second)['type'] == 'variable'
+    assert model.edges == before['edges']
+    assert model.orderedTitles == ['One', 'Three']
+    model.undo()
+    app.processEvents()
+    assert model.to_dict() == before
+    assert not add_draw.property('enabled') and not add_map.property('enabled')
+    model.redo()
+    model.editNode(second, 'Two again', 'action', '')
+    model.moveAction(2, 0)
+    app.processEvents()
+    assert not add_draw.property('enabled') and not add_map.property('enabled')
+    assert tasks.rowCount() == 3
+    assert model.edges == before['edges']
+    assert not errors, '\n'.join(errors)
+    window.close()
+    root.setProperty('suppressClosePrompt', True)
+    root.close()
+    app.processEvents()
 
 
 def test_qml_companion_opens_and_tracks_tabs(app, actiondraw_window):

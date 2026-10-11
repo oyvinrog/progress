@@ -60,6 +60,7 @@ ApplicationWindow {
     }
     function actionUpButtonAt(index) { return actionList.itemAtIndex(index).upButton }
     function actionDragHandleAt(index) { return actionList.itemAtIndex(index).dragHandle }
+    function actionRemoveButtonAt(index) { return actionList.itemAtIndex(index).removeButton }
     function connectionHandleById(key) { return nodeItemById(key).connectionHandle }
     function openNewNode(x, y, kind) {
         selectedNode = ""
@@ -359,7 +360,12 @@ ApplicationWindow {
             ColumnLayout {
                 Layout.minimumWidth: 270; Layout.preferredWidth: 270; Layout.maximumWidth: 270; Layout.fillHeight: true
                 Label { text: "Action order (" + modelRef.actions.length + ")"; font.bold: true }
-                Label { text: "Drag the ≡ handles to reorder actions, then add the list to ActionDraw or the mindmap."; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                Button {
+                    objectName: "causalSidebarAddAction"
+                    text: "+ Add action"; Layout.fillWidth: true
+                    onClicked: root.openNewNode(viewport.contentX + 80, viewport.contentY + 80, "action")
+                }
+                Label { text: "Drag the ≡ handles to reorder. Remove action keeps the node and its connections as a variable. Each destination receives only new actions."; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 ListView {
                     id: actionList
                     Layout.fillWidth: true; Layout.fillHeight: true; clip: true
@@ -371,18 +377,30 @@ ApplicationWindow {
                         required property int index
                         property alias upButton: upButton
                         property alias dragHandle: actionDrag
+                        property alias removeButton: removeActionButton
                         width: actionList.width
                         height: Math.max(54, actionContents.implicitHeight + 12)
                         radius: 6
                         color: root.actionDropTargetIndex === index ? "#e2f3e5" : "#fff0bf"
                         border.color: root.draggedActionIndex === index ? "#1976d2" : "#bf9b3d"
-                        RowLayout {
+                        ColumnLayout {
                             id: actionContents
                             anchors.fill: parent; anchors.margins: 6
-                            Label { text: "≡"; color: "#695115"; Layout.preferredWidth: 26; font.pixelSize: 22 }
-                            Label { text: modelData.order + ". " + modelData.label; color: "#263238"; Layout.fillWidth: true; wrapMode: Text.Wrap }
-                            Button { id: upButton; Layout.preferredWidth: 32; Layout.maximumWidth: 32; objectName: "causalActionUp_" + index; text: "↑"; enabled: index>0; onClicked: modelRef.moveAction(index,index-1) }
-                            Button { Layout.preferredWidth: 32; Layout.maximumWidth: 32; text: "↓"; enabled: index<actionList.count-1; onClicked: modelRef.moveAction(index,index+1) }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                Label { text: "≡"; color: "#695115"; Layout.preferredWidth: 26; font.pixelSize: 22 }
+                                Label { text: modelData.order + ". " + modelData.label; color: "#263238"; Layout.fillWidth: true; wrapMode: Text.Wrap }
+                                Button { id: upButton; Layout.preferredWidth: 32; Layout.maximumWidth: 32; objectName: "causalActionUp_" + index; text: "↑"; enabled: index>0; onClicked: modelRef.moveAction(index,index-1) }
+                                Button { Layout.preferredWidth: 32; Layout.maximumWidth: 32; text: "↓"; enabled: index<actionList.count-1; onClicked: modelRef.moveAction(index,index+1) }
+                            }
+                            Button {
+                                id: removeActionButton
+                                objectName: "causalRemoveAction_" + modelData.id
+                                text: "Remove action"
+                                Layout.alignment: Qt.AlignRight
+                                enabled: root.draggedActionIndex < 0 && !root.connectSource
+                                onClicked: modelRef.removeAction(modelData.id)
+                            }
                         }
                         MouseArea {
                             id: actionDrag
@@ -420,21 +438,27 @@ ApplicationWindow {
                 Button {
                     objectName: "causalAddToActionDraw"
                     text: "Add to ActionDraw"; Layout.fillWidth: true
-                    enabled: modelRef.actions.length>0 && !modelRef.imported && !!hostRoot
+                    enabled: modelRef.pendingActionDrawActions.length>0 && !!hostRoot
                     onClicked: {
+                        var pending=modelRef.pendingActionDrawActions
+                        var titles=pending.map(function(action) { return action.label })
+                        var ids=pending.map(function(action) { return action.id })
                         var point=hostRoot.actionPaintImportPosition()
-                        var created=hostRoot.diagramModelRef.createTaskChainAtPosition(modelRef.orderedTitles,point.x,point.y)
-                        if(created.length===modelRef.actions.length) {modelRef.markImported();root.statusText="Actions added to ActionDraw"}
+                        var created=hostRoot.diagramModelRef.createTaskChainAtPosition(titles,point.x,point.y)
+                        modelRef.markActionsImported("actiondraw",ids.slice(0,created.length))
+                        if(created.length===pending.length) root.statusText="Actions added to ActionDraw"
                         else root.statusText="Could not add every action"
                     }
                 }
                 Button {
                     objectName: "causalAddToMindmap"
                     text: "Add to mindmap"; Layout.fillWidth: true
-                    enabled: modelRef.actions.length>0 && !!hostRoot && !!hostRoot.projectManagerRef
+                    enabled: modelRef.pendingMindmapActions.length>0 && !!hostRoot && !!hostRoot.projectManagerRef
                     onClicked: {
-                        var created=hostRoot.projectManagerRef.addCausalModelToMindmap()
-                        root.statusText=created.length===modelRef.actions.length ? "Actions added to mindmap" : "Could not add every action"
+                        var pending=modelRef.pendingMindmapActions
+                        var ids=pending.map(function(action) { return action.id })
+                        var created=hostRoot.projectManagerRef.addCausalModelToMindmap(ids)
+                        root.statusText=created.length===pending.length ? "Actions added to mindmap" : "Could not add every action"
                     }
                 }
             }

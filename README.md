@@ -249,6 +249,19 @@ choose execution order, then **Add to ActionDraw** or **Add to mindmap** to copy
 that order. These copies are independent of the model, and the causal edges
 stay in the causal editor. Each tab's model is saved with the project.
 
+The action list also has **+ Add action** and a **Remove action** button on each
+row. Removing an action changes its node to a variable and preserves its label,
+notes, position, and connections; Undo restores its action status and order.
+Canvas **Delete** still removes the whole node and its connections.
+
+You can keep adding actions after importing. Each destination tracks imports
+separately and receives only actions it has not received before, in current list
+order. New ActionDraw batches form separate chains. Renaming, reordering, or
+removing and restoring an imported action does not copy it again or change its
+existing copies. Import history is saved with the project and survives graph
+Undo/Redo. For older projects, ActionDraw history is recovered from the last
+import signature; mindmap history starts empty because it was not recorded.
+
 Edge percentages record your estimated likelihoods. They need not sum to 100%,
 and they do not calculate outcome probabilities. Numerical causal question
 answering is reserved for a later version with explicit probability rules.

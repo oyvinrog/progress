@@ -11,7 +11,16 @@ from PySide6.QtCore import QObject, Property, Signal, Slot
 
 
 def empty_causal_model_state():
-    return dict(version=1, nodes=[], edges=[], description='', action_order=[], last_imported_signature='')
+    return dict(version=2, nodes=[], edges=[], description='', action_order=[],
+                last_imported_signature='', imported_action_ids={'actiondraw': [], 'mindmap': []})
+
+
+def record_causal_imports(state, destination, action_ids):
+    """Keep import history even for nodes removed from the graph."""
+    history = state['imported_action_ids'][destination]
+    for key in action_ids:
+        if isinstance(key, str) and key and key not in history:
+            history.append(key)
 
 
 def _reachable(edges, start, target):
@@ -67,6 +76,23 @@ def normalize_causal_model_state(value):
             state['action_order'].append(key)
     state['description'] = str(value.get('description', ''))
     state['last_imported_signature'] = str(value.get('last_imported_signature', ''))
+    history = value.get('imported_action_ids')
+    if isinstance(history, dict):
+        for destination in state['imported_action_ids']:
+            keys = history.get(destination, [])
+            if isinstance(keys, list):
+                record_causal_imports(state, destination, keys)
+    else:
+        try:
+            legacy = json.loads(state['last_imported_signature'])
+        except (ValueError, TypeError):
+            legacy = []
+        if isinstance(legacy, list):
+            record_causal_imports(state, 'actiondraw', [
+                pair[0] for pair in legacy
+                if isinstance(pair, list) and len(pair) == 2
+                and isinstance(pair[0], str) and isinstance(pair[1], str)
+            ])
     return state
 
 
@@ -87,15 +113,13 @@ class CausalModelModel(QObject):
         if tab_model is not None:
             tab_model.currentTabChanged.connect(self.loadCurrentTab)
             tab_model.modelReset.connect(self.loadCurrentTab)
+            tab_model.causalActionsImported.connect(self._on_actions_imported)
             self.loadCurrentTab()
 
     def _fail(self, message):
         self._error = message
         self.errorChanged.emit()
         return False
-
-    def _signature(self):
-        return json.dumps([(n['id'], n['label']) for n in self.actions], ensure_ascii=False)
 
     def _current_tab(self):
         if self._tabs is None:
@@ -162,7 +186,23 @@ class CausalModelModel(QObject):
 
     @Property(bool, notify=changed)
     def imported(self):
-        return bool(self.actions) and self._signature() == self._state['last_imported_signature']
+        return bool(self.actions) and not self.pendingActionDrawActions
+
+    @Slot(str, result='QVariantList')
+    def pendingActions(self, destination):
+        history = self._state['imported_action_ids'].get(destination)
+        if history is None:
+            return []
+        imported = set(history)
+        return [node for node in self.actions if node['id'] not in imported]
+
+    @Property('QVariantList', notify=changed)
+    def pendingActionDrawActions(self):
+        return self.pendingActions('actiondraw')
+
+    @Property('QVariantList', notify=changed)
+    def pendingMindmapActions(self):
+        return self.pendingActions('mindmap')
 
     @Slot(str, str, float, float, result=str)
     @Slot(str, str, float, float, str, result=str)
@@ -200,6 +240,13 @@ class CausalModelModel(QObject):
         self._state['edges'] = [e for e in self._state['edges'] if key not in (e['source'], e['target'])]
         self._state['action_order'] = [k for k in self._state['action_order'] if k != key]
         self._commit(before)
+
+    @Slot(str, result=bool)
+    def removeAction(self, key):
+        node = next((n for n in self._state['nodes'] if n['id'] == key and n['type'] == 'action'), None)
+        if node is None:
+            return self._fail('Select an existing action.')
+        return self.editNode(key, node['label'], 'variable', node['notes'])
 
     @Slot()
     def beginNodeDrag(self):
@@ -294,12 +341,28 @@ class CausalModelModel(QObject):
 
     @Slot()
     def markImported(self):
-        if self.actions:
-            self._state['last_imported_signature'] = self._signature()
-            # Import bookkeeping must survive graph undo without enabling duplicate imports.
-            for snapshot in self._undo + self._redo:
-                snapshot['last_imported_signature'] = self._state['last_imported_signature']
-            self._publish()
+        self.markActionsImported('actiondraw', [n['id'] for n in self.actions])
+
+    @Slot(str, 'QStringList')
+    def markActionsImported(self, destination, action_ids):
+        if destination not in self._state['imported_action_ids']:
+            return
+        valid = {n['id'] for n in self.actions}
+        keys = [key for key in action_ids if key in valid]
+        if not keys:
+            return
+        # Imports are independent copies, so graph history cannot undo bookkeeping.
+        snapshots = [self._state] + self._undo + self._redo
+        if self._drag is not None:
+            snapshots.append(self._drag)
+        for snapshot in snapshots:
+            record_causal_imports(snapshot, destination, keys)
+        self._publish()
+
+    def _on_actions_imported(self, tab_id, destination, action_ids):
+        tab = self._current_tab()
+        if tab is not None and tab.id == tab_id:
+            self.markActionsImported(destination, action_ids)
 
     @Slot()
     def undo(self):
