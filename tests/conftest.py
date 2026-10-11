@@ -30,7 +30,12 @@ def app():
 
 @pytest.fixture
 def actiondraw_window(app):
-    """Destroy QML engines before releasing their Python context objects."""
+    """Destroy QML engines before releasing their Python context objects.
+
+    Closing a window only hides it. The markdown editor can keep its engine
+    alive in a Python cycle, so both engines need explicit teardown to keep
+    later garbage collection from calling into partially finalized models.
+    """
     import shiboken6
     from actiondraw.ui import create_actiondraw_window
 

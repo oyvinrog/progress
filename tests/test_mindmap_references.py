@@ -7,7 +7,6 @@ from PySide6.QtTest import QTest
 
 from actiondraw.mindmap import MindMapController
 from actiondraw.model import DiagramModel
-from actiondraw.ui import create_actiondraw_window
 from task_model import ProjectManager, TabModel, TaskModel
 
 
@@ -187,10 +186,10 @@ def test_search_export_navigation_and_local_fold(project):
     assert m.tabScoped and m.selectedNode['sourceId'] == child
 
 
-def test_qml_add_tab_search_and_edit(project, app):
+def test_qml_add_tab_search_and_edit(project, app, actiondraw_window):
     pm, tabs, tasks, diagram, daily, lunch, roots, child = project
     m = pm.mindmap
-    engine = create_actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     warnings = []
     engine.warnings.connect(lambda messages: warnings.extend(x.toString() for x in messages))
     window = engine.rootObjects()[0]
@@ -251,7 +250,6 @@ def test_qml_add_tab_search_and_edit(project, app):
         assert not warnings
     finally:
         window.close()
-        engine.deleteLater()
         QTest.qWait(20)
 
 
