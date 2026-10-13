@@ -1231,13 +1231,13 @@ def test_qml_bookmarks(project, app, actiondraw_window):
         point = item.mapToItem(viewport, item.boundingRect().center())
         assert point.x() == pytest.approx(viewport.width() / 2)
         assert point.y() == pytest.approx(viewport.height() / 2)
-        highlight = find_item(window.contentItem(), 'mindmapBookmarkHighlight_' + m.selectedId)
+        highlight = find_item(window.contentItem(), 'mindmapSearchHighlight_' + m.selectedId)
         assert highlight.isVisible() and highlight.opacity() == 1
-        assert QQmlProperty.read(highlight, 'border.width') * pane.property('zoom') == pytest.approx(3)
+        assert QQmlProperty.read(highlight, 'border.width') * pane.property('zoom') == pytest.approx(4)
         click(find_item(window.contentItem(), 'mindmapBookmark_' + tab))
         assert not m.tabScoped and m.selectedId == tab
         assert not highlight.isVisible()
-        highlight = find_item(window.contentItem(), 'mindmapBookmarkHighlight_' + tab)
+        highlight = find_item(window.contentItem(), 'mindmapSearchHighlight_' + tab)
         assert highlight.isVisible()
         before = m.to_dict()
         QTest.qWait(2600)

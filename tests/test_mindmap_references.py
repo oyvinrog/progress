@@ -246,7 +246,7 @@ def test_qml_add_tab_search_and_edit(project, app, actiondraw_window):
         assert QMetaObject.invokeMethod(pane, 'jumpBookmark', Q_ARG('QVariant', child))
         QTest.qWait(30)
         assert m.selectedId == projected
-        assert pane.property('bookmarkHighlightId') == projected
+        assert pane.property('navigationHighlightId') == projected
         assert not warnings
     finally:
         window.close()

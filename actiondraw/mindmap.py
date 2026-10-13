@@ -941,6 +941,7 @@ class MindMapController(QObject):
                 return False
             self.set_scope()
             node = self._find(source_id)
+        self.clearSearch()
         if node not in self._priority_nodes():
             self.setPriorityFilter(1.0)
         for ancestor in node.ancestors():

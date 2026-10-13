@@ -100,3 +100,65 @@ def test_large_qml_map_loads_viewport_and_reveals_search(app, actiondraw_window,
     assert any(item.objectName() == 'mindmapNode_' + children[0].id
                for item in loaded_nodes(window.contentItem()))
     assert 'Binding loop detected' not in capfd.readouterr().err
+
+
+@pytest.mark.parametrize('navigation', ['reminder', 'kanban', 'keyboard'])
+def test_large_map_navigation_uses_search_highlight(app, actiondraw_window, navigation):
+    from PySide6.QtCore import QObject
+    from PySide6.QtQml import QQmlProperty
+    from PySide6.QtTest import QTest
+    from actiondraw.model import DiagramModel
+    from task_model import ProjectManager, TabModel, TaskModel
+
+    tasks, tabs = TaskModel(), TabModel()
+    diagram = DiagramModel(tasks)
+    project = ProjectManager(tasks, diagram, tabs)
+    m = project.mindmap
+    branch = m.map.root.add_child('Large branch')
+    children = [branch.add_child(f'Thought {i}') for i in range(300)]
+    target = children[-1]
+    engine = actiondraw_window(diagram, tasks, project, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    project.showMindmap()
+    QTest.qWait(50)
+    pane = window.findChild(QObject, 'mindmapPane')
+    pane.setProperty('zoom', 0.7)
+
+    def find(item, name):
+        if item.objectName() == name:
+            return item
+        for child in item.childItems():
+            found = find(child, name)
+            if found is not None:
+                return found
+
+    if navigation == 'keyboard':
+        m.select(children[-2].id)
+        m.navigate('down')
+    else:
+        branch.folded = True
+        project.showTabCanvas()
+        if navigation == 'reminder':
+            project.openMindmapReminder(target.id)
+        else:
+            project.openKanbanItem('node:' + target.id)
+    QTest.qWait(50)
+    assert m.selectedId == target.id and not m.searchQuery
+    highlight = find(window.contentItem(), 'mindmapSearchHighlight_' + target.id)
+    assert highlight is not None and highlight.isVisible()
+    assert QQmlProperty.read(highlight, 'border.color').name() == '#ffbf47'
+    assert QQmlProperty.read(highlight, 'border.width') * pane.property('zoom') == pytest.approx(4)
+    assert highlight.opacity() == 1
+    # A regular selection ends the jump highlight, including when selected again.
+    m.select(branch.id)
+    m.select(target.id)
+    assert not highlight.isVisible()
+    m.searchText('no matches')
+    project.openMindmapReminder(target.id)
+    assert not m.searchQuery
+    QTest.qWait(20)
+    highlight = find(window.contentItem(), 'mindmapSearchHighlight_' + target.id)
+    assert highlight.isVisible()
+    m.searchText('no matches')
+    assert not highlight.isVisible()

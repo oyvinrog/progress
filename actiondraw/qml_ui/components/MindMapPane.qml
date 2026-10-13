@@ -90,8 +90,8 @@ FocusScope {
     property real panY: 0
     property bool initialized: false
     property var viewPositions: ({})
-    property string bookmarkHighlightId: ""
-    property real bookmarkHighlightOpacity: 0
+    property string navigationHighlightId: ""
+    property real navigationHighlightOpacity: 0
     property string hoveredNodeId: ""
     property bool nodePressed: false
     property double deadlineNow: Date.now() / 1000
@@ -114,6 +114,7 @@ FocusScope {
     }
     readonly property bool shortcutsEnabled: visible && activeFocus && !toolDialogOpen && !editor.visible && !nodeMenu.visible && !actionsButton.activeFocus && !prioritySlider.activeFocus && !actionsMenu.visible && !helpDialog.visible && !deadlineDialog.visible && !tabReferenceDialog.visible && !reminderDialogOpen
     readonly property bool searching: controller && controller.searchQuery.length > 0
+    onSearchingChanged: if (searching) navigationHighlightId = ""
     onShortcutsEnabledChanged: if (!shortcutsEnabled && controller) controller.clearSearch()
 
     Keys.onPressed: function(event) {
@@ -190,13 +191,17 @@ FocusScope {
                 if (n.id !== occurrenceId) continue
                 pane.panX = -(n.x + n.width / 2) * pane.zoom
                 pane.panY = -(n.y + n.height / 2) * pane.zoom
-                bookmarkFade.stop()
-                pane.bookmarkHighlightId = occurrenceId
-                pane.bookmarkHighlightOpacity = 1
-                bookmarkHold.restart()
+                pane.highlightDestination(occurrenceId)
                 return
             }
         })
+    }
+    function highlightDestination(nodeId) {
+        if (searching) return
+        navigationFade.stop()
+        navigationHighlightId = nodeId
+        navigationHighlightOpacity = 1
+        navigationHold.restart()
     }
     function revealNode(nodeId) {
         if (!visible || !controller) return
@@ -204,6 +209,7 @@ FocusScope {
         for (var i = 0; i < nodes.length; ++i) {
             var n = nodes[i]
             if (n.id !== nodeId) continue
+            highlightDestination(nodeId)
             var left = viewport.width / 2 + panX + n.x * zoom
             var top = viewport.height / 2 + panY + n.y * zoom
             var width = n.width * zoom, height = n.height * zoom
@@ -235,25 +241,29 @@ FocusScope {
         if (!initialized) Qt.callLater(function() { if (pane.visible && !pane.initialized) pane.fitMap() })
     }
     Timer {
-        id: bookmarkHold
+        id: navigationHold
         interval: 1800
-        onTriggered: bookmarkFade.restart()
+        onTriggered: navigationFade.restart()
     }
     NumberAnimation {
-        id: bookmarkFade
+        id: navigationFade
         target: pane
-        property: "bookmarkHighlightOpacity"
+        property: "navigationHighlightOpacity"
         to: 0
         duration: 600
     }
     Connections {
         target: pane.controller
+        function onChanged() {
+            if (pane.navigationHighlightId !== pane.controller.selectedId)
+                pane.navigationHighlightId = ""
+        }
         function onSceneChanged() { edges.requestPaint() }
         function onRevealNode(nodeId) { pane.revealNode(nodeId) }
         function onScopeChanging(oldScope, newScope) {
             pane.hoveredNodeId = ""
             pane.controller.clearSearch()
-            pane.bookmarkHighlightId = ""
+            pane.navigationHighlightId = ""
             pane.viewPositions[oldScope] = { zoom: pane.zoom, x: pane.panX, y: pane.panY, initialized: pane.initialized }
             var saved = pane.viewPositions[newScope]
             pane.zoom = saved ? saved.zoom : 1
@@ -266,7 +276,7 @@ FocusScope {
         function onResetView() {
             pane.hoveredNodeId = ""
             pane.controller.clearSearch()
-            pane.bookmarkHighlightId = ""
+            pane.navigationHighlightId = ""
             pane.viewPositions = ({})
             pane.initialized = false
             pane.zoom = 1; pane.panX = 0; pane.panY = 0
@@ -641,18 +651,6 @@ FocusScope {
                             border.width: selected ? 2 : 1
                             border.color: selected ? "#a5d9ff" : "#557b98"
                             Rectangle {
-                                objectName: "mindmapBookmarkHighlight_" + nodeItem.modelData.id
-                                anchors.fill: parent
-                                anchors.margins: -6 / pane.zoom
-                                radius: nodeItem.radius + 6 / pane.zoom
-                                color: "transparent"
-                                border.color: "#fff2a8"
-                                border.width: 3 / pane.zoom
-                                opacity: pane.bookmarkHighlightOpacity
-                                visible: nodeItem.selected && pane.bookmarkHighlightId === nodeItem.modelData.id
-                                         && opacity > 0
-                            }
-                            Rectangle {
                                 objectName: "mindmapSearchHighlight_" + nodeItem.modelData.id
                                 anchors.fill: parent
                                 anchors.margins: -8 / pane.zoom
@@ -660,7 +658,10 @@ FocusScope {
                                 color: "transparent"
                                 border.color: "#ffbf47"
                                 border.width: 4 / pane.zoom
+                                opacity: nodeItem.currentSearchHit ? 1 : pane.navigationHighlightOpacity
                                 visible: nodeItem.currentSearchHit
+                                         || (nodeItem.selected && pane.navigationHighlightId === nodeItem.modelData.id
+                                             && opacity > 0)
                             }
                             Text {
                                 objectName: "mindmapNoteIcon_" + nodeItem.modelData.id
