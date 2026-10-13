@@ -462,7 +462,9 @@ class MindMapController(QObject):
 
     @Slot(str, result='QVariantMap')
     def planData(self, node_id):
-        node_id = self.sourceNodeId(node_id)
+        return self._plan_data(self.sourceNodeId(node_id))
+
+    def _plan_data(self, node_id):
         placement = self._plan_placement(node_id)
         status = placement.get('status', 'unscheduled')
         on_board = status != 'unscheduled'
@@ -762,9 +764,11 @@ class MindMapController(QObject):
 
     def _search_matches(self):
         query = self._search_query.casefold()
+        if not query:
+            return []
         retained = self._priority_nodes()
         return [node for node in self.view_root.walk()
-                if node in retained and query in node.text.casefold()] if query else []
+                if node in retained and query in node.text.casefold()]
 
     @Property(int, notify=changed)
     def searchMatchCount(self):
@@ -796,11 +800,16 @@ class MindMapController(QObject):
         index = ((ids.index(self._selected) + direction) % len(ids)
                  if self._selected in ids else (-1 if direction < 0 else 0))
         node = matches[index]
-        for ancestor in node.ancestors():
-            if self._in_scope(ancestor):
-                ancestor.folded = False
+        unfolded = False
+        root = self.view_root
+        for ancestor in (() if node is root else node.ancestors()):
+            unfolded = unfolded or ancestor.folded
+            ancestor.folded = False
+            if ancestor is root:
+                break
         self.select(node.id)
-        self.sceneChanged.emit()
+        if unfolded:
+            self.sceneChanged.emit()
         self.revealNode.emit(node.id)
 
     @Property('QVariantMap', notify=changed)
@@ -863,7 +872,9 @@ class MindMapController(QObject):
 
     @Slot(str, result='QVariantMap')
     def reminderData(self, node_id):
-        node_id = self.sourceNodeId(node_id)
+        return self._reminder_data(self.sourceNodeId(node_id))
+
+    def _reminder_data(self, node_id):
         reminder = self.reminders.get(node_id)
         return {'reminderActive': reminder is not None,
                 'reminderAt': datetime.fromtimestamp(reminder['at']).strftime('%Y-%m-%d %H:%M') if reminder else '',
@@ -871,7 +882,9 @@ class MindMapController(QObject):
 
     @Slot(str, result='QVariantMap')
     def deadlineData(self, node_id):
-        node_id = self.sourceNodeId(node_id)
+        return self._deadline_data(self.sourceNodeId(node_id))
+
+    def _deadline_data(self, node_id):
         deadline = self.deadlines.get(node_id)
         return {'deadlineActive': deadline is not None,
                 'deadlineStart': deadline['start'] if deadline else 0,
@@ -928,6 +941,7 @@ class MindMapController(QObject):
                 return False
             self.set_scope()
             node = self._find(source_id)
+        self.clearSearch()
         if node not in self._priority_nodes():
             self.setPriorityFilter(1.0)
         for ancestor in node.ancestors():
@@ -982,6 +996,8 @@ class MindMapController(QObject):
         return f'Score ≥ {cutoff:.3g}'
 
     def _priority_nodes(self, priorities=None):
+        if self._priority_filter == 1:
+            return set(self.view_root.walk())
         priorities = self._priority_data() if priorities is None else priorities
         scores = self._scope_scores(priorities)
         root = self.view_root
@@ -1040,15 +1056,25 @@ class MindMapController(QObject):
         font.setBold(True)
         bold_metrics = QFontMetricsF(font)
         sizes = {}
-        for node in self.view_root.walk():
+        root = self.view_root
+        bookmarks = set(self._bookmarks)
+
+        def visible_nodes(node):
+            yield node
+            if not node.folded:
+                for child in node.children:
+                    yield from visible_nodes(child)
+
+        for node in visible_nodes(root):
             padding = 74.0 if _content(node).id in self._completed else 52.0
             if node.children:
                 padding += 22.0
             if node.note and node.note.strip():
                 padding += 20.0
-            if _content(node).id in self._bookmarks:
+            if _content(node).id in bookmarks:
                 padding += 20.0
-            if self.planData(node.id)['planVisible']:
+            if (self._plan_placement(_content(node).id).get('status', 'unscheduled') != 'unscheduled'
+                    or _content(node).id in self.plan_schedules):
                 padding += 20.0
             if self._tab_id(node) in priorities:
                 padding += 30.0
@@ -1061,20 +1087,20 @@ class MindMapController(QObject):
             sizes[node] = (width, 40.0 + (24.0 if _content(node).id in self.reminders else 0.0)
                            + (24.0 if _content(node).id in self._measure_progress else 0.0)
                            + (28.0 if _content(node).id in self.deadlines else 0.0))
-        if self.view_root.folded:
-            width, height = sizes[self.view_root]
-            return {self.view_root: Box(-width / 2, -height / 2, width, height)}
+        if root.folded:
+            width, height = sizes[root]
+            return {root: Box(-width / 2, -height / 2, width, height)}
         # Layout only needs a root; keep the canonical tree's parent links intact.
         if self._priority_filter == 1:
-            return layout(SimpleNamespace(root=self.view_root), sizes)
+            return layout(SimpleNamespace(root=root), sizes)
         retained = self._priority_nodes(priorities)
-        sides = assigned_sides(SimpleNamespace(root=self.view_root))
+        sides = assigned_sides(SimpleNamespace(root=root))
         projected = {node: copy.copy(node) for node in retained}
         for node, clone in projected.items():
             clone.children = [projected[child] for child in node.children if child in retained]
             clone.parent = projected.get(node.parent)
             clone.side = sides.get(node, node.side)
-        boxes = layout(SimpleNamespace(root=projected[self.view_root]),
+        boxes = layout(SimpleNamespace(root=projected[root]),
                        {projected[node]: size for node, size in sizes.items() if node in retained})
         return {node: boxes[projected[node]] for node in sizes
                 if node in projected and projected[node] in boxes}
@@ -1082,19 +1108,21 @@ class MindMapController(QObject):
     @Property('QVariantList', notify=sceneChanged)
     def nodes(self):
         priorities = self._priority_data()
+        root = self.view_root
+        bookmarks = set(self._bookmarks)
         return [{'id': n.id, 'sourceId': _content(n).id,
                  'isReference': _placement(n).id in self.references, 'text': n.text, 'note': n.note or '', 'x': b.x, 'y': b.y,
                  'width': b.width, 'height': b.height, 'isTab': self._tab_id(n) is not None,
                  'hasNote': bool(n.note and n.note.strip()),
                  'folded': n.folded, 'hasChildren': bool(n.children), 'bold': bool(n.style.bold),
-                 'isViewRoot': n is self.view_root, 'completed': _content(n).id in self._completed,
-                 'bookmarked': _content(n).id in self._bookmarks,
+                 'isViewRoot': n is root, 'completed': _content(n).id in self._completed,
+                 'bookmarked': _content(n).id in bookmarks,
                  'measureProgress': _content(n).id in self._measure_progress,
                  'progressPercent': (math.floor(100 * sum(_content(child).id in self._completed for child in n.children)
                                                   / len(n.children) + 0.5) if n.children else 0),
-                 **self.planData(n.id),
-                 **self.reminderData(n.id),
-                 **self.deadlineData(n.id),
+                 **self._plan_data(_content(n).id),
+                 **self._reminder_data(_content(n).id),
+                 **self._deadline_data(_content(n).id),
                  **priorities.get(self._tab_id(n), {'priorityScore': None, 'priorityLevel': 0,
                                                        'priorityRank': 0})}
                 for n, b in self._layout(priorities).items()]
@@ -1283,6 +1311,8 @@ class MindMapController(QObject):
         self.changed.emit()
 
     def _branch_roots(self, ids):
+        if not ids:
+            return []
         selected = set(ids)
         return [node for node in self.view_root.walk() if node.id in selected and self._in_scope(node)
                 and not any(parent.id in selected for parent in node.ancestors())]

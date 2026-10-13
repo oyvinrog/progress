@@ -80,13 +80,18 @@ FocusScope {
     signal clearReminderRequested(string nodeId)
     property bool reminderDialogOpen: false
     property var controller
+    // Read Python scene/selection properties once per notification, not per delegate.
+    readonly property var sceneNodes: controller ? controller.nodes : []
+    readonly property var sceneEdges: controller ? controller.edges : []
+    readonly property var selectedNodeSet: new Set(controller ? controller.selectedIds : [])
+    readonly property var cutNodeSet: new Set(controller ? controller.cutNodeIds : [])
     property real zoom: 1
     property real panX: 0
     property real panY: 0
     property bool initialized: false
     property var viewPositions: ({})
-    property string bookmarkHighlightId: ""
-    property real bookmarkHighlightOpacity: 0
+    property string navigationHighlightId: ""
+    property real navigationHighlightOpacity: 0
     property string hoveredNodeId: ""
     property bool nodePressed: false
     property double deadlineNow: Date.now() / 1000
@@ -109,6 +114,7 @@ FocusScope {
     }
     readonly property bool shortcutsEnabled: visible && activeFocus && !toolDialogOpen && !editor.visible && !nodeMenu.visible && !actionsButton.activeFocus && !prioritySlider.activeFocus && !actionsMenu.visible && !helpDialog.visible && !deadlineDialog.visible && !tabReferenceDialog.visible && !reminderDialogOpen
     readonly property bool searching: controller && controller.searchQuery.length > 0
+    onSearchingChanged: if (searching) navigationHighlightId = ""
     onShortcutsEnabledChanged: if (!shortcutsEnabled && controller) controller.clearSearch()
 
     Keys.onPressed: function(event) {
@@ -156,7 +162,7 @@ FocusScope {
 
     function fitMap() {
         if (!controller || viewport.width <= 0 || viewport.height <= 0) return
-        var nodes = controller.nodes
+        var nodes = pane.sceneNodes
         var left = 0, right = 0, top = 0, bottom = 0
         for (var i = 0; i < nodes.length; ++i) {
             var n = nodes[i]
@@ -179,26 +185,31 @@ FocusScope {
         forceActiveFocus()
         Qt.callLater(function() {
             if (!pane.visible || !pane.controller || pane.controller.selectedId !== occurrenceId) return
-            var nodes = pane.controller.nodes
+            var nodes = pane.sceneNodes
             for (var i = 0; i < nodes.length; ++i) {
                 var n = nodes[i]
                 if (n.id !== occurrenceId) continue
                 pane.panX = -(n.x + n.width / 2) * pane.zoom
                 pane.panY = -(n.y + n.height / 2) * pane.zoom
-                bookmarkFade.stop()
-                pane.bookmarkHighlightId = occurrenceId
-                pane.bookmarkHighlightOpacity = 1
-                bookmarkHold.restart()
+                pane.highlightDestination(occurrenceId)
                 return
             }
         })
     }
+    function highlightDestination(nodeId) {
+        if (searching) return
+        navigationFade.stop()
+        navigationHighlightId = nodeId
+        navigationHighlightOpacity = 1
+        navigationHold.restart()
+    }
     function revealNode(nodeId) {
         if (!visible || !controller) return
-        var nodes = controller.nodes
+        var nodes = pane.sceneNodes
         for (var i = 0; i < nodes.length; ++i) {
             var n = nodes[i]
             if (n.id !== nodeId) continue
+            highlightDestination(nodeId)
             var left = viewport.width / 2 + panX + n.x * zoom
             var top = viewport.height / 2 + panY + n.y * zoom
             var width = n.width * zoom, height = n.height * zoom
@@ -230,25 +241,29 @@ FocusScope {
         if (!initialized) Qt.callLater(function() { if (pane.visible && !pane.initialized) pane.fitMap() })
     }
     Timer {
-        id: bookmarkHold
+        id: navigationHold
         interval: 1800
-        onTriggered: bookmarkFade.restart()
+        onTriggered: navigationFade.restart()
     }
     NumberAnimation {
-        id: bookmarkFade
+        id: navigationFade
         target: pane
-        property: "bookmarkHighlightOpacity"
+        property: "navigationHighlightOpacity"
         to: 0
         duration: 600
     }
     Connections {
         target: pane.controller
+        function onChanged() {
+            if (pane.navigationHighlightId !== pane.controller.selectedId)
+                pane.navigationHighlightId = ""
+        }
         function onSceneChanged() { edges.requestPaint() }
         function onRevealNode(nodeId) { pane.revealNode(nodeId) }
         function onScopeChanging(oldScope, newScope) {
             pane.hoveredNodeId = ""
             pane.controller.clearSearch()
-            pane.bookmarkHighlightId = ""
+            pane.navigationHighlightId = ""
             pane.viewPositions[oldScope] = { zoom: pane.zoom, x: pane.panX, y: pane.panY, initialized: pane.initialized }
             var saved = pane.viewPositions[newScope]
             pane.zoom = saved ? saved.zoom : 1
@@ -261,7 +276,7 @@ FocusScope {
         function onResetView() {
             pane.hoveredNodeId = ""
             pane.controller.clearSearch()
-            pane.bookmarkHighlightId = ""
+            pane.navigationHighlightId = ""
             pane.viewPositions = ({})
             pane.initialized = false
             pane.zoom = 1; pane.panX = 0; pane.panY = 0
@@ -588,7 +603,7 @@ FocusScope {
                     ctx.translate(viewport.width / 2 + pane.panX, viewport.height / 2 + pane.panY)
                     ctx.scale(pane.zoom, pane.zoom)
                     ctx.strokeStyle = "#658ba8"; ctx.lineWidth = 1.5
-                    var lines = pane.controller.edges
+                    var lines = pane.sceneEdges
                     for (var i = 0; i < lines.length; ++i) {
                         var e = lines[i], middle = (e.x1 + e.x2) / 2
                         ctx.beginPath(); ctx.moveTo(e.x1, e.y1)
@@ -605,377 +620,383 @@ FocusScope {
                 scale: pane.zoom
                 transformOrigin: Item.TopLeft
                 Repeater {
-                    model: pane.controller ? pane.controller.nodes : []
-                    delegate: Rectangle {
-                        id: nodeItem
+                    model: pane.sceneNodes
+                    delegate: Loader {
+                        id: nodeLoader
+                        property bool dragging: false
                         required property var modelData
-                        objectName: "mindmapNode_" + modelData.id
-                        x: modelData.x; y: modelData.y
                         width: modelData.width; height: modelData.height
-                        radius: 8
-                        color: modelData.priorityLevel > 0 ? pane.priorityColor(modelData.priorityLevel)
-                              : modelData.isTab ? "#254d6c" : "#223442"
-                        readonly property bool selected: pane.controller.selectedIds.indexOf(modelData.id) >= 0
-                        readonly property bool currentSearchHit: pane.searching && selected
-                                                                      && pane.controller.searchMatchPosition > 0
-                        opacity: pane.controller.cutNodeIds.indexOf(modelData.id) >= 0 ? 0.45 : 1
-                        border.width: selected ? 2 : 1
-                        border.color: selected ? "#a5d9ff" : "#557b98"
-                        Rectangle {
-                            objectName: "mindmapBookmarkHighlight_" + nodeItem.modelData.id
-                            anchors.fill: parent
-                            anchors.margins: -6 / pane.zoom
-                            radius: nodeItem.radius + 6 / pane.zoom
-                            color: "transparent"
-                            border.color: "#fff2a8"
-                            border.width: 3 / pane.zoom
-                            opacity: pane.bookmarkHighlightOpacity
-                            visible: nodeItem.selected && pane.bookmarkHighlightId === nodeItem.modelData.id
-                                     && opacity > 0
-                        }
-                        Rectangle {
-                            objectName: "mindmapSearchHighlight_" + nodeItem.modelData.id
-                            anchors.fill: parent
-                            anchors.margins: -8 / pane.zoom
-                            radius: nodeItem.radius + 8 / pane.zoom
-                            color: "transparent"
-                            border.color: "#ffbf47"
-                            border.width: 4 / pane.zoom
-                            visible: nodeItem.currentSearchHit
-                        }
-                        Text {
-                            objectName: "mindmapNoteIcon_" + nodeItem.modelData.id
-                            visible: nodeItem.modelData.hasNote
-                            anchors.left: parent.left; anchors.leftMargin: 9
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
-                                                          - (nodeItem.modelData.measureProgress ? 12 : 0)
-                                                          - (nodeItem.modelData.deadlineActive ? 14 : 0)
-                            text: "\uD83D\uDCDD"
-                            font.pixelSize: 15
-                            z: 2
-                            Accessible.role: Accessible.Button
-                            Accessible.name: "Edit note"
-                            MouseArea {
-                                anchors.fill: parent
-                                acceptedButtons: Qt.LeftButton
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    pane.controller.select(nodeItem.modelData.id)
-                                    pane.editNode()
-                                }
-                            }
-                        }
-                        Text {
-                            objectName: "mindmapBookmarkIcon_" + nodeItem.modelData.id
-                            visible: nodeItem.modelData.bookmarked
-                            anchors.left: parent.left
-                            anchors.leftMargin: nodeItem.modelData.hasNote ? 29 : 9
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
-                                                          - (nodeItem.modelData.measureProgress ? 12 : 0)
-                                                          - (nodeItem.modelData.deadlineActive ? 14 : 0)
-                            text: "\uD83D\uDD16"
-                            font.pixelSize: 15
-                            Accessible.role: Accessible.StaticText
-                            Accessible.name: "Bookmarked"
-                        }
-                        Rectangle {
-                            objectName: "mindmapPlanBadge_" + nodeItem.modelData.id
-                            visible: nodeItem.modelData.planVisible
-                            width: 16; height: 18; radius: 3
-                            anchors.left: parent.left
-                            anchors.leftMargin: 9 + (nodeItem.modelData.hasNote ? 20 : 0)
-                                                   + (nodeItem.modelData.bookmarked ? 20 : 0)
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
-                                                          - (nodeItem.modelData.measureProgress ? 12 : 0)
-                                                          - (nodeItem.modelData.deadlineActive ? 14 : 0)
-                            color: nodeItem.modelData.planState === "pending" ? "#806125" : "#315e7b"
-                            z: 3
-                            Image {
-                                anchors.centerIn: parent
-                                width: 14; height: 14
-                                source: Qt.resolvedUrl("../icons/calendar.svg")
-                            }
+                        // Keep a margin for smooth panning and retain selected nodes
+                        // so an in-progress drag cannot destroy its MouseArea.
+                        active: pane.sceneNodes.length < 200
+                                || pane.selectedNodeSet.has(modelData.id)
+                                || dragging
+                                || (world.x + (modelData.x + width) * pane.zoom >= -200
+                                    && world.x + modelData.x * pane.zoom <= viewport.width + 200
+                                    && world.y + (modelData.y + height) * pane.zoom >= -200
+                                    && world.y + modelData.y * pane.zoom <= viewport.height + 200)
+                        sourceComponent: Rectangle {
+                            id: nodeItem
+                            readonly property var modelData: nodeLoader.modelData
+                            objectName: "mindmapNode_" + modelData.id
+                            x: modelData.x; y: modelData.y
+                            width: modelData.width; height: modelData.height
+                            radius: 8
+                            color: modelData.priorityLevel > 0 ? pane.priorityColor(modelData.priorityLevel)
+                                  : modelData.isTab ? "#254d6c" : "#223442"
+                            readonly property bool selected: pane.selectedNodeSet.has(modelData.id)
+                            readonly property bool currentSearchHit: pane.searching && selected
+                                                                          && pane.controller.searchMatchPosition > 0
+                            opacity: pane.cutNodeSet.has(modelData.id) ? 0.45 : 1
+                            border.width: selected ? 2 : 1
+                            border.color: selected ? "#a5d9ff" : "#557b98"
                             Rectangle {
-                                visible: nodeItem.modelData.planState === "combined"
-                                anchors.right: parent.right; anchors.top: parent.top
-                                width: 5; height: 5; radius: 3; color: "#ffcc66"
-                            }
-                            Accessible.role: Accessible.StaticText
-                            Accessible.name: nodeItem.modelData.planTooltip
-                            ToolTip.visible: planHover.containsMouse
-                            ToolTip.delay: 300
-                            ToolTip.text: nodeItem.modelData.planTooltip
-                            MouseArea {
-                                id: planHover
+                                objectName: "mindmapSearchHighlight_" + nodeItem.modelData.id
                                 anchors.fill: parent
-                                hoverEnabled: true
-                                acceptedButtons: Qt.NoButton
+                                anchors.margins: -8 / pane.zoom
+                                radius: nodeItem.radius + 8 / pane.zoom
+                                color: "transparent"
+                                border.color: "#ffbf47"
+                                border.width: 4 / pane.zoom
+                                opacity: nodeItem.currentSearchHit ? 1 : pane.navigationHighlightOpacity
+                                visible: nodeItem.currentSearchHit
+                                         || (nodeItem.selected && pane.navigationHighlightId === nodeItem.modelData.id
+                                             && opacity > 0)
                             }
-                        }
-                        Text {
-                            objectName: "mindmapNodeText_" + nodeItem.modelData.id
-                            anchors.fill: parent
-                            anchors.bottomMargin: (nodeItem.modelData.reminderActive ? 24 : 0)
-                                                  + (nodeItem.modelData.measureProgress ? 24 : 0)
-                                                  + (nodeItem.modelData.deadlineActive ? 28 : 0)
-                            anchors.leftMargin: 9 + (nodeItem.modelData.hasNote ? 20 : 0)
-                                                   + (nodeItem.modelData.bookmarked ? 20 : 0)
-                                                   + (nodeItem.modelData.planVisible ? 20 : 0)
-                            anchors.rightMargin: (nodeItem.modelData.priorityLevel > 0 ? 48 : 18)
-                                                 + (nodeItem.modelData.hasChildren ? 22 : 0)
-                                                 + (nodeItem.modelData.priorityRank > 0 ? 30 : 0)
-                            verticalAlignment: Text.AlignVCenter
-                            text: (nodeItem.modelData.completed ? "✓ " : "") + (nodeItem.modelData.isReference ? "↗ " : nodeItem.modelData.isTab ? "▣ " : "") + nodeItem.modelData.text
-                            font.pixelSize: 14
-                            font.bold: nodeItem.modelData.bold
-                            color: "#e5f0fa"; elide: Text.ElideRight
-                        }
-                        Rectangle {
-                            objectName: "mindmapPriorityRank_" + nodeItem.modelData.id
-                            readonly property int rank: nodeItem.modelData.priorityRank
-                            visible: rank > 0
-                            width: 24; height: 24; radius: 12
-                            anchors.right: parent.right; anchors.rightMargin: 48 + (nodeItem.modelData.hasChildren ? 22 : 0)
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
-                                                          - (nodeItem.modelData.measureProgress ? 12 : 0)
-                                                          - (nodeItem.modelData.deadlineActive ? 14 : 0)
-                            color: rank === 1 ? "#f2c75c" : rank === 2 ? "#c8d3df" : "#d99b6c"
-                            border.color: "#e5f0fa"
-                            Accessible.role: Accessible.StaticText
-                            Accessible.name: "Priority rank " + rank
                             Text {
-                                anchors.centerIn: parent
-                                text: parent.rank
-                                font.pixelSize: 14
-                                font.bold: true
-                                color: "#1b2028"
-                            }
-                        }
-                        PriorityBars {
-                            objectName: "mindmapPriority_" + nodeItem.modelData.id
-                            anchors.right: parent.right; anchors.rightMargin: 20 + (nodeItem.modelData.hasChildren ? 22 : 0)
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
-                                                          - (nodeItem.modelData.measureProgress ? 12 : 0)
-                                                          - (nodeItem.modelData.deadlineActive ? 14 : 0)
-                            level: nodeItem.modelData.priorityLevel
-                            visible: level > 0
-                        }
-                        ToolButton {
-                            id: foldButton
-                            objectName: "mindmapFold_" + nodeItem.modelData.id
-                            visible: nodeItem.modelData.hasChildren
-                            anchors.right: parent.right
-                            anchors.rightMargin: 3
-                            anchors.top: parent.top
-                            anchors.topMargin: 4
-                            width: 32; height: 32
-                            z: 3
-                            text: nodeItem.modelData.folded ? "+" : "−"
-                            font.pixelSize: 18
-                            palette.buttonText: "#e5f0fa"
-                            background: Rectangle {
-                                radius: 8
-                                color: foldButton.down ? "#42647c" : foldButton.hovered ? "#345265" : "#20394c"
-                                border.color: foldButton.activeFocus ? "#e5f0fa" : "#6288a5"
-                            }
-                            Accessible.name: (nodeItem.modelData.folded ? "Unfold " : "Fold ") + nodeItem.modelData.text
-                            ToolTip.visible: hovered
-                            ToolTip.text: nodeItem.modelData.folded ? "Unfold branch" : "Fold branch"
-                            onClicked: {
-                                pane.controller.toggleNodeFold(nodeItem.modelData.id)
-                                pane.focusMap()
-                            }
-                        }
-                        MouseArea {
-                            id: nodeMouse
-                            objectName: "mindmapNodeMouse_" + nodeItem.modelData.id
-                            anchors.fill: parent
-                            acceptedButtons: Qt.LeftButton | Qt.RightButton
-                            hoverEnabled: true
-                            onEntered: { insertionHoverExit.stop(); pane.hoveredNodeId = nodeItem.modelData.id }
-                            onExited: insertionHoverExit.restart()
-                            onPressedChanged: pane.nodePressed = pressed
-                            cursorShape: Qt.PointingHandCursor
-                            drag.target: pressedButtons === Qt.LeftButton ? nodeItem : null
-                            drag.axis: reorderDrag ? Drag.YAxis : Drag.XAndYAxis
-                            property bool wasDragged: false
-                            property bool reorderDrag: false
-                            function restorePosition() {
-                                nodeItem.x = Qt.binding(function() { return nodeItem.modelData.x })
-                                nodeItem.y = Qt.binding(function() { return nodeItem.modelData.y })
-                            }
-                            onPressed: function(mouse) {
-                                pane.focusMap()
-                                wasDragged = false
-                                reorderDrag = mouse.button === Qt.LeftButton && !!(mouse.modifiers & Qt.ControlModifier)
-                            }
-                            onPositionChanged: if (drag.active) wasDragged = true
-                            onCanceled: { restorePosition(); wasDragged = true; reorderDrag = false }
-                            onReleased: function(mouse) {
-                                if (!wasDragged) return
-                                if (reorderDrag) {
-                                    var reorderId = nodeItem.modelData.id
-                                    var centerY = nodeItem.y + nodeItem.height / 2
-                                    restorePosition()
-                                    Qt.callLater(pane.controller.reorderNodeAt, reorderId, centerY)
-                                    return
-                                }
-                                var point = nodeItem.mapToItem(world, mouse.x, mouse.y)
-                                var nodes = pane.controller.nodes
-                                var targetId = "", placement = "child"
-                                for (var i = 0; i < nodes.length; ++i) {
-                                    var n = nodes[i]
-                                    if (n.id === nodeItem.modelData.id) continue
-                                    if (point.x >= n.x && point.x <= n.x + n.width && point.y >= n.y && point.y <= n.y + n.height) {
-                                        targetId = n.id
-                                        var relativeY = (point.y - n.y) / n.height
-                                        placement = relativeY < 0.25 ? "before" : relativeY > 0.75 ? "after" : "child"
-                                        break
+                                objectName: "mindmapNoteIcon_" + nodeItem.modelData.id
+                                visible: nodeItem.modelData.hasNote
+                                anchors.left: parent.left; anchors.leftMargin: 9
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
+                                                              - (nodeItem.modelData.measureProgress ? 12 : 0)
+                                                              - (nodeItem.modelData.deadlineActive ? 14 : 0)
+                                text: "\uD83D\uDCDD"
+                                font.pixelSize: 15
+                                z: 2
+                                Accessible.role: Accessible.Button
+                                Accessible.name: "Edit note"
+                                MouseArea {
+                                    anchors.fill: parent
+                                    acceptedButtons: Qt.LeftButton
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        pane.controller.select(nodeItem.modelData.id)
+                                        pane.editNode()
                                     }
                                 }
-                                var sourceId = nodeItem.modelData.id
-                                restorePosition()
-                                if (targetId) Qt.callLater(pane.controller.moveNode, sourceId, targetId, placement)
                             }
-                            onClicked: function(mouse) {
-                                if (wasDragged) return
-                                var nodeId = nodeItem.modelData.id
-                                if (mouse.button === Qt.RightButton) {
-                                    if (!nodeItem.selected) pane.controller.select(nodeId)
-                                    nodeMenu.targetNodeId = nodeId
-                                    nodeMenu.popup()
-                                } else if (mouse.modifiers & Qt.ControlModifier) {
-                                    pane.controller.select(nodeId, "toggle")
-                                } else if (mouse.modifiers & Qt.ShiftModifier) {
-                                    pane.controller.select(nodeId, "range")
-                                } else {
-                                    pane.controller.select(nodeId)
-                                }
-                            }
-                            onDoubleClicked: function(mouse) {
-                                if (wasDragged || mouse.button !== Qt.LeftButton || mouse.modifiers !== Qt.NoModifier) return
-                                var nodeId = nodeItem.modelData.id
-                                pane.controller.select(nodeId)
-                                if (nodeItem.modelData.isTab) {
-                                    if (!(pane.controller.tabScoped && nodeItem.modelData.isViewRoot) && !pane.controller.canPaste)
-                                        pane.controller.activate(nodeId)
-                                } else {
-                                    pane.editNode()
-                                }
-                            }
-                            ToolTip {
-                                objectName: "mindmapTooltip_" + nodeItem.modelData.id
-                                y: nodeItem.height + 8
-                                delay: 800
-                                visible: nodeMouse.containsMouse && !nodeMouse.pressed
-                                text: nodeItem.modelData.text
-                                      + (nodeItem.modelData.priorityRank > 0
-                                         ? "\nPriority rank: " + nodeItem.modelData.priorityRank : "")
-                                      + (nodeItem.modelData.priorityLevel > 0
-                                         ? "\nRelative priority: " + pane.priorityLabel(nodeItem.modelData.priorityLevel)
-                                           + " · Score: " + nodeItem.modelData.priorityScore.toFixed(2) : "")
-                                      + (nodeItem.modelData.note ? "\n\n" + nodeItem.modelData.note : "")
-                            }
-                        }
-                        Item {
-                            id: deadlineBar
-                            objectName: "mindmapDeadlineBar_" + nodeItem.modelData.id
-                            visible: nodeItem.modelData.deadlineActive
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.bottom: parent.bottom
-                            anchors.margins: 6
-                            height: 22
-                            readonly property real remaining: visible
-                                ? Math.max(0, Math.min(nodeItem.modelData.deadlineDuration,
-                                    nodeItem.modelData.deadlineStart + nodeItem.modelData.deadlineDuration - pane.deadlineNow)) : 0
-                            readonly property real progress: nodeItem.modelData.deadlineDuration > 0
-                                ? remaining / nodeItem.modelData.deadlineDuration : 0
-                            readonly property color timerColor: progress > 0.5 ? "#2ecc71"
-                                : progress > 0.25 ? "#f39c12" : "#e74c3c"
                             Text {
-                                objectName: "mindmapDeadlineText_" + nodeItem.modelData.id
-                                anchors.right: parent.right
-                                anchors.top: parent.top
-                                text: {
-                                    var seconds = Math.ceil(deadlineBar.remaining)
-                                    return Math.floor(seconds / 60) + ":" + (seconds % 60 < 10 ? "0" : "") + seconds % 60
-                                }
-                                color: deadlineBar.timerColor
-                                font.pixelSize: 12
+                                objectName: "mindmapBookmarkIcon_" + nodeItem.modelData.id
+                                visible: nodeItem.modelData.bookmarked
+                                anchors.left: parent.left
+                                anchors.leftMargin: nodeItem.modelData.hasNote ? 29 : 9
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
+                                                              - (nodeItem.modelData.measureProgress ? 12 : 0)
+                                                              - (nodeItem.modelData.deadlineActive ? 14 : 0)
+                                text: "\uD83D\uDD16"
+                                font.pixelSize: 15
                                 Accessible.role: Accessible.StaticText
-                                Accessible.name: "Deadline: " + text
+                                Accessible.name: "Bookmarked"
                             }
                             Rectangle {
+                                objectName: "mindmapPlanBadge_" + nodeItem.modelData.id
+                                visible: nodeItem.modelData.planVisible
+                                width: 16; height: 18; radius: 3
+                                anchors.left: parent.left
+                                anchors.leftMargin: 9 + (nodeItem.modelData.hasNote ? 20 : 0)
+                                                       + (nodeItem.modelData.bookmarked ? 20 : 0)
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
+                                                              - (nodeItem.modelData.measureProgress ? 12 : 0)
+                                                              - (nodeItem.modelData.deadlineActive ? 14 : 0)
+                                color: nodeItem.modelData.planState === "pending" ? "#806125" : "#315e7b"
+                                z: 3
+                                Image {
+                                    anchors.centerIn: parent
+                                    width: 14; height: 14
+                                    source: Qt.resolvedUrl("../icons/calendar.svg")
+                                }
+                                Rectangle {
+                                    visible: nodeItem.modelData.planState === "combined"
+                                    anchors.right: parent.right; anchors.top: parent.top
+                                    width: 5; height: 5; radius: 3; color: "#ffcc66"
+                                }
+                                Accessible.role: Accessible.StaticText
+                                Accessible.name: nodeItem.modelData.planTooltip
+                                ToolTip.visible: planHover.containsMouse
+                                ToolTip.delay: 300
+                                ToolTip.text: nodeItem.modelData.planTooltip
+                                MouseArea {
+                                    id: planHover
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    acceptedButtons: Qt.NoButton
+                                }
+                            }
+                            Text {
+                                objectName: "mindmapNodeText_" + nodeItem.modelData.id
+                                anchors.fill: parent
+                                anchors.bottomMargin: (nodeItem.modelData.reminderActive ? 24 : 0)
+                                                      + (nodeItem.modelData.measureProgress ? 24 : 0)
+                                                      + (nodeItem.modelData.deadlineActive ? 28 : 0)
+                                anchors.leftMargin: 9 + (nodeItem.modelData.hasNote ? 20 : 0)
+                                                       + (nodeItem.modelData.bookmarked ? 20 : 0)
+                                                       + (nodeItem.modelData.planVisible ? 20 : 0)
+                                anchors.rightMargin: (nodeItem.modelData.priorityLevel > 0 ? 48 : 18)
+                                                     + (nodeItem.modelData.hasChildren ? 22 : 0)
+                                                     + (nodeItem.modelData.priorityRank > 0 ? 30 : 0)
+                                verticalAlignment: Text.AlignVCenter
+                                text: (nodeItem.modelData.completed ? "✓ " : "") + (nodeItem.modelData.isReference ? "↗ " : nodeItem.modelData.isTab ? "▣ " : "") + nodeItem.modelData.text
+                                font.pixelSize: 14
+                                font.bold: nodeItem.modelData.bold
+                                color: "#e5f0fa"; elide: Text.ElideRight
+                            }
+                            Rectangle {
+                                objectName: "mindmapPriorityRank_" + nodeItem.modelData.id
+                                readonly property int rank: nodeItem.modelData.priorityRank
+                                visible: rank > 0
+                                width: 24; height: 24; radius: 12
+                                anchors.right: parent.right; anchors.rightMargin: 48 + (nodeItem.modelData.hasChildren ? 22 : 0)
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
+                                                              - (nodeItem.modelData.measureProgress ? 12 : 0)
+                                                              - (nodeItem.modelData.deadlineActive ? 14 : 0)
+                                color: rank === 1 ? "#f2c75c" : rank === 2 ? "#c8d3df" : "#d99b6c"
+                                border.color: "#e5f0fa"
+                                Accessible.role: Accessible.StaticText
+                                Accessible.name: "Priority rank " + rank
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: parent.rank
+                                    font.pixelSize: 14
+                                    font.bold: true
+                                    color: "#1b2028"
+                                }
+                            }
+                            PriorityBars {
+                                objectName: "mindmapPriority_" + nodeItem.modelData.id
+                                anchors.right: parent.right; anchors.rightMargin: 20 + (nodeItem.modelData.hasChildren ? 22 : 0)
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
+                                                              - (nodeItem.modelData.measureProgress ? 12 : 0)
+                                                              - (nodeItem.modelData.deadlineActive ? 14 : 0)
+                                level: nodeItem.modelData.priorityLevel
+                                visible: level > 0
+                            }
+                            ToolButton {
+                                id: foldButton
+                                objectName: "mindmapFold_" + nodeItem.modelData.id
+                                visible: nodeItem.modelData.hasChildren
+                                anchors.right: parent.right
+                                anchors.rightMargin: 3
+                                anchors.top: parent.top
+                                anchors.topMargin: 4
+                                width: 32; height: 32
+                                z: 3
+                                text: nodeItem.modelData.folded ? "+" : "−"
+                                font.pixelSize: 18
+                                palette.buttonText: "#e5f0fa"
+                                background: Rectangle {
+                                    radius: 8
+                                    color: foldButton.down ? "#42647c" : foldButton.hovered ? "#345265" : "#20394c"
+                                    border.color: foldButton.activeFocus ? "#e5f0fa" : "#6288a5"
+                                }
+                                Accessible.name: (nodeItem.modelData.folded ? "Unfold " : "Fold ") + nodeItem.modelData.text
+                                ToolTip.visible: hovered
+                                ToolTip.text: nodeItem.modelData.folded ? "Unfold branch" : "Fold branch"
+                                onClicked: {
+                                    pane.controller.toggleNodeFold(nodeItem.modelData.id)
+                                    pane.focusMap()
+                                }
+                            }
+                            MouseArea {
+                                id: nodeMouse
+                                objectName: "mindmapNodeMouse_" + nodeItem.modelData.id
+                                anchors.fill: parent
+                                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                hoverEnabled: true
+                                onEntered: { insertionHoverExit.stop(); pane.hoveredNodeId = nodeItem.modelData.id }
+                                onExited: insertionHoverExit.restart()
+                                onPressedChanged: { pane.nodePressed = pressed; nodeLoader.dragging = pressed }
+                                cursorShape: Qt.PointingHandCursor
+                                drag.target: pressedButtons === Qt.LeftButton ? nodeItem : null
+                                drag.axis: reorderDrag ? Drag.YAxis : Drag.XAndYAxis
+                                property bool wasDragged: false
+                                property bool reorderDrag: false
+                                function restorePosition() {
+                                    nodeItem.x = Qt.binding(function() { return nodeItem.modelData.x })
+                                    nodeItem.y = Qt.binding(function() { return nodeItem.modelData.y })
+                                }
+                                onPressed: function(mouse) {
+                                    pane.focusMap()
+                                    wasDragged = false
+                                    reorderDrag = mouse.button === Qt.LeftButton && !!(mouse.modifiers & Qt.ControlModifier)
+                                }
+                                onPositionChanged: if (drag.active) wasDragged = true
+                                onCanceled: { restorePosition(); wasDragged = true; reorderDrag = false }
+                                onReleased: function(mouse) {
+                                    if (!wasDragged) return
+                                    if (reorderDrag) {
+                                        var reorderId = nodeItem.modelData.id
+                                        var centerY = nodeItem.y + nodeItem.height / 2
+                                        restorePosition()
+                                        Qt.callLater(pane.controller.reorderNodeAt, reorderId, centerY)
+                                        return
+                                    }
+                                    var point = nodeItem.mapToItem(world, mouse.x, mouse.y)
+                                    var nodes = pane.sceneNodes
+                                    var targetId = "", placement = "child"
+                                    for (var i = 0; i < nodes.length; ++i) {
+                                        var n = nodes[i]
+                                        if (n.id === nodeItem.modelData.id) continue
+                                        if (point.x >= n.x && point.x <= n.x + n.width && point.y >= n.y && point.y <= n.y + n.height) {
+                                            targetId = n.id
+                                            var relativeY = (point.y - n.y) / n.height
+                                            placement = relativeY < 0.25 ? "before" : relativeY > 0.75 ? "after" : "child"
+                                            break
+                                        }
+                                    }
+                                    var sourceId = nodeItem.modelData.id
+                                    restorePosition()
+                                    if (targetId) Qt.callLater(pane.controller.moveNode, sourceId, targetId, placement)
+                                }
+                                onClicked: function(mouse) {
+                                    if (wasDragged) return
+                                    var nodeId = nodeItem.modelData.id
+                                    if (mouse.button === Qt.RightButton) {
+                                        if (!nodeItem.selected) pane.controller.select(nodeId)
+                                        nodeMenu.targetNodeId = nodeId
+                                        nodeMenu.popup()
+                                    } else if (mouse.modifiers & Qt.ControlModifier) {
+                                        pane.controller.select(nodeId, "toggle")
+                                    } else if (mouse.modifiers & Qt.ShiftModifier) {
+                                        pane.controller.select(nodeId, "range")
+                                    } else {
+                                        pane.controller.select(nodeId)
+                                    }
+                                }
+                                onDoubleClicked: function(mouse) {
+                                    if (wasDragged || mouse.button !== Qt.LeftButton || mouse.modifiers !== Qt.NoModifier) return
+                                    var nodeId = nodeItem.modelData.id
+                                    pane.controller.select(nodeId)
+                                    if (nodeItem.modelData.isTab) {
+                                        if (!(pane.controller.tabScoped && nodeItem.modelData.isViewRoot) && !pane.controller.canPaste)
+                                            pane.controller.activate(nodeId)
+                                    } else {
+                                        pane.editNode()
+                                    }
+                                }
+                                ToolTip {
+                                    objectName: "mindmapTooltip_" + nodeItem.modelData.id
+                                    y: nodeItem.height + 8
+                                    delay: 800
+                                    visible: nodeMouse.containsMouse && !nodeMouse.pressed
+                                    text: nodeItem.modelData.text
+                                          + (nodeItem.modelData.priorityRank > 0
+                                             ? "\nPriority rank: " + nodeItem.modelData.priorityRank : "")
+                                          + (nodeItem.modelData.priorityLevel > 0
+                                             ? "\nRelative priority: " + pane.priorityLabel(nodeItem.modelData.priorityLevel)
+                                               + " · Score: " + nodeItem.modelData.priorityScore.toFixed(2) : "")
+                                          + (nodeItem.modelData.note ? "\n\n" + nodeItem.modelData.note : "")
+                                }
+                            }
+                            Item {
+                                id: deadlineBar
+                                objectName: "mindmapDeadlineBar_" + nodeItem.modelData.id
+                                visible: nodeItem.modelData.deadlineActive
                                 anchors.left: parent.left
                                 anchors.right: parent.right
                                 anchors.bottom: parent.bottom
-                                height: 4
-                                radius: 2
-                                color: "#1a2230"
-                                Rectangle {
-                                    objectName: "mindmapDeadlineFill_" + nodeItem.modelData.id
-                                    width: parent.width * deadlineBar.progress
-                                    height: parent.height
-                                    radius: 2
+                                anchors.margins: 6
+                                height: 22
+                                readonly property real remaining: visible
+                                    ? Math.max(0, Math.min(nodeItem.modelData.deadlineDuration,
+                                        nodeItem.modelData.deadlineStart + nodeItem.modelData.deadlineDuration - pane.deadlineNow)) : 0
+                                readonly property real progress: nodeItem.modelData.deadlineDuration > 0
+                                    ? remaining / nodeItem.modelData.deadlineDuration : 0
+                                readonly property color timerColor: progress > 0.5 ? "#2ecc71"
+                                    : progress > 0.25 ? "#f39c12" : "#e74c3c"
+                                Text {
+                                    objectName: "mindmapDeadlineText_" + nodeItem.modelData.id
+                                    anchors.right: parent.right
+                                    anchors.top: parent.top
+                                    text: {
+                                        var seconds = Math.ceil(deadlineBar.remaining)
+                                        return Math.floor(seconds / 60) + ":" + (seconds % 60 < 10 ? "0" : "") + seconds % 60
+                                    }
                                     color: deadlineBar.timerColor
+                                    font.pixelSize: 12
+                                    Accessible.role: Accessible.StaticText
+                                    Accessible.name: "Deadline: " + text
+                                }
+                                Rectangle {
+                                    anchors.left: parent.left
+                                    anchors.right: parent.right
+                                    anchors.bottom: parent.bottom
+                                    height: 4
+                                    radius: 2
+                                    color: "#1a2230"
+                                    Rectangle {
+                                        objectName: "mindmapDeadlineFill_" + nodeItem.modelData.id
+                                        width: parent.width * deadlineBar.progress
+                                        height: parent.height
+                                        radius: 2
+                                        color: deadlineBar.timerColor
+                                    }
                                 }
                             }
-                        }
-                        Rectangle {
-                            objectName: "mindmapProgressBadge_" + nodeItem.modelData.id
-                            visible: nodeItem.modelData.measureProgress
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.bottom: parent.bottom
-                            anchors.bottomMargin: 4 + (nodeItem.modelData.reminderActive ? 24 : 0)
-                                                    + (nodeItem.modelData.deadlineActive ? 28 : 0)
-                            anchors.leftMargin: 4
-                            anchors.rightMargin: 4
-                            height: 20
-                            radius: 4
-                            color: "#345265"
-                            Text {
-                                objectName: "mindmapProgressText_" + nodeItem.modelData.id
-                                anchors.centerIn: parent
-                                text: "Progress: " + nodeItem.modelData.progressPercent + "%"
-                                color: "#e5f0fa"
-                                font.pixelSize: 12
-                                Accessible.role: Accessible.StaticText
-                                Accessible.name: text
+                            Rectangle {
+                                objectName: "mindmapProgressBadge_" + nodeItem.modelData.id
+                                visible: nodeItem.modelData.measureProgress
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                anchors.bottomMargin: 4 + (nodeItem.modelData.reminderActive ? 24 : 0)
+                                                        + (nodeItem.modelData.deadlineActive ? 28 : 0)
+                                anchors.leftMargin: 4
+                                anchors.rightMargin: 4
+                                height: 20
+                                radius: 4
+                                color: "#345265"
+                                Text {
+                                    objectName: "mindmapProgressText_" + nodeItem.modelData.id
+                                    anchors.centerIn: parent
+                                    text: "Progress: " + nodeItem.modelData.progressPercent + "%"
+                                    color: "#e5f0fa"
+                                    font.pixelSize: 12
+                                    Accessible.role: Accessible.StaticText
+                                    Accessible.name: text
+                                }
                             }
-                        }
-                        Rectangle {
-                            objectName: "mindmapReminderBadge_" + nodeItem.modelData.id
-                            anchors.bottomMargin: 4 + (nodeItem.modelData.deadlineActive ? 28 : 0)
-                            visible: nodeItem.modelData.reminderActive
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.bottom: parent.bottom
-                            anchors.margins: 4
-                            height: 22
-                            radius: 4
-                            color: "#a94f0b"
-                            border.color: "#f4a64f"
-                            Text {
-                                anchors.centerIn: parent
-                                text: "\uD83D\uDD14 " + nodeItem.modelData.reminderAt
-                                color: "#fff4e4"
-                                font.pixelSize: 12
-                            }
-                            MouseArea {
-                                anchors.fill: parent
-                                acceptedButtons: Qt.LeftButton | Qt.RightButton
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: {
-                                    pane.controller.select(nodeItem.modelData.id)
-                                    nodeMenu.targetNodeId = nodeItem.modelData.id
-                                    nodeMenu.popup()
+                            Rectangle {
+                                objectName: "mindmapReminderBadge_" + nodeItem.modelData.id
+                                anchors.bottomMargin: 4 + (nodeItem.modelData.deadlineActive ? 28 : 0)
+                                visible: nodeItem.modelData.reminderActive
+                                anchors.left: parent.left
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                anchors.margins: 4
+                                height: 22
+                                radius: 4
+                                color: "#a94f0b"
+                                border.color: "#f4a64f"
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "\uD83D\uDD14 " + nodeItem.modelData.reminderAt
+                                    color: "#fff4e4"
+                                    font.pixelSize: 12
+                                }
+                                MouseArea {
+                                    anchors.fill: parent
+                                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        pane.controller.select(nodeItem.modelData.id)
+                                        nodeMenu.targetNodeId = nodeItem.modelData.id
+                                        nodeMenu.popup()
+                                    }
                                 }
                             }
                         }
@@ -988,7 +1009,7 @@ FocusScope {
                 readonly property var targetNode: {
                     if (!pane.controller) return null
                     var id = pane.hoveredNodeId || pane.controller.selectedId
-                    var nodes = pane.controller.nodes
+                    var nodes = pane.sceneNodes
                     for (var i = 0; i < nodes.length; ++i)
                         if (nodes[i].id === id) return nodes[i].isViewRoot ? null : nodes[i]
                     return null
