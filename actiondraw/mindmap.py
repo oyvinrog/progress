@@ -1264,7 +1264,21 @@ class MindMapController(QObject):
         """
         if not self.canCreateTab:
             return
-        node = self._find(self._selected)
+        self._promote_node(self._find(self._selected))
+
+    @Slot(str, str, str, result=str)
+    def createScheduledGoalFromNode(self, node_id, start, end):
+        """Promote the captured node only after validating its date range."""
+        node = self._find(node_id)
+        if (self._tabs is None or node is None
+                or _content(node) is self.map.root or self._tab_id(node) is not None):
+            return ''
+        start, end = self._tabs.normalizeGoalRange(start, end)
+        if start is None:
+            return ''
+        return self._promote_node(node, start, end)
+
+    def _promote_node(self, node, start=None, end=None):
         # addTab emits tabsChanged synchronously. Defer reconciliation until the
         # new tab is linked here, otherwise it would get a duplicate root node.
         self._creating_tab = True
@@ -1273,6 +1287,8 @@ class MindMapController(QObject):
         finally:
             self._creating_tab = False
         tab = self._tabs.getAllTabs()[-1]
+        if start is not None:
+            self._tabs.setGoalRange(tab.id, start, end)
 
         def mutate():
             self.links[_content(node).id] = tab.id
@@ -1281,6 +1297,7 @@ class MindMapController(QObject):
         self._commit(mutate)
         self.reconcile()
         self.revealNode.emit(node.id)
+        return tab.id
 
     def _set_selection(self, ids, primary=None):
         self._selected_ids = list(dict.fromkeys(ids))

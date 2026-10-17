@@ -120,7 +120,7 @@ FocusScope {
             pane.hoveredNodeId = ""
         }
     }
-    readonly property bool shortcutsEnabled: visible && activeFocus && !toolDialogOpen && !editor.visible && !quickChildDialog.visible && !nodeMenu.visible && !actionsButton.activeFocus && !prioritySlider.activeFocus && !actionsMenu.visible && !helpDialog.visible && !deadlineDialog.visible && !tabReferenceDialog.visible && !reminderDialogOpen
+    readonly property bool shortcutsEnabled: visible && activeFocus && !toolDialogOpen && !editor.visible && !quickChildDialog.visible && !nodeMenu.visible && !actionsButton.activeFocus && !prioritySlider.activeFocus && !actionsMenu.visible && !helpDialog.visible && !deadlineDialog.visible && !tabReferenceDialog.visible && !nodeGoalRangeDialog.visible && !reminderDialogOpen
     readonly property bool searching: controller && controller.searchQuery.length > 0
     onSearchingChanged: if (searching) navigationHighlightId = ""
     onShortcutsEnabledChanged: if (!shortcutsEnabled && controller) controller.clearSearch()
@@ -377,6 +377,12 @@ FocusScope {
                             onTriggered: { pane.controller.createTabFromSelected(); pane.focusMap() }
                         }
                         MenuItem {
+                            objectName: "mindmapCreateScheduledGoal"
+                            text: "Create goal with time range…"
+                            enabled: pane.controller && pane.controller.canCreateTab
+                            onTriggered: nodeGoalRangeDialog.showForNode(pane.controller.selectedId, pane.controller.selectedNode.text)
+                        }
+                        MenuItem {
                             text: "Open goal"
                             enabled: pane.controller && pane.controller.selectedNode.isTab === true
                             onTriggered: pane.controller.activate(pane.controller.selectedId)
@@ -405,7 +411,7 @@ FocusScope {
                     MenuSeparator {}
                     MenuItem { objectName: "mindmapHelpAction"; text: "Shortcuts and legend…"; onTriggered: helpDialog.open() }
                     onClosed: Qt.callLater(function() {
-                        if (!editor.visible && !helpDialog.visible && !deadlineDialog.visible && !pane.reminderDialogOpen) pane.focusMap()
+                        if (!editor.visible && !helpDialog.visible && !deadlineDialog.visible && !nodeGoalRangeDialog.visible && !pane.reminderDialogOpen) pane.focusMap()
                     })
                 }
             }
@@ -1039,7 +1045,7 @@ FocusScope {
                 }
                 visible: !!targetNode && !pane.nodePressed && !canvasMouse.pressed
                          && !editor.visible && !quickChildDialog.visible && !nodeMenu.visible && !actionsMenu.visible
-                         && !helpDialog.visible && !deadlineDialog.visible && !pane.reminderDialogOpen
+                         && !helpDialog.visible && !deadlineDialog.visible && !nodeGoalRangeDialog.visible && !pane.reminderDialogOpen
                 Repeater {
                     model: 3
                     id: insertionButtons
@@ -1405,11 +1411,24 @@ FocusScope {
             enabled: pane.controller && pane.controller.canCreateTab
             onTriggered: { pane.controller.createTabFromSelected(); pane.focusMap() }
         }
+        IconMenuItem {
+            iconKey: "tab"
+            objectName: "mindmapContextCreateScheduledGoal"
+            text: "Create goal with time range…"
+            enabled: pane.controller && pane.controller.canCreateTab
+            onTriggered: nodeGoalRangeDialog.showForNode(nodeMenu.targetNodeId, pane.controller.selectedNode.text)
+        }
         IconMenuItem { iconKey: "check"; text: "Complete"; enabled: pane.controller && pane.controller.selectedIds.length > 0; onTriggered: pane.controller.toggleCompleted() }
         IconMenuItem { iconKey: "fold"; text: "Fold / Unfold"; onTriggered: pane.controller.toggleFold() }
         IconMenuItem { iconKey: "left"; text: "Branch on left"; onTriggered: pane.controller.setSide("left") }
         IconMenuItem { iconKey: "right"; text: "Branch on right"; onTriggered: pane.controller.setSide("right") }
         IconMenuItem { iconKey: "trash"; text: pane.controller && pane.controller.selectedNode.isReference ? "Remove goal reference" : "Delete branch"; onTriggered: pane.controller.deleteSelected() }
+    }
+    GoalRangeDialog {
+        id: nodeGoalRangeDialog
+        objectName: "mindmapGoalRangeDialog"
+        nodeController: pane.controller
+        onClosed: pane.focusMap()
     }
     Dialog {
         id: tabReferenceDialog

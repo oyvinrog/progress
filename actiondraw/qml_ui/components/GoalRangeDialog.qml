@@ -8,11 +8,14 @@ Dialog {
     property var goalModel
     property var projectManager
     property string goalId: ""
+    property var nodeController: null
+    property string nodeId: ""
     title: goalId ? "Edit Goal Time Range" : "Add Goal with Time Range"
     modal: true
     anchors.centerIn: parent
     width: 360
     function show(goal, selectedDate) {
+        nodeId = ""
         goalId = goal ? goal.id : ""
         nameField.text = goal ? goal.name : ""
         var today = selectedDate || Qt.formatDate(new Date(), "yyyy-MM-dd")
@@ -21,7 +24,24 @@ Dialog {
         errorLabel.text = ""
         open()
     }
+    function showForNode(id, name) {
+        goalId = ""
+        nodeId = id
+        nameField.text = name
+        startField.text = Qt.formatDate(new Date(), "yyyy-MM-dd")
+        endField.text = startField.text
+        errorLabel.text = ""
+        open()
+    }
     function saveRange() {
+        if (nodeId) {
+            if (!nodeController || !nodeController.createScheduledGoalFromNode(nodeId, startField.text, endField.text)) {
+                errorLabel.text = "Choose a valid end date on or after the start date. The node must still exist and not already be a goal."
+                return
+            }
+            dialog.close()
+            return
+        }
         if (!dialog.goalModel) return
         var id = dialog.goalId
         var ok = id ? dialog.goalModel.setGoalRange(id, startField.text, endField.text)
@@ -35,7 +55,7 @@ Dialog {
         dialog.close()
     }
     onOpened: {
-        if (goalId) startField.forceActiveFocus()
+        if (goalId || nodeId) startField.forceActiveFocus()
         else nameField.forceActiveFocus()
     }
     onClosed: datePicker.close()
@@ -116,18 +136,18 @@ Dialog {
         }
     }
     contentItem: ColumnLayout {
-        TextField { id: nameField; objectName: "goalRangeName"; Layout.fillWidth: true; placeholderText: "Goal name"; readOnly: !!dialog.goalId }
+        TextField { id: nameField; objectName: "goalRangeName"; Layout.fillWidth: true; placeholderText: "Goal name"; readOnly: !!dialog.goalId || !!dialog.nodeId }
         Label { text: "Start date (inclusive)" }
         Button { id: startField; objectName: "goalRangeStart"; Layout.fillWidth: true; Accessible.name: "Choose start date: " + text; onClicked: datePicker.showFor(startField) }
         Label { text: "End date (inclusive)" }
         Button { id: endField; objectName: "goalRangeEnd"; Layout.fillWidth: true; Accessible.name: "Choose end date: " + text; onClicked: datePicker.showFor(endField) }
-        Label { id: errorLabel; Layout.fillWidth: true; wrapMode: Text.WordWrap; color: "#ffaaa0"; visible: text.length > 0 }
+        Label { id: errorLabel; objectName: "goalRangeError"; Layout.fillWidth: true; wrapMode: Text.WordWrap; color: "#ffaaa0"; visible: text.length > 0 }
         RowLayout {
             Button {
                 text: "Save"; objectName: "saveGoalRange"
                 onClicked: dialog.saveRange()
             }
-            Button { text: "Cancel"; onClicked: dialog.close() }
+            Button { objectName: "cancelGoalRange"; text: "Cancel"; onClicked: dialog.close() }
         }
     }
 }

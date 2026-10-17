@@ -231,3 +231,21 @@ def test_date_picker_and_enter_save(calendar_ui, app, enter_key):
     assert not dialog.property("visible")
     assert tabs.tabCount == 2
     overview.setProperty("goalModel", None)
+
+
+def test_mindmap_created_goal_appears_in_calendar(calendar_ui, app):
+    from actiondraw.mindmap import MindMapController
+
+    root, _, overview, calendar, _, _ = calendar_ui
+    tabs = TabModel()
+    tabs.addTab('Main')
+    mindmap = MindMapController(tabs)
+    mindmap.addThought(False)
+    mindmap.editSelected('From mindmap', '')
+    overview.setProperty('goalModel', tabs)
+    goal = mindmap.createScheduledGoalFromNode(mindmap.selectedId, '2032-02-28', '2032-03-02')
+    app.processEvents()
+    assert [g['id'] for g in value(overview, 'filteredGoals')] == [goal]
+    assert find(root, 'reminderDay_2032-02-28').property('goalsCount') == 1
+    assert find(root, 'reminderDay_2032-02-29').property('goalsCount') == 1
+    overview.setProperty('goalModel', None)

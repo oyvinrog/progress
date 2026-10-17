@@ -4130,3 +4130,122 @@ def test_plan_encrypted_project_roundtrip_and_persisted_delivery(project, tmp_pa
     assert saved['tabs'][0]['kanban_status'] == 'ready'
     pm.loadProject(str(path))
     assert not m.plan_schedules
+
+
+def test_scheduled_node_goal_preserves_branch_history_and_dates(project, tmp_path, monkeypatch):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    parent = thought(m, 'Parent')
+    node = thought(m, 'Scheduled', 'Keep notes')
+    child = thought(m, 'Child')
+    m.select(node)
+    m.toggleFold()
+    count = len(list(m.map.walk()))
+    current = tabs.getCurrentTabData().id
+    pm.showMindmap()
+    # Creation targets the captured node even after selection changes.
+    m.select(child)
+    goal = m.createScheduledGoalFromNode(node, '2032-02-29', '2032-03-02')
+    assert goal and m.links[node] == goal
+    assert m.map.find(node).parent.id == parent
+    assert m.map.find(node).note == 'Keep notes'
+    assert m.map.find(node).folded
+    assert m.map.find(child).parent.id == node
+    assert len(list(m.map.walk())) == count
+    assert pm.mindmapVisible and tabs.getCurrentTabData().id == current
+    assert pm.hasUnsavedChanges()
+    scheduled = tabs.scheduledGoals
+    assert scheduled[0]['id'] == goal
+    m.undo()
+    assert node not in m.links and tabs.scheduledGoals == scheduled
+    m.redo()
+    assert m.links[node] == goal and tabs.scheduledGoals == scheduled
+    assert len(list(m.map.walk())) == count
+    monkeypatch.setattr(ProjectManager, '_prompt_encryption_credentials',
+                        lambda *args: EncryptionCredentials(passphrase='test-passphrase'))
+    path = tmp_path / 'scheduled-node.progress'
+    assert pm.saveProject(str(path))
+    tabs.clearGoalRange(goal)
+    pm.loadProject(str(path))
+    assert tabs.scheduledGoals == scheduled
+    assert pm.mindmap.links[node] == goal
+
+
+def test_scheduled_node_goal_validation_is_non_mutating(project):
+    m, tabs = project[0].mindmap, project[1]
+    node = thought(m, 'Scheduled')
+    before = m.to_dict()
+    count = tabs.tabCount
+    history = len(m._undo)
+    for target, start, end in [
+        (node, '2033-02-29', '2033-03-01'),
+        (node, '2032-03-02', '2032-03-01'),
+        (node, '', ''),
+        ('missing', '2032-03-01', '2032-03-01'),
+        (m.map.root.id, '2032-03-01', '2032-03-01'),
+        (next(iter(m.links)), '2032-03-01', '2032-03-01'),
+    ]:
+        assert not m.createScheduledGoalFromNode(target, start, end)
+        assert m.to_dict() == before and tabs.tabCount == count
+        assert len(m._undo) == history
+    assert m.createScheduledGoalFromNode(node, '2032-03-01', '2032-03-01')
+    assert not m.createScheduledGoalFromNode(node, '2032-03-01', '2032-03-01')
+    assert tabs.tabCount == count + 1
+
+
+@pytest.mark.parametrize('action_name', ['mindmapCreateScheduledGoal', 'mindmapContextCreateScheduledGoal'])
+def test_qml_create_scheduled_node_goal(project, app, actiondraw_window, action_name):
+    pm, tabs, tasks, diagram = project
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    m = pm.mindmap
+    node = thought(m, 'Dated node')
+    QTest.qWait(100)
+    pane = window.findChild(QObject, 'mindmapPane')
+    dialog = window.findChild(QObject, 'mindmapGoalRangeDialog')
+    action = window.findChild(QObject, action_name)
+    window.findChild(QObject, 'mindmapNodeMenu').setProperty('targetNodeId', node)
+    count = tabs.tabCount
+
+    def invoke(obj, method):
+        assert QMetaObject.invokeMethod(obj, method)
+        QTest.qWait(30)
+
+    invoke(action, 'triggered')
+    assert dialog.property('visible') and not pane.property('shortcutsEnabled')
+    name = dialog.findChild(QObject, 'goalRangeName')
+    assert name.property('text') == 'Dated node' and name.property('readOnly')
+    start = dialog.findChild(QObject, 'goalRangeStart')
+    end = dialog.findChild(QObject, 'goalRangeEnd')
+    assert start.property('text') == end.property('text')
+    assert start.property('activeFocus')
+    invoke(dialog.findChild(QObject, 'cancelGoalRange'), 'clicked')
+    assert tabs.tabCount == count and node not in m.links
+    invoke(action, 'triggered')
+    start.setProperty('text', '2032-02-29')
+    end.setProperty('text', '2032-02-28')
+    invoke(dialog.findChild(QObject, 'saveGoalRange'), 'clicked')
+    assert dialog.property('visible') and tabs.tabCount == count
+    assert dialog.findChild(QObject, 'goalRangeError').property('text')
+    invoke(end, 'clicked')
+    invoke(dialog.findChild(QObject, 'goalDateNextMonth'), 'clicked')
+    def find_visual(item, name):
+        if item.objectName() == name:
+            return item
+        for child in item.childItems():
+            found = find_visual(child, name)
+            if found is not None:
+                return found
+        return None
+
+    invoke(find_visual(window.contentItem(), 'goalDateDay_2'), 'clicked')
+    assert end.property('text') == '2032-03-02'
+    QTest.keyClick(window, Qt.Key_Return)
+    QTest.qWait(30)
+    assert not dialog.property('visible') and pane.property('activeFocus')
+    assert tabs.tabCount == count + 1 and pm.mindmapVisible
+    assert tabs.scheduledGoals[0]['id'] == m.links[node]
+    assert tabs.scheduledGoals[0]['startDate'] == '2032-02-29'
+    assert tabs.scheduledGoals[0]['endDate'] == '2032-03-02'
