@@ -108,6 +108,7 @@ class DiagramModel(
             self._task_model.taskCountdownChanged.connect(self.onTaskCountdownChanged)
             self._task_model.taskReminderChanged.connect(self.onTaskReminderChanged)
             self._task_model.taskContractChanged.connect(self.onTaskContractChanged)
+            self._task_model.taskContractTick.connect(self.onTaskContractChanged)
 
         self._edge_drag_x: float = 0.0
         self._edge_drag_y: float = 0.0

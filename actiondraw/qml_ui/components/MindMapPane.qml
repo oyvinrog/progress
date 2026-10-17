@@ -81,8 +81,12 @@ FocusScope {
     property bool reminderDialogOpen: false
     property var controller
     // Read Python scene/selection properties once per notification, not per delegate.
-    readonly property var sceneNodes: controller ? controller.nodes : []
-    readonly property var sceneEdges: controller ? controller.edges : []
+    readonly property var sceneData: controller ? controller.scene : ({nodes: [], edges: []})
+    readonly property var sceneNodes: sceneData.nodes
+    readonly property var sceneEdges: sceneData.edges
+    readonly property bool hasRunningDeadlines: sceneNodes.some(function(node) {
+        return node.deadlineActive && node.deadlineStart + node.deadlineDuration > pane.deadlineNow
+    })
     readonly property var selectedNodeSet: new Set(controller ? controller.selectedIds : [])
     readonly property var cutNodeSet: new Set(controller ? controller.cutNodeIds : [])
     property real zoom: 1
@@ -96,9 +100,13 @@ FocusScope {
     property bool nodePressed: false
     property double deadlineNow: Date.now() / 1000
     Timer {
+        objectName: "mindmapDeadlineTimer"
         interval: 1000
         repeat: true
-        running: pane.visible
+        running: pane.visible && pane.hasRunningDeadlines
+            && pane.Window.window !== null && pane.Window.window.visible
+            && pane.Window.window.visibility !== Window.Minimized
+        onRunningChanged: if (running) pane.deadlineNow = Date.now() / 1000
         onTriggered: pane.deadlineNow = Date.now() / 1000
     }
     Timer {

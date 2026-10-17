@@ -14,6 +14,7 @@ import random
 import subprocess
 import sys
 import threading
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -515,6 +516,7 @@ class TaskModel(QAbstractListModel):
     taskReminderChanged = Signal(int, arguments=['taskIndex'])
     taskReminderDue = Signal(int, str, bool, arguments=['taskIndex', 'taskTitle', 'sendNotification'])
     taskContractChanged = Signal(int, arguments=['taskIndex'])
+    taskContractTick = Signal(int, arguments=['taskIndex'])
     taskContractBreached = Signal(
         int,
         str,
@@ -1095,7 +1097,8 @@ class TaskModel(QAbstractListModel):
                     self.ContractPunishmentRole,
                 ],
             )
-            self.taskContractChanged.emit(i)
+            # Time passing is a display update, not a project mutation.
+            self.taskContractTick.emit(i)
 
         for i, task_title, send_notification in due_reminders:
             task = self._tasks[i]
@@ -2494,6 +2497,7 @@ class ProjectManager(QObject):
     ENCRYPTED_PROJECT_VERSION = "1.2"
     MAX_RECENT_PROJECTS = 8
 
+    projectAccessEnding = Signal()  # Revoke remote access before replacing plaintext.
     saveCompleted = Signal(str)  # Emitted with file path after successful save
     loadCompleted = Signal(str)  # Emitted with file path after successful load
     errorOccurred = Signal(str)  # Emitted with error message on failure
@@ -2512,6 +2516,7 @@ class ProjectManager(QObject):
     taskDrillRequested = Signal(int, arguments=["taskIndex"])
     taskReminderDue = Signal(int, int, str, bool, arguments=["tabIndex", "taskIndex", "taskTitle", "sendNotification"])
     mindmapReminderDue = Signal(str, str, bool, arguments=["nodeId", "title", "sendNotification"])
+    standaloneRemindersChanged = Signal()
     standaloneReminderDue = Signal(str, bool, arguments=["title", "sendNotification"])
     taskContractBreached = Signal(
         int,
@@ -2588,6 +2593,7 @@ class ProjectManager(QObject):
         """
         import gc
 
+        self.projectAccessEnding.emit()
         # Zero the derived key — this is the one thing we can reliably scrub.
         if self._cached_key_material is not None:
             self._cached_key_material.scrub()
@@ -3053,6 +3059,7 @@ class ProjectManager(QObject):
             return
 
         self._standalone_reminders = remaining
+        self.standaloneRemindersChanged.emit()
         if sent_notification:
             self._save_after_reminder()
 
@@ -3383,6 +3390,7 @@ class ProjectManager(QObject):
             )
         )
         self._standalone_reminders.sort(key=lambda reminder: float(reminder.reminder_at))
+        self.standaloneRemindersChanged.emit()
         return True
 
     @Slot(int, str, str, result=bool)
@@ -3411,6 +3419,7 @@ class ProjectManager(QObject):
         reminder.reminder_at = reminder_at
         reminder.reminder_send_notification = bool(send_notification)
         self._standalone_reminders.sort(key=lambda item: float(item.reminder_at))
+        self.standaloneRemindersChanged.emit()
         return True
 
     @Slot(int)
@@ -3419,6 +3428,7 @@ class ProjectManager(QObject):
         if reminder_index < 0 or reminder_index >= len(self._standalone_reminders):
             return
         self._standalone_reminders.pop(reminder_index)
+        self.standaloneRemindersChanged.emit()
 
     def _string_setting(self, key: str, default: str = "") -> str:
         """Read a string setting from QSettings."""
@@ -4121,6 +4131,9 @@ class ProjectManager(QObject):
         if not file_path.endswith(".progress"):
             file_path += ".progress"
 
+        if file_path != self._current_file_path:
+            self.projectAccessEnding.emit()
+
         try:
             # Save current tab state first
             self._saveCurrentTabState()
@@ -4170,8 +4183,20 @@ class ProjectManager(QObject):
                 )
                 self._cached_encryption_file_path = file_path
 
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(encrypted_payload, f, ensure_ascii=False, separators=(",", ":"))
+            # Keep the previous encrypted file intact if writing fails.
+            temporary_path = None
+            try:
+                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                        dir=os.path.dirname(os.path.abspath(file_path)),
+                        prefix=".actiondraw-", suffix=".tmp", delete=False) as f:
+                    temporary_path = f.name
+                    json.dump(encrypted_payload, f, ensure_ascii=False, separators=(",", ":"))
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(temporary_path, file_path)
+            finally:
+                if temporary_path and os.path.exists(temporary_path):
+                    os.unlink(temporary_path)
 
             self._current_file_path = file_path
             self.currentFilePathChanged.emit()
@@ -4224,6 +4249,7 @@ class ProjectManager(QObject):
             self.errorOccurred.emit(f"File not found: {file_path}")
             return
 
+        self.projectAccessEnding.emit()
         # Validate incoming data before replacing the open project.
         key_material = None
         credentials = None

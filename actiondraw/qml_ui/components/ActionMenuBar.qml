@@ -12,6 +12,15 @@ MenuBar {
     property var saveDialog: null
     property var loadDialog: null
     property var notificationSettingsDialog: null
+    property var server: null
+
+    ServerDialog {
+        id: serverDialog
+        parent: root ? root.contentItem : menuBar
+        server: menuBar.server
+        manager: menuBar.projectManager
+        windowRoot: menuBar.root
+    }
 
     function hasDiagramModel() {
         return diagramModel !== null && diagramModel !== undefined
@@ -106,6 +115,12 @@ MenuBar {
         }
 
         MenuSeparator {}
+
+        MenuItem {
+            text: menuBar.server && menuBar.server.running ? "Server…" : "Start Server…"
+            enabled: !!menuBar.server
+            onTriggered: serverDialog.open()
+        }
 
         MenuItem {
             text: "Exit"

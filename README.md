@@ -199,6 +199,66 @@ With no cut pending, **Ctrl+V** adds clipboard text beneath the selected node.
 Plain text uses one node per non-empty line and indentation for nesting; OPML
 outlines retain their hierarchy.
 
+## Open your plans on your phone
+
+Choose **File → Start Server…**, select the network address and press **Start
+Server**. ActionDraw prefers an available Tailscale interface; you can choose
+another local interface and port. Save the project first if prompted, then scan
+the QR code with your phone or use **Copy Link**. Keep ActionDraw running and the
+computer awake. Both devices must be able to reach each other over Tailscale or
+your private network; ActionDraw does not configure network access for you.
+
+The phone opens the **Mindmap** with secondary controls tucked under **Tools**.
+Choose **Expand map** for more screen space while keeping quick-add and notes
+available; **Exit expanded** restores navigation. **Tools** reveals search,
+other views, goals and undo/redo.
+
+Tap a node to select it, then type into the
+quick-entry field and choose **Child** or **Sibling**. The new node is selected
+and brought into view so you can keep building the branch. **Parent**, **Child**,
+**Previous** and **Next** navigate without opening an editor. Double-tap a node
+(or choose **Focus**) to focus its branch; use breadcrumbs, **Up a branch** or
+**Whole map** to return. Pinch to zoom, drag to pan, and use **Expand/Collapse**
+for the selected branch. Search results jump to the matching node on the map.
+**Edit / Notes** opens the full node editor.
+
+**Outline**, **Calendar**, **Kanban** and **Notes** remain available. Goal
+settings include date ranges and Markdown tabs. Branches can be copied as text
+or imported and exported as OPML. The mobile client does not include the legacy
+canvas, drawing, causal models or priority-plot editing.
+
+Phone edits update the desktop project and save automatically with its existing
+encryption. **Connected · Saved** confirms persistence; **Retry Save** handles
+failed writes. Undo/redo uses the same history as the desktop. Browsing, selection,
+folding and zoom on the phone do not move the desktop view. Idle refreshes use
+small change-check responses and back off from two to ten seconds; hidden pages
+stop polling. Snapshots and map layouts are reused until data changes. Idle checks do not scan or serialize the project; model change signals invalidate
+the cache. Every submitted edit and full page refresh checks the current project
+before proceeding, including older editing paths that do not emit change signals.
+If the project changes
+while you are editing, your draft is retained and you can review the current
+content before resubmitting. Connection loss keeps the current draft in the open
+page, but offline edits are not queued and reloading discards that draft.
+
+The QR link grants editing access until you stop the server. Keep it private.
+The server uses HTTP on the selected interface: use Tailscale's encrypted network
+or another trusted private network. **File → Server… → Stop Server** revokes the
+link, as does loading another project, saving to a different destination or
+closing ActionDraw. Each start generates a new link. Scheduling uses the
+computer's local timezone, shown on the phone; goal periods are inclusive dates.
+
+If the phone cannot connect, check that Tailscale is active on both devices,
+the displayed interface is reachable, and the computer's firewall allows the
+selected port (8765 by default). An occupied port is reported in the server
+dialog; choose another port and start again.
+
+If the browser reports **ERR_SSL_PROTOCOL_ERROR** or says the site does not
+support secure connections, check that the address starts with `http://`, not
+`https://`. Keep the rest of the copied link, including `#key=…`, unchanged.
+Some browsers automatically attempt HTTPS. If offered, choose **Continue to
+site** for this private-network address. The current server does not provide TLS;
+Tailscale encrypts traffic between devices when you use its address.
+
 ## Mindmap shortcuts
 
 These shortcuts apply while the mindmap has focus, outside dialogs and menus.

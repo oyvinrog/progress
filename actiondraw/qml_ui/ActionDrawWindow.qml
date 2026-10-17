@@ -92,6 +92,7 @@ ApplicationWindow {
     property string _itemTooltipHoveredId: ""
 
     menuBar: ActionMenuBar {
+        server: typeof actiondrawServer !== "undefined" ? actiondrawServer : null
         root: root
         diagramModel: diagramModelRef
         projectManager: projectManagerRef
@@ -529,11 +530,14 @@ ApplicationWindow {
         viewport.contentY = targetY
     }
 
+    property bool defaultViewPending: false
     function applyDefaultView() {
-        if (!viewport || viewport.width <= 0 || viewport.height <= 0) {
-            Qt.callLater(root.applyDefaultView)
+        // The legacy canvas has no size while the mindmap is open. Wait for
+        // visibility/geometry changes instead of requeuing an endless idle loop.
+        defaultViewPending = true
+        if (!viewport || !viewport.visible || viewport.width <= 0 || viewport.height <= 0)
             return
-        }
+        defaultViewPending = false
 
         root.zoomLevel = clampZoom(0.95)
 
@@ -754,9 +758,11 @@ ApplicationWindow {
 
     Timer {
         id: overviewRefreshTimer
+        objectName: "overviewRefreshTimer"
         interval: 1000
         repeat: true
-        running: true
+        running: root.visible && root.visibility !== Window.Minimized
+            && (root.activeReminders.length > 0 || root.activeContracts.length > 0)
         onTriggered: root.refreshOverviewData()
     }
 
@@ -1843,6 +1849,10 @@ ApplicationWindow {
 
             Flickable {
                 id: viewport
+                objectName: "diagramViewport"
+                onVisibleChanged: if (visible && root.defaultViewPending) Qt.callLater(root.applyDefaultView)
+                onWidthChanged: if (root.defaultViewPending) Qt.callLater(root.applyDefaultView)
+                onHeightChanged: if (root.defaultViewPending) Qt.callLater(root.applyDefaultView)
                 anchors.fill: parent
                 contentWidth: root.sceneWidth * root.zoomLevel
                 contentHeight: root.sceneHeight * root.zoomLevel
@@ -4692,6 +4702,7 @@ ApplicationWindow {
     Connections {
         target: projectManager
         enabled: projectManager !== null
+        function onStandaloneRemindersChanged() { root.refreshActiveReminders() }
         function onTaskReminderDue(tabIndex, taskIndex, taskTitle, sendNotification) {
             root.showWindow()
             root.refreshActiveReminders()

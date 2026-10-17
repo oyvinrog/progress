@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width,initial-scale=1,viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#10222e" />
+    <title>ActionDraw</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <div class="brand">ActionDraw <small id="zone"></small></div>
+      <div id="status" role="status">Connecting…</div>
+      <button id="retry">Retry Save</button>
+      <button id="mapTools" aria-expanded="false">Tools</button>
+    </header>
+    <nav aria-label="Views">
+      <button data-view="map" class="active">Mindmap</button
+      ><button data-view="outline">Outline</button
+      ><button data-view="calendar">Calendar</button
+      ><button data-view="kanban">Kanban</button
+      ><button data-view="notes">Notes</button>
+    </nav>
+    <div id="message" role="alert" hidden></div>
+    <section id="toolbar">
+      <input
+        id="search"
+        type="search"
+        placeholder="Search thoughts and goals"
+        aria-label="Search"
+      /><button id="add">＋ Add</button><button id="goals">Goals</button
+      ><button id="undo" title="Shared with desktop">Undo</button
+      ><button id="redo" title="Shared with desktop">Redo</button>
+    </section>
+    <div id="mapSearchResults" aria-label="Mindmap search results" hidden></div>
+    <div id="bookmarks"></div>
+    <div id="breadcrumbs"></div>
+    <main id="content"></main>
+    <section id="mapDock" aria-label="Mindmap controls" hidden>
+      <div class="map-selection-row">
+        <div id="mapSelection" aria-live="polite"></div>
+        <button id="mapEdit">Edit / Notes</button>
+      </div>
+      <div id="mapActions" class="actions"></div>
+      <form id="quickAdd">
+        <input
+          id="quickTitle"
+          aria-label="New node title"
+          placeholder="New thought…"
+          required
+          autocomplete="off"
+        />
+        <button type="submit" value="child">＋ Child</button>
+        <button id="quickSibling" type="submit" value="sibling">
+          ＋ Sibling
+        </button>
+      </form>
+      <small id="quickContext"></small>
+    </section>
+    <dialog id="editor">
+      <form id="editorForm">
+        <div class="sheet-head">
+          <h2 id="editorTitle">Edit thought</h2>
+          <button type="button" id="closeEditor">Close</button>
+        </div>
+        <div id="fields"></div>
+        <div id="editorError" role="alert"></div>
+        <footer><button id="submit" type="submit">Save changes</button></footer>
+      </form>
+    </dialog>
+  </body>
+</html>

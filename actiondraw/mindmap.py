@@ -1,5 +1,6 @@
 """Project-owned mindmap with stable tab references and a QML-facing editor API."""
 import copy
+from contextlib import contextmanager
 import math
 import time
 import weakref
@@ -1105,9 +1106,20 @@ class MindMapController(QObject):
         return {node: boxes[projected[node]] for node in sizes
                 if node in projected and projected[node] in boxes}
 
+    @Property('QVariantMap', notify=sceneChanged)
+    def scene(self):
+        # Nodes and edges describe the same layout; calculate it only once.
+        priorities = self._priority_data()
+        boxes = self._layout(priorities)
+        return {'nodes': self._scene_nodes(boxes, priorities),
+                'edges': self._scene_edges(boxes)}
+
     @Property('QVariantList', notify=sceneChanged)
     def nodes(self):
         priorities = self._priority_data()
+        return self._scene_nodes(self._layout(priorities), priorities)
+
+    def _scene_nodes(self, boxes, priorities):
         root = self.view_root
         bookmarks = set(self._bookmarks)
         return [{'id': n.id, 'sourceId': _content(n).id,
@@ -1125,11 +1137,14 @@ class MindMapController(QObject):
                  **self._deadline_data(_content(n).id),
                  **priorities.get(self._tab_id(n), {'priorityScore': None, 'priorityLevel': 0,
                                                        'priorityRank': 0})}
-                for n, b in self._layout(priorities).items()]
+                for n, b in boxes.items()]
 
     @Property('QVariantList', notify=sceneChanged)
     def edges(self):
-        boxes = self._layout()
+        return self._scene_edges(self._layout())
+
+    @staticmethod
+    def _scene_edges(boxes):
         result = []
         for n, b in boxes.items():
             if n.parent in boxes:
@@ -1459,6 +1474,7 @@ class MindMapController(QObject):
         self.revealNode.emit(self._selected)
 
     def _commit(self, mutation, tab_state=None):
+        self._last_commit_error = ""
         before = self.to_dict()
         previous_ids = {n.id for n in self.map.walk()}
         selected = self._selection_state()
@@ -1477,6 +1493,7 @@ class MindMapController(QObject):
             self._kanban = {key: value for key, value in self._kanban.items()
                             if key in live and key not in self.links}
         except (ValueError, IndexError) as exc:
+            self._last_commit_error = str(exc)
             self.map, self.links = self.decode(before)
             self.references = dict(before.get('tab_references', {}))
             self._completed = set(before.get('completed', []))
@@ -1528,6 +1545,67 @@ class MindMapController(QObject):
             return []
         self.revealNode.emit(created[0])
         return created
+
+    @contextmanager
+    def independent_view(self, node_id=None):
+        """Use explicit remote targets without changing desktop navigation.
+
+        Synchronous GUI-thread scope only. Content and undo history stay shared;
+        temporary selection/scope signals and reveal requests are suppressed.
+        """
+        scope = self._scope_tab
+        selection = self._selection_state()
+        cut, query, priority = list(self._cut_ids), self._search_query, self._priority_filter
+        was_blocked = self.blockSignals(True)
+        try:
+            self._scope_tab = None
+            self._search_query = ''
+            self._priority_filter = 1.0
+            self._cut_ids = []
+            if node_id is not None:
+                if self._find(node_id) is None:
+                    raise ValueError('This node no longer exists.')
+                self._set_selection([node_id])
+            yield
+        finally:
+            self._scope_tab = scope if scope in self.links.values() else None
+            self._search_query, self._priority_filter = query, priority
+            self._cut_ids = [key for key in cut if self._find(key)]
+            self._restore_selection(selection)
+            valid = [key for key in self._selected_ids if self._in_scope(self._find(key))]
+            if valid != self._selected_ids:
+                self._set_selection(valid or [self.view_root.id])
+            self.blockSignals(was_blocked)
+
+    def editNode(self, node_id, text, note):
+        node = self._find(node_id)
+        if node is None:
+            return False
+        def mutate():
+            if self._tab_id(node) is None:
+                node.text = text
+            node.note = note or None
+        return self._commit(mutate)
+
+    def importBranchText(self, node_id, text):
+        target = self._find(node_id)
+        if target is None:
+            return False
+        entries = parse_opml_text(text)
+        if entries is None:
+            if looks_like_opml(text):
+                raise ValueError('Malformed or empty OPML.')
+            entries = parse_text_hierarchy(text)
+        if not entries:
+            return False
+        def mutate():
+            parents = []
+            for entry in entries:
+                level = min(max(0, int(entry['level'])), len(parents))
+                del parents[level:]
+                parent = target if level == 0 else parents[level - 1]
+                parents.append(parent.add_child(entry['text']))
+        return self._commit(mutate)
 
     @Slot(bool)
     def addThought(self, sibling=False):
@@ -1635,14 +1713,7 @@ class MindMapController(QObject):
 
     @Slot(str, str)
     def editSelected(self, text, note):
-        node = self._find(self._selected)
-        if node is None:
-            return
-        def mutate():
-            if self._tab_id(node) is None:
-                node.text = text
-            node.note = note or None
-        self._commit(mutate)
+        self.editNode(self._selected, text, note)
 
     def _apply_fold_states(self, states):
         # Reference occurrences can share the same persisted placement.
