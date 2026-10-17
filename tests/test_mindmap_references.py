@@ -435,3 +435,19 @@ def test_plan_scheduling_references_deduplicate_and_share_badges(project):
     m.scheduleNodeToWeekday(roots[lunch], 0)
     tabs.removeTab(next(i for i, tab in enumerate(tabs.getAllTabs()) if tab.id == lunch))
     assert roots[lunch] not in m.plan_schedules
+
+
+def test_named_child_from_plus_uses_shared_branch_and_single_undo(project):
+    m = project[0].mindmap
+    ref = reference(project)
+    before = m.to_dict()
+    assert not m.addChildNamed(ref, '   ')
+    assert not m.addChildNamed('missing', 'Thought')
+    assert m.to_dict() == before
+    assert m.addChildNamed(ref, '  New shared thought  ')
+    added = m.selectedNode['sourceId']
+    assert m.map.find(added).text == 'New shared thought'
+    assert m.map.find(added).parent.id == project[6][project[5]]
+    assert m.map.find(ref).children == []
+    m.undo()
+    assert m.to_dict() == before

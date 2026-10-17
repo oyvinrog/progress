@@ -321,3 +321,60 @@ def test_hidden_canvas_waits_for_geometry_without_busy_loop(app, actiondraw_wind
     assert window.property('zoomLevel') == pytest.approx(1.4)
     tasks._timer.stop()
     project._reminder_timer.stop()
+
+
+def test_map_direct_completion_and_child_button(app, actiondraw_window):
+    from PySide6.QtCore import QObject, QPointF, Qt
+    from PySide6.QtTest import QTest
+    from actiondraw.model import DiagramModel
+    from task_model import ProjectManager, TabModel, TaskModel
+
+    tasks, tabs = TaskModel(), TabModel()
+    tabs.addTab('Main')
+    diagram = DiagramModel(tasks)
+    project = ProjectManager(tasks, diagram, tabs)
+    m = project.mindmap
+    engine = actiondraw_window(diagram, tasks, project, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    project.showMindmap()
+    QTest.qWait(80)
+
+    def find(item, name):
+        if item.objectName() == name:
+            return item
+        for child in item.childItems():
+            found = find(child, name)
+            if found is not None:
+                return found
+
+    def click(name):
+        item = find(window.contentItem(), name)
+        assert item is not None and item.isVisible()
+        point = item.mapToScene(QPointF(item.width()/2, item.height()/2))
+        QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, point.toPoint())
+        QTest.qWait(30)
+
+    root_id = m.map.root.id
+    click('mindmapComplete_' + root_id)
+    assert root_id in m._completed
+    click('mindmapComplete_' + root_id)
+    assert root_id not in m._completed
+    before = len(list(m.map.walk()))
+    click('mindmapAddChild')
+    title = window.findChild(QObject, 'mindmapQuickChildTitle')
+    assert title is not None
+    QTest.keyClick(window, Qt.Key_Escape)
+    QTest.qWait(100)
+    assert len(list(m.map.walk())) == before
+    click('mindmapAddChild')
+    title.setProperty('text', 'A quick thought')
+    QTest.keyClick(window, Qt.Key_Return)
+    QTest.qWait(80)
+    assert m.selectedNode['text'] == 'A quick thought'
+    assert m._find(m.selectedId).parent.id == root_id
+    assert len(list(m.map.walk())) == before + 1
+    m.undo()
+    assert len(list(m.map.walk())) == before
+    tasks._timer.stop()
+    project._reminder_timer.stop()

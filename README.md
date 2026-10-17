@@ -94,8 +94,10 @@ behind it from the same place.
 
 Choose **Mindmap** above the sidebar goals to open the full project map. Start
 with goals such as **Website launch**, **Customer research**, and **Launch
-checklist**, then select a node and choose **Add child** to break it into smaller
-steps. Use **Sibling** for another step at the same level.
+checklist**, then select a node and click **+** beside it to add a child. Enter
+a title and press **Enter**; canceling leaves the map unchanged. Use the smaller
+**+** above or below a node to add a sibling. Click a node’s checkbox to mark it
+complete or incomplete.
 
 In the overview above, the website branch contains content and quality checks,
 while research and the launch checklist sit on the left. Drag a node onto
@@ -103,7 +105,7 @@ another node to nest it, or onto its top or bottom edge to reorder it. Use the
 right-click menu to place a branch on the left or right. Scroll to zoom, drag
 the background to pan, and choose **Fit** to see the whole map.
 
-Click **−** on a node to fold its branch, or **+** to unfold it. The map toolbar
+Click **▾** on a node to fold its branch, or **▸** to unfold it. The map toolbar
 also offers **Fold all** and **Unfold all** for the current view. Fold all keeps
 the view root and its immediate children visible; unfold all opens every nested
 branch. In a focused branch view these actions affect that branch. Each action
@@ -213,8 +215,10 @@ Choose **Expand map** for more screen space while keeping quick-add and notes
 available; **Exit expanded** restores navigation. **Tools** reveals search,
 other views, goals and undo/redo.
 
-Tap a node to select it, then type into the
-quick-entry field and choose **Child** or **Sibling**. The new node is selected
+Tap a node to select it. Use the **checkbox** beside it to mark it complete,
+or **+** to add a child with a short title-only form. The buttons remain
+finger-sized as you zoom. For repeated entry, use the quick-entry field and
+choose **Child** or **Sibling**. The new node is selected
 and brought into view so you can keep building the branch. **Parent**, **Child**,
 **Previous** and **Next** navigate without opening an editor. Double-tap a node
 (or choose **Focus**) to focus its branch; use breadcrumbs, **Up a branch** or

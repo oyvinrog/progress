@@ -1067,7 +1067,7 @@ class MindMapController(QObject):
                     yield from visible_nodes(child)
 
         for node in visible_nodes(root):
-            padding = 74.0 if _content(node).id in self._completed else 52.0
+            padding = 88.0  # Reserve a stable checkbox hit area, even when unchecked.
             if node.children:
                 padding += 22.0
             if node.note and node.note.strip():
@@ -1617,6 +1617,21 @@ class MindMapController(QObject):
             self._set_selection([parent.add_child('New thought').id])
         self._commit(mutate)
         self.revealNode.emit(self._selected)
+
+    @Slot(str, str, result=bool)
+    def addChildNamed(self, node_id, title):
+        parent = self._find(node_id)
+        title = title.strip()
+        if parent is None or not title:
+            return False
+        def mutate():
+            parent.folded = False
+            self._set_selection([parent.add_child(title).id])
+        result = self._commit(mutate)
+        if result is False:
+            return False
+        self.revealNode.emit(self._selected)
+        return True
 
     @Slot(float, float, result=bool)
     def addThoughtAt(self, x, y):

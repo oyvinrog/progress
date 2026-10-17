@@ -120,7 +120,7 @@ FocusScope {
             pane.hoveredNodeId = ""
         }
     }
-    readonly property bool shortcutsEnabled: visible && activeFocus && !toolDialogOpen && !editor.visible && !nodeMenu.visible && !actionsButton.activeFocus && !prioritySlider.activeFocus && !actionsMenu.visible && !helpDialog.visible && !deadlineDialog.visible && !tabReferenceDialog.visible && !reminderDialogOpen
+    readonly property bool shortcutsEnabled: visible && activeFocus && !toolDialogOpen && !editor.visible && !quickChildDialog.visible && !nodeMenu.visible && !actionsButton.activeFocus && !prioritySlider.activeFocus && !actionsMenu.visible && !helpDialog.visible && !deadlineDialog.visible && !tabReferenceDialog.visible && !reminderDialogOpen
     readonly property bool searching: controller && controller.searchQuery.length > 0
     onSearchingChanged: if (searching) navigationHighlightId = ""
     onShortcutsEnabledChanged: if (!shortcutsEnabled && controller) controller.clearSearch()
@@ -674,7 +674,7 @@ FocusScope {
                             Text {
                                 objectName: "mindmapNoteIcon_" + nodeItem.modelData.id
                                 visible: nodeItem.modelData.hasNote
-                                anchors.left: parent.left; anchors.leftMargin: 9
+                                anchors.left: parent.left; anchors.leftMargin: 45
                                 anchors.verticalCenter: parent.verticalCenter
                                 anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
                                                               - (nodeItem.modelData.measureProgress ? 12 : 0)
@@ -698,7 +698,7 @@ FocusScope {
                                 objectName: "mindmapBookmarkIcon_" + nodeItem.modelData.id
                                 visible: nodeItem.modelData.bookmarked
                                 anchors.left: parent.left
-                                anchors.leftMargin: nodeItem.modelData.hasNote ? 29 : 9
+                                anchors.leftMargin: nodeItem.modelData.hasNote ? 65 : 45
                                 anchors.verticalCenter: parent.verticalCenter
                                 anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
                                                               - (nodeItem.modelData.measureProgress ? 12 : 0)
@@ -713,7 +713,7 @@ FocusScope {
                                 visible: nodeItem.modelData.planVisible
                                 width: 16; height: 18; radius: 3
                                 anchors.left: parent.left
-                                anchors.leftMargin: 9 + (nodeItem.modelData.hasNote ? 20 : 0)
+                                anchors.leftMargin: 45 + (nodeItem.modelData.hasNote ? 20 : 0)
                                                        + (nodeItem.modelData.bookmarked ? 20 : 0)
                                 anchors.verticalCenter: parent.verticalCenter
                                 anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
@@ -749,14 +749,14 @@ FocusScope {
                                 anchors.bottomMargin: (nodeItem.modelData.reminderActive ? 24 : 0)
                                                       + (nodeItem.modelData.measureProgress ? 24 : 0)
                                                       + (nodeItem.modelData.deadlineActive ? 28 : 0)
-                                anchors.leftMargin: 9 + (nodeItem.modelData.hasNote ? 20 : 0)
+                                anchors.leftMargin: 45 + (nodeItem.modelData.hasNote ? 20 : 0)
                                                        + (nodeItem.modelData.bookmarked ? 20 : 0)
                                                        + (nodeItem.modelData.planVisible ? 20 : 0)
                                 anchors.rightMargin: (nodeItem.modelData.priorityLevel > 0 ? 48 : 18)
                                                      + (nodeItem.modelData.hasChildren ? 22 : 0)
                                                      + (nodeItem.modelData.priorityRank > 0 ? 30 : 0)
                                 verticalAlignment: Text.AlignVCenter
-                                text: (nodeItem.modelData.completed ? "✓ " : "") + (nodeItem.modelData.isReference ? "↗ " : nodeItem.modelData.isTab ? "▣ " : "") + nodeItem.modelData.text
+                                text: (nodeItem.modelData.isReference ? "↗ " : nodeItem.modelData.isTab ? "▣ " : "") + nodeItem.modelData.text
                                 font.pixelSize: 14
                                 font.bold: nodeItem.modelData.bold
                                 color: "#e5f0fa"; elide: Text.ElideRight
@@ -794,6 +794,21 @@ FocusScope {
                                 visible: level > 0
                             }
                             ToolButton {
+                                objectName: "mindmapComplete_" + nodeItem.modelData.id
+                                x: 3; y: 2; width: 38; height: 36; z: 4
+                                text: nodeItem.modelData.completed ? "☑" : "☐"
+                                font.pixelSize: 24
+                                palette.buttonText: nodeItem.modelData.completed ? "#91d6b6" : "#a9bfd1"
+                                Accessible.name: (nodeItem.modelData.completed ? "Mark incomplete: " : "Complete: ") + nodeItem.modelData.text
+                                ToolTip.visible: hovered
+                                ToolTip.text: nodeItem.modelData.completed ? "Mark incomplete" : "Mark complete"
+                                onClicked: {
+                                    pane.controller.select(nodeItem.modelData.id)
+                                    pane.controller.toggleCompleted()
+                                    pane.focusMap()
+                                }
+                            }
+                            ToolButton {
                                 id: foldButton
                                 objectName: "mindmapFold_" + nodeItem.modelData.id
                                 visible: nodeItem.modelData.hasChildren
@@ -803,7 +818,7 @@ FocusScope {
                                 anchors.topMargin: 4
                                 width: 32; height: 32
                                 z: 3
-                                text: nodeItem.modelData.folded ? "+" : "−"
+                                text: nodeItem.modelData.folded ? "▸" : "▾"
                                 font.pixelSize: 18
                                 palette.buttonText: "#e5f0fa"
                                 background: Rectangle {
@@ -1019,33 +1034,37 @@ FocusScope {
                     var id = pane.hoveredNodeId || pane.controller.selectedId
                     var nodes = pane.sceneNodes
                     for (var i = 0; i < nodes.length; ++i)
-                        if (nodes[i].id === id) return nodes[i].isViewRoot ? null : nodes[i]
+                        if (nodes[i].id === id) return nodes[i]
                     return null
                 }
                 visible: !!targetNode && !pane.nodePressed && !canvasMouse.pressed
-                         && !editor.visible && !nodeMenu.visible && !actionsMenu.visible
+                         && !editor.visible && !quickChildDialog.visible && !nodeMenu.visible && !actionsMenu.visible
                          && !helpDialog.visible && !deadlineDialog.visible && !pane.reminderDialogOpen
                 Repeater {
-                    model: 2
+                    model: 3
                     id: insertionButtons
                     delegate: ToolButton {
                         id: insertionButton
                         required property int index
+                        readonly property bool child: index === 2
                         readonly property bool before: index === 0
-                        objectName: before ? "mindmapAddAbove" : "mindmapAddBelow"
-                        width: 24
-                        height: 24
+                        visible: child || !insertionControls.targetNode || !insertionControls.targetNode.isViewRoot
+                        objectName: child ? "mindmapAddChild" : before ? "mindmapAddAbove" : "mindmapAddBelow"
+                        width: child ? 36 : 24
+                        height: width
                         x: insertionControls.targetNode
                            ? viewport.width / 2 + pane.panX
-                             + (insertionControls.targetNode.x + insertionControls.targetNode.width / 2) * pane.zoom - width / 2 : 0
+                             + (insertionControls.targetNode.x + insertionControls.targetNode.width / 2) * pane.zoom
+                             + (child ? (insertionControls.targetNode.x < 0 && !insertionControls.targetNode.isViewRoot ? -1 : 1)
+                                * (insertionControls.targetNode.width * pane.zoom / 2 + 22) : 0) - width / 2 : 0
                         y: insertionControls.targetNode
                            ? viewport.height / 2 + pane.panY
                              + (insertionControls.targetNode.y + insertionControls.targetNode.height / 2) * pane.zoom
-                             + (before ? -1 : 1) * Math.max(insertionControls.targetNode.height * pane.zoom / 2, 14) - height / 2 : 0
+                             + (child ? 0 : before ? -1 : 1) * Math.max(insertionControls.targetNode.height * pane.zoom / 2, 14) - height / 2 : 0
                         focusPolicy: Qt.NoFocus
                         hoverEnabled: true
-                        Accessible.name: before ? "Add sibling above" : "Add sibling below"
-                        ToolTip.text: before ? "Add sibling above" : "Add sibling below"
+                        Accessible.name: child ? "Add child" : before ? "Add sibling above" : "Add sibling below"
+                        ToolTip.text: child ? "Add child" : before ? "Add sibling above" : "Add sibling below"
                         ToolTip.visible: hovered
                         ToolTip.delay: 500
                         onHoveredChanged: {
@@ -1068,7 +1087,11 @@ FocusScope {
                             var nodeId = insertionControls.targetNode.id
                             pane.hoveredNodeId = ""
                             pane.focusMap()
-                            if (pane.controller.addSiblingRelative(nodeId, before)) pane.editNode()
+                            if (child) {
+                                quickChildDialog.targetNodeId = nodeId
+                                quickChildTitle.text = ""
+                                quickChildDialog.open()
+                            } else if (pane.controller.addSiblingRelative(nodeId, before)) pane.editNode()
                         }
                     }
                 }
@@ -1092,7 +1115,7 @@ FocusScope {
             spacing: 16
             Label {
                 Layout.fillWidth: true
-                text: "Drag the priority slider left for highest scores, right to include more; All restores every branch · Hover or select a node and click + above or below to add a sibling · Type to find node titles, including folded branches · Enter / Shift+Enter cycles matches · Backspace edits search · Escape clears search · Double-click a goal node to open it · Double-click empty space to add a thought · Ctrl+B toggles bold · Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+C / Ctrl+V copies branches · Ctrl+X / Ctrl+V moves branches · F4 completes · Arrows navigate · Tab adds a child · Ctrl+Enter opens a goal"
+                text: "Drag the priority slider left for highest scores, right to include more; All restores every branch · Click a node’s checkbox to complete it · Select a node and click + beside it to add a child, or above/below to add a sibling · Type to find node titles, including folded branches · Enter / Shift+Enter cycles matches · Backspace edits search · Escape clears search · Double-click a goal node to open it · Double-click empty space to add a thought · Ctrl+B toggles bold · Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+C / Ctrl+V copies branches · Ctrl+X / Ctrl+V moves branches · F4 completes · Arrows navigate · Tab adds a child · Ctrl+Enter opens a goal"
                 wrapMode: Text.WordWrap
                 color: "#a9bfd1"
             }
@@ -1465,6 +1488,31 @@ FocusScope {
                 color: "#ffb4a9"
             }
         }
+    }
+    Dialog {
+        id: quickChildDialog
+        objectName: "mindmapQuickChildDialog"
+        property string targetNodeId: ""
+        title: "Add thought"
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(360, pane.width - 20)
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        TextField {
+            id: quickChildTitle
+            objectName: "mindmapQuickChildTitle"
+            width: parent.width
+            placeholderText: "New thought"
+            onAccepted: if (text.trim().length) quickChildDialog.accept()
+            onTextChanged: if (quickChildDialog.visible) quickChildDialog.standardButton(Dialog.Ok).enabled = text.trim().length > 0
+        }
+        onOpened: {
+            standardButton(Dialog.Ok).text = "Add"
+            standardButton(Dialog.Ok).enabled = false
+            quickChildTitle.forceActiveFocus()
+        }
+        onAccepted: pane.controller.addChildNamed(targetNodeId, quickChildTitle.text)
+        onClosed: pane.focusMap()
     }
     Dialog {
         id: editor

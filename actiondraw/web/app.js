@@ -74,6 +74,7 @@ function status() {
       busy ||
       (b.value === "sibling" && !nodes.get(selected)?.parent);
   });
+  document.querySelectorAll(".map-node-controls button").forEach(b => { b.disabled = !connected || busy; });
   $("zone").textContent = state ? `Times: ${state.timezone}` : "";
 }
 async function api(path, body) {
@@ -774,6 +775,21 @@ function renderOutline() {
   if (!rows.length)
     $("content").append(el("p", "No matching thoughts.", "muted"));
 }
+function addMapChild(node) {
+  let title;
+  openForm("Add thought", () => {
+    title = field("New thought", "");
+    title.required = true;
+  }, async revision => {
+    const text = title.value.trim();
+    if (!text) throw new Error("Enter a thought.");
+    const result = await command("child", {node, title: text}, revision);
+    folded.delete(node);
+    if (result.nodeId) selectMapNode(result.nodeId, true);
+  });
+  title.focus();
+}
+
 function renderMap() {
   const ns = "http://www.w3.org/2000/svg",
     svgEl = (tag, attrs) => {
@@ -785,6 +801,17 @@ function renderMap() {
     wrap = el("div", undefined, "map-wrap"),
     svg = svgEl("svg", { "aria-label": "Mindmap" });
   wrap.append(svg);
+  let selectedNode = nodes.get(selected);
+  const nodeControls = el("div", undefined, "map-node-controls");
+  if (selectedNode) {
+    const complete = button(selectedNode.completed ? "☑" : "☐", () => run("complete", {node: selectedNode.id}));
+    complete.setAttribute("aria-label", (selectedNode.completed ? "Mark incomplete: " : "Complete: ") + selectedNode.title);
+    complete.setAttribute("aria-pressed", String(selectedNode.completed));
+    const add = button("+", () => addMapChild(selectedNode.id));
+    add.setAttribute("aria-label", "Add child to " + selectedNode.title);
+    nodeControls.append(complete, add);
+    wrap.append(nodeControls);
+  }
   let visible = [];
   function visit(id) {
     const n = nodes.get(id);
@@ -806,12 +833,32 @@ function renderMap() {
     camera = { x: (xmin + xmax - w) / 2, y: (ymin + ymax - h) / 2, w, h };
     update();
   };
+  wrap.addEventListener("mapselection", update);
   function update() {
+    selectedNode = nodes.get(selected);
+    nodeControls.hidden = !selectedNode || !visible.some(n => n.id === selected);
+    if (selectedNode && nodeControls.children.length) {
+      const [complete, add] = nodeControls.children;
+      complete.textContent = selectedNode.completed ? "☑" : "☐";
+      complete.setAttribute("aria-label", (selectedNode.completed ? "Mark incomplete: " : "Complete: ") + selectedNode.title);
+      complete.setAttribute("aria-pressed", String(selectedNode.completed));
+      add.setAttribute("aria-label", "Add child to " + selectedNode.title);
+    }
     if (camera)
       svg.setAttribute(
         "viewBox",
         `${camera.x} ${camera.y} ${camera.w} ${camera.h}`,
       );
+    if (selectedNode && camera) {
+      const matrix = svg.getScreenCTM();
+      if (!matrix) return;
+      const point = svg.createSVGPoint();
+      point.x = selectedNode.x + selectedNode.width / 2;
+      point.y = selectedNode.y + selectedNode.height;
+      const screen = point.matrixTransform(matrix), rect = wrap.getBoundingClientRect();
+      nodeControls.style.left = `${Math.max(4, Math.min(rect.width - 104, screen.x - rect.left - 48))}px`;
+      nodeControls.style.top = `${Math.max(4, Math.min(rect.height - 52, screen.y - rect.top + 6))}px`;
+    }
   }
   toolbar.append(
     button("Up a branch", () =>
@@ -1349,6 +1396,7 @@ function selectMapNode(id, center = false) {
       g.classList.toggle("selected-node", active);
       g.setAttribute("aria-pressed", String(active));
     });
+    document.querySelector(".map-wrap")?.dispatchEvent(new Event("mapselection"));
     updateMapControls();
   }
 }

@@ -522,7 +522,8 @@ def test_qml_mindmap_priority_rendering(project, app, actiondraw_window):
         QTest.qWait(20)
         node = find(window.contentItem(), 'mindmapNode_' + high)
         assert node.opacity() == pytest.approx(0.45)
-        assert any(str(child.property('text')).startswith('✓ ') for child in node.childItems())
+        checkbox = find(node, 'mindmapComplete_' + high)
+        assert checkbox.property('text') == '☑'
         index = next(i for i, tab in enumerate(tabs.getAllTabs()) if tab.id == ids[2])
         tabs.setIncludeInPriorityPlot(index, False)
         QTest.qWait(20)
@@ -2964,6 +2965,8 @@ def test_qml_sibling_insertion_controls(project, app, zoom, before, actiondraw_w
     b = m.map.root.add_child('Beta', side='right')
     engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
+    # Keep the wider checkbox cards on screen at 1.5x so no reveal pan is needed.
+    window.setWidth(1300)
     window.show()
     pm.showMindmap()
     QTest.qWait(150)
