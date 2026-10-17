@@ -263,10 +263,7 @@ MenuBar {
             checked: !!(hasDiagramModel() && diagramModel.drawingMode)
             onTriggered: diagramModel && diagramModel.setDrawingMode(checked)
         }
-    }
-
-    Menu {
-        title: "Tools"
+        MenuSeparator {}
 
         MenuItem {
             text: "Notification Settings..."
