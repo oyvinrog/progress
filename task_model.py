@@ -1522,8 +1522,8 @@ class TabModel(QAbstractListModel):
 
     def __init__(self):
         super().__init__()
-        self._tabs: List[Tab] = [Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})]
-        self._current_tab_index: int = 0
+        self._tabs: List[Tab] = []
+        self._current_tab_index: int = -1
         self._recent_tab_indices: List[int] = []
         self._priority_value_weight = 1.0
         self._priority_time_weight = 1.0
@@ -1884,8 +1884,14 @@ class TabModel(QAbstractListModel):
 
         self.beginInsertRows(QModelIndex(), len(self._tabs), len(self._tabs))
         self._tabs.append(new_tab)
+        first_tab = self._current_tab_index < 0
+        if first_tab:
+            self._current_tab_index = 0
         self.endInsertRows()
         self.tabsChanged.emit()
+        if first_tab:
+            self.currentTabIndexChanged.emit()
+            self.currentTabChanged.emit()
         self._emitRecentTabsChanged()
 
     @Slot(str, str, int, result=int)
@@ -1898,29 +1904,22 @@ class TabModel(QAbstractListModel):
 
     @Slot(int)
     def removeTab(self, index: int) -> None:
-        """Remove a tab at the given index. Cannot remove last tab."""
-        if len(self._tabs) <= 1:
-            return  # Cannot remove last tab
+        """Remove a tab, allowing an empty project."""
         if index < 0 or index >= len(self._tabs):
             return
 
         previous_current_index = self._current_tab_index
         self.beginRemoveRows(QModelIndex(), index, index)
         self._tabs.pop(index)
-        self.endRemoveRows()
-
-        # Adjust current tab index if needed
+        # Observers of rowsRemoved must see the surviving goal (or -1) already.
         if self._current_tab_index >= len(self._tabs):
             self._current_tab_index = len(self._tabs) - 1
-            self.currentTabIndexChanged.emit()
         elif self._current_tab_index > index:
             self._current_tab_index -= 1
-            self.currentTabIndexChanged.emit()
-        elif self._current_tab_index == index:
-            self._current_tab_index = min(index, len(self._tabs) - 1)
-            self.currentTabIndexChanged.emit()
+        self.endRemoveRows()
 
         if self._current_tab_index != previous_current_index or index == previous_current_index:
+            self.currentTabIndexChanged.emit()
             self.currentTabChanged.emit()
 
         self.tabsChanged.emit()
@@ -2340,9 +2339,11 @@ class TabModel(QAbstractListModel):
         self.currentTabChanged.emit()
         self._recordRecentTab(previous_index)
 
-    def getCurrentTabData(self) -> Tab:
-        """Get the current tab's data."""
-        return self._tabs[self._current_tab_index]
+    def getCurrentTabData(self) -> Optional[Tab]:
+        """Get the current goal, or None for an empty project."""
+        if 0 <= self._current_tab_index < len(self._tabs):
+            return self._tabs[self._current_tab_index]
+        return None
 
     def setCurrentTabData(self, tasks: Dict[str, Any], diagram: Dict[str, Any]) -> None:
         """Update the current tab's data."""
@@ -2380,7 +2381,7 @@ class TabModel(QAbstractListModel):
             tab.priority_score = (self._computePriorityScore(tab.priority_subjective_value,
                                                             tab.priority_time_hours)
                                   if tab.include_in_priority_plot else 0.0)
-        self._current_tab_index = active_tab
+        self._current_tab_index = max(0, min(active_tab, len(tabs) - 1)) if tabs else -1
         self._recent_tab_indices = [index for tab_id in recent_ids
                                     for index, tab in enumerate(tabs) if tab.id == tab_id]
         self.endResetModel()
@@ -2396,7 +2397,7 @@ class TabModel(QAbstractListModel):
             scoring = priority_scoring if isinstance(priority_scoring, dict) else {}
             self._priority_value_weight = normalize_priority_weight(scoring.get("value_weight", 1.0))
             self._priority_time_weight = normalize_priority_weight(scoring.get("time_weight", 1.0))
-        self._tabs = tabs if tabs else [Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})]
+        self._tabs = tabs
         for tab in self._tabs:
             from actiondraw.actionpaint import normalize_action_paint_state
 
@@ -2428,7 +2429,7 @@ class TabModel(QAbstractListModel):
             tab.kanban_duration_hours = duration if type(duration) is int and 1 <= duration <= limit else 1
         # Reset observers must see the new tabs and their valid active index together.
         if active_tab < 0 or active_tab >= len(self._tabs):
-            active_tab = 0
+            active_tab = 0 if self._tabs else -1
         self._current_tab_index = active_tab
         self._recent_tab_indices = []
         self.endResetModel()
@@ -2440,9 +2441,8 @@ class TabModel(QAbstractListModel):
         self._emitRecentTabsChanged()
 
     def clear(self) -> None:
-        """Reset to a single empty tab."""
-        self.setTabs([Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})], 0,
-                     priority_scoring={})
+        """Reset to an empty project."""
+        self.setTabs([], -1, priority_scoring={})
 
     @Slot(int, int)
     def moveTab(self, from_index: int, to_index: int) -> None:
@@ -2637,7 +2637,10 @@ class ProjectManager(QObject):
         if self._tab_model is None:
             return
         self._saveCurrentTabState()
-        self.mindmap.set_scope(self._tab_model.getCurrentTabData().id)
+        tab = self._tab_model.getCurrentTabData()
+        if tab is None:
+            return
+        self.mindmap.set_scope(tab.id)
         self._setMindmapVisible(True)
 
     @Slot()
@@ -2652,6 +2655,8 @@ class ProjectManager(QObject):
         from actiondraw.actionpaint import normalize_action_paint_state
 
         tab = self._tab_model.getCurrentTabData()
+        if tab is None:
+            return []
         titles = [action['text'] for action in normalize_action_paint_state(tab.action_paint)['actions']]
         if not titles:
             return []
@@ -2691,7 +2696,7 @@ class ProjectManager(QObject):
 
     def _defaultTabView(self) -> None:
         tab = self._tab_model.getCurrentTabData()
-        self.mindmap.set_scope(tab.id)
+        self.mindmap.set_scope(tab.id if tab else None)
         self._setMindmapVisible(True)
 
     @Slot(str)
@@ -3646,7 +3651,7 @@ class ProjectManager(QObject):
     def createTaskFromWorkspaceMarkdownSelection(self, selected_text: str, x: float, y: float) -> str:
         """Create a top-level task from selected workspace markdown text."""
         text = str(selected_text or "").strip()
-        if not text:
+        if not text or (self._tab_model is not None and self._tab_model.currentTabIndex < 0):
             return ""
         add_task_from_text = getattr(self._diagram_model, "addTaskFromText", None)
         if not callable(add_task_from_text):
@@ -3661,6 +3666,8 @@ class ProjectManager(QObject):
         y: float,
     ) -> List[str]:
         """Create a task chain from workspace or tab Markdown."""
+        if self._tab_model is not None and self._tab_model.currentTabIndex < 0:
+            return []
         create_tasks = getattr(self._diagram_model, "createTasksFromMarkdownListAtPosition", None)
         if not callable(create_tasks):
             return []
@@ -4286,10 +4293,6 @@ class ProjectManager(QObject):
                     ))
                 active_tab = project_data.get("active_tab", 0)
 
-                # Ensure at least one tab exists
-                if not tabs:
-                    tabs = [Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})]
-
             seen_tab_ids = set()
             for tab in tabs:
                 try:
@@ -4327,7 +4330,7 @@ class ProjectManager(QObject):
 
             # Validate active_tab index
             if active_tab < 0 or active_tab >= len(tabs):
-                active_tab = 0
+                active_tab = 0 if tabs else -1
 
             # Update tab model if available
             if self._tab_model is not None:
@@ -4339,9 +4342,10 @@ class ProjectManager(QObject):
             self._setMindmapVisible(True)
 
             # Load the active tab's data into the models
-            active_tab_data = tabs[active_tab]
-            self._task_model.from_dict(active_tab_data.tasks)
-            self._diagram_model.from_dict(active_tab_data.diagram)
+            if tabs:
+                active_tab_data = tabs[active_tab]
+                self._task_model.from_dict(active_tab_data.tasks)
+                self._diagram_model.from_dict(active_tab_data.diagram)
 
             self._current_file_path = file_path
             self.currentFilePathChanged.emit()
@@ -4686,8 +4690,8 @@ class ProjectManager(QObject):
 
         # Load new tab data into models
         tab_data = self._tab_model.getCurrentTabData()
-        self._task_model.from_dict(tab_data.tasks)
-        self._diagram_model.from_dict(tab_data.diagram)
+        self._task_model.from_dict(tab_data.tasks if tab_data else {"tasks": []})
+        self._diagram_model.from_dict(tab_data.diagram if tab_data else {"items": [], "edges": [], "strokes": []})
 
         self._defaultTabView()
         self.currentTabMarkdownTabsChanged.emit()
@@ -4697,8 +4701,6 @@ class ProjectManager(QObject):
     def removeTab(self, index: int) -> None:
         """Remove a tab while keeping live models aligned with the surviving tab."""
         if self._tab_model is None:
-            return
-        if self._tab_model.tabCount <= 1:
             return
         if index < 0 or index >= self._tab_model.tabCount:
             return
@@ -4722,10 +4724,9 @@ class ProjectManager(QObject):
         ids = set(state['ids'])
         tabs = model.getAllTabs()
         surviving = [tab for tab in tabs if tab.id not in ids]
-        if not surviving and not state['tabs']:
-            raise ValueError('Cannot delete this branch: at least one goal must remain.')
         self._saveCurrentTabState()
-        current_id = model.getCurrentTabData().id
+        current = model.getCurrentTabData()
+        current_id = current.id if current else None
         inverse = {'ids': ids,
                    'tabs': [(index, copy.deepcopy(tab)) for index, tab in enumerate(tabs)
                             if tab.id in ids],
@@ -4737,8 +4738,9 @@ class ProjectManager(QObject):
                       min(model.currentTabIndex, len(surviving) - 1))
         model.restoreMindmapTabs(surviving, active)
         tab = model.getCurrentTabData()
-        if tab.id != current_id:
-            tasks, diagram = copy.deepcopy((tab.tasks, tab.diagram))
+        if (tab.id if tab else None) != current_id:
+            tasks, diagram = (copy.deepcopy((tab.tasks, tab.diagram)) if tab else
+                              ({"tasks": []}, {"items": [], "edges": [], "strokes": []}))
             self._task_model.from_dict(tasks)
             self._diagram_model.from_dict(diagram)
         self.currentTabMarkdownTabsChanged.emit()
@@ -4756,8 +4758,8 @@ class ProjectManager(QObject):
             return
 
         tab_data = self._tab_model.getCurrentTabData()
-        self._task_model.from_dict(tab_data.tasks)
-        self._diagram_model.from_dict(tab_data.diagram)
+        self._task_model.from_dict(tab_data.tasks if tab_data else {"tasks": []})
+        self._diagram_model.from_dict(tab_data.diagram if tab_data else {"items": [], "edges": [], "strokes": []})
 
         self._defaultTabView()
         self.currentTabMarkdownTabsChanged.emit()

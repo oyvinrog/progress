@@ -25,6 +25,7 @@ def main():
     args = parser.parse_args()
     app = QGuiApplication([])
     tasks, tabs = TaskModel(), TabModel()
+    tabs.addTab("Benchmark")
     diagram = DiagramModel(tasks)
     project = ProjectManager(tasks, diagram, tabs)
     m = project.mindmap

@@ -1051,9 +1051,9 @@ Rectangle {
         }
         MenuItem {
             text: "Delete"
-            enabled: tabModel ? tabModel.tabCount > 1 : false
+            enabled: tabModel ? tabModel.tabCount > 0 : false
             onTriggered: {
-                if (projectManager && tabModel && tabModel.tabCount > 1)
+                if (projectManager && tabModel && tabModel.tabCount > 0)
                     projectManager.removeTab(tabContextMenu.tabIndex)
             }
         }
@@ -1320,6 +1320,8 @@ Rectangle {
 
     Dialog {
         id: renameTabDialog
+        objectName: "goalNameDialog"
+        parent: Overlay.overlay
         property string mode: "rename"
         property int tabIndex: -1
         property string currentName: ""
@@ -1329,13 +1331,20 @@ Rectangle {
         width: 300
         standardButtons: Dialog.Ok | Dialog.Cancel
 
+        Binding {
+            target: renameTabDialog.standardButton(Dialog.Ok)
+            property: "enabled"
+            value: renameTabField.text.trim().length > 0
+        }
+
         TextField {
             id: renameTabField
+            objectName: "goalNameField"
             width: parent.width
             text: renameTabDialog.currentName
             placeholderText: "Goal name"
             selectByMouse: true
-            onAccepted: renameTabDialog.accept()
+            onAccepted: { if (text.trim().length > 0) renameTabDialog.accept() }
         }
 
         onOpened: {

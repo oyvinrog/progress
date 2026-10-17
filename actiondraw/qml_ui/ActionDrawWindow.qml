@@ -13,6 +13,8 @@ ApplicationWindow {
     title: {
         var tabName = activeTabDisplayName()
         var projectName = projectDisplayName()
+        if (root.emptyProject)
+            return "ActionDraw - " + (projectName || "New project")
         if (projectName !== "")
             return "ActionDraw - " + tabName + " - " + projectName
         return "ActionDraw - " + tabName
@@ -72,6 +74,7 @@ ApplicationWindow {
     property var taskModelRef: taskModel
     property var projectManagerRef: projectManager
     property var markdownNoteManagerRef: markdownNoteManager
+    readonly property bool emptyProject: tabModelRef && tabModelRef.tabCount === 0
     property var tabModelRef: tabModel
     property var priorityPlotWindowRef: null
     property var kanbanWindowRef: null
@@ -141,7 +144,7 @@ ApplicationWindow {
             if (name.length > 0)
                 return name
         }
-        return "Main"
+        return "New project"
     }
 
     function projectDisplayName() {
@@ -224,6 +227,7 @@ ApplicationWindow {
     }
 
     function openCausalModelWindow() {
+        if (root.emptyProject) return
         if (causalModelWindowRef) {
             causalModelWindowRef.show()
             causalModelWindowRef.raise()
@@ -245,6 +249,7 @@ ApplicationWindow {
     }
 
     function openActionPaintWindow() {
+        if (root.emptyProject) return
         if (actionPaintWindowRef) {
             actionPaintWindowRef.show()
             actionPaintWindowRef.raise()
@@ -618,13 +623,13 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Ctrl+C"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
         onActivated: root.copySelectionToClipboard()
     }
 
     Shortcut {
         sequence: "Ctrl+V"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
         onActivated: {
             root.pasteFromClipboard()
         }
@@ -632,7 +637,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "F2"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null || tabModelRef !== null)
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null || tabModelRef !== null)
         onActivated: {
             if (root.selectedItemId && root.selectedItemId.length > 0) {
                 root.renameSelectedItem()
@@ -644,49 +649,49 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Ctrl+Return"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen))
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen))
         onActivated: root.addTaskOrConnectedTask()
     }
 
     Shortcut {
         sequence: "Ctrl+-"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen))
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen))
         onActivated: root.addTaskOrConnectedTaskBackward()
     }
 
     Shortcut {
         sequence: "Ctrl+Minus"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen))
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen))
         onActivated: root.addTaskOrConnectedTaskBackward()
     }
 
     Shortcut {
         sequence: "Ctrl+M"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
         onActivated: root.openMarkdownNoteForSelection()
     }
 
     Shortcut {
         sequence: "Ctrl+Alt+M"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
         onActivated: root.openTabMarkdownHub()
     }
 
     Shortcut {
         sequence: "Ctrl+Shift+M"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
         onActivated: root.openWorkspaceMarkdownHub()
     }
 
     Shortcut {
         sequence: "Ctrl+N"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen))
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen))
         onActivated: root.addConnectedNote()
     }
 
     Shortcut {
         sequence: "Ctrl+K"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (tabModelRef !== null)
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (tabModelRef !== null)
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
             && !contractPopup.visible
@@ -699,7 +704,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Delete"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
@@ -709,7 +714,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Left"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
@@ -719,7 +724,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Right"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
@@ -729,7 +734,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Up"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
@@ -739,7 +744,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Down"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
@@ -1201,6 +1206,7 @@ ApplicationWindow {
     }
 
     function openTabMarkdownHub() {
+        if (root.emptyProject) return
         if (!markdownNoteManager || !markdownNoteManager.openTabMarkdown)
             return
         var center = root.snapPoint(root.diagramCenterPoint())
@@ -1293,7 +1299,26 @@ ApplicationWindow {
         edgeCanvas: edgeCanvas
     }
 
+    Shortcut {
+        sequence: "Ctrl+Z"
+        enabled: root.emptyProject && emptyProjectPage.actionFocused
+        onActivated: mindmapController.undo()
+    }
+    Shortcut {
+        sequence: "Ctrl+Y"
+        enabled: root.emptyProject && emptyProjectPage.actionFocused
+        onActivated: mindmapController.redo()
+    }
+
+    EmptyProjectPage {
+        id: emptyProjectPage
+        anchors.fill: parent
+        visible: root.emptyProject
+        onAddGoalRequested: sidebarTabs.addNewTab()
+    }
+
     RowLayout {
+        visible: !root.emptyProject
         anchors.fill: parent
         anchors.margins: 18
         spacing: 14

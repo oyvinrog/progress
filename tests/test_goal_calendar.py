@@ -11,6 +11,7 @@ from PySide6.QtTest import QTest
 
 def test_range_validation_stable_ids_and_signals(app):
     tabs = TabModel()
+    tabs.addTab("Main")
     changes = []
     tabs.scheduledGoalsChanged.connect(lambda: changes.append(True))
     goal = tabs.createScheduledGoal("Launch", "2032-02-28", "2032-03-02")
@@ -41,6 +42,7 @@ def test_period_roundtrip_and_legacy(app, tmp_path, monkeypatch):
     monkeypatch.setattr(ProjectManager, "_prompt_encryption_credentials",
                         lambda *args: EncryptionCredentials(passphrase="test-passphrase"))
     tasks, tabs = TaskModel(), TabModel()
+    tabs.addTab("Main")
     diagram = DiagramModel(tasks)
     pm = ProjectManager(tasks, diagram, tabs)
     goal = tabs.createScheduledGoal("Range", "2032-12-31", "2033-01-02")
@@ -154,6 +156,7 @@ def test_cross_month_hover_and_outside_drop(calendar_ui, app):
 def test_overview_goal_selection_dialog_and_open(calendar_ui, app):
     root, host, overview, calendar, _, click = calendar_ui
     tabs = TabModel()
+    tabs.addTab("Main")
     overview.setProperty("goalModel", tabs)
     goal = tabs.createScheduledGoal("Completed goal", "2032-02-01", "2032-02-29")
     tabs.setKanbanPlacement(tabs.goalIndex(goal), "done", -1)
@@ -187,6 +190,7 @@ def test_overview_goal_selection_dialog_and_open(calendar_ui, app):
 def test_date_picker_and_enter_save(calendar_ui, app, enter_key):
     root, _, overview, _, _, click = calendar_ui
     tabs = TabModel()
+    tabs.addTab("Main")
     overview.setProperty("goalModel", tabs)
     dialog = overview.findChild(QObject, "goalRangeDialog")
     dialog.show(None, "2032-02-28")

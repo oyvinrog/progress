@@ -13,6 +13,7 @@ from task_model import ProjectManager, TabModel, TaskModel
 @pytest.fixture
 def project(app):
     tasks, tabs = TaskModel(), TabModel()
+    tabs.addTab("Main")
     diagram = DiagramModel(tasks)
     pm = ProjectManager(tasks, diagram, tabs)
     tabs.addTab('dagens oppgaver')

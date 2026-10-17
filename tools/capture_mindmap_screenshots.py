@@ -33,7 +33,7 @@ def main():
     diagram = DiagramModel(tasks)
     project = ProjectManager(tasks, diagram, tabs)
     mindmap = project.mindmap
-    tabs.renameTab(0, "Website launch")
+    tabs.addTab("Website launch")
     tabs.addTab("Customer research")
     tabs.addTab("Launch checklist")
     names = ["Website launch", "Customer research", "Launch checklist"]

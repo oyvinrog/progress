@@ -22,6 +22,7 @@ from task_model import ProjectManager, TabModel, TaskModel
 def project(app):
     tasks = TaskModel()
     tabs = TabModel()
+    tabs.addTab("Main")
     diagram = DiagramModel(tasks)
     pm = ProjectManager(tasks, diagram, tabs)
     return pm, tabs, tasks, diagram
@@ -35,6 +36,7 @@ def thought(controller, text='Secret thought', note='Secret note'):
 
 def test_tab_connections_keep_mindmap_metaobject_static(app):
     tabs = TabModel()
+    tabs.addTab("Main")
     controller = MindMapController(tabs)
     # QML caches the controller's Qt API across instances and engines. Signal
     # connections must not add an instance-specific dynamic metaobject.
@@ -593,16 +595,17 @@ def test_linked_deletion_last_tab_and_redo_are_atomic(project):
     m.select(first)
     m.deleteSelected()
     m.undo()
-    tabs.removeTab(1)  # Redo would now delete the last remaining tab.
-    before = m.to_dict()
+    tabs.removeTab(1)
     errors = []
     m.errorOccurred.connect(errors.append)
     m.redo()
-    assert errors and 'at least one goal' in errors[-1]
-    assert m.to_dict() == before and tabs.tabCount == 1 and m.canRedo
+    assert not errors
+    assert tabs.tabCount == 0 and tabs.currentTabIndex == -1
+    m.undo()
+    assert tabs.tabCount == 1 and first in m.links
     m.select(first)
     m.deleteSelected()
-    assert m.to_dict() == before and tabs.tabCount == 1
+    assert tabs.tabCount == 0 and not errors
 
 
 def test_linked_deletion_persists_and_load_clears_tab_history(project, tmp_path, monkeypatch):
@@ -812,6 +815,9 @@ def test_edit_move_fold_delete_and_cycle_guard(project):
     m.moveNode(tab_node, branch, 'child')
     m.select(branch)
     m.deleteSelected()
+    assert m.map.find(branch) is None
+    assert project[1].tabCount == 0
+    m.undo()
     assert m.map.find(branch) is not None
     m.moveNode(tab_node, m.map.root.id, 'child')
     m.select(branch)
@@ -1844,8 +1850,12 @@ def test_multi_delete_is_atomic_and_undo_restores_selection(project):
     m.undo()
     assert m.to_dict() == before and m.selectedIds == selected
     m.select(next(iter(m.links)), 'toggle')
+    selected = m.selectedIds
     m.deleteSelected()
-    assert m.to_dict() == before
+    assert project[1].tabCount == 0
+    assert not m.map.root.children
+    m.undo()
+    assert m.to_dict() == before and m.selectedIds == selected
 
 
 def test_qml_multi_selection_cut_and_paste(project, app, actiondraw_window):

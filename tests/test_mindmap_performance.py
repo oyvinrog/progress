@@ -62,6 +62,7 @@ def test_large_qml_map_loads_viewport_and_reveals_search(app, actiondraw_window,
     from task_model import ProjectManager, TabModel, TaskModel
 
     tasks, tabs = TaskModel(), TabModel()
+    tabs.addTab("Main")
     diagram = DiagramModel(tasks)
     project = ProjectManager(tasks, diagram, tabs)
     m = project.mindmap
@@ -111,6 +112,7 @@ def test_large_map_navigation_uses_search_highlight(app, actiondraw_window, navi
     from task_model import ProjectManager, TabModel, TaskModel
 
     tasks, tabs = TaskModel(), TabModel()
+    tabs.addTab("Main")
     diagram = DiagramModel(tasks)
     project = ProjectManager(tasks, diagram, tabs)
     m = project.mindmap

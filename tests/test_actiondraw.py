@@ -2159,12 +2159,15 @@ class TestMultiTabSupport:
     @pytest.fixture
     def tab_model(self, app):
         from task_model import TabModel
-        return TabModel()
+        model = TabModel()
+        model.addTab("Main")
+        return model
 
     @pytest.fixture
     def project_manager_with_tabs(self, app, task_model, empty_diagram_model):
         from task_model import ProjectManager, TabModel
         tab_model = TabModel()
+        tab_model.addTab("Main")
         return ProjectManager(task_model, empty_diagram_model, tab_model), tab_model
 
     # --- Format tests ---
@@ -2199,6 +2202,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel()
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         project_manager.loadProject(str(project_file))
@@ -2225,6 +2229,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel()
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         project_manager.loadProject(str(project_file))
@@ -2239,6 +2244,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel()
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         task_model.addTask("Test Task", -1)
@@ -2262,6 +2268,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel()
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         # Add tasks and items to first tab
@@ -2284,6 +2291,7 @@ class TestMultiTabSupport:
         task_model2 = TaskModel()
         diagram_model2 = DiagramModel()
         tab_model2 = TabModel()
+        tab_model2.addTab("Main")
         project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
 
         project_manager2.loadProject(str(project_file))
@@ -2307,6 +2315,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel()
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         tab_model.setAssessment(0, 8, 9, True)
@@ -2319,6 +2328,7 @@ class TestMultiTabSupport:
         task_model2 = TaskModel()
         diagram_model2 = DiagramModel()
         tab_model2 = TabModel()
+        tab_model2.addTab("Main")
         project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
         project_manager2.loadProject(str(project_file))
 
@@ -2340,6 +2350,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel()
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
         project_manager.setWorkspaceMarkdownTabs(
             [
@@ -2354,6 +2365,7 @@ class TestMultiTabSupport:
         task_model2 = TaskModel()
         diagram_model2 = DiagramModel()
         tab_model2 = TabModel()
+        tab_model2.addTab("Main")
         project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
         project_manager2.loadProject(str(project_file))
 
@@ -2369,6 +2381,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel()
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
         imported_tabs = parse_tabs_from_clipboard_text("Inbox\nIdeas\nArchive")
 
@@ -2382,6 +2395,7 @@ class TestMultiTabSupport:
         task_model2 = TaskModel()
         diagram_model2 = DiagramModel()
         tab_model2 = TabModel()
+        tab_model2.addTab("Main")
         project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
         project_manager2.loadProject(str(project_file))
 
@@ -2399,6 +2413,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel()
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         tab_model.getAllTabs()[0].markdown_tabs = [
@@ -2416,6 +2431,7 @@ class TestMultiTabSupport:
         task_model2 = TaskModel()
         diagram_model2 = DiagramModel()
         tab_model2 = TabModel()
+        tab_model2.addTab("Main")
         project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
         project_manager2.loadProject(str(project_file))
 
@@ -2434,6 +2450,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         tab_model.setKanbanPlacement(0, "todo", -1)
@@ -2450,6 +2467,7 @@ class TestMultiTabSupport:
         task_model2 = TaskModel()
         diagram_model2 = DiagramModel(task_model=task_model2)
         tab_model2 = TabModel()
+        tab_model2.addTab("Main")
         project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
         project_manager2.loadProject(str(project_file))
 
@@ -2489,6 +2507,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
         project_manager.loadProject(str(project_file))
 
@@ -2502,6 +2521,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel()
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         project_manager.setCurrentTabMarkdownTabs([
@@ -2534,6 +2554,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel()
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         assert project_manager.hasUnsavedChanges() is False
@@ -2552,6 +2573,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel()
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         project_file = tmp_path / "workspace_unsaved.progress"
@@ -2568,6 +2590,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel()
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         project_file = tmp_path / "tab_markdown_unsaved.progress"
@@ -2585,6 +2608,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel()
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
         task_model.addTask("Running task", -1)
 
@@ -2605,6 +2629,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel()
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
         diagram_model.addBox(50.0, 60.0, "Saved Box")
 
@@ -2614,6 +2639,7 @@ class TestMultiTabSupport:
         task_model2 = TaskModel()
         diagram_model2 = DiagramModel()
         tab_model2 = TabModel()
+        tab_model2.addTab("Main")
         project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
         project_manager2.loadProject(str(project_file))
 
@@ -2626,6 +2652,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel()
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
         task_model.addTask("Secret", -1)
 
@@ -2635,6 +2662,7 @@ class TestMultiTabSupport:
         task_model2 = TaskModel()
         diagram_model2 = DiagramModel()
         tab_model2 = TabModel()
+        tab_model2.addTab("Main")
         project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
 
         def _wrong_prompt(self, operation, file_path, envelope=None):
@@ -2665,6 +2693,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel()
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
         task_model.addTask("Secret", -1)
 
@@ -2674,6 +2703,7 @@ class TestMultiTabSupport:
         task_model2 = TaskModel()
         diagram_model2 = DiagramModel()
         tab_model2 = TabModel()
+        tab_model2.addTab("Main")
         project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
         project_manager2.loadProject(str(project_file))
 
@@ -2697,6 +2727,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel()
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
         task_model.addTask("Secret", -1)
 
@@ -2706,6 +2737,7 @@ class TestMultiTabSupport:
         task_model2 = TaskModel()
         diagram_model2 = DiagramModel()
         tab_model2 = TabModel()
+        tab_model2.addTab("Main")
         project_manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
         project_manager2.loadProject(str(project_file))
 
@@ -2723,6 +2755,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel()
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
         task_model.addTask("Secret", -1)
 
@@ -2886,9 +2919,11 @@ class TestMultiTabSupport:
         assert tab_model.data(tab_model.index(0, 0), tab_model.NameRole) == "Third"
         assert tab_model.currentTabIndex == 1  # Main tab shifted right
 
-    def test_cannot_remove_last_tab(self, tab_model):
-        """Cannot remove the last remaining tab."""
-        assert tab_model.tabCount == 1
+    def test_remove_last_tab(self, tab_model):
+        """Removing the last goal leaves an empty project."""
+        tab_model.removeTab(0)
+        assert tab_model.tabCount == 0
+        assert tab_model.currentTabIndex == -1
 
     def test_tab_completion_role(self, tab_model):
         """Completion percent reflects task completion."""
@@ -2910,6 +2945,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel()
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         # Add box to first tab
@@ -2942,6 +2978,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel()
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         # Add task to first tab
@@ -2974,6 +3011,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel()
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         diagram_model.addBox(10.0, 10.0, "Tab 0 Box")
@@ -3002,6 +3040,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel()
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         task_model.addTask("Tab 0 Task", -1)
@@ -3030,6 +3069,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel()
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         diagram_model.addBox(10.0, 10.0, "Main Box")
@@ -3068,6 +3108,7 @@ class TestMultiTabSupport:
         diagram_model = DiagramModel(task_model=task_model)
         diagram_model.addTask(0, 40.0, 60.0)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         project_manager.drillToTask(0)
@@ -3079,6 +3120,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         task_model.addTask("Main Task", -1)
@@ -3117,6 +3159,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         task_model.addTask("Main Task", -1)
@@ -3164,6 +3207,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         tab_model.addTab("Second")
@@ -3179,6 +3223,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
         tab_model.addTab("Second")
 
@@ -3202,6 +3247,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         task_model.addTask("Tab 1 Task", -1)
@@ -3274,6 +3320,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         task_model.addTask("Main Task", -1)
@@ -3316,6 +3363,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         captured = []
@@ -3333,6 +3381,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         tab_model.addTab("Backend API")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
@@ -3353,6 +3402,7 @@ class TestMultiTabSupport:
         task_model.addTask("Write checklist", 0)
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         created_index = project_manager.addTaskToKanban(0)
@@ -3371,6 +3421,7 @@ class TestMultiTabSupport:
         task_model.addTask("Existing card", -1)
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         tab_model.addTab("Existing card")
         tab_model.setKanbanPlacement(1, "todo", -1)
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
@@ -3388,6 +3439,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         task_model.addTask("Existing task")
@@ -3409,6 +3461,7 @@ class TestMultiTabSupport:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         current_index = tab_model.currentTabIndex
@@ -3519,6 +3572,7 @@ class TestActionDrawQmlTaskInteractions:
             return None
 
         model = TabModel()
+        model.addTab("Main")
         model.addTab("Drag me")
         engine = QQmlEngine()
         component = QQmlComponent(engine, QUrl.fromLocalFile(str(QML_DIR / "KanbanWindow.qml")))
@@ -3594,6 +3648,7 @@ class TestActionDrawQmlTaskInteractions:
             )
 
         model = TabModel()
+        model.addTab("Main")
         model.renameTab(0, "First long scheduled tab title that should wrap instead of disappearing")
         model.setKanbanPlacement(0, "in_progress", 10)
         model.addTab("Second long scheduled tab title that should also remain readable")
@@ -3671,6 +3726,7 @@ class TestActionDrawQmlTaskInteractions:
             return None
 
         model = TabModel()
+        model.addTab("Main")
         model.renameTab(0, "Alpha Todo")
         model.addTab("Beta Todo")
         model.addTab("Alpha Ready")
@@ -3731,6 +3787,7 @@ class TestActionDrawQmlTaskInteractions:
             return None
 
         model = TabModel()
+        model.addTab("Main")
         engine = QQmlEngine()
         component = QQmlComponent(engine, QUrl.fromLocalFile(str(QML_DIR / "KanbanWindow.qml")))
         root = component.createWithInitialProperties({"tabModel": model})
@@ -4442,6 +4499,7 @@ class TestTaskReminders:
 
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
         project_manager.saveNtfySettings("https://example.ntfy", "alerts", "secret")
 
@@ -4461,6 +4519,7 @@ class TestTaskReminders:
 
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
         project_manager.saveNtfySettings("https://ntfy.sh", "", "")
 
@@ -4480,6 +4539,7 @@ class TestTaskReminders:
         task_model.addTask("Tab 1 Task", -1)
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
         project_manager.saveNtfySettings("https://ntfy.sh", "", "")
 
@@ -4524,6 +4584,7 @@ class TestTaskReminders:
         task_model.addTask("Tab 1 Task", -1)
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         tab_model.addTab("Tab 2")
@@ -4562,6 +4623,7 @@ class TestTaskReminders:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         project_manager.saveNtfySettings("https://example.ntfy", "alerts", "secret")
@@ -4582,6 +4644,7 @@ class TestTaskReminders:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         published = []
@@ -4622,6 +4685,7 @@ class TestTaskReminders:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         published = []
@@ -4653,6 +4717,7 @@ class TestTaskReminders:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         statuses = []
@@ -4686,6 +4751,7 @@ class TestTaskReminders:
 
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         earlier = (datetime.now() + timedelta(minutes=15)).timestamp()
@@ -4735,6 +4801,7 @@ class TestTaskReminders:
 
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         standalone_str = (datetime.now() + timedelta(minutes=15)).strftime("%Y-%m-%d %H:%M")
@@ -4760,6 +4827,7 @@ class TestTaskReminders:
 
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         reminders = project_manager.getActiveReminders()
@@ -4777,6 +4845,7 @@ class TestTaskReminders:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
         project_manager._standalone_reminders = [
             StandaloneReminder(
@@ -4799,6 +4868,7 @@ class TestTaskReminders:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         reminder_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
@@ -4818,6 +4888,7 @@ class TestTaskReminders:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         initial_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
@@ -4838,6 +4909,7 @@ class TestTaskReminders:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         reminder_str = (datetime.now() + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M")
@@ -4859,6 +4931,7 @@ class TestTaskReminders:
         task_model.addTask("Current Task", -1)
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         tab_model.addTab("Tab 2")
@@ -4893,6 +4966,7 @@ class TestTaskReminders:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         reminder_str = (datetime.now() - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M")
@@ -4912,6 +4986,7 @@ class TestTaskReminders:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         reminder_str = (datetime.now() - timedelta(minutes=1)).strftime("%Y-%m-%d %H:%M")
@@ -4932,6 +5007,7 @@ class TestTaskReminders:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
         project_manager.saveNtfySettings("https://example.ntfy", "alerts", "secret")
 
@@ -4956,6 +5032,7 @@ class TestTaskReminders:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         reminder_str = (datetime.now() + timedelta(hours=3)).strftime("%Y-%m-%d %H:%M")
@@ -4968,6 +5045,7 @@ class TestTaskReminders:
         other_task_model = TaskModel()
         other_diagram_model = DiagramModel(task_model=other_task_model)
         other_tab_model = TabModel()
+        other_tab_model.addTab("Main")
         other_project_manager = ProjectManager(other_task_model, other_diagram_model, other_tab_model)
         other_project_manager._load_standalone_reminders(payload["standalone_reminders"])
 
@@ -4986,6 +5064,7 @@ class TestTaskReminders:
 
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         project_manager.clearReminder(0, 0)
@@ -5002,6 +5081,7 @@ class TestTaskReminders:
         task_model.addTask("Current Task", -1)
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         tab_model.addTab("Tab 2")
@@ -5196,6 +5276,7 @@ class TestTaskContracts:
         task_model._tasks[0].contract_deadline_at = time.time() - 1
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         due = []
@@ -5218,6 +5299,7 @@ class TestTaskContracts:
         task_model.addTask("Tab 1 Task", -1)
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         tab_model.addTab("Tab 2")
@@ -5264,6 +5346,7 @@ class TestTaskContracts:
         assert task_model.setContractAt(0, deadline_str, "No coke") is True
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_manager = ProjectManager(task_model, diagram_model, tab_model)
 
         contracts = project_manager.getActiveContracts()
@@ -5294,6 +5377,7 @@ class TestLinkedSubtabMetadata:
         diagram_model = DiagramModel(task_model=task_model)
 
         tab_model = TabModel()
+        tab_model.addTab("Main")
         tab_model.setTabs(
             [
                 Tab(
@@ -5330,6 +5414,7 @@ class TestLinkedSubtabMetadata:
         diagram_model = DiagramModel(task_model=task_model)
 
         tab_model = TabModel()
+        tab_model.addTab("Main")
         tab_model.setTabs(
             [
                 Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": [], "current_task_index": -1}),
@@ -5425,6 +5510,7 @@ class TestTabModelCompletion:
         """TabModel has CompletionRole."""
         from task_model import TabModel
         model = TabModel()
+        model.addTab("Main")
         role_names = model.roleNames()
         assert b"completionPercent" in role_names.values()
 
@@ -5432,6 +5518,7 @@ class TestTabModelCompletion:
         """Empty tab has 0% completion."""
         from task_model import TabModel
         model = TabModel()
+        model.addTab("Main")
         index = model.index(0, 0)
         completion = model.data(index, model.CompletionRole)
         assert completion == 0.0
@@ -5440,6 +5527,7 @@ class TestTabModelCompletion:
         """Tab completion reflects task completion."""
         from task_model import TabModel
         model = TabModel()
+        model.addTab("Main")
         # Set tab with 2 tasks, 1 completed
         model._tabs[0].tasks = {
             "tasks": [
@@ -5455,6 +5543,7 @@ class TestTabModelCompletion:
         """100% completion when all tasks done."""
         from task_model import TabModel
         model = TabModel()
+        model.addTab("Main")
         model._tabs[0].tasks = {
             "tasks": [
                 {"title": "Task 1", "completed": True},
@@ -5470,6 +5559,7 @@ class TestTabModelCompletion:
         from task_model import TabModel, Tab
 
         model = TabModel()
+        model.addTab("Main")
         model.setTabs(
             [
                 Tab(
@@ -5502,6 +5592,7 @@ class TestTabModelCompletion:
         from task_model import TabModel, Tab
 
         model = TabModel()
+        model.addTab("Main")
         model.setTabs(
             [
                 Tab(
@@ -5525,6 +5616,7 @@ class TestTabModelCompletion:
         from task_model import TabModel
 
         model = TabModel()
+        model.addTab("Main")
         role_names = model.roleNames()
         assert b"priorityTimeHours" in role_names.values()
         assert b"prioritySubjectiveValue" in role_names.values()
@@ -5539,6 +5631,7 @@ class TestTabModelCompletion:
         from task_model import TabModel
 
         model = TabModel()
+        model.addTab("Main")
         model.setTabIcon(0, "!")
         model.setTabColor(0, "#336699")
         assert model.data(model.index(0, 0), model.IconRole) == "!"
@@ -5553,6 +5646,7 @@ class TestTabModelCompletion:
         from task_model import TabModel
 
         model = TabModel()
+        model.addTab("Main")
         model.setTabPinned(0, True)
 
         assert model.data(model.index(0, 0), model.PinnedRole) is True
@@ -5564,6 +5658,7 @@ class TestTabModelCompletion:
         from task_model import TabModel
 
         model = TabModel()
+        model.addTab("Main")
         model.addTab("Second")
         model.setPriorityPoint(0, 4.0, 4.0)
         model.setPriorityPoint(1, 2.0, 6.0)
@@ -5578,6 +5673,7 @@ class TestTabModelCompletion:
         from task_model import TabModel
 
         model = TabModel()
+        model.addTab("Main")
         model.addTab("Second")
         model.setCurrentTab(1)
         assert model.currentTabName == "Second"
@@ -5592,6 +5688,7 @@ class TestTabModelCompletion:
         from task_model import TabModel
 
         model = TabModel()
+        model.addTab("Main")
         model.addTab("Second")
         model.setPriorityPoint(0, 2.0, 9.0)  # High score
         model.setPriorityPoint(1, 2.0, 3.0)  # Lower score
@@ -5618,6 +5715,7 @@ class TestTabModelMoveTab:
         """Moving tab forward works."""
         from task_model import TabModel
         model = TabModel()
+        model.addTab("Main")
         model.addTab("Tab 2")
         model.addTab("Tab 3")
         assert model.rowCount() == 3
@@ -5630,6 +5728,7 @@ class TestTabModelMoveTab:
         """Moving tab backward works."""
         from task_model import TabModel
         model = TabModel()
+        model.addTab("Main")
         model.addTab("Tab 2")
         model.addTab("Tab 3")
 
@@ -5641,6 +5740,7 @@ class TestTabModelMoveTab:
         """Moving tab to same position does nothing."""
         from task_model import TabModel
         model = TabModel()
+        model.addTab("Main")
         model.addTab("Tab 2")
         model.moveTab(0, 0)
         assert model.data(model.index(0, 0), model.NameRole) == "Main"
@@ -5649,6 +5749,7 @@ class TestTabModelMoveTab:
         """Moving with invalid indices does nothing."""
         from task_model import TabModel
         model = TabModel()
+        model.addTab("Main")
         model.addTab("Tab 2")
         model.moveTab(-1, 0)
         model.moveTab(0, 10)
@@ -5660,6 +5761,7 @@ class TestTabModelMoveTab:
         """Moving current tab updates currentTabIndex."""
         from task_model import TabModel
         model = TabModel()
+        model.addTab("Main")
         model.addTab("Tab 2")
         model.addTab("Tab 3")
         model.setCurrentTab(0)
@@ -5672,6 +5774,7 @@ class TestTabModelMoveTab:
         from task_model import TabModel
 
         model = TabModel()
+        model.addTab("Main")
         model.addTab("Tab 2")
         model.addTab("Tab 3")
 
@@ -5693,6 +5796,7 @@ class TestTabModelMoveTab:
         from task_model import TabModel
 
         model = TabModel()
+        model.addTab("Main")
         model.addTab("Tab 2")
         model.addTab("Tab 3")
         model.setCurrentTab(1)
@@ -5717,6 +5821,7 @@ class TestTabModelKanban:
         from task_model import TabModel
 
         model = TabModel()
+        model.addTab("Main")
 
         assert model.data(model.index(0, 0), model.KanbanStatusRole) == "todo"
         assert model.data(model.index(0, 0), model.KanbanSlotHourRole) == -1
@@ -5728,6 +5833,7 @@ class TestTabModelKanban:
         from task_model import TabModel
 
         model = TabModel()
+        model.addTab("Main")
         changed = []
         model.kanbanChanged.connect(lambda: changed.append(True))
 
@@ -5741,6 +5847,7 @@ class TestTabModelKanban:
         from task_model import TabModel
 
         model = TabModel()
+        model.addTab("Main")
 
         assert model.setKanbanPlacement(99, "done", -1) is False
         assert model.getAllTabs()[0].kanban_status == "todo"
@@ -5749,6 +5856,7 @@ class TestTabModelKanban:
         from task_model import TabModel
 
         model = TabModel()
+        model.addTab("Main")
 
         assert model.setKanbanPlacement(0, "in_progress", 12) is True
         assert model.setKanbanPlacement(0, "ready", 12) is True
@@ -5768,6 +5876,7 @@ class TestTabModelKanban:
         from task_model import TabModel
 
         model = TabModel()
+        model.addTab("Main")
 
         assert model.setKanbanPlacement(0, "in_progress", 22) is False
         assert model.getTabSummary(0)["kanbanStatus"] == "todo"
@@ -5777,6 +5886,7 @@ class TestTabModelKanban:
         from task_model import TabModel
 
         model = TabModel()
+        model.addTab("Main")
 
         created_index = model.createTabAtKanbanPlacement("Build board", "in_progress", 14)
 
@@ -5790,6 +5900,7 @@ class TestTabModelKanban:
         from task_model import TabModel
 
         model = TabModel()
+        model.addTab("Main")
         model.renameTab(0, "Early")
         model.setKanbanPlacement(0, "in_progress", 14)
         model.addTab("Fifteen")
@@ -5813,6 +5924,7 @@ class TestTabModelKanban:
         from task_model import TabModel
 
         model = TabModel()
+        model.addTab("Main")
         model.renameTab(0, "Ready")
         model.setKanbanPlacement(0, "ready", -1)
         model.addTab("Doing Fifteen")
@@ -5838,6 +5950,7 @@ class TestTabModelKanban:
         from task_model import TabModel
 
         model = TabModel()
+        model.addTab("Main")
         model.renameTab(0, "Ready")
         model.setKanbanPlacement(0, "ready", -1)
         model.addTab("Doing Fifteen")
@@ -5866,6 +5979,7 @@ class TestTabModelKanban:
         from task_model import TabModel
 
         model = TabModel()
+        model.addTab("Main")
         model.renameTab(0, "Todo")
         model.addTab("Ready")
         model.setKanbanPlacement(1, "ready", -1)
@@ -5890,6 +6004,7 @@ class TestTabModelKanban:
         from task_model import TabModel
 
         model = TabModel()
+        model.addTab("Main")
         model.renameTab(0, "Todo")
         model.addTab("Ready")
         model.setKanbanPlacement(1, "ready", -1)
@@ -5918,6 +6033,7 @@ class TestTabModelUpdateCurrentTabTasks:
         """updateCurrentTabTasks updates only tasks data."""
         from task_model import TabModel
         model = TabModel()
+        model.addTab("Main")
         original_diagram = model._tabs[0].diagram
 
         new_tasks = {"tasks": [{"title": "New Task", "completed": False}]}
@@ -5930,6 +6046,7 @@ class TestTabModelUpdateCurrentTabTasks:
         """updateCurrentTabTasks emits dataChanged signal."""
         from task_model import TabModel
         model = TabModel()
+        model.addTab("Main")
         signal_received = []
 
         def on_data_changed(top_left, bottom_right, roles):
@@ -5952,6 +6069,7 @@ class TestPriorityPlotPersistence:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         tab_model.setTabs(
             [
                 Tab(
@@ -5981,6 +6099,7 @@ class TestPriorityPlotPersistence:
         task_model2 = TaskModel()
         diagram_model2 = DiagramModel(task_model=task_model2)
         tab_model2 = TabModel()
+        tab_model2.addTab("Main")
         manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
         manager2.loadProject(str(project_file))
 
@@ -6006,6 +6125,7 @@ class TestPriorityPlotPersistence:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         tab_model.setTabs(
             [
                 Tab(
@@ -6030,6 +6150,7 @@ class TestPriorityPlotPersistence:
         task_model2 = TaskModel()
         diagram_model2 = DiagramModel(task_model=task_model2)
         tab_model2 = TabModel()
+        tab_model2.addTab("Main")
         manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
         manager2.loadProject(str(project_file))
 
@@ -6045,6 +6166,7 @@ class TestPriorityPlotPersistence:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         tab_model.setTabs(
             [
                 Tab(
@@ -6070,6 +6192,7 @@ class TestPriorityPlotPersistence:
         task_model2 = TaskModel()
         diagram_model2 = DiagramModel(task_model=task_model2)
         tab_model2 = TabModel()
+        tab_model2.addTab("Main")
         manager2 = ProjectManager(task_model2, diagram_model2, tab_model2)
         manager2.loadProject(str(project_file))
 
@@ -6454,6 +6577,7 @@ class TestProjectManagerRefreshTasks:
         task_model = TaskModel()
         diagram_model = DiagramModel()
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_mgr = ProjectManager(task_model, diagram_model, tab_model)
 
         task_model._loading = True
@@ -6471,6 +6595,7 @@ class TestProjectManagerRefreshTasks:
         task_model = TaskModel()
         diagram_model = DiagramModel()
         tab_model = TabModel()
+        tab_model.addTab("Main")
         project_mgr = ProjectManager(task_model, diagram_model, tab_model)
 
         task_model.addTask("New Task", -1)

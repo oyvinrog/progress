@@ -76,8 +76,10 @@ To run the standalone priority plot:
 priorityplot
 ```
 
-Start a project, add your first goals, and choose **Mindmap** to connect the
-plan. Save the project to select its encryption mode.
+New projects open on a blank starting page. Choose **Add goal**, give it a name,
+and start organizing its steps in the goal’s mind map. Deleting the last goal
+returns to the starting page; empty projects can also be saved and reopened.
+Save the project to select its encryption mode.
 
 [Follow the walkthrough](#plan-a-project-with-the-mindmap) ·
 [View keyboard shortcuts](#mindmap-shortcuts)

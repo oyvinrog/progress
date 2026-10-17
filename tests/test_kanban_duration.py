@@ -19,6 +19,7 @@ def project(app, monkeypatch):
     monkeypatch.setattr(ProjectManager, "_prompt_encryption_credentials",
                         lambda *args: EncryptionCredentials(passphrase="test-passphrase"))
     tasks, tabs = TaskModel(), TabModel()
+    tabs.addTab("Main")
     diagram = DiagramModel(tasks)
     return ProjectManager(tasks, diagram, tabs), tabs, tasks, diagram
 

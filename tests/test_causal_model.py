@@ -198,6 +198,7 @@ def project():
     tasks = TaskModel()
     diagram = DiagramModel(task_model=tasks)
     tabs = TabModel()
+    tabs.addTab("Main")
     manager = ProjectManager(tasks, diagram, tabs)
     model = CausalModelModel(tab_model=tabs)
     return tasks, diagram, tabs, manager, model
@@ -206,6 +207,7 @@ def project():
 @pytest.mark.parametrize('active_tab, expected_index', [(0, 0), (1, 1), (99, 0), (-1, 0)])
 def test_reset_publishes_valid_current_tab_before_notifying_editors(app, active_tab, expected_index):
     tabs = TabModel()
+    tabs.addTab("Main")
     tabs.addTab('Old second')
     tabs.addTab('Old third')
     tabs.setCurrentTab(2)
@@ -227,13 +229,14 @@ def test_reset_publishes_valid_current_tab_before_notifying_editors(app, active_
     assert replacement[expected_index].causal_model['description'] == 'Saved to the new active tab'
     assert replacement[1 - expected_index].causal_model['description'] == ''
     tabs.clear()
-    assert observed[-1] == (0, [])
+    assert observed[-1] == (-1, [])
     assert model.to_dict() == empty_causal_model_state()
 
 
 @pytest.mark.parametrize('invalid_index', [-1, 5])
 def test_causal_editor_tolerates_missing_current_tab_and_recovers(app, invalid_index):
     tabs = TabModel()
+    tabs.addTab("Main")
     model = CausalModelModel(tab_model=tabs)
     model.addNode('Keep on tab', 'action', 10, 20)
     saved = copy.deepcopy(tabs.getCurrentTabData().causal_model)
