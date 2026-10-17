@@ -181,3 +181,49 @@ def test_overview_goal_selection_dialog_and_open(calendar_ui, app):
     assert len(value(overview, "filteredGoals")) == 1
     # Detach before the Python QObject leaves scope.
     overview.setProperty("goalModel", None)
+
+
+@pytest.mark.parametrize("enter_key", [Qt.Key_Return, Qt.Key_Enter])
+def test_date_picker_and_enter_save(calendar_ui, app, enter_key):
+    root, _, overview, _, _, click = calendar_ui
+    tabs = TabModel()
+    overview.setProperty("goalModel", tabs)
+    dialog = overview.findChild(QObject, "goalRangeDialog")
+    dialog.show(None, "2032-02-28")
+    QTest.qWait(30)
+    # Enter uses validation and keeps an unnamed goal open.
+    QTest.keyClick(root, enter_key)
+    assert dialog.property("visible")
+    assert tabs.tabCount == 1
+    dialog.findChild(QObject, "goalRangeName").setProperty("text", "Picked dates")
+    click("goalRangeStart")
+    picker = dialog.findChild(QObject, "goalDatePicker")
+    assert picker.property("visible")
+    click("goalDateDay_29")
+    assert not picker.property("visible")
+    assert dialog.findChild(QObject, "goalRangeStart").property("text") == "2032-02-29"
+    click("goalRangeEnd")
+    click("goalDateNextMonth")
+    assert picker.property("month") == 2
+    # Enter inside the date popup activates its focused control, without saving the goal.
+    day = find(root, "goalDateDay_2")
+    day.forceActiveFocus()
+    QTest.keyClick(root, enter_key)
+    app.processEvents()
+    assert dialog.property("visible")
+    assert tabs.tabCount == 1
+    assert not picker.property("visible")
+    assert dialog.findChild(QObject, "goalRangeEnd").property("text") == "2032-03-02"
+    QTest.keyClick(root, enter_key)
+    app.processEvents()
+    assert not dialog.property("visible")
+    assert tabs.tabCount == 2
+    assert tabs.scheduledGoals[0]["startDate"] == "2032-02-29"
+    assert tabs.scheduledGoals[0]["endDate"] == "2032-03-02"
+    # Editing also saves from the date button using Enter.
+    dialog.show(tabs.scheduledGoals[0], "")
+    QTest.qWait(30)
+    QTest.keyClick(root, enter_key)
+    assert not dialog.property("visible")
+    assert tabs.tabCount == 2
+    overview.setProperty("goalModel", None)
