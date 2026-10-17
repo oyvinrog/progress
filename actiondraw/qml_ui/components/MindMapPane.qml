@@ -361,15 +361,15 @@ FocusScope {
                     }
                     Menu {
                         objectName: "mindmapTabsMenu"
-                        title: "Tabs"
+                        title: "Goals"
                         MenuItem {
                             objectName: "mindmapCreateTab"
-                            text: "Create tab"
+                            text: "Create goal"
                             enabled: pane.controller && pane.controller.canCreateTab
                             onTriggered: { pane.controller.createTabFromSelected(); pane.focusMap() }
                         }
                         MenuItem {
-                            text: "Open tab"
+                            text: "Open goal"
                             enabled: pane.controller && pane.controller.selectedNode.isTab === true
                             onTriggered: pane.controller.activate(pane.controller.selectedId)
                         }
@@ -1084,7 +1084,7 @@ FocusScope {
             spacing: 16
             Label {
                 Layout.fillWidth: true
-                text: "Drag the priority slider left for highest scores, right to include more; All restores every branch · Hover or select a node and click + above or below to add a sibling · Type to find node titles, including folded branches · Enter / Shift+Enter cycles matches · Backspace edits search · Escape clears search · Double-click a tab node to open it · Double-click empty space to add a thought · Ctrl+B toggles bold · Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+C / Ctrl+V copies branches · Ctrl+X / Ctrl+V moves branches · F4 completes · Arrows navigate · Tab adds a child · Ctrl+Enter opens a tab"
+                text: "Drag the priority slider left for highest scores, right to include more; All restores every branch · Hover or select a node and click + above or below to add a sibling · Type to find node titles, including folded branches · Enter / Shift+Enter cycles matches · Backspace edits search · Escape clears search · Double-click a goal node to open it · Double-click empty space to add a thought · Ctrl+B toggles bold · Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+C / Ctrl+V copies branches · Ctrl+X / Ctrl+V moves branches · F4 completes · Arrows navigate · Tab adds a child · Ctrl+Enter opens a goal"
                 wrapMode: Text.WordWrap
                 color: "#a9bfd1"
             }
@@ -1359,7 +1359,7 @@ FocusScope {
         IconMenuItem {
             iconKey: "tab"
             objectName: "mindmapAddTab"
-            text: "Add tab…"
+            text: "Add goal…"
             onTriggered: {
                 tabReferenceDialog.targetNodeId = nodeMenu.targetNodeId
                 tabReferenceDialog.open()
@@ -1370,7 +1370,7 @@ FocusScope {
         IconMenuItem { iconKey: "notes"; text: "Edit / Notes"; onTriggered: pane.editNode() }
         IconMenuItem {
             iconKey: "tab"
-            text: "Create tab"
+            text: "Create goal"
             enabled: pane.controller && pane.controller.canCreateTab
             onTriggered: { pane.controller.createTabFromSelected(); pane.focusMap() }
         }
@@ -1378,12 +1378,12 @@ FocusScope {
         IconMenuItem { iconKey: "fold"; text: "Fold / Unfold"; onTriggered: pane.controller.toggleFold() }
         IconMenuItem { iconKey: "left"; text: "Branch on left"; onTriggered: pane.controller.setSide("left") }
         IconMenuItem { iconKey: "right"; text: "Branch on right"; onTriggered: pane.controller.setSide("right") }
-        IconMenuItem { iconKey: "trash"; text: pane.controller && pane.controller.selectedNode.isReference ? "Remove tab reference" : "Delete branch"; onTriggered: pane.controller.deleteSelected() }
+        IconMenuItem { iconKey: "trash"; text: pane.controller && pane.controller.selectedNode.isReference ? "Remove goal reference" : "Delete branch"; onTriggered: pane.controller.deleteSelected() }
     }
     Dialog {
         id: tabReferenceDialog
         objectName: "mindmapTabReferenceDialog"
-        title: "Add tab"
+        title: "Add goal"
         modal: true
         anchors.centerIn: parent
         width: Math.min(600, pane.width - 20)
@@ -1420,7 +1420,7 @@ FocusScope {
                 id: tabReferenceSearch
                 objectName: "mindmapTabReferenceSearch"
                 Layout.fillWidth: true
-                placeholderText: "Search tabs…"
+                placeholderText: "Search goals…"
                 onTextChanged: tabReferenceDialog.refresh()
                 onAccepted: tabReferenceDialog.insert(tabReferenceList.currentIndex)
                 Keys.onDownPressed: tabReferenceList.currentIndex = Math.min(tabReferenceList.count - 1, tabReferenceList.currentIndex + 1)
@@ -1446,7 +1446,7 @@ FocusScope {
                 Label {
                     anchors.centerIn: parent
                     visible: tabReferenceList.count === 0
-                    text: "No matching tabs"
+                    text: "No matching goals"
                 }
             }
             Label {

@@ -142,7 +142,7 @@ Window {
                 }
 
                 Text {
-                    text: "Drag points and release to update time, value, and tab priority ordering."
+                    text: "Drag points and release to update time, value, and goal priority ordering."
                     color: "#9ec6e2"
                     font.pixelSize: 12
                 }
@@ -265,7 +265,7 @@ Window {
                     spacing: 8
 
                     Text {
-                        text: "Tab Scores"
+                        text: "Goal Scores"
                         color: "#d9efff"
                         font.pixelSize: 14
                         font.bold: true
@@ -463,7 +463,7 @@ Window {
                 wrapMode: Text.WordWrap
                 color: "#9fc6de"
                 font.pixelSize: 11
-                text: "This removes the underlying tab and its saved tasks."
+                text: "This removes the underlying goal and its saved tasks."
             }
         }
     }

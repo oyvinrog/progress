@@ -30,6 +30,7 @@ Window {
     QtObject {
         id: manager
         function addStandaloneReminder(title, date, notify) { host.savedReminder = date; return true }
+        function switchTab(index) { host.action = "open-goal-" + index }
         function openTabTask(tab, task) { host.action = "open-task" }
         function openMindmapReminder(node) { host.action = "open-node" }
         function clearReminder(tab, task) { host.action = "clear-task" }
@@ -145,7 +146,7 @@ def test_selection_reset_and_live_updates(calendar_ui):
     assert calendar.property("displayedMonth") == 1
     assert value(overview, "filteredReminders") == []
     assert find(root, "reminderEmptyDay").isVisible()
-    assert find(root, "reminderEmptyDay").property("text") == "No reminders for this day"
+    assert find(root, "reminderEmptyDay").property("text") == "No goals or reminders for this day"
     click("reminderAllDays")
     assert overview.property("selectedDate") == ""
     assert len(value(overview, "filteredReminders")) == 2
@@ -177,7 +178,7 @@ def test_monday_grid_leap_year_and_month_navigation(calendar_ui):
 def test_responsive_layout_collapse_and_row_actions(calendar_ui, app):
     root, host, _, _, refresh, click = calendar_ui
     refresh([reminder("2032-02-29T18:00:00")])
-    assert find(root, "reminderCalendarContent").property("columns") == 2
+    assert find(root, "reminderCalendarContent").property("columns") == 1
     click("openReminder_task")
     assert host.property("action") == "open-task"
     click("editReminder_task")

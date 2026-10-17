@@ -6,6 +6,8 @@ Rectangle {
     id: calendar
     objectName: "reminderCalendar"
     property var dayCounts: ({})
+    property var goals: []
+    property real viewportHeightLimit: 440
     property double nowTimestamp: Date.now() / 1000
     property string selectedDate: ""
     property int displayedYear: new Date().getFullYear()
@@ -20,134 +22,214 @@ Rectangle {
         }
         return cells
     }
-    signal dateSelected(string date)
-
-    function dateKey(date) {
-        return date.getFullYear() + "-" + ("0" + (date.getMonth() + 1)).slice(-2) + "-" + ("0" + date.getDate()).slice(-2)
+    // UTC is used solely as an integer civil-day coordinate, never as a goal timestamp.
+    function dayNumber(key) { var p = key.split("-"), d = new Date(0); d.setUTCFullYear(+p[0], +p[1]-1, +p[2]); return Math.floor(d.getTime() / 86400000) }
+    function dayKey(n) { return new Date(n * 86400000).toISOString().slice(0, 10) }
+    function dateKey(date) { return date.getFullYear() + "-" + ("0"+(date.getMonth()+1)).slice(-2) + "-" + ("0"+date.getDate()).slice(-2) }
+    function goalCount(key) { return goals.filter(function(g) { return g.startDate <= key && g.endDate >= key }).length }
+    readonly property var weeks: {
+        var result = [], top = 0
+        for (var w = 0; w < 6; ++w) {
+            var start = dayNumber(calendarDays[w*7].key), lanes = [], bars = []
+            goals.forEach(function(g) {
+                var a = Math.max(start, dayNumber(g.startDate)), b = Math.min(start+6, dayNumber(g.endDate))
+                if (a > b) return
+                var lane = 0
+                while (lane < lanes.length && lanes[lane] >= a) ++lane
+                lanes[lane] = b
+                bars.push({goal:g, column:a-start, span:b-a+1, lane:lane,
+                           first:a === dayNumber(g.startDate), last:b === dayNumber(g.endDate)})
+            })
+            var h = 34 + Math.max(1, lanes.length) * 25
+            result.push({top:top, height:h, bars:bars})
+            top += h + 3
+        }
+        return result
     }
+    readonly property real gridHeight: weeks[5].top + weeks[5].height
+    property var gesture: null
+    property string previewStart: ""
+    property string previewEnd: ""
+    property bool validDrop: false
+    property int hoverMonth: 0
+    property bool moved: false
+    signal dateSelected(string date)
+    signal goalOpened(string goalId)
+    signal rangeEdited(string goalId, string startDate, string endDate)
+
     function changeMonth(offset) {
-        var date = new Date(displayedYear, displayedMonth + offset, 1)
-        displayedYear = date.getFullYear()
-        displayedMonth = date.getMonth()
+        var d = new Date(displayedYear, displayedMonth+offset, 1)
+        displayedYear = d.getFullYear(); displayedMonth = d.getMonth()
     }
     function showToday() {
-        var date = new Date(nowTimestamp * 1000)
-        displayedYear = date.getFullYear()
-        displayedMonth = date.getMonth()
+        var d = new Date(nowTimestamp*1000)
+        displayedYear = d.getFullYear(); displayedMonth = d.getMonth()
     }
-
-    implicitHeight: calendarColumn.implicitHeight + 12
-    implicitWidth: 320
-    color: "#21313d"
-    border.color: "#3b566a"
-    radius: 8
-
+    function cellAt(x, y) {
+        if (x < 0 || x >= grid.width || y < 0) return -1
+        for (var w=0; w<6; ++w)
+            if (y >= weeks[w].top && y < weeks[w].top+weeks[w].height)
+                return w*7 + Math.floor(x / (grid.width/7))
+        return -1
+    }
+    function beginGesture(goal, mode, x, y) {
+        var cell = cellAt(x,y)
+        if (cell < 0) return
+        gesture = {id:goal.id, mode:mode, start:dayNumber(goal.startDate), end:dayNumber(goal.endDate),
+                   anchor:dayNumber(calendarDays[cell].key), x:x, y:y}
+        previewStart = goal.startDate; previewEnd = goal.endDate
+        validDrop = true; moved = false
+        forceActiveFocus()
+    }
+    function updateGesture(x,y) {
+        if (!gesture) return
+        if (Math.abs(x-gesture.x)+Math.abs(y-gesture.y)>5) moved = true
+        var cell = cellAt(x,y)
+        var visiblePoint = grid.mapToItem(viewport,x,y)
+        validDrop = cell >= 0 && visiblePoint.x >= 0 && visiblePoint.x < viewport.width && visiblePoint.y >= 0 && visiblePoint.y < viewport.height
+        if (!validDrop) return
+        var delta = dayNumber(calendarDays[cell].key)-gesture.anchor
+        var a=gesture.start, b=gesture.end
+        if (gesture.mode === "move") { a+=delta; b+=delta }
+        else if (gesture.mode === "start") a=Math.min(b,a+delta)
+        else b=Math.max(a,b+delta)
+        previewStart=dayKey(a); previewEnd=dayKey(b)
+    }
+    function finishGesture() {
+        if (!gesture) return
+        var g=gesture, commit=validDrop && moved
+        gesture=null; hoverMonth=0
+        if (commit) rangeEdited(g.id,previewStart,previewEnd)
+        else if (!moved && validDrop) goalOpened(g.id)
+    }
+    function cancelGesture() { gesture=null; hoverMonth=0; validDrop=false }
+    Keys.onEscapePressed: { cancelGesture(); pointer.pressedCell=-1 }
+    Timer { interval: 650; repeat: true; running: calendar.gesture !== null && calendar.hoverMonth !== 0; onTriggered: calendar.changeMonth(calendar.hoverMonth) }
+    implicitHeight: column.implicitHeight+12
+    implicitWidth: 700
+    color: "#21313d"; border.color: "#3b566a"; radius: 8
     ColumnLayout {
-        id: calendarColumn
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.margins: 6
+        id: column
+        anchors { left: parent.left; right: parent.right; top: parent.top; margins: 6 }
         spacing: 4
         RowLayout {
             Layout.fillWidth: true
-            Button {
-                objectName: "reminderPreviousMonth"
-                text: "‹"
-                implicitWidth: 32
-                Accessible.name: "Previous month"
-                onClicked: calendar.changeMonth(-1)
-            }
-            Label {
-                Layout.fillWidth: true
-                horizontalAlignment: Text.AlignHCenter
-                text: Qt.formatDate(new Date(calendar.displayedYear, calendar.displayedMonth, 1), "MMMM yyyy")
-                color: "#fff7ef"
-                font.bold: true
-            }
-            Button {
-                objectName: "reminderNextMonth"
-                text: "›"
-                implicitWidth: 32
-                Accessible.name: "Next month"
-                onClicked: calendar.changeMonth(1)
-            }
+            Button { id: previous; objectName: "reminderPreviousMonth"; text:"‹"; Accessible.name:"Previous month"; onClicked: calendar.changeMonth(-1) }
+            Label { Layout.fillWidth:true; text: Qt.formatDate(new Date(calendar.displayedYear,calendar.displayedMonth,1),"MMMM yyyy"); color:"#fff7ef"; horizontalAlignment:Text.AlignHCenter }
+            Button { id: next; objectName:"reminderNextMonth"; text:"›"; Accessible.name:"Next month"; onClicked:calendar.changeMonth(1) }
+            Button { objectName:"reminderToday"; text:"Today"; onClicked:calendar.showToday() }
+            Button { objectName:"reminderAllDays"; text:"All days"; highlighted:calendar.selectedDate===""; onClicked:calendar.dateSelected("") }
         }
-        RowLayout {
-            Button {
-                objectName: "reminderToday"
-                text: "Today"
-                onClicked: calendar.showToday()
-            }
-            Button {
-                objectName: "reminderAllDays"
-                text: "All days"
-                highlighted: calendar.selectedDate === ""
-                onClicked: calendar.dateSelected("")
-            }
+        Label {
+            Layout.fillWidth:true
+            text: calendar.gesture ? calendar.previewStart+" → "+calendar.previewEnd+(calendar.validDrop ? "" : " · Drop on a day to save") : "Drag goals to move · Drag ends to resize · Escape cancels"
+            color:"#f1c892"; font.pixelSize:11
         }
-        GridLayout {
-            Layout.fillWidth: true
-            columns: 7
-            columnSpacing: 2
-            rowSpacing: 2
-            Repeater {
-                model: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-                delegate: Label {
-                    required property string modelData
-                    Layout.fillWidth: true
-                    horizontalAlignment: Text.AlignHCenter
-                    text: modelData
-                    color: "#f1c892"
-                    font.pixelSize: 10
+        Flickable {
+            id: viewport
+            Layout.fillWidth:true
+            Layout.preferredHeight: Math.min(calendar.gridHeight+24, calendar.viewportHeightLimit)
+            contentWidth: Math.max(width, 560)
+            contentHeight: calendar.gridHeight+24
+            clip:true
+            interactive: calendar.gesture === null
+            ScrollBar.horizontal: ScrollBar { policy: viewport.contentWidth > viewport.width ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff }
+            ScrollBar.vertical: ScrollBar { policy: viewport.contentHeight > viewport.height ? ScrollBar.AlwaysOn : ScrollBar.AlwaysOff }
+            Row {
+                Repeater {
+                    model:["Mon","Tue","Wed","Thu","Fri","Sat","Sun"]
+                    Label { required property string modelData; width:viewport.contentWidth/7; height:24; text:modelData; color:"#f1c892"; horizontalAlignment:Text.AlignHCenter }
                 }
             }
-            Repeater {
-                model: calendar.calendarDays
-                delegate: Button {
-                    id: dayButton
-                    required property var modelData
-                    readonly property int reminderCount: calendar.dayCounts[modelData.key] || 0
-                    objectName: "reminderDay_" + modelData.key
-                    Layout.fillWidth: true
-                    Layout.preferredWidth: 40
-                    Layout.preferredHeight: 32
-                    highlighted: calendar.selectedDate === modelData.key
-                    Accessible.name: modelData.key + ", " + reminderCount + " reminders"
-                    onClicked: calendar.dateSelected(modelData.key)
-                    background: Rectangle {
-                        radius: 4
-                        color: dayButton.highlighted ? "#8d6948" : dayButton.down ? "#3b566a" : "#2b3d4a"
-                        border.width: dayButton.modelData.key === calendar.todayKey || dayButton.highlighted ? 2 : 1
-                        border.color: dayButton.modelData.key === calendar.todayKey ? "#ffe3a8" : dayButton.highlighted ? "#f1c892" : "#3b566a"
-                    }
-                    contentItem: Item {
-                        Row {
-                            anchors.centerIn: parent
-                            spacing: 2
-                            Text {
-                                text: dayButton.modelData.day
-                                color: dayButton.modelData.key === calendar.todayKey ? "#ffe3a8" : "#fff7ef"
-                                opacity: dayButton.modelData.inMonth ? 1 : 0.45
-                                font.bold: dayButton.modelData.key === calendar.todayKey
-                                font.pixelSize: 11
+            Item {
+                id:grid
+                y:24; width:viewport.contentWidth; height:calendar.gridHeight
+                Repeater {
+                    model:calendar.calendarDays
+                    delegate: Button {
+                        id:day
+                        required property var modelData
+                        required property int index
+                        readonly property int reminderCount: calendar.dayCounts[modelData.key] || 0
+                        readonly property int goalsCount: calendar.goalCount(modelData.key)
+                        objectName:"reminderDay_"+modelData.key
+                        x:(index%7)*grid.width/7; y:calendar.weeks[Math.floor(index/7)].top
+                        width:grid.width/7-2; height:calendar.weeks[Math.floor(index/7)].height
+                        Accessible.name:modelData.key+", "+goalsCount+" goals, "+reminderCount+" reminders"
+                        onClicked:calendar.dateSelected(modelData.key)
+                        background:Rectangle {
+                            color:calendar.selectedDate===day.modelData.key ? "#65533e" : "#2b3d4a"
+                            border.color:day.modelData.key===calendar.todayKey ? "#ffe3a8" : "#3b566a"
+                            radius:3
                         }
-                        Rectangle {
-                            visible: dayButton.reminderCount > 0
-                            width: countLabel.implicitWidth + 6
-                            height: 15
-                            radius: 7
-                            color: "#8d6948"
-                            Text {
-                                id: countLabel
-                                anchors.centerIn: parent
-                                text: dayButton.reminderCount
-                                color: "#fff7ef"
-                                font.pixelSize: 10
+                        contentItem:Text {
+                            text:day.modelData.day+((day.reminderCount+day.goalsCount)>0 ? "  · "+(day.reminderCount+day.goalsCount) : "")
+                            color:"#fff7ef"; opacity:day.modelData.inMonth ? 1 : 0.5
+                            font.pixelSize:12; verticalAlignment:Text.AlignTop
+                        }
+                    }
+                }
+                Repeater {
+                    model:calendar.weeks
+                    delegate: Item {
+                        id:week
+                        required property var modelData
+                        y:modelData.top; width:grid.width; height:modelData.height
+                        Repeater {
+                            model:week.modelData.bars
+                            delegate:Rectangle {
+                                id:bar
+                                required property var modelData
+                                objectName:"goalBar_"+modelData.goal.id+"_"+modelData.column
+                                x:modelData.column*grid.width/7+2; y:32+modelData.lane*25
+                                width:modelData.span*grid.width/7-6; height:22; radius:4
+                                color:"#243d50"; border.color:modelData.goal.color || "#7dbde8"; border.width:2
+                                Text { anchors {fill:parent; leftMargin:12; rightMargin:12} text:bar.modelData.goal.name; elide:Text.ElideRight; color:"white"; verticalAlignment:Text.AlignVCenter; font.pixelSize:11 }
+                                Text { visible:bar.modelData.first; text:"│"; color:"white"; anchors.left:parent.left }
+                                Text { visible:bar.modelData.last; text:"│"; color:"white"; anchors.right:parent.right }
+
                             }
                         }
-                      }
                     }
+                }
+                MouseArea {
+                    id: pointer
+                    anchors.fill: parent
+                    property int pressedCell: -1
+                    onPressed: function(mouse) {
+                        pressedCell=calendar.cellAt(mouse.x,mouse.y)
+                        if (pressedCell<0) return
+                        var week=calendar.weeks[Math.floor(pressedCell/7)]
+                        var column=pressedCell%7
+                        var lane=Math.floor((mouse.y-week.top-32)/25)
+                        for (var i=0;i<week.bars.length;++i) {
+                            var b=week.bars[i]
+                            if (b.lane!==lane || column<b.column || column>=b.column+b.span) continue
+                            var left=b.column*grid.width/7+2, right=(b.column+b.span)*grid.width/7-4
+                            var mode=mouse.x-left<10 && b.first ? "start" : right-mouse.x<10 && b.last ? "end" : "move"
+                            calendar.beginGesture(b.goal,mode,mouse.x,mouse.y)
+                            return
+                        }
+                    }
+                    onPositionChanged: function(mouse) {
+                        if (!calendar.gesture) return
+                        calendar.updateGesture(mouse.x,mouse.y)
+                        var a=mapToItem(previous,mouse.x,mouse.y), b=mapToItem(next,mouse.x,mouse.y)
+                        calendar.hoverMonth=a.x>=0 && a.x<previous.width && a.y>=0 && a.y<previous.height ? -1 :
+                                            b.x>=0 && b.x<next.width && b.y>=0 && b.y<next.height ? 1 : 0
+                        if (mouse.x>viewport.contentX+viewport.width-20) viewport.contentX=Math.max(0,Math.min(viewport.contentWidth-viewport.width,viewport.contentX+8))
+                        if (mouse.x<viewport.contentX+20) viewport.contentX=Math.max(0,viewport.contentX-8)
+                        if (mouse.y>viewport.contentY+viewport.height-35)
+                            viewport.contentY=Math.min(viewport.contentHeight-viewport.height,viewport.contentY+8)
+                        if (mouse.y<viewport.contentY+15) viewport.contentY=Math.max(0,viewport.contentY-8)
+                    }
+                    onReleased: function(mouse) {
+                        if (calendar.gesture) calendar.finishGesture()
+                        else if (pressedCell>=0 && calendar.cellAt(mouse.x,mouse.y)===pressedCell)
+                            calendar.dateSelected(calendar.calendarDays[pressedCell].key)
+                        pressedCell=-1
+                    }
+                    onCanceled: { calendar.cancelGesture(); pressedCell=-1 }
                 }
             }
         }

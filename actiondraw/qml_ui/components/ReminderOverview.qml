@@ -8,6 +8,22 @@ Column {
     property var windowRoot
     property var projectManager
     property var dialogs
+    property var goalModel: null
+    readonly property var scheduledGoals: goalModel ? goalModel.scheduledGoals : []
+    readonly property var filteredGoals: scheduledGoals.filter(function(g) {
+        return !overview.selectedDate || (g.startDate <= overview.selectedDate && g.endDate >= overview.selectedDate)
+    })
+    onScheduledGoalsChanged: {
+        if (windowRoot && scheduledGoals.length && !windowRoot.reminderOverviewTouched)
+            windowRoot.reminderOverviewExpanded = true
+    }
+    function openGoal(id) {
+        if (goalModel && projectManager) {
+            var index = goalModel.goalIndex(id)
+            if (index >= 0) projectManager.switchTab(index)
+        }
+    }
+    GoalRangeDialog { id: goalDialog; goalModel: overview.goalModel; projectManager: overview.projectManager }
     property var planController
     property double nowTimestamp: Date.now() / 1000
     property string selectedDate: ""
@@ -49,12 +65,17 @@ Column {
             spacing: 10
 
             Label {
-                text: "Waiting Reminders · " + overview.futureReminders.length + " pending"
+                text: "Planning Calendar · " + overview.scheduledGoals.length + " goals · " + overview.futureReminders.length + " reminders"
                 color: "#ffe4c7"
                 font.pixelSize: 12
                 font.bold: true
                 height: newReminderButton.implicitHeight
                 verticalAlignment: Text.AlignVCenter
+            }
+            Button {
+                text: "Add Goal with Time Range"
+                visible: !!overview.goalModel
+                onClicked: goalDialog.show(null, overview.selectedDate)
             }
             Button {
                 id: newReminderButton
@@ -77,16 +98,24 @@ Column {
         id: calendarContent
         objectName: "reminderCalendarContent"
         width: overview.width
-        columns: width >= 800 ? 2 : 1
+        columns: 1
         columnSpacing: 10
         rowSpacing: 6
         visible: !!overview.windowRoot && overview.windowRoot.reminderOverviewExpanded
 
         ReminderCalendar {
             id: calendar
-            Layout.preferredWidth: 320
-            Layout.fillWidth: calendarContent.columns === 1
+            Layout.fillWidth: true
             Layout.alignment: Qt.AlignTop
+            viewportHeightLimit: overview.windowRoot && overview.windowRoot.height !== undefined
+                ? Math.max(130, Math.min(440, overview.windowRoot.height * 0.5
+                    - reminderHeader.implicitHeight
+                    - (overview.filteredReminders.length ? 180 : 0)
+                    - (overview.filteredGoals.length ? 150 : 0)))
+                : 440
+            goals: overview.scheduledGoals
+            onGoalOpened: function(id) { overview.openGoal(id) }
+            onRangeEdited: function(id, start, end) { if (overview.goalModel) overview.goalModel.setGoalRange(id, start, end) }
             dayCounts: overview.dayCounts
             nowTimestamp: overview.nowTimestamp
             selectedDate: overview.selectedDate
@@ -98,14 +127,46 @@ Column {
             Layout.alignment: Qt.AlignTop
             Label {
                 visible: overview.selectedDate !== ""
-                text: "Reminders for " + overview.selectedDate
+                text: "Goals and reminders for " + overview.selectedDate
                 color: "#ffe4c7"
             }
             Label {
                 objectName: "reminderEmptyDay"
-                visible: overview.filteredReminders.length === 0
-                text: overview.selectedDate ? "No reminders for this day" : "No waiting reminders"
+                visible: overview.filteredReminders.length === 0 && overview.filteredGoals.length === 0
+                text: overview.selectedDate ? "No goals or reminders for this day" : "No scheduled goals or waiting reminders"
                 color: "#f1c892"
+            }
+            ScrollView {
+                id: goalList
+                Layout.fillWidth: true
+                Layout.preferredHeight: Math.min(goalRows.implicitHeight, 150)
+                visible: overview.filteredGoals.length > 0
+                clip: true
+                Column {
+                    id: goalRows
+                    width: goalList.availableWidth
+                    spacing: 4
+                    Repeater {
+                        model: overview.filteredGoals
+                        delegate: GridLayout {
+                            id: goalRow
+                            columns: width < 700 ? 2 : 3
+                            required property var modelData
+                            width: goalRows.width
+                            Button {
+                                objectName: "openGoal_" + goalRow.modelData.id
+                                Layout.fillWidth: true
+                                Layout.minimumWidth: 0
+                                Layout.columnSpan: goalRow.columns === 2 ? 2 : 1
+                                contentItem: Text { text: parent.text; elide: Text.ElideRight; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                                text: goalRow.modelData.name + " · " + goalRow.modelData.startDate + " → " + goalRow.modelData.endDate
+                                onClicked: overview.openGoal(goalRow.modelData.id)
+                            }
+                            Button { text: "Edit Time Range"; onClicked: goalDialog.show(goalRow.modelData, "") }
+                            Button { text: "Remove Time Range"; onClicked: overview.goalModel.clearGoalRange(goalRow.modelData.id) }
+                        }
+                    }
+                }
             }
             ScrollView {
                 id: reminderList

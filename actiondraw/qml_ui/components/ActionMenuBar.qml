@@ -61,7 +61,7 @@ MenuBar {
         }
 
         MenuItem {
-            text: "Tab Markdown...\tCtrl+Alt+M"
+            text: "Goal Markdown...\tCtrl+Alt+M"
             icon.name: "document-edit"
             enabled: hasDiagramModel()
             onTriggered: root.openTabMarkdownHub()

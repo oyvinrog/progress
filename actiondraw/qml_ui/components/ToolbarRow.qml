@@ -108,7 +108,7 @@ Rectangle {
 
         Button {
             id: goalsButton
-            text: "★ Goals"
+            text: "★ Outcome Goals"
             flat: true
             padding: 8
             icon.name: "starred"

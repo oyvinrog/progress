@@ -598,7 +598,7 @@ def test_linked_deletion_last_tab_and_redo_are_atomic(project):
     errors = []
     m.errorOccurred.connect(errors.append)
     m.redo()
-    assert errors and 'at least one tab' in errors[-1]
+    assert errors and 'at least one goal' in errors[-1]
     assert m.to_dict() == before and tabs.tabCount == 1 and m.canRedo
     m.select(first)
     m.deleteSelected()
@@ -759,7 +759,7 @@ def test_create_tab_uses_normal_tab_naming(project, title):
     node_id = thought(m, title)
     m.createTabFromSelected()
     created = tabs.getAllTabs()[-1]
-    assert created.name == (title.strip() or f'Tab {tabs.tabCount}')
+    assert created.name == (title.strip() or f'Goal {tabs.tabCount}')
     assert m.map.find(node_id).text == created.name
     assert m.links[node_id] == created.id
     assert len(set(m.links.values())) == tabs.tabCount
@@ -3583,8 +3583,10 @@ def test_thought_wandering_without_alternatives(project, monkeypatch):
     ProjectManager(tasks, diagram).openRandomTab()
 
 
-def test_mindmap_companion_tools_responsive_and_live_assessment(project, app, actiondraw_window):
+def test_mindmap_companion_tools_responsive_and_live_assessment(project, app, actiondraw_window, monkeypatch):
     pm, tabs, tasks, diagram = project
+    # These width thresholds assume the expanded sidebar, independent of saved preferences.
+    monkeypatch.setattr(pm, "_sidebar_expanded", True)
     engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     warnings = []
     engine.warnings.connect(lambda messages: warnings.extend(m.toString() for m in messages))

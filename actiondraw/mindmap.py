@@ -290,7 +290,7 @@ class MindMapController(QObject):
     def addTabReference(self, parent_id, tab_id):
         parent = self._find(parent_id)
         if not self._in_scope(parent) or tab_id not in self.links.values():
-            self.errorOccurred.emit('The destination or tab no longer exists.')
+            self.errorOccurred.emit('The destination or goal no longer exists.')
             return False
         created = []
 
@@ -1700,7 +1700,7 @@ class MindMapController(QObject):
         tab_state = None
         if tab_ids:
             if self.exchange_tabs is None:
-                self.errorOccurred.emit('Tab deletion requires a project manager.')
+                self.errorOccurred.emit('Goal deletion requires a project manager.')
                 return
             self._changing_tabs = True
             try:

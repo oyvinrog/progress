@@ -5,6 +5,7 @@ import QtQuick.Layouts 1.15
 
 Rectangle {
     id: sidebar
+    property string selectedCalendarDate: ""
     property var tabModel
     property var projectManager
     property var onTabDragMoved
@@ -23,6 +24,8 @@ Rectangle {
     readonly property bool keepExpanded: (
         tabContextMenu.visible
         || renameTabDialog.visible
+        || goalRangeDialog.visible
+        || addGoalMenu.visible
         || tabIconDialog.visible
         || tabColorDialog.visible
     )
@@ -234,7 +237,7 @@ Rectangle {
                 spacing: 8
 
                 Text {
-                    text: sidebar.isExpanded ? "Project Tabs" : "Tabs"
+                    text: sidebar.isExpanded ? "Project Goals" : "Goals"
                     color: "#dbe7f3"
                     font.pixelSize: sidebar.isExpanded ? 12 : 10
                     font.bold: true
@@ -307,7 +310,7 @@ Rectangle {
                 TextField {
                     id: searchField
                     Layout.fillWidth: true
-                    placeholderText: "Search tabs or active task"
+                    placeholderText: "Search goals or active task"
                     placeholderTextColor: "#6f8798"
                     color: "#e8f2fb"
                     selectByMouse: true
@@ -584,7 +587,7 @@ Rectangle {
 
                     Text {
                         visible: sidebar.isExpanded && !sidebar.hasSingleTab
-                        text: sidebar.searchText.length > 0 ? "All Matching Tabs" : "All Tabs"
+                        text: sidebar.searchText.length > 0 ? "All Matching Goals" : "All Goals"
                         color: "#81b9d7"
                         font.pixelSize: 10
                         font.bold: true
@@ -593,7 +596,7 @@ Rectangle {
                     Text {
                         visible: sidebar.isExpanded && sidebar.searchText.length > 0 && sidebar.filteredTabCount() === 1
                         width: parent.width
-                        text: "No extra matches. Current tab stays visible."
+                        text: "No extra matches. Current goal stays visible."
                         color: "#7696aa"
                         font.pixelSize: 9
                         wrapMode: Text.WordWrap
@@ -643,7 +646,7 @@ Rectangle {
                             }
 
                             Drag.active: tabDragHandler.active
-                            Drag.keys: ["progress-tab"]
+                            Drag.keys: ["progress-goal"]
                             Drag.supportedActions: Qt.CopyAction
                             Drag.mimeData: ({ "text/plain": tabButton.dragTabName })
                             Drag.hotSpot.x: width / 2
@@ -859,7 +862,7 @@ Rectangle {
                     anchors.rightMargin: 10
 
                     Text {
-                        text: sidebar.isExpanded ? "+ Add Tab" : "+"
+                        text: sidebar.isExpanded ? "+ Add Goal" : "+"
                         color: "#d2e4f3"
                         font.pixelSize: sidebar.isExpanded ? 11 : 16
                         font.bold: true
@@ -872,7 +875,7 @@ Rectangle {
                     id: addTabMouseArea
                     anchors.fill: parent
                     hoverEnabled: true
-                    onClicked: sidebar.addNewTab()
+                    onClicked: addGoalMenu.popup()
                 }
             }
 
@@ -887,7 +890,7 @@ Rectangle {
 
                 Text {
                     anchors.centerIn: parent
-                    text: "Paste Tabs"
+                    text: "Paste Goals"
                     color: "#d8f2e4"
                     font.pixelSize: 11
                     font.bold: true
@@ -903,6 +906,17 @@ Rectangle {
         }
     }
 
+    GoalRangeDialog {
+        id: goalRangeDialog
+        goalModel: sidebar.tabModel
+        projectManager: sidebar.projectManager
+    }
+    Menu {
+        id: addGoalMenu
+        MenuItem { text: "Add Goal"; onTriggered: sidebar.addNewTab() }
+        MenuItem { text: "Add Goal with Time Range"; onTriggered: goalRangeDialog.show(null, sidebar.selectedCalendarDate) }
+    }
+
     Menu {
         id: tabContextMenu
         property int tabIndex: -1
@@ -911,6 +925,16 @@ Rectangle {
         property string tabColor: ""
         property bool includeInPlot: true
         property bool pinned: false
+
+        MenuItem {
+            text: "Set/Edit Time Range"
+            onTriggered: goalRangeDialog.show(sidebar.tabModel.getTabSummary(tabContextMenu.tabIndex), sidebar.selectedCalendarDate)
+        }
+        MenuItem {
+            text: "Remove Time Range"
+            onTriggered: sidebar.tabModel.clearGoalRange(sidebar.tabModel.getTabSummary(tabContextMenu.tabIndex).id)
+        }
+
 
         Menu {
             title: "Set Priority"
@@ -963,7 +987,7 @@ Rectangle {
         MenuSeparator {}
 
         MenuItem {
-            text: tabContextMenu.pinned ? "Unpin Tab" : "Pin Tab"
+            text: tabContextMenu.pinned ? "Unpin Goal" : "Pin Goal"
             onTriggered: {
                 if (tabModel && tabModel.setTabPinned)
                     tabModel.setTabPinned(tabContextMenu.tabIndex, !tabContextMenu.pinned)
@@ -1041,7 +1065,7 @@ Rectangle {
         property string currentIcon: ""
         property string currentName: ""
         property string selectedIcon: ""
-        title: "Set Tab Icon"
+        title: "Set Goal Icon"
         modal: true
         anchors.centerIn: parent
         width: 360
@@ -1066,14 +1090,14 @@ Rectangle {
                     spacing: 8
 
                     Text {
-                        text: tabIconDialog.selectedIcon.length > 0 ? tabIconDialog.selectedIcon : "T"
+                        text: tabIconDialog.selectedIcon.length > 0 ? tabIconDialog.selectedIcon : "G"
                         color: "#f1f7ff"
                         font.pixelSize: 14
                         font.bold: true
                     }
 
                     Text {
-                        text: tabIconDialog.currentName.length > 0 ? tabIconDialog.currentName : "Tab Preview"
+                        text: tabIconDialog.currentName.length > 0 ? tabIconDialog.currentName : "Goal Preview"
                         color: "#c8d8e8"
                         font.pixelSize: 11
                         elide: Text.ElideRight
@@ -1171,7 +1195,7 @@ Rectangle {
         property string currentColor: ""
         property string currentName: ""
         property string selectedColor: ""
-        title: "Set Tab Color"
+        title: "Set Goal Color"
         modal: true
         anchors.centerIn: parent
         width: 360
@@ -1205,7 +1229,7 @@ Rectangle {
                     }
 
                     Text {
-                        text: tabColorDialog.currentName.length > 0 ? tabColorDialog.currentName : "Tab Preview"
+                        text: tabColorDialog.currentName.length > 0 ? tabColorDialog.currentName : "Goal Preview"
                         color: "#c8d8e8"
                         font.pixelSize: 11
                         elide: Text.ElideRight
@@ -1299,7 +1323,7 @@ Rectangle {
         property string mode: "rename"
         property int tabIndex: -1
         property string currentName: ""
-        title: mode === "create" ? "Add Tab" : "Rename Tab"
+        title: mode === "create" ? "Add Goal" : "Rename Goal"
         modal: true
         anchors.centerIn: parent
         width: 300
@@ -1309,7 +1333,7 @@ Rectangle {
             id: renameTabField
             width: parent.width
             text: renameTabDialog.currentName
-            placeholderText: "Tab name"
+            placeholderText: "Goal name"
             selectByMouse: true
             onAccepted: renameTabDialog.accept()
         }

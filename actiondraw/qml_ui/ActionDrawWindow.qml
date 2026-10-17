@@ -404,7 +404,7 @@ ApplicationWindow {
         activeReminders = projectManager.getActiveReminders()
         if ((!hadReminders || !reminderOverviewTouched) && activeReminders.length > 0)
             reminderOverviewExpanded = true
-        if (activeReminders.length === 0)
+        if (activeReminders.length === 0 && (!root.tabModelRef || root.tabModelRef.scheduledGoals.length === 0))
             reminderOverviewTouched = false
     }
 
@@ -1299,6 +1299,7 @@ ApplicationWindow {
         spacing: 14
 
         SidebarTabs {
+            selectedCalendarDate: planningOverview.selectedDate
             id: sidebarTabs
             tabModel: tabModelRef
             projectManager: projectManagerRef
@@ -1312,6 +1313,8 @@ ApplicationWindow {
             spacing: 10
 
             ReminderOverview {
+                id: planningOverview
+                goalModel: root.tabModelRef
                 planController: typeof mindmapController !== "undefined" ? mindmapController : null
                 Layout.fillWidth: true
                 windowRoot: root
@@ -1517,7 +1520,7 @@ ApplicationWindow {
                         Layout.alignment: Qt.AlignVCenter
 
                         Text {
-                            text: "Current Tab: " + root.activeTabDisplayName()
+                            text: "Current Goal: " + root.activeTabDisplayName()
                             color: "#dfefff"
                             font.pixelSize: 13
                             font.bold: true
@@ -1538,7 +1541,7 @@ ApplicationWindow {
 
                     Button {
                         id: tabMarkdownButton
-                        text: "Tab Markdown"
+                        text: "Goal Markdown"
                         flat: true
                         padding: 0
                         Layout.alignment: Qt.AlignVCenter
@@ -1719,7 +1722,7 @@ ApplicationWindow {
                     spacing: 6
 
                     Text {
-                        text: "Linked From Tabs"
+                        text: "Linked From Goals"
                         color: "#9ed1f2"
                         font.pixelSize: 10
                         font.bold: true
@@ -1942,7 +1945,7 @@ ApplicationWindow {
                         }
                         MenuItem {
                             id: drillToTabMenuItem
-                            text: "Drill to Tab"
+                            text: "Drill to Goal"
                             icon.name: "go-next"
                             visible: {
                                 if (!diagramModel || !projectManager || !tabModel || !diagramLayer.contextMenuItemId)
@@ -2727,7 +2730,7 @@ ApplicationWindow {
 
                                     Text {
                                         id: linkedSubtabPercent
-                                        text: Math.round(itemRect.linkedSubtabCompletion) + "% subtab"
+                                        text: Math.round(itemRect.linkedSubtabCompletion) + "% subgoal"
                                         color: "#8fd9ff"
                                         font.pixelSize: 9
                                         font.bold: true
@@ -4294,7 +4297,7 @@ ApplicationWindow {
                     model: [
                         "Ctrl+Enter  New Task",
                         "Ctrl+N  Connected Note",
-                        "Ctrl+K  Find Tab",
+                        "Ctrl+K  Find Goal",
                         "Ctrl+-  Backward Chain",
                         "Delete  Remove Node",
                         "Arrows  Connected Task",

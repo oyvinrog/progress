@@ -19,7 +19,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import (
@@ -456,6 +456,8 @@ class Tab:
         "outcomeUnderstanding": 1,
         "ambitionRaised": False,
     })
+    goal_start_date: Optional[str] = None
+    goal_end_date: Optional[str] = None
     kanban_status: str = "todo"
     kanban_duration_hours: int = 1
     kanban_slot_hour: int = -1
@@ -1506,6 +1508,7 @@ class TabModel(QAbstractListModel):
     KanbanSlotHourRole = Qt.UserRole + 14
     KanbanDurationHoursRole = Qt.UserRole + 15
 
+    scheduledGoalsChanged = Signal()
     tabsChanged = Signal()
     currentTabChanged = Signal()
     currentTabIndexChanged = Signal()
@@ -1524,6 +1527,8 @@ class TabModel(QAbstractListModel):
         self._recent_tab_indices: List[int] = []
         self._priority_value_weight = 1.0
         self._priority_time_weight = 1.0
+        for signal in (self.dataChanged, self.modelReset, self.rowsInserted, self.rowsRemoved, self.rowsMoved):
+            signal.connect(self.scheduledGoalsChanged)
         self.dataChanged.connect(self.priorityRanksChanged)
         self.modelReset.connect(self.priorityRanksChanged)
         self.rowsInserted.connect(self.priorityRanksChanged)
@@ -1801,16 +1806,73 @@ class TabModel(QAbstractListModel):
             "icon": tab.icon,
             "color": tab.color,
             "pinned": tab.pinned,
+            "goalStartDate": tab.goal_start_date,
+            "goalEndDate": tab.goal_end_date,
             "kanbanStatus": tab.kanban_status,
             "kanbanSlotHour": tab.kanban_slot_hour,
             "kanbanDurationHours": tab.kanban_duration_hours,
         }
 
+    @staticmethod
+    def normalizeGoalRange(start, end):
+        try:
+            if not isinstance(start, str) or not isinstance(end, str):
+                return None, None
+            first, last = date.fromisoformat(start), date.fromisoformat(end)
+            if first.isoformat() != start or last.isoformat() != end or last < first:
+                return None, None
+            return start, end
+        except ValueError:
+            return None, None
+
+    @Property("QVariantList", notify=scheduledGoalsChanged)
+    def scheduledGoals(self):
+        return sorted([
+            {"id": tab.id, "name": tab.name, "color": tab.color,
+             "startDate": tab.goal_start_date, "endDate": tab.goal_end_date}
+            for tab in self._tabs if tab.goal_start_date and tab.goal_end_date
+        ], key=lambda goal: (goal["startDate"], goal["name"], goal["id"]))
+
+    @Slot(str, result=int)
+    def goalIndex(self, goal_id):
+        return next((i for i, tab in enumerate(self._tabs) if tab.id == goal_id), -1)
+
+    @Slot(str, str, str, result=bool)
+    def setGoalRange(self, goal_id, start, end):
+        index = self.goalIndex(goal_id)
+        start, end = self.normalizeGoalRange(start, end)
+        if index < 0 or start is None:
+            return False
+        tab = self._tabs[index]
+        tab.goal_start_date, tab.goal_end_date = start, end
+        self.scheduledGoalsChanged.emit()
+        return True
+
+    @Slot(str, result=bool)
+    def clearGoalRange(self, goal_id):
+        index = self.goalIndex(goal_id)
+        if index < 0:
+            return False
+        self._tabs[index].goal_start_date = None
+        self._tabs[index].goal_end_date = None
+        self.scheduledGoalsChanged.emit()
+        return True
+
+    @Slot(str, str, str, result=str)
+    def createScheduledGoal(self, name, start, end):
+        start, end = self.normalizeGoalRange(start, end)
+        if not name.strip() or start is None:
+            return ""
+        self.addTab(name)
+        goal_id = self._tabs[-1].id
+        self.setGoalRange(goal_id, start, end)
+        return goal_id
+
     @Slot(str)
     def addTab(self, name: str = "") -> None:
         """Add a new empty tab."""
         if not name or not name.strip():
-            name = f"Tab {len(self._tabs) + 1}"
+            name = f"Goal {len(self._tabs) + 1}"
 
         new_tab = Tab(
             name=name.strip(),
@@ -2723,7 +2785,7 @@ class ProjectManager(QObject):
             name = str(getattr(tabs[tab_index], "name", "")).strip()
             if name:
                 return name
-        return "Main" if tab_index == 0 else f"Tab {tab_index + 1}"
+        return "Main" if tab_index == 0 else f"Goal {tab_index + 1}"
 
     def _publishReminderNotification(
         self,
@@ -2740,7 +2802,7 @@ class ProjectManager(QObject):
         else:
             tab_name = self._tabDisplayName(tab_index)
             if tab_name:
-                message += f"\nTab: {tab_name}"
+                message += f"\nGoal: {tab_name}"
         _publish_ntfy_message_async(
             "ActionDraw Reminder",
             message,
@@ -3106,7 +3168,7 @@ class ProjectManager(QObject):
                 tab_name = "Main"
             else:
                 tab = self._tab_model.getAllTabs()[tab_index]
-                tab_name = getattr(tab, "name", "") or "Tab"
+                tab_name = getattr(tab, "name", "") or "Goal"
 
             for task_index, task in enumerate(tasks):
                 if not isinstance(task, dict):
@@ -3205,7 +3267,7 @@ class ProjectManager(QObject):
             tasks = tab_tasks_payload.get("tasks", []) if isinstance(tab_tasks_payload, dict) else []
             if not isinstance(tasks, list):
                 continue
-            tab_name = getattr(tab, "name", "") or "Tab"
+            tab_name = getattr(tab, "name", "") or "Goal"
             for task_index, task in enumerate(tasks):
                 if not isinstance(task, dict):
                     continue
@@ -3683,6 +3745,8 @@ class ProjectManager(QObject):
                     "color": tab.color,
                     "pinned": tab.pinned,
                     "goals": tab.goals,
+                    "goal_start_date": tab.goal_start_date,
+                    "goal_end_date": tab.goal_end_date,
                     "assessment": TabModel._normalizeAssessment(tab.assessment),
                     "kanban_status": tab.kanban_status,
                     "kanban_slot_hour": tab.kanban_slot_hour,
@@ -4190,9 +4254,13 @@ class ProjectManager(QObject):
                 tabs_data = project_data.get("tabs", [])
                 tabs = []
                 for tab_data in tabs_data:
+                    goal_start, goal_end = TabModel.normalizeGoalRange(
+                        tab_data.get("goal_start_date"), tab_data.get("goal_end_date"))
                     tabs.append(Tab(
                         id=tab_data.get("id") or str(uuid.uuid4()),
-                        name=tab_data.get("name", "Tab"),
+                        name=tab_data.get("name", "Goal"),
+                        goal_start_date=goal_start,
+                        goal_end_date=goal_end,
                         tasks=tab_data.get("tasks", {"tasks": []}),
                         diagram=tab_data.get("diagram", {"items": [], "edges": [], "strokes": []}),
                         action_paint=tab_data.get("action_paint", {}),
@@ -4357,7 +4425,7 @@ class ProjectManager(QObject):
                     'sourceId': tab.id,
                     'tabIndex': index,
                     'name': tab.name,
-                    'sourceLabel': 'Tab',
+                    'sourceLabel': 'Goal',
                     'icon': tab.icon or '▣',
                     'color': tab.color or '#4aa3ff',
                     'completionPercent': self._tab_model._calculateTabCompletion(tab),
@@ -4655,7 +4723,7 @@ class ProjectManager(QObject):
         tabs = model.getAllTabs()
         surviving = [tab for tab in tabs if tab.id not in ids]
         if not surviving and not state['tabs']:
-            raise ValueError('Cannot delete this branch: at least one tab must remain.')
+            raise ValueError('Cannot delete this branch: at least one goal must remain.')
         self._saveCurrentTabState()
         current_id = model.getCurrentTabData().id
         inverse = {'ids': ids,

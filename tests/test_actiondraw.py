@@ -1148,7 +1148,7 @@ class TestCreateActionDrawWindow:
         assert 'title: "Save Note PDF"' in note_editor_qml
         assert 'text: "Save PDF..."' in dialogs_qml
         assert 'title: "Save Markdown PDF"' in dialogs_qml
-        assert 'text: "Create Tab"' in editor_pane_qml
+        assert 'text: "Create Goal"' in editor_pane_qml
         assert "mcp" not in action_menu_qml.lower()
         assert "mcp" not in window_qml.lower()
         assert 'property string _tabHighlightStart: "\\u2060"' in editor_pane_qml
@@ -3774,11 +3774,11 @@ class TestActionDrawQmlTaskInteractions:
         menu_qml = (QML_DIR / "components" / "ActionMenuBar.qml").read_text(encoding="utf-8")
 
         assert 'id: tabMarkdownButton' in actiondraw_qml
-        assert 'text: "Tab Markdown"' in actiondraw_qml
+        assert 'text: "Goal Markdown"' in actiondraw_qml
         assert 'onClicked: root.openTabMarkdownHub()' in actiondraw_qml
         assert 'sequence: "Ctrl+Alt+M"' in actiondraw_qml
         assert 'onActivated: root.openTabMarkdownHub()' in actiondraw_qml
-        assert 'text: "Tab Markdown...\\tCtrl+Alt+M"' in menu_qml
+        assert 'text: "Goal Markdown...\\tCtrl+Alt+M"' in menu_qml
         assert 'icon.name: "document-edit"' in menu_qml
         assert 'onTriggered: root.openTabMarkdownHub()' in menu_qml
 
@@ -3815,7 +3815,7 @@ class TestActionDrawQmlTaskInteractions:
         sidebar_qml = (QML_DIR / "components" / "SidebarTabs.qml").read_text(encoding="utf-8")
 
         assert 'function addNewTab()' in sidebar_qml
-        assert 'onClicked: sidebar.addNewTab()' in sidebar_qml
+        assert 'onClicked: addGoalMenu.popup()' in sidebar_qml
         add_tab_section = sidebar_qml[sidebar_qml.index('function addNewTab()'):sidebar_qml.index('function openTabIconDialog(')]
         assert 'renameTabDialog.mode = "create"' in add_tab_section
         assert 'renameTabDialog.currentName = ""' in add_tab_section
@@ -3824,7 +3824,7 @@ class TestActionDrawQmlTaskInteractions:
         assert 'openTabRenameDialog(' not in add_tab_section
 
         assert 'property string mode: "rename"' in sidebar_qml
-        assert 'title: mode === "create" ? "Add Tab" : "Rename Tab"' in sidebar_qml
+        assert 'title: mode === "create" ? "Add Goal" : "Rename Goal"' in sidebar_qml
         assert 'if (mode === "create") {' in sidebar_qml
         assert 'tabModel.addTab(nextName)' in sidebar_qml
         assert 'projectManager.switchTab(tabModel.tabCount - 1)' in sidebar_qml
@@ -3835,7 +3835,7 @@ class TestActionDrawQmlTaskInteractions:
 
         assert 'function pasteTabsFromClipboard()' in sidebar_qml
         assert 'projectManager.createTabsFromClipboard()' in sidebar_qml
-        assert 'text: "Paste Tabs"' in sidebar_qml
+        assert 'text: "Paste Goals"' in sidebar_qml
         assert 'onClicked: sidebar.pasteTabsFromClipboard()' in sidebar_qml
 
     def test_recent_and_pinned_tabs_share_context_menu_helper(self):
@@ -4448,7 +4448,7 @@ class TestTaskReminders:
         task_model._updateActiveTasks()
 
         assert project_manager is not None
-        assert published == [("ActionDraw Reminder", "Reminder due: Current Reminder\nTab: Main", "https://example.ntfy", "alerts", "secret")]
+        assert published == [("ActionDraw Reminder", "Reminder due: Current Reminder\nGoal: Main", "https://example.ntfy", "alerts", "secret")]
 
     def test_project_manager_emits_current_tab_reminder_due(self, app):
         from datetime import datetime, timedelta
@@ -4554,7 +4554,7 @@ class TestTaskReminders:
 
         project_manager._checkBackgroundTabReminders()
 
-        assert published == [("ActionDraw Reminder", "Reminder due: Background Reminder\nTab: Tab 2", "https://example.ntfy", "alerts", "secret")]
+        assert published == [("ActionDraw Reminder", "Reminder due: Background Reminder\nGoal: Tab 2", "https://example.ntfy", "alerts", "secret")]
 
     def test_project_manager_persists_ntfy_settings(self, app):
         from task_model import TaskModel, ProjectManager, TabModel
