@@ -968,6 +968,10 @@ def test_qml_ctrl_drag_reorder_and_context_target(project, app, zoom, pan, actio
     down = window.findChild(QObject, 'mindmapMoveDown')
     assert menu.property('targetNodeId') == c.id
     assert not up.property('enabled') and down.property('enabled')
+    arrange = window.findChild(QObject, 'mindmapArrangeMenu')
+    QMetaObject.invokeMethod(arrange, 'open')
+    QTest.qWait(30)
+    assert arrange.property('visible')
     QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
                      down.mapToScene(down.boundingRect().center()).toPoint())
     QTest.qWait(50)

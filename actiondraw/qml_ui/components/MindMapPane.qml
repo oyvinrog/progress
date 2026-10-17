@@ -1208,6 +1208,12 @@ FocusScope {
             canMoveDown = pane.controller.canReorderNode(targetNodeId, 1)
             measuringProgress = pane.controller.measuresProgress(targetNodeId)
         }
+        IconMenuItem { iconKey: "notes"; text: "Edit / Notes"; onTriggered: pane.editNode() }
+        IconMenuItem { iconKey: "child"; text: "Add child"; onTriggered: pane.addThought(false) }
+        IconMenuItem { iconKey: "sibling"; text: "Add sibling"; onTriggered: pane.addThought(true) }
+        IconMenuItem { iconKey: "check"; text: "Complete"; enabled: pane.controller && pane.controller.selectedIds.length > 0; onTriggered: pane.controller.toggleCompleted() }
+        IconMenuItem { iconKey: "fold"; text: "Fold / Unfold"; onTriggered: pane.controller.toggleFold() }
+        MenuSeparator {}
         Menu {
             objectName: "mindmapAddToPlanMenu"
             title: "Add to plan"
@@ -1254,114 +1260,166 @@ FocusScope {
                 }
             }
         }
-        MenuSeparator {}
-        IconMenuItem {
-            iconKey: "timer"
-            objectName: "mindmapSetDeadline"
-            text: nodeMenu.deadlineData.deadlineActive ? "Update deadline" : "Set deadline"
-            onTriggered: {
-                deadlineDialog.targetNodeId = nodeMenu.targetNodeId
-                deadlineDialog.title = text
-                deadlineMinutes.text = nodeMenu.deadlineData.deadlineActive
-                    ? String(Math.max(1, Math.ceil(nodeMenu.deadlineData.deadlineDuration / 60))) : "25"
-                deadlineDialog.open()
-            }
-        }
-        IconMenuItem {
-            iconKey: "timer"
-            objectName: "mindmapClearDeadline"
-            text: "Clear deadline"
-            visible: !!nodeMenu.deadlineData.deadlineActive
-            onTriggered: pane.controller.clearDeadline(nodeMenu.targetNodeId)
-        }
-        IconMenuItem {
-            iconKey: "bell"
-            objectName: "mindmapSetReminder"
-            text: nodeMenu.reminderData.reminderActive ? "Update Reminder" : "Set Reminder"
-            onTriggered: pane.reminderRequested(nodeMenu.targetNodeId)
-        }
         Menu {
-            objectName: "mindmapQuickReminderMenu"
-            title: "Quick reminder"
+            objectName: "mindmapTimingMenu"
+            title: "Reminders & deadline"
+            width: 280
             icon.source: Qt.resolvedUrl("../icons/bell.svg")
             icon.width: 16
             icon.height: 16
             icon.color: palette.text
             IconMenuItem {
                 iconKey: "bell"
-                objectName: "mindmapQuickReminder10Minutes"
-                text: "10 minutes"
-                onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 10)
+                objectName: "mindmapSetReminder"
+                text: nodeMenu.reminderData.reminderActive ? "Update Reminder" : "Set Reminder"
+                onTriggered: pane.reminderRequested(nodeMenu.targetNodeId)
+            }
+            Menu {
+                objectName: "mindmapQuickReminderMenu"
+                title: "Quick reminder"
+                icon.source: Qt.resolvedUrl("../icons/bell.svg")
+                icon.width: 16
+                icon.height: 16
+                icon.color: palette.text
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapQuickReminder10Minutes"
+                    text: "10 minutes"
+                    onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 10)
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapQuickReminder20Minutes"
+                    text: "20 minutes"
+                    onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 20)
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapQuickReminder1Hour"
+                    text: "1 hour"
+                    onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 60)
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapQuickReminder24Hours"
+                    text: "24 hours"
+                    onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 24 * 60)
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapQuickReminder2Days"
+                    text: "2 days"
+                    onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 2 * 24 * 60)
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapQuickReminder7Days"
+                    text: "7 days"
+                    onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 7 * 24 * 60)
+                }
             }
             IconMenuItem {
                 iconKey: "bell"
-                objectName: "mindmapQuickReminder20Minutes"
-                text: "20 minutes"
-                onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 20)
+                objectName: "mindmapClearReminder"
+                text: "Clear Reminder"
+                visible: !!nodeMenu.reminderData.reminderActive
+                onTriggered: pane.clearReminderRequested(nodeMenu.targetNodeId)
+            }
+            MenuSeparator {}
+            IconMenuItem {
+                iconKey: "timer"
+                objectName: "mindmapSetDeadline"
+                text: nodeMenu.deadlineData.deadlineActive ? "Update deadline" : "Set deadline"
+                onTriggered: {
+                    deadlineDialog.targetNodeId = nodeMenu.targetNodeId
+                    deadlineDialog.title = text
+                    deadlineMinutes.text = nodeMenu.deadlineData.deadlineActive
+                        ? String(Math.max(1, Math.ceil(nodeMenu.deadlineData.deadlineDuration / 60))) : "25"
+                    deadlineDialog.open()
+                }
             }
             IconMenuItem {
-                iconKey: "bell"
-                objectName: "mindmapQuickReminder1Hour"
-                text: "1 hour"
-                onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 60)
-            }
-            IconMenuItem {
-                iconKey: "bell"
-                objectName: "mindmapQuickReminder24Hours"
-                text: "24 hours"
-                onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 24 * 60)
-            }
-            IconMenuItem {
-                iconKey: "bell"
-                objectName: "mindmapQuickReminder2Days"
-                text: "2 days"
-                onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 2 * 24 * 60)
-            }
-            IconMenuItem {
-                iconKey: "bell"
-                objectName: "mindmapQuickReminder7Days"
-                text: "7 days"
-                onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 7 * 24 * 60)
+                iconKey: "timer"
+                objectName: "mindmapClearDeadline"
+                text: "Clear deadline"
+                visible: !!nodeMenu.deadlineData.deadlineActive
+                onTriggered: pane.controller.clearDeadline(nodeMenu.targetNodeId)
             }
         }
-        IconMenuItem {
-            iconKey: "bell"
-            objectName: "mindmapClearReminder"
-            text: "Clear Reminder"
-            visible: !!nodeMenu.reminderData.reminderActive
-            onTriggered: pane.clearReminderRequested(nodeMenu.targetNodeId)
+        Menu {
+            objectName: "mindmapGoalsMenu"
+            title: "Goals & progress"
+            width: 280
+            icon.source: Qt.resolvedUrl("../icons/tab.svg")
+            icon.width: 16
+            icon.height: 16
+            icon.color: palette.text
+            IconMenuItem {
+                iconKey: "tab"
+                objectName: "mindmapAddTab"
+                text: "Add goal…"
+                onTriggered: {
+                    tabReferenceDialog.targetNodeId = nodeMenu.targetNodeId
+                    tabReferenceDialog.open()
+                }
+            }
+            IconMenuItem {
+                iconKey: "tab"
+                text: "Create goal"
+                enabled: pane.controller && pane.controller.canCreateTab
+                onTriggered: { pane.controller.createTabFromSelected(); pane.focusMap() }
+            }
+            IconMenuItem {
+                iconKey: "tab"
+                objectName: "mindmapContextCreateScheduledGoal"
+                text: "Create goal with time range…"
+                enabled: pane.controller && pane.controller.canCreateTab
+                onTriggered: nodeGoalRangeDialog.showForNode(nodeMenu.targetNodeId, pane.controller.selectedNode.text)
+            }
+            MenuSeparator {}
+            IconMenuItem {
+                iconKey: "progress"
+                objectName: "mindmapMeasureProgressMenuItem"
+                text: nodeMenu.measuringProgress ? "Stop measuring progress" : "Measure progress"
+                onTriggered: {
+                    pane.controller.toggleMeasureProgress(nodeMenu.targetNodeId)
+                    nodeMenu.measuringProgress = pane.controller.measuresProgress(nodeMenu.targetNodeId)
+                    pane.focusMap()
+                }
+            }
         }
-        MenuSeparator {}
+        Menu {
+            objectName: "mindmapArrangeMenu"
+            title: "Arrange branch"
+            width: 280
+            icon.source: Qt.resolvedUrl("../icons/sibling.svg")
+            icon.width: 16
+            icon.height: 16
+            icon.color: palette.text
+            IconMenuItem {
+                iconKey: "up"
+                objectName: "mindmapMoveUp"
+                text: "Move up"
+                enabled: nodeMenu.canMoveUp
+                onTriggered: { pane.controller.reorderNode(nodeMenu.targetNodeId, -1); pane.focusMap() }
+            }
+            IconMenuItem {
+                iconKey: "down"
+                objectName: "mindmapMoveDown"
+                text: "Move down"
+                enabled: nodeMenu.canMoveDown
+                onTriggered: { pane.controller.reorderNode(nodeMenu.targetNodeId, 1); pane.focusMap() }
+            }
+            MenuSeparator {}
+            IconMenuItem { iconKey: "left"; text: "Branch on left"; onTriggered: pane.controller.setSide("left") }
+            IconMenuItem { iconKey: "right"; text: "Branch on right"; onTriggered: pane.controller.setSide("right") }
+        }
         IconMenuItem {
             iconKey: "bookmark"
             objectName: "mindmapBookmarkMenuItem"
             text: pane.controller && pane.controller.bookmarks.some(function(b) { return b.id === pane.controller.sourceNodeId(nodeMenu.targetNodeId) })
                   ? "Remove bookmark" : "Bookmark"
             onTriggered: { pane.controller.toggleBookmark(nodeMenu.targetNodeId); pane.focusMap() }
-        }
-        IconMenuItem {
-            iconKey: "progress"
-            objectName: "mindmapMeasureProgressMenuItem"
-            text: nodeMenu.measuringProgress ? "Stop measuring progress" : "Measure progress"
-            onTriggered: {
-                pane.controller.toggleMeasureProgress(nodeMenu.targetNodeId)
-                nodeMenu.measuringProgress = pane.controller.measuresProgress(nodeMenu.targetNodeId)
-                pane.focusMap()
-            }
-        }
-        IconMenuItem {
-            iconKey: "up"
-            objectName: "mindmapMoveUp"
-            text: "Move up"
-            enabled: nodeMenu.canMoveUp
-            onTriggered: { pane.controller.reorderNode(nodeMenu.targetNodeId, -1); pane.focusMap() }
-        }
-        IconMenuItem {
-            iconKey: "down"
-            objectName: "mindmapMoveDown"
-            text: "Move down"
-            enabled: nodeMenu.canMoveDown
-            onTriggered: { pane.controller.reorderNode(nodeMenu.targetNodeId, 1); pane.focusMap() }
         }
         MenuSeparator {}
         IconMenuItem { iconKey: "cut"; text: "Cut branches"; enabled: pane.controller && pane.controller.canCut; onTriggered: pane.controller.cutSelected() }
@@ -1393,35 +1451,6 @@ FocusScope {
             }
         }
         MenuSeparator {}
-        IconMenuItem {
-            iconKey: "tab"
-            objectName: "mindmapAddTab"
-            text: "Add goal…"
-            onTriggered: {
-                tabReferenceDialog.targetNodeId = nodeMenu.targetNodeId
-                tabReferenceDialog.open()
-            }
-        }
-        IconMenuItem { iconKey: "child"; text: "Add child"; onTriggered: pane.addThought(false) }
-        IconMenuItem { iconKey: "sibling"; text: "Add sibling"; onTriggered: pane.addThought(true) }
-        IconMenuItem { iconKey: "notes"; text: "Edit / Notes"; onTriggered: pane.editNode() }
-        IconMenuItem {
-            iconKey: "tab"
-            text: "Create goal"
-            enabled: pane.controller && pane.controller.canCreateTab
-            onTriggered: { pane.controller.createTabFromSelected(); pane.focusMap() }
-        }
-        IconMenuItem {
-            iconKey: "tab"
-            objectName: "mindmapContextCreateScheduledGoal"
-            text: "Create goal with time range…"
-            enabled: pane.controller && pane.controller.canCreateTab
-            onTriggered: nodeGoalRangeDialog.showForNode(nodeMenu.targetNodeId, pane.controller.selectedNode.text)
-        }
-        IconMenuItem { iconKey: "check"; text: "Complete"; enabled: pane.controller && pane.controller.selectedIds.length > 0; onTriggered: pane.controller.toggleCompleted() }
-        IconMenuItem { iconKey: "fold"; text: "Fold / Unfold"; onTriggered: pane.controller.toggleFold() }
-        IconMenuItem { iconKey: "left"; text: "Branch on left"; onTriggered: pane.controller.setSide("left") }
-        IconMenuItem { iconKey: "right"; text: "Branch on right"; onTriggered: pane.controller.setSide("right") }
         IconMenuItem { iconKey: "trash"; text: pane.controller && pane.controller.selectedNode.isReference ? "Remove goal reference" : "Delete branch"; onTriggered: pane.controller.deleteSelected() }
     }
     GoalRangeDialog {
