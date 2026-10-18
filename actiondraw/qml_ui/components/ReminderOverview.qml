@@ -9,7 +9,14 @@ Column {
     property var projectManager
     property var dialogs
     property var goalModel: null
-    readonly property var scheduledGoals: goalModel ? goalModel.scheduledGoals : []
+    readonly property var scheduledGoals: {
+        var result = []
+        var goals = goalModel ? goalModel.scheduledGoals : []
+        var plans = planController && planController.plannedGoals ? planController.plannedGoals : []
+        for (var i = 0; i < goals.length; ++i) result.push(goals[i])
+        for (var j = 0; j < plans.length; ++j) result.push(plans[j])
+        return result
+    }
     readonly property var filteredGoals: scheduledGoals.filter(function(g) {
         return !overview.selectedDate || (g.startDate <= overview.selectedDate && g.endDate >= overview.selectedDate)
     })
@@ -17,16 +24,23 @@ Column {
         if (windowRoot && scheduledGoals.length && !windowRoot.reminderOverviewTouched)
             windowRoot.reminderOverviewExpanded = true
     }
+    function rangeModel(id) { return id.indexOf("plan:") === 0 ? planController : goalModel }
     function openGoal(id) {
+        if (id.indexOf("plan:") === 0) {
+            projectManager.openMindmapReminder(id.slice(5))
+            return
+        }
         if (goalModel && projectManager) {
             var index = goalModel.goalIndex(id)
             if (index >= 0) projectManager.switchTab(index)
         }
     }
     GoalRangeDialog { id: goalDialog; goalModel: overview.goalModel; projectManager: overview.projectManager }
+    GoalRangeDialog { id: planDialog; objectName: "planRangeDialog"; goalModel: overview.planController; projectManager: overview.projectManager }
     property var planController
     property double nowTimestamp: Date.now() / 1000
     property string selectedDate: ""
+    onSelectedDateChanged: if (planController && planController.setDateFilter) planController.setDateFilter(selectedDate)
     readonly property var futureReminders: {
         var entries = windowRoot ? windowRoot.activeReminders : []
         return entries.filter(function(entry) { return Number(entry.reminderAt) > overview.nowTimestamp })
@@ -115,7 +129,7 @@ Column {
                 : 440
             goals: overview.scheduledGoals
             onGoalOpened: function(id) { overview.openGoal(id) }
-            onRangeEdited: function(id, start, end) { if (overview.goalModel) overview.goalModel.setGoalRange(id, start, end) }
+            onRangeEdited: function(id, start, end) { if (overview.rangeModel(id)) overview.rangeModel(id).setGoalRange(id, start, end) }
             dayCounts: overview.dayCounts
             nowTimestamp: overview.nowTimestamp
             selectedDate: overview.selectedDate
@@ -162,8 +176,8 @@ Column {
                                 text: goalRow.modelData.name + " · " + goalRow.modelData.startDate + " → " + goalRow.modelData.endDate
                                 onClicked: overview.openGoal(goalRow.modelData.id)
                             }
-                            Button { text: "Edit Time Range"; onClicked: goalDialog.show(goalRow.modelData, "") }
-                            Button { text: "Remove Time Range"; onClicked: overview.goalModel.clearGoalRange(goalRow.modelData.id) }
+                            Button { text: "Edit Time Range"; onClicked: (goalRow.modelData.nodeId ? planDialog : goalDialog).show(goalRow.modelData, "") }
+                            Button { text: "Remove Time Range"; onClicked: overview.rangeModel(goalRow.modelData.id).clearGoalRange(goalRow.modelData.id) }
                         }
                     }
                 }

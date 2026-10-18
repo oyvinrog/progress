@@ -4428,3 +4428,116 @@ def test_quick_reminder_elapsed_time_across_dst(project, monkeypatch, start, min
     assert not pm.setMindmapReminderIn(node_id, 0)
     assert not pm.setMindmapReminderIn('missing', minutes)
     assert m.to_dict() == before
+
+
+def test_plan_calendar_entry_survives_delivery_board_removal_and_reload(project, monkeypatch):
+    from datetime import datetime
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    now = [datetime(2026, 10, 4, 12).timestamp()]
+    monkeypatch.setattr('actiondraw.mindmap.time.time', lambda: now[0])
+    node = thought(m, 'Remember the plan')
+    m.scheduleSelectedToWeekday(0)
+    assert m.plannedGoals[0]['startDate'] == '2026-10-05'
+    now[0] = datetime(2026, 10, 6, 12).timestamp()
+    monkeypatch.setattr(pm, '_publishReminderNotification', lambda *a, **k: None)
+    pm._checkPlanSchedules()
+    assert node not in m.plan_schedules
+    assert m.plannedGoals[0]['startDate'] == m.plannedGoals[0]['endDate'] == '2026-10-05'
+    assert pm.removeKanbanItem('node:' + node)
+    restored = MindMapController(tabs)
+    restored.load(m.to_dict())
+    assert restored.plannedGoals == m.plannedGoals
+    restored.select(node)
+    restored.deleteSelected()
+    assert not restored.plannedGoals
+    restored.undo()
+    assert restored.plannedGoals == m.plannedGoals
+
+
+def test_add_to_plan_creates_single_day_calendar_range(project, monkeypatch):
+    from datetime import datetime
+    m = project[0].mindmap
+    monkeypatch.setattr('actiondraw.mindmap.time.time', lambda: datetime(2026, 10, 18, 12).timestamp())
+    node = thought(m)
+    assert m.addSelectedToReady()
+    assert m.plan_ranges[node] == {'startDate': '2026-10-18', 'endDate': '2026-10-18'}
+    assert m.setGoalRange('plan:' + node, '2026-10-18', '2026-10-20')
+    assert not m.setGoalRange('plan:' + node, '2026-10-20', '2026-10-18')
+
+
+def test_calendar_date_filter_keeps_matching_branches_and_ancestors(project):
+    m = project[0].mindmap
+    tabs = project[1]
+    parent = m.map.root.add_child('Context')
+    planned = parent.add_child('Planned')
+    child = planned.add_child('Child')
+    unrelated = parent.add_child('Unrelated')
+    goal = next(iter(m.links))
+    goal_child = m.map.find(goal).add_child('Goal child')
+    m.setGoalRange('plan:' + planned.id, '2026-10-18', '2026-10-18')
+    tabs.setGoalRange(m.links[goal], '2026-10-17', '2026-10-19')
+    m.select(unrelated.id)
+    m.setDateFilter('2026-10-18')
+    visible = {n['id'] for n in m.nodes}
+    assert {parent.id, planned.id, child.id, goal, goal_child.id} <= visible
+    assert unrelated.id not in visible
+    assert m.selectedId in visible
+    m.setDateFilter('2026-10-20')
+    assert {n['id'] for n in m.nodes} == {m.map.root.id}
+    m.setDateFilter('')
+    assert unrelated.id in {n['id'] for n in m.nodes}
+
+
+def test_calendar_selection_filters_map_in_qml(project, actiondraw_window):
+    pm, tabs, tasks, diagram = project
+    node = thought(pm.mindmap)
+    pm.mindmap.setGoalRange('plan:' + node, '2026-10-18', '2026-10-18')
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    overview = window.findChild(QObject, 'reminderOverview')
+    overview.setProperty('selectedDate', '2026-10-18')
+    assert pm.mindmap.dateFilter == '2026-10-18'
+    overview.setProperty('selectedDate', '')
+    assert pm.mindmap.dateFilter == ''
+
+
+def test_calendar_filter_reveals_folded_goal_and_children_without_changing_folds(project):
+    m = project[0].mindmap
+    parent = m.map.root.add_child('Collapsed branch')
+    goal = parent.add_child('Planned goal')
+    child = goal.add_child('Related child')
+    m.setGoalRange('plan:' + goal.id, '2026-10-18', '2026-10-18')
+    parent.folded = goal.folded = m.map.root.folded = True
+    m.setDateFilter('2026-10-18')
+    assert {goal.id, child.id} <= {n['id'] for n in m.nodes}
+    assert not any(n['folded'] for n in m.nodes)
+    assert parent.folded and goal.folded and m.map.root.folded
+    m.setDateFilter('')
+    assert {n['id'] for n in m.nodes} == {m.map.root.id}
+
+
+def test_calendar_filter_reveals_goal_outside_tab_scope_and_priority_filter(project):
+    m = project[0].mindmap
+    low, high = filter_tabs(project, [0, 10])
+    tabs = project[1]
+    tabs.setGoalRange(m.links[low.id], '2026-10-18', '2026-10-18')
+    m.set_scope(m.links[high.id])
+    m.setPriorityFilter(0)
+    resets = []
+    m.resetView.connect(lambda: resets.append(True))
+    m.setDateFilter('2026-10-18')
+    assert not m.tabScoped
+    assert low.id in {n['id'] for n in m.nodes}
+    assert high.id not in {n['id'] for n in m.nodes}
+    assert resets
+
+
+def test_calendar_filter_matches_pending_plan_even_with_another_retained_range(project):
+    from datetime import datetime
+    m = project[0].mindmap
+    node = thought(m)
+    m.setGoalRange('plan:' + node, '2026-10-18', '2026-10-18')
+    m.plan_schedules[node] = {'at': datetime(2026, 10, 19, 8).timestamp()}
+    m.setDateFilter('2026-10-19')
+    assert node in {n['id'] for n in m.nodes}

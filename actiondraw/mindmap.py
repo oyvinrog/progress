@@ -4,7 +4,7 @@ from contextlib import contextmanager
 import math
 import time
 import weakref
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -143,6 +143,8 @@ class MindMapController(QObject):
         self._bookmarks = []
         self._kanban = {}
         self.plan_schedules = {}
+        self.plan_ranges = {}
+        self._date_filter = ""
         self._scope_tab = None
         self._view_selections = {}
         self._selected = self.map.root.id
@@ -163,6 +165,7 @@ class MindMapController(QObject):
             tab_model.tabsChanged.connect(self.reconcile)
             tab_model.priorityRanksChanged.connect(self.reconcile)
             tab_model.kanbanChanged.connect(self.planChanged)
+            tab_model.scheduledGoalsChanged.connect(self.sceneChanged)
         self.planChanged.connect(self.sceneChanged)
         self.reconcile()
 
@@ -397,8 +400,12 @@ class MindMapController(QObject):
         changed = False
         for node_id in dict.fromkeys(self.sourceNodeId(key) for key in self._selected_ids):
             before = self._plan_placement(node_id)
+            previous_range = self.plan_ranges.get(node_id)
             if self._place_plan_node(node_id, status, slot_hour):
-                changed = changed or before != self._plan_placement(node_id)
+                day = datetime.fromtimestamp(time.time()).date().isoformat()
+                self.setGoalRange("plan:" + node_id, day, day)
+                changed = (changed or before != self._plan_placement(node_id)
+                           or previous_range != self.plan_ranges.get(node_id))
         return changed
 
     def _place_plan_node(self, node_id, status, slot_hour=-1):
@@ -444,8 +451,11 @@ class MindMapController(QObject):
         if not ids:
             return False
         at = self._weekday_at(weekday)
-        return self._commit(lambda: self.plan_schedules.update(
-            {key: {'at': at} for key in ids}))
+        day = datetime.fromtimestamp(at).date().isoformat()
+        def mutate():
+            self.plan_schedules.update({key: {'at': at} for key in ids})
+            self.plan_ranges.update({key: {'startDate': day, 'endDate': day} for key in ids})
+        return self._commit(mutate)
 
     @Slot(str)
     def cancelPlanSchedule(self, node_id):
@@ -455,9 +465,14 @@ class MindMapController(QObject):
 
     def consume_plan_schedule(self, node_id):
         # Delivery is external to editing history and must never be replayed by undo.
-        self.plan_schedules.pop(node_id, None)
+        schedule = self.plan_schedules.pop(node_id, None)
+        if schedule is not None and self.map.find(node_id) is not None:
+            day = datetime.fromtimestamp(schedule['at']).date().isoformat()
+            self.plan_ranges[node_id] = {'startDate': day, 'endDate': day}
         for payload, _, _ in self._undo + self._redo:
             payload.get('plan_schedules', {}).pop(node_id, None)
+            if node_id in self.plan_ranges and node_id in payload.get('plan_ranges', {}):
+                payload['plan_ranges'][node_id] = copy.deepcopy(self.plan_ranges[node_id])
         self.changed.emit()
         self.planChanged.emit()
 
@@ -609,6 +624,7 @@ class MindMapController(QObject):
         self.reminders = {key: value for key, value in self.reminders.items() if key in nodes}
         self.deadlines = {key: value for key, value in self.deadlines.items() if key in nodes}
         self.plan_schedules = {key: value for key, value in self.plan_schedules.items() if key in nodes}
+        self.plan_ranges = {key: value for key, value in self.plan_ranges.items() if key in nodes}
         self._kanban = {key: value for key, value in self._kanban.items()
                         if key in nodes and key not in self.links}
         self._selected_ids = [key for key in self._selected_ids if self._in_scope(self._find(key))]
@@ -627,7 +643,8 @@ class MindMapController(QObject):
                 'measure_progress': sorted(self._measure_progress),
                 'deadlines': copy.deepcopy(self.deadlines),
                 'kanban': copy.deepcopy(self._kanban),
-                'plan_schedules': copy.deepcopy(self.plan_schedules)}
+                'plan_schedules': copy.deepcopy(self.plan_schedules),
+                'plan_ranges': copy.deepcopy(self.plan_ranges)}
 
     @staticmethod
     def decode(payload):
@@ -718,6 +735,14 @@ class MindMapController(QObject):
             if (type(duration) is not int or not 1 <= duration <= 10
                     or (status == 'in_progress' and slot_hour + duration > 18)):
                 raise ValueError('Malformed mindmap kanban duration')
+        ranges = payload.get('plan_ranges', {})
+        if not isinstance(ranges, dict):
+            raise ValueError('Malformed plan ranges')
+        for node_id, value in ranges.items():
+            if (mindmap.find(node_id) is None or node_id in payload.get('tab_references', {})
+                    or not isinstance(value, dict)
+                    or not MindMapController._valid_plan_range(value.get('startDate'), value.get('endDate'))):
+                raise ValueError('Malformed plan range')
         schedules = payload.get('plan_schedules', {})
         if not isinstance(schedules, dict):
             raise ValueError('Malformed plan schedules')
@@ -745,6 +770,7 @@ class MindMapController(QObject):
         self.map, self.links = self.decode(payload) if payload is not None else (MindMap('Project'), {})
         self.references = dict((payload or {}).get('tab_references', {}))
         self._search_query = ''
+        self._date_filter = ''
         self._priority_filter = 1.0
         self._completed = set((payload or {}).get('completed', []))
         self._measure_progress = set((payload or {}).get('measure_progress', []))
@@ -753,6 +779,7 @@ class MindMapController(QObject):
         self._bookmarks = list((payload or {}).get('bookmarks', []))
         self._kanban = copy.deepcopy((payload or {}).get('kanban', {}))
         self.plan_schedules = copy.deepcopy((payload or {}).get('plan_schedules', {}))
+        self.plan_ranges = copy.deepcopy((payload or {}).get('plan_ranges', {}))
         self._scope_tab = None
         self._view_selections.clear()
         self._undo.clear()
@@ -1033,11 +1060,10 @@ class MindMapController(QObject):
         return retained
 
     def _sync_filter_selection(self):
-        if self._priority_filter == 1:
+        if self._priority_filter == 1 and not self._date_filter:
             return
         if not self.priorityFilterEnabled:
             self._priority_filter = 1.0
-            return
         visible = self._layout()
         ids = [key for key in self._selected_ids if self._find(key) in visible]
         if self._selected in ids and ids == self._selected_ids:
@@ -1055,6 +1081,76 @@ class MindMapController(QObject):
         self._sync_filter_selection()
         self.sceneChanged.emit()
         self.changed.emit()
+
+    @staticmethod
+    def _valid_plan_range(start, end):
+        try:
+            return (isinstance(start, str) and isinstance(end, str)
+                    and date.fromisoformat(start).isoformat() == start
+                    and date.fromisoformat(end).isoformat() == end and start <= end)
+        except ValueError:
+            return False
+
+    @Property('QVariantList', notify=changed)
+    def plannedGoals(self):
+        return [dict(id='plan:' + key, nodeId=key, name=self.map.find(key).text,
+                     color='#739ac5', **value)
+                for key, value in self.plan_ranges.items() if self.map.find(key) is not None]
+
+    @Slot(str, str, str, result=bool)
+    def setGoalRange(self, goal_id, start, end):
+        node_id = goal_id.removeprefix('plan:')
+        if self.map.find(node_id) is None or not self._valid_plan_range(start, end):
+            return False
+        node_id = self.sourceNodeId(node_id)
+        return self._commit(lambda: self.plan_ranges.update(
+            {node_id: {'startDate': start, 'endDate': end}}))
+
+    @Slot(str, result=bool)
+    def clearGoalRange(self, goal_id):
+        node_id = goal_id.removeprefix('plan:')
+        return self._commit(lambda: self.plan_ranges.pop(node_id, None))
+
+    @Property(str, notify=changed)
+    def dateFilter(self):
+        return self._date_filter
+
+    @Slot(str)
+    def setDateFilter(self, day):
+        if day and not self._valid_plan_range(day, day):
+            return
+        self._date_filter = day
+        if day:
+            # The calendar covers the whole project, not only the open tab.
+            self.set_scope()
+            self._priority_filter = 1.0
+        self._sync_filter_selection()
+        self.sceneChanged.emit()
+        self.changed.emit()
+        self.resetView.emit()
+
+    def _date_nodes(self):
+        root = self.view_root
+        if not self._date_filter:
+            return set(root.walk())
+        day = self._date_filter
+        goals = {g['id']: g for g in self._tabs.scheduledGoals} if self._tabs else {}
+        retained = {root}
+        for node in root.walk():
+            source_id = _content(node).id
+            ranges = [self.plan_ranges.get(source_id, {}), goals.get(self._tab_id(node), {})]
+            reminder = self.reminders.get(source_id, {})
+            at = reminder.get('at')
+            scheduled_at = self.plan_schedules.get(source_id, {}).get('at')
+            matches = any(r.get('startDate', '~') <= day <= r.get('endDate', '') for r in ranges)
+            if matches or any(value and datetime.fromtimestamp(value).date().isoformat() == day
+                              for value in (at, scheduled_at)):
+                retained.update(node.walk())
+                ancestor = node.parent
+                while ancestor is not None:
+                    retained.add(ancestor)
+                    ancestor = ancestor.parent
+        return retained
 
     def _show_completion_checkbox(self, node, root):
         return (node is not root and node.parent is not None
@@ -1074,7 +1170,7 @@ class MindMapController(QObject):
 
         def visible_nodes(node):
             yield node
-            if not node.folded:
+            if not node.folded or self._date_filter:
                 for child in node.children:
                     yield from visible_nodes(child)
 
@@ -1103,16 +1199,18 @@ class MindMapController(QObject):
             sizes[node] = (width, 40.0 + (24.0 if _content(node).id in self.reminders else 0.0)
                            + (24.0 if _content(node).id in self._measure_progress else 0.0)
                            + (28.0 if _content(node).id in self.deadlines else 0.0))
-        if root.folded:
+        if root.folded and not self._date_filter:
             width, height = sizes[root]
             return {root: Box(-width / 2, -height / 2, width, height)}
         # Layout only needs a root; keep the canonical tree's parent links intact.
-        if self._priority_filter == 1:
+        if self._priority_filter == 1 and not self._date_filter:
             return layout(SimpleNamespace(root=root), sizes)
-        retained = self._priority_nodes(priorities)
+        retained = self._priority_nodes(priorities) & self._date_nodes()
         sides = assigned_sides(SimpleNamespace(root=root))
         projected = {node: copy.copy(node) for node in retained}
         for node, clone in projected.items():
+            if self._date_filter:
+                clone.folded = False
             clone.children = [projected[child] for child in node.children if child in retained]
             clone.parent = projected.get(node.parent)
             clone.side = sides.get(node, node.side)
@@ -1141,7 +1239,7 @@ class MindMapController(QObject):
                  'isReference': _placement(n).id in self.references, 'text': n.text, 'note': n.note or '', 'x': b.x, 'y': b.y,
                  'width': b.width, 'height': b.height, 'isTab': self._tab_id(n) is not None,
                  'hasNote': bool(n.note and n.note.strip()),
-                 'folded': n.folded, 'hasChildren': bool(n.children), 'bold': bool(n.style.bold),
+                 'folded': n.folded and not bool(self._date_filter), 'hasChildren': bool(n.children), 'bold': bool(n.style.bold),
                  'isViewRoot': n is root, 'completed': _content(n).id in self._completed,
                  'showCompletionCheckbox': self._show_completion_checkbox(n, root),
                  'bookmarked': _content(n).id in bookmarks,
@@ -1521,6 +1619,7 @@ class MindMapController(QObject):
             self._measure_progress.intersection_update(live)
             self._bookmarks = [key for key in self._bookmarks if key in live]
             self.plan_schedules = {key: value for key, value in self.plan_schedules.items() if key in live}
+            self.plan_ranges = {key: value for key, value in self.plan_ranges.items() if key in live}
             self.reminders = {key: value for key, value in self.reminders.items() if key in live}
             self.deadlines = {key: value for key, value in self.deadlines.items() if key in live}
             self._kanban = {key: value for key, value in self._kanban.items()
@@ -1536,6 +1635,7 @@ class MindMapController(QObject):
             self._bookmarks = list(before.get('bookmarks', []))
             self._kanban = copy.deepcopy(before.get('kanban', {}))
             self.plan_schedules = copy.deepcopy(before.get('plan_schedules', {}))
+            self.plan_ranges = copy.deepcopy(before.get('plan_ranges', {}))
             self._restore_selection(selected)
             self.errorOccurred.emit(str(exc))
             self.changed.emit()
@@ -1589,10 +1689,12 @@ class MindMapController(QObject):
         scope = self._scope_tab
         selection = self._selection_state()
         cut, query, priority = list(self._cut_ids), self._search_query, self._priority_filter
+        date_filter = self._date_filter
         was_blocked = self.blockSignals(True)
         try:
             self._scope_tab = None
             self._search_query = ''
+            self._date_filter = ''
             self._priority_filter = 1.0
             self._cut_ids = []
             if node_id is not None:
@@ -1603,6 +1705,7 @@ class MindMapController(QObject):
         finally:
             self._scope_tab = scope if scope in self.links.values() else None
             self._search_query, self._priority_filter = query, priority
+            self._date_filter = date_filter
             self._cut_ids = [key for key in cut if self._find(key)]
             self._restore_selection(selection)
             valid = [key for key in self._selected_ids if self._in_scope(self._find(key))]
@@ -1949,6 +2052,7 @@ class MindMapController(QObject):
         self._bookmarks = list(payload.get('bookmarks', []))
         self._kanban = copy.deepcopy(payload.get('kanban', {}))
         self.plan_schedules = copy.deepcopy(payload.get('plan_schedules', {}))
+        self.plan_ranges = copy.deepcopy(payload.get('plan_ranges', {}))
         if tab_state is not None:
             live = {tab.id for tab in self._tabs.getAllTabs()}
             self._view_selections = {key: value for key, value in self._view_selections.items()
