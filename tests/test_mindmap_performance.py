@@ -334,6 +334,9 @@ def test_map_direct_completion_and_child_button(app, actiondraw_window):
     diagram = DiagramModel(tasks)
     project = ProjectManager(tasks, diagram, tabs)
     m = project.mindmap
+    child = m.map.root.add_child('Task to complete')
+    m.reconcile()
+    m.toggleMeasureProgress(m.map.root.id)
     engine = actiondraw_window(diagram, tasks, project, tab_model=tabs)
     window = engine.rootObjects()[0]
     window.show()
@@ -356,10 +359,13 @@ def test_map_direct_completion_and_child_button(app, actiondraw_window):
         QTest.qWait(30)
 
     root_id = m.map.root.id
-    click('mindmapComplete_' + root_id)
-    assert root_id in m._completed
-    click('mindmapComplete_' + root_id)
-    assert root_id not in m._completed
+    # Checkboxes belong to children of a progress-measuring node, never the view root.
+    click('mindmapComplete_' + child.id)
+    assert child.id in m._completed
+    click('mindmapComplete_' + child.id)
+    assert child.id not in m._completed
+    m.select(root_id)
+    QTest.qWait(30)
     before = len(list(m.map.walk()))
     click('mindmapAddChild')
     title = window.findChild(QObject, 'mindmapQuickChildTitle')

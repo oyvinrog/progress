@@ -4504,16 +4504,27 @@ def test_calendar_date_filter_keeps_matching_branches_and_ancestors(project):
 
 
 def test_calendar_selection_filters_map_in_qml(project, actiondraw_window):
+    from datetime import datetime
     pm, tabs, tasks, diagram = project
     node = thought(pm.mindmap)
-    pm.mindmap.setGoalRange('plan:' + node, '2026-10-18', '2026-10-18')
+    selected = pm.mindmap.selectedId
     engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
     overview = window.findChild(QObject, 'reminderOverview')
-    overview.setProperty('selectedDate', '2026-10-18')
-    assert pm.mindmap.dateFilter == '2026-10-18'
-    overview.setProperty('selectedDate', '')
+    # The agenda opens on today without hiding unscheduled work or changing selection.
+    today = overview.property('selectedDate')
+    assert today == datetime.now().date().isoformat()
     assert pm.mindmap.dateFilter == ''
+    assert pm.mindmap.selectedId == selected
+    assert node in {entry['id'] for entry in pm.mindmap.nodes}
+    calendar = window.findChild(QObject, 'reminderCalendar')
+    # Clicking today's already-selected cell must activate filtering too.
+    calendar.dateSelected.emit(today)
+    assert pm.mindmap.dateFilter == today
+    assert node not in {entry['id'] for entry in pm.mindmap.nodes}
+    calendar.dateSelected.emit('')
+    assert pm.mindmap.dateFilter == ''
+    assert node in {entry['id'] for entry in pm.mindmap.nodes}
 
 
 def test_calendar_filter_reveals_folded_goal_and_children_without_changing_folds(project):

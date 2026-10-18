@@ -40,7 +40,7 @@ Column {
         var duration = goal.goalStartDate && goal.goalEndDate
             ? calendar.dayNumber(goal.goalEndDate) - calendar.dayNumber(goal.goalStartDate) : 0
         if (goalModel.setGoalRange(goalId, day, calendar.dayKey(calendar.dayNumber(day) + duration)))
-            selectedDate = day
+            selectDate(day)
         return true
     }
     function rangeModel(id) { return id.indexOf("plan:") === 0 ? planController : goalModel }
@@ -59,11 +59,21 @@ Column {
     property var planController
     property double nowTimestamp: Date.now() / 1000
     property string selectedDate: ""
+    property bool initializingDate: true
+    function applyDateFilter() {
+        if (planController && planController.setDateFilter) planController.setDateFilter(selectedDate)
+    }
+    function selectDate(day) {
+        // Selecting the already-highlighted initial day must still filter the map.
+        if (selectedDate === day) applyDateFilter()
+        else selectedDate = day
+    }
     Component.onCompleted: {
         selectedDate = calendar.dateKey(new Date(nowTimestamp * 1000))
+        initializingDate = false
         syncAgendaReminders()
     }
-    onSelectedDateChanged: if (planController && planController.setDateFilter) planController.setDateFilter(selectedDate)
+    onSelectedDateChanged: if (!initializingDate) applyDateFilter()
     readonly property var futureReminders: {
         var entries = windowRoot ? windowRoot.activeReminders : []
         return entries.filter(function(entry) { return Number(entry.reminderAt) > overview.nowTimestamp })
@@ -175,9 +185,9 @@ Column {
             dayCounts: overview.dayCounts
             nowTimestamp: overview.nowTimestamp
             selectedDate: overview.selectedDate
-            onDateSelected: function(date) { overview.selectedDate = date; agenda.contentItem.contentY = 0; agenda.forceActiveFocus() }
+            onDateSelected: function(date) { overview.selectDate(date); agenda.contentItem.contentY = 0; agenda.forceActiveFocus() }
             onDateDoubleClicked: function(date) {
-                overview.selectedDate = date
+                overview.selectDate(date)
                 goalDialog.show(null, date)
             }
         }
