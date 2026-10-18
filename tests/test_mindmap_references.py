@@ -198,7 +198,7 @@ def test_qml_add_tab_search_and_edit(project, app, actiondraw_window):
     QTest.qWait(100)
 
     def find_item(item, name):
-        if item.objectName() == name:
+        if item.objectName() == name or item.property('text') == name:
             return item
         for nested in item.childItems():
             found = find_item(nested, name)
@@ -213,7 +213,9 @@ def test_qml_add_tab_search_and_edit(project, app, actiondraw_window):
 
     try:
         click(find_item(window.contentItem(), 'mindmapNodeMouse_' + roots[daily]), Qt.RightButton)
+        click(find_item(window.contentItem(), 'Goals & progress'))
         action = window.findChild(QObject, 'mindmapAddTab')
+        assert action.isVisible()
         click(action)
         dialog = window.findChild(QObject, 'mindmapTabReferenceDialog')
         assert dialog.property('visible')

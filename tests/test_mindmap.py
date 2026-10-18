@@ -4353,3 +4353,25 @@ def test_qml_conditional_completion_clicks(project, app, actiondraw_window):
         assert not warnings, warnings
     finally:
         window.close()
+
+
+@pytest.mark.parametrize('start', ['2026-03-28T12:00:00', '2026-10-24T12:00:00'])
+@pytest.mark.parametrize('minutes', [10, 20, 60, 1440, 2880, 10080])
+def test_quick_reminder_elapsed_time_across_dst(project, monkeypatch, start, minutes):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    pm = project[0]
+    m = pm.mindmap
+    node_id = thought(m)
+    now = datetime.fromisoformat(start).replace(tzinfo=ZoneInfo('Europe/Oslo')).timestamp()
+    monkeypatch.setattr('task_model.time.time', lambda: now)
+    assert pm.setMindmapReminderIn(node_id, minutes)
+    assert m.reminders[node_id] == {'at': now + minutes * 60, 'send_notification': False}
+    m.set_reminder(node_id, now + 60, True)
+    assert pm.setMindmapReminderIn(node_id, minutes)
+    assert m.reminders[node_id] == {'at': now + minutes * 60, 'send_notification': True}
+    before = m.to_dict()
+    assert not pm.setMindmapReminderIn(node_id, 0)
+    assert not pm.setMindmapReminderIn('missing', minutes)
+    assert m.to_dict() == before

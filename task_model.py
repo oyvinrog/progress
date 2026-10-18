@@ -2985,6 +2985,15 @@ class ProjectManager(QObject):
             return False
         return self.mindmap.set_reminder(node_id, timestamp, send_notification)
 
+    @Slot(str, int, result=bool)
+    def setMindmapReminderIn(self, node_id: str, minutes: int) -> bool:
+        if type(minutes) is not int or not 1 <= minutes <= 2147483647:
+            return False
+        data = self.mindmap.reminderData(node_id)
+        # Relative reminders measure elapsed time, including across DST changes.
+        return self.mindmap.set_reminder(
+            node_id, time.time() + minutes * 60, data['reminderSendNotification'])
+
     @Slot(str)
     def clearMindmapReminder(self, node_id: str) -> None:
         self.mindmap.clearReminder(node_id)
