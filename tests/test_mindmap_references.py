@@ -451,3 +451,26 @@ def test_named_child_from_plus_uses_shared_branch_and_single_undo(project):
     assert m.map.find(ref).children == []
     m.undo()
     assert m.to_dict() == before
+
+
+def test_completion_checkboxes_use_reference_placement_parent(project):
+    pm, tabs, tasks, diagram, daily, lunch, roots, child = project
+    m = pm.mindmap
+    ref = reference(project)
+    projected_child = occurrence(m, child, ref)
+
+    def checkboxes():
+        return {n['id']: n['showCompletionCheckbox'] for n in m.nodes}
+
+    m.toggleMeasureProgress(roots[daily])
+    assert checkboxes()[ref]
+    assert not checkboxes()[projected_child]
+    m.toggleMeasureProgress(roots[lunch])
+    assert checkboxes()[projected_child]
+    m.set_scope(lunch)
+    assert not checkboxes()[roots[lunch]]
+    assert checkboxes()[child]
+    m.set_scope(daily)
+    m.toggleMeasureProgress(roots[daily])
+    assert not checkboxes()[ref]
+    assert checkboxes()[projected_child]

@@ -523,7 +523,11 @@ def test_qml_mindmap_priority_rendering(project, app, actiondraw_window):
         node = find(window.contentItem(), 'mindmapNode_' + high)
         assert node.opacity() == pytest.approx(0.45)
         checkbox = find(node, 'mindmapComplete_' + high)
-        assert checkbox.property('text') == '☑'
+        assert not checkbox.isVisible()
+        mark = find(node, 'mindmapCompletedMark_' + high)
+        assert mark.isVisible() and mark.property('text') == '✓'
+        note = find(node, 'mindmapNoteIcon_' + high)
+        assert mark.x() + mark.width() <= note.x()
         index = next(i for i, tab in enumerate(tabs.getAllTabs()) if tab.id == ids[2])
         tabs.setIncludeInPriorityPlot(index, False)
         QTest.qWait(20)
@@ -4253,3 +4257,99 @@ def test_qml_create_scheduled_node_goal(project, app, actiondraw_window, action_
     assert tabs.scheduledGoals[0]['id'] == m.links[node]
     assert tabs.scheduledGoals[0]['startDate'] == '2032-02-29'
     assert tabs.scheduledGoals[0]['endDate'] == '2032-03-02'
+
+
+def test_completion_checkbox_follows_immediate_parent(project):
+    m = project[0].mindmap
+    parent = m.map.root.add_child('Measured parent')
+    child = parent.add_child('A sufficiently long child title')
+    grandchild = child.add_child('Grandchild')
+    outside = m.map.root.add_child('Outside')
+    m.reconcile()
+
+    def data(node):
+        return next(n for n in m.nodes if n['id'] == node.id)
+
+    plain_width = data(child)['width']
+    assert not any(n['showCompletionCheckbox'] for n in m.nodes)
+    m.toggleMeasureProgress(parent.id)
+    assert data(child)['showCompletionCheckbox']
+    assert data(child)['width'] == plain_width + 27
+    assert not data(parent)['showCompletionCheckbox']
+    assert not data(grandchild)['showCompletionCheckbox']
+    m.toggleMeasureProgress(child.id)
+    assert data(grandchild)['showCompletionCheckbox']
+    m.select(child.id)
+    m.toggleCompleted()
+    m.moveNode(child.id, outside.id, 'child')
+    assert not data(child)['showCompletionCheckbox'] and data(child)['completed']
+    m.undo()
+    assert data(child)['showCompletionCheckbox'] and data(child)['completed']
+    m.redo()
+    assert not data(child)['showCompletionCheckbox'] and data(child)['completed']
+    m.toggleMeasureProgress(outside.id)
+    assert data(child)['showCompletionCheckbox']
+    m.toggleMeasureProgress(outside.id)
+    assert not data(child)['showCompletionCheckbox'] and data(child)['completed']
+
+
+def test_qml_conditional_completion_clicks(project, app, actiondraw_window):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    parent = next(iter(m.links))
+    m.select(parent)
+    child = thought(m, 'Child', '')
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    warnings = []
+    engine.warnings.connect(lambda messages: warnings.extend(x.toString() for x in messages))
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+
+    def item(prefix):
+        def find(node):
+            if node.objectName() == prefix + child:
+                return node
+            for nested in node.childItems():
+                found = find(nested)
+                if found is not None:
+                    return found
+        return find(window.contentItem())
+
+    def click(target):
+        QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                         target.mapToScene(target.boundingRect().center()).toPoint())
+        QTest.qWait(30)
+
+    try:
+        assert not item('mindmapComplete_').isVisible()
+        assert not item('mindmapCompletedMark_').isVisible()
+        m.select(parent)
+        click(item('mindmapNodeText_'))
+        assert m.selectedId == child and not m.selectedNode['completed']
+        QTest.keyClick(window, Qt.Key_F4)
+        QTest.qWait(30)
+        assert item('mindmapCompletedMark_').isVisible()
+        assert not item('mindmapComplete_').isVisible()
+        m.select(parent)
+        click(item('mindmapCompletedMark_'))
+        assert m.selectedId == child and m.selectedNode['completed']
+        mark = item('mindmapCompletedMark_')
+        assert mark.x() + mark.width() <= item('mindmapNodeText_').x()
+        m.toggleMeasureProgress(parent)
+        QTest.qWait(30)
+        assert item('mindmapComplete_').isVisible()
+        assert not item('mindmapCompletedMark_').isVisible()
+        click(item('mindmapComplete_'))
+        assert not m.selectedNode['completed']
+        click(item('mindmapComplete_'))
+        assert m.selectedNode['completed']
+        assert next(n for n in m.nodes if n['id'] == parent)['progressPercent'] == 100
+        m.toggleMeasureProgress(parent)
+        QTest.qWait(30)
+        assert not item('mindmapComplete_').isVisible()
+        assert item('mindmapCompletedMark_').isVisible()
+        assert not warnings, warnings
+    finally:
+        window.close()

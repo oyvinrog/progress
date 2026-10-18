@@ -652,6 +652,7 @@ FocusScope {
                         sourceComponent: Rectangle {
                             id: nodeItem
                             readonly property var modelData: nodeLoader.modelData
+                            readonly property int leadingInset: modelData.showCompletionCheckbox || modelData.completed ? 45 : 18
                             objectName: "mindmapNode_" + modelData.id
                             x: modelData.x; y: modelData.y
                             width: modelData.width; height: modelData.height
@@ -680,7 +681,7 @@ FocusScope {
                             Text {
                                 objectName: "mindmapNoteIcon_" + nodeItem.modelData.id
                                 visible: nodeItem.modelData.hasNote
-                                anchors.left: parent.left; anchors.leftMargin: 45
+                                anchors.left: parent.left; anchors.leftMargin: nodeItem.leadingInset
                                 anchors.verticalCenter: parent.verticalCenter
                                 anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
                                                               - (nodeItem.modelData.measureProgress ? 12 : 0)
@@ -704,7 +705,7 @@ FocusScope {
                                 objectName: "mindmapBookmarkIcon_" + nodeItem.modelData.id
                                 visible: nodeItem.modelData.bookmarked
                                 anchors.left: parent.left
-                                anchors.leftMargin: nodeItem.modelData.hasNote ? 65 : 45
+                                anchors.leftMargin: nodeItem.leadingInset + (nodeItem.modelData.hasNote ? 20 : 0)
                                 anchors.verticalCenter: parent.verticalCenter
                                 anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
                                                               - (nodeItem.modelData.measureProgress ? 12 : 0)
@@ -719,7 +720,7 @@ FocusScope {
                                 visible: nodeItem.modelData.planVisible
                                 width: 16; height: 18; radius: 3
                                 anchors.left: parent.left
-                                anchors.leftMargin: 45 + (nodeItem.modelData.hasNote ? 20 : 0)
+                                anchors.leftMargin: nodeItem.leadingInset + (nodeItem.modelData.hasNote ? 20 : 0)
                                                        + (nodeItem.modelData.bookmarked ? 20 : 0)
                                 anchors.verticalCenter: parent.verticalCenter
                                 anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
@@ -755,7 +756,7 @@ FocusScope {
                                 anchors.bottomMargin: (nodeItem.modelData.reminderActive ? 24 : 0)
                                                       + (nodeItem.modelData.measureProgress ? 24 : 0)
                                                       + (nodeItem.modelData.deadlineActive ? 28 : 0)
-                                anchors.leftMargin: 45 + (nodeItem.modelData.hasNote ? 20 : 0)
+                                anchors.leftMargin: nodeItem.leadingInset + (nodeItem.modelData.hasNote ? 20 : 0)
                                                        + (nodeItem.modelData.bookmarked ? 20 : 0)
                                                        + (nodeItem.modelData.planVisible ? 20 : 0)
                                 anchors.rightMargin: (nodeItem.modelData.priorityLevel > 0 ? 48 : 18)
@@ -801,6 +802,7 @@ FocusScope {
                             }
                             ToolButton {
                                 objectName: "mindmapComplete_" + nodeItem.modelData.id
+                                visible: nodeItem.modelData.showCompletionCheckbox
                                 x: 3; y: 2; width: 38; height: 36; z: 4
                                 text: nodeItem.modelData.completed ? "☑" : "☐"
                                 font.pixelSize: 24
@@ -813,6 +815,18 @@ FocusScope {
                                     pane.controller.toggleCompleted()
                                     pane.focusMap()
                                 }
+                            }
+                            Text {
+                                objectName: "mindmapCompletedMark_" + nodeItem.modelData.id
+                                visible: nodeItem.modelData.completed && !nodeItem.modelData.showCompletionCheckbox
+                                x: 3; y: 2; width: 38; height: 36
+                                text: "✓"
+                                font.pixelSize: 24
+                                color: "#91d6b6"
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                                Accessible.role: Accessible.StaticText
+                                Accessible.name: "Completed"
                             }
                             ToolButton {
                                 id: foldButton
@@ -1121,7 +1135,7 @@ FocusScope {
             spacing: 16
             Label {
                 Layout.fillWidth: true
-                text: "Drag the priority slider left for highest scores, right to include more; All restores every branch · Click a node’s checkbox to complete it · Select a node and click + beside it to add a child, or above/below to add a sibling · Type to find node titles, including folded branches · Enter / Shift+Enter cycles matches · Backspace edits search · Escape clears search · Double-click a goal node to open it · Double-click empty space to add a thought · Ctrl+B toggles bold · Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+C / Ctrl+V copies branches · Ctrl+X / Ctrl+V moves branches · F4 completes · Arrows navigate · Tab adds a child · Ctrl+Enter opens a goal"
+                text: "Drag the priority slider left for highest scores, right to include more; All restores every branch · Children of progress-measuring nodes have completion checkboxes · Select a node and click + beside it to add a child, or above/below to add a sibling · Type to find node titles, including folded branches · Enter / Shift+Enter cycles matches · Backspace edits search · Escape clears search · Double-click a goal node to open it · Double-click empty space to add a thought · Ctrl+B toggles bold · Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+C / Ctrl+V copies branches · Ctrl+X / Ctrl+V moves branches · F4 or the Complete menu action toggles completion on any node · Arrows navigate · Tab adds a child · Ctrl+Enter opens a goal"
                 wrapMode: Text.WordWrap
                 color: "#a9bfd1"
             }

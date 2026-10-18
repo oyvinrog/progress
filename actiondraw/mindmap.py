@@ -1048,6 +1048,10 @@ class MindMapController(QObject):
         self.sceneChanged.emit()
         self.changed.emit()
 
+    def _show_completion_checkbox(self, node, root):
+        return (node is not root and node.parent is not None
+                and _content(node.parent).id in self._measure_progress)
+
     def _layout(self, priorities=None):
         if priorities is None:
             priorities = self._priority_data()
@@ -1067,7 +1071,10 @@ class MindMapController(QObject):
                     yield from visible_nodes(child)
 
         for node in visible_nodes(root):
-            padding = 88.0  # Reserve a stable checkbox hit area, even when unchecked.
+            # Match the QML leading inset; ordinary nodes need no checkbox space.
+            padding = 61.0
+            if self._show_completion_checkbox(node, root) or _content(node).id in self._completed:
+                padding += 27.0
             if node.children:
                 padding += 22.0
             if node.note and node.note.strip():
@@ -1128,6 +1135,7 @@ class MindMapController(QObject):
                  'hasNote': bool(n.note and n.note.strip()),
                  'folded': n.folded, 'hasChildren': bool(n.children), 'bold': bool(n.style.bold),
                  'isViewRoot': n is root, 'completed': _content(n).id in self._completed,
+                 'showCompletionCheckbox': self._show_completion_checkbox(n, root),
                  'bookmarked': _content(n).id in bookmarks,
                  'measureProgress': _content(n).id in self._measure_progress,
                  'progressPercent': (math.floor(100 * sum(_content(child).id in self._completed for child in n.children)
