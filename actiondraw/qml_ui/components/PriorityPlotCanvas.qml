@@ -13,6 +13,7 @@ Rectangle {
     property real rightPadding: 24
     property real topPadding: 28
     property real bottomPadding: 44
+    signal pointPlanRequested(int tabIndex)
     signal pointClicked(int tabIndex)
     signal pointDoubleClicked(int tabIndex)
 
@@ -177,15 +178,20 @@ Rectangle {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.OpenHandCursor
-                drag.target: pointItem
+                acceptedButtons: Qt.LeftButton | Qt.RightButton
+                drag.target: pressedButtons === Qt.LeftButton ? pointItem : null
                 drag.minimumX: root.leftPadding - pointItem.width / 2
                 drag.maximumX: root.width - root.rightPadding - pointItem.width / 2
                 drag.minimumY: root.topPadding - pointItem.height / 2
                 drag.maximumY: root.height - root.bottomPadding - pointItem.height / 2
-                onPressed: cursorShape = Qt.ClosedHandCursor
-                onClicked: root.pointClicked(index)
-                onDoubleClicked: root.pointDoubleClicked(index)
-                onReleased: {
+                onPressed: function(mouse) { if (mouse.button === Qt.LeftButton) cursorShape = Qt.ClosedHandCursor }
+                onClicked: function(mouse) {
+                    if (mouse.button === Qt.RightButton) root.pointPlanRequested(index)
+                    else root.pointClicked(index)
+                }
+                onDoubleClicked: function(mouse) { if (mouse.button === Qt.LeftButton) root.pointDoubleClicked(index) }
+                onReleased: function(mouse) {
+                    if (mouse.button !== Qt.LeftButton) return
                     cursorShape = Qt.OpenHandCursor
                     var centerX = pointItem.x + pointItem.width / 2
                     var centerY = pointItem.y + pointItem.height / 2

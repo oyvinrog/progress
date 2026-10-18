@@ -228,6 +228,7 @@ def test_qml_adjustments_keep_selection_and_matching_ranks(project, app, actiond
     warnings = []
     engine.warnings.connect(lambda messages: warnings.extend(m.toString() for m in messages))
     window = engine.rootObjects()[0]
+    window.findChild(QObject, 'reminderOverview').setProperty('selectedDate', '')
     QMetaObject.invokeMethod(window, 'openPriorityPlotWindow')
     plot = window.property('priorityPlotWindowRef')
     plot.show()

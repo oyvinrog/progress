@@ -177,7 +177,8 @@ ApplicationWindow {
         }
         var win = component.createObject(root, {
             "tabModel": tabModelRef,
-            "projectManager": projectManagerRef
+            "projectManager": projectManagerRef,
+            "planController": typeof mindmapController !== "undefined" ? mindmapController : null
         })
         if (!win) {
             console.log("Failed to instantiate PriorityPlotWindow")
@@ -1048,7 +1049,10 @@ ApplicationWindow {
         return Qt.point(vx, vy)
     }
 
+    property string tabDragCalendarDate: ""
     function clearTabDragPreview() {
+        tabDragCalendarDate = ""
+        planningOverview.clearGoalDrop()
         root.tabDragActive = false
         root.tabDragInsideViewport = false
         root.tabDragPreviewName = ""
@@ -1056,13 +1060,15 @@ ApplicationWindow {
         root.tabDragPreviewY = 0
     }
 
-    function updateTabDragHover(tabIndex, tabName, sceneX, sceneY, active) {
+    function updateTabDragHover(tabIndex, tabName, sceneX, sceneY, active, goalId) {
         if (!active) {
             root.clearTabDragPreview()
             return
         }
         root.tabDragActive = true
         root.tabDragPreviewName = tabName || ""
+        root.tabDragCalendarDate = planningOverview.updateGoalDrop(sceneX, sceneY)
+        if (root.tabDragCalendarDate) { root.tabDragInsideViewport = false; return }
 
         if (!diagramModel || tabIndex === undefined || tabIndex < 0) {
             root.tabDragInsideViewport = false
@@ -1084,7 +1090,14 @@ ApplicationWindow {
         root.tabDragPreviewY = snapped.y
     }
 
-    function handleTabDragRelease(tabIndex, sceneX, sceneY) {
+    function handleTabDragRelease(tabIndex, sceneX, sceneY, goalId) {
+        if (!goalId && tabModelRef && tabIndex >= 0)
+            goalId = tabModelRef.getTabSummary(tabIndex).id
+        if (planningOverview.dropGoal(goalId, sceneX, sceneY)) {
+            root.clearTabDragPreview()
+            return
+        }
+
         if (!projectManager || !diagramModel) {
             root.clearTabDragPreview()
             return
@@ -4380,9 +4393,9 @@ ApplicationWindow {
             color: "#eaf7ff"
             font.pixelSize: 12
             font.bold: true
-            text: root.tabDragInsideViewport
+            text: root.tabDragCalendarDate ? "Drop to schedule on " + root.tabDragCalendarDate : root.tabDragInsideViewport
                 ? "Drop to create drill task"
-                : "Drag into drawing area"
+                : "Drag to a calendar day or drawing area"
         }
     }
 

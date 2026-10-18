@@ -394,11 +394,14 @@ class MindMapController(QObject):
                 for hour in range(8, 18)]
 
     def _add_selected_to_placement(self, status, slot_hour=-1):
+        return self._add_nodes_to_placement(self._selected_ids, status, slot_hour)
+
+    def _add_nodes_to_placement(self, node_ids, status, slot_hour=-1):
         placement = self._normalize_kanban_placement(status, slot_hour)
         if placement is None:
             return False
         changed = False
-        for node_id in dict.fromkeys(self.sourceNodeId(key) for key in self._selected_ids):
+        for node_id in dict.fromkeys(self.sourceNodeId(key) for key in node_ids):
             before = self._plan_placement(node_id)
             previous_range = self.plan_ranges.get(node_id)
             if self._place_plan_node(node_id, status, slot_hour):
@@ -407,6 +410,22 @@ class MindMapController(QObject):
                 changed = (changed or before != self._plan_placement(node_id)
                            or previous_range != self.plan_ranges.get(node_id))
         return changed
+
+    def _goal_plan_nodes(self, goal_id):
+        return [node_id for node_id, tab_id in self.links.items()
+                if tab_id == goal_id and self.map.find(node_id) is not None]
+
+    @Slot(str, result=bool)
+    def addGoalToReady(self, goal_id):
+        return self._add_nodes_to_placement(self._goal_plan_nodes(goal_id), 'ready')
+
+    @Slot(str, int, result=bool)
+    def addGoalToPlan(self, goal_id, hour):
+        return self._add_nodes_to_placement(self._goal_plan_nodes(goal_id), 'in_progress', hour)
+
+    @Slot(str, int, result=bool)
+    def scheduleGoalToWeekday(self, goal_id, weekday):
+        return self._schedule_nodes(self._goal_plan_nodes(goal_id), weekday)
 
     def _place_plan_node(self, node_id, status, slot_hour=-1):
         tab_id = self.links.get(node_id)

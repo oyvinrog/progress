@@ -69,6 +69,15 @@ Rectangle {
     signal goalOpened(string goalId)
     signal rangeEdited(string goalId, string startDate, string endDate)
 
+    property string externalDropDate: ""
+    function dateAtScene(sceneX, sceneY) {
+        if (!visible) return ""
+        var point = viewport.mapFromItem(null, sceneX, sceneY)
+        if (point.x < 0 || point.y < 0 || point.x >= viewport.width || point.y >= viewport.height) return ""
+        point = grid.mapFromItem(null, sceneX, sceneY)
+        var cell = cellAt(point.x, point.y)
+        return cell < 0 ? "" : calendarDays[cell].key
+    }
     function changeMonth(offset) {
         var d = new Date(displayedYear, displayedMonth+offset, 1)
         displayedYear = d.getFullYear(); displayedMonth = d.getMonth()
@@ -182,7 +191,7 @@ Rectangle {
                         Accessible.name:modelData.key+", "+goalsCount+" goals, "+reminderCount+" reminders"
                         onClicked:calendar.dateSelected(modelData.key)
                         background:Rectangle {
-                            color:calendar.selectedDate===day.modelData.key ? "#354e63" : "#263744"
+                            color:calendar.externalDropDate===day.modelData.key ? "#386a62" : calendar.selectedDate===day.modelData.key ? "#354e63" : "#263744"
                             border.color:day.modelData.key===calendar.todayKey ? "#ffe3a8" : "#304450"
                             radius:3
                         }

@@ -619,6 +619,9 @@ Rectangle {
                             property bool isActive: sidebar.tabModel ? index === sidebar.tabModel.currentTabIndex : false
                             property string tabActiveTaskTitle: activeTaskTitle || ""
                             property real tabPriorityScore: priorityScore || 0
+                            objectName: "sidebarGoal_" + index
+                            property string dragGoalId: ""
+                            property bool dragCancelled: false
                             property int dragTabIndex: index
                             property string dragTabName: name || ""
                             property string tabIcon: icon || ""
@@ -652,6 +655,15 @@ Rectangle {
                             Drag.hotSpot.x: width / 2
                             Drag.hotSpot.y: height / 2
 
+                            Shortcut {
+                                sequence: "Escape"
+                                enabled: tabDragHandler.active
+                                onActivated: {
+                                    tabButton.dragCancelled = true
+                                    if (typeof sidebar.onTabDragMoved === "function")
+                                        sidebar.onTabDragMoved(tabButton.dragTabIndex, "", 0, 0, false)
+                                }
+                            }
                             DragHandler {
                                 id: tabDragHandler
                                 target: null
@@ -665,24 +677,27 @@ Rectangle {
                                     )
                                     if (active) {
                                         tabButton.suppressClick = true
+                                        tabButton.dragCancelled = false
+                                        tabButton.dragGoalId = sidebar.tabModel.getTabSummary(index).id
                                         if (typeof sidebar.onTabDragMoved === "function")
-                                            sidebar.onTabDragMoved(tabButton.dragTabIndex, tabButton.dragTabName, scenePos.x, scenePos.y, true)
+                                            sidebar.onTabDragMoved(tabButton.dragTabIndex, tabButton.dragTabName, scenePos.x, scenePos.y, true, tabButton.dragGoalId)
                                     } else {
                                         if (typeof sidebar.onTabDragMoved === "function")
                                             sidebar.onTabDragMoved(tabButton.dragTabIndex, tabButton.dragTabName, scenePos.x, scenePos.y, false)
-                                        if (tabButton.suppressClick && typeof sidebar.onTabDragReleased === "function")
-                                            sidebar.onTabDragReleased(tabButton.dragTabIndex, scenePos.x, scenePos.y)
+                                        if (tabButton.suppressClick && !tabButton.dragCancelled && typeof sidebar.onTabDragReleased === "function")
+                                            sidebar.onTabDragReleased(tabButton.dragTabIndex, scenePos.x, scenePos.y, tabButton.dragGoalId)
                                     }
                                 }
+                                onCanceled: tabButton.dragCancelled = true
                                 onTranslationChanged: {
-                                    if (!tabDragHandler.active || typeof sidebar.onTabDragMoved !== "function")
+                                    if (!tabDragHandler.active || tabButton.dragCancelled || typeof sidebar.onTabDragMoved !== "function")
                                         return
                                     var scenePos = tabButton.mapToItem(
                                         null,
                                         tabDragHandler.centroid.position.x,
                                         tabDragHandler.centroid.position.y
                                     )
-                                    sidebar.onTabDragMoved(tabButton.dragTabIndex, tabButton.dragTabName, scenePos.x, scenePos.y, true)
+                                    sidebar.onTabDragMoved(tabButton.dragTabIndex, tabButton.dragTabName, scenePos.x, scenePos.y, true, tabButton.dragGoalId)
                                 }
                             }
 
@@ -804,7 +819,7 @@ Rectangle {
                                     var baseText = priorityText + name + " (" + Math.round(completionPercent) + "%)"
                                     if (tabButton.tabActiveTaskTitle)
                                         baseText += "\n" + tabButton.tabActiveTaskTitle
-                                    return baseText + "\nDrag to drawing to create a drill task"
+                                    return baseText + "\nDrag to a calendar day to schedule, or to drawing to create a drill task"
                                 }
                                 delay: 500
                             }

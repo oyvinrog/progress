@@ -24,6 +24,25 @@ Column {
         if (windowRoot && scheduledGoals.length && !windowRoot.reminderOverviewTouched)
             windowRoot.reminderOverviewExpanded = true
     }
+    function updateGoalDrop(sceneX, sceneY) {
+        calendar.externalDropDate = calendar.dateAtScene(sceneX, sceneY)
+        return calendar.externalDropDate
+    }
+    function clearGoalDrop() { calendar.externalDropDate = "" }
+    function dropGoal(goalId, sceneX, sceneY) {
+        var day = calendar.dateAtScene(sceneX, sceneY)
+        clearGoalDrop()
+        if (!day) return false
+        if (!goalModel || !goalId) return true
+        var index = goalModel.goalIndex(goalId)
+        if (index < 0) return true
+        var goal = goalModel.getTabSummary(index)
+        var duration = goal.goalStartDate && goal.goalEndDate
+            ? calendar.dayNumber(goal.goalEndDate) - calendar.dayNumber(goal.goalStartDate) : 0
+        if (goalModel.setGoalRange(goalId, day, calendar.dayKey(calendar.dayNumber(day) + duration)))
+            selectedDate = day
+        return true
+    }
     function rangeModel(id) { return id.indexOf("plan:") === 0 ? planController : goalModel }
     function openGoal(id) {
         if (id.indexOf("plan:") === 0) {
