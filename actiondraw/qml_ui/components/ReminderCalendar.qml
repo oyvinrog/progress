@@ -54,6 +54,7 @@ Rectangle {
     property int hoverMonth: 0
     property bool moved: false
     signal dateSelected(string date)
+    signal dateDoubleClicked(string date)
     signal goalOpened(string goalId)
     signal rangeEdited(string goalId, string startDate, string endDate)
 
@@ -122,7 +123,7 @@ Rectangle {
         }
         Label {
             Layout.fillWidth:true
-            text: calendar.gesture ? calendar.previewStart+" → "+calendar.previewEnd+(calendar.validDrop ? "" : " · Drop on a day to save") : "Drag goals to move · Drag ends to resize · Escape cancels"
+            text: calendar.gesture ? calendar.previewStart+" → "+calendar.previewEnd+(calendar.validDrop ? "" : " · Drop on a day to save") : "Double-click a day to add a goal · Drag goals to move · Drag ends to resize · Escape cancels"
             color:"#f1c892"; font.pixelSize:11
         }
         Flickable {
@@ -210,6 +211,13 @@ Rectangle {
                             calendar.beginGesture(b.goal,mode,mouse.x,mouse.y)
                             return
                         }
+                    }
+                    onDoubleClicked: function(mouse) {
+                        if (calendar.gesture) return
+                        var cell = calendar.cellAt(mouse.x, mouse.y)
+                        if (cell < 0) return
+                        pressedCell = -1
+                        calendar.dateDoubleClicked(calendar.calendarDays[cell].key)
                     }
                     onPositionChanged: function(mouse) {
                         if (!calendar.gesture) return

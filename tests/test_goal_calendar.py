@@ -153,6 +153,63 @@ def test_cross_month_hover_and_outside_drop(calendar_ui, app):
     assert len(changes) == 1
 
 
+@pytest.mark.parametrize("date", ["2032-02-10", "2032-01-31"])
+@pytest.mark.parametrize("save", [False, True])
+def test_day_double_click_creates_goal(calendar_ui, app, date, save):
+    root, host, overview, calendar, _, click = calendar_ui
+    tabs = TabModel()
+    tabs.addTab("Main")
+    overview.setProperty("goalModel", tabs)
+    dialog = overview.findChild(QObject, "goalRangeDialog")
+    opened = []
+    dialog.opened.connect(lambda: opened.append(True))
+    day = find(root, "reminderDay_" + date)
+    point = day.mapToScene(QPointF(day.width()/2, 15)).toPoint()
+    QTest.mouseClick(root, Qt.LeftButton, Qt.NoModifier, point)
+    app.processEvents()
+    assert overview.property("selectedDate") == date
+    assert not dialog.property("visible")
+    QTest.mouseDClick(root, Qt.LeftButton, Qt.NoModifier, point)
+    QTest.qWait(200)
+    assert dialog.property("visible")
+    assert opened == [True]
+    assert dialog.findChild(QObject, "goalRangeStart").property("text") == date
+    assert dialog.findChild(QObject, "goalRangeEnd").property("text") == date
+    name = dialog.findChild(QObject, "goalRangeName")
+    assert name.property("activeFocus")
+    assert name.property("text") == ""
+    assert tabs.tabCount == 1
+    name.setProperty("text", "Calendar goal")
+    if save:
+        dialog.findChild(QObject, "goalRangeEnd").setProperty("text", "2032-03-02")
+    click("saveGoalRange" if save else "cancelGoalRange")
+    assert not dialog.property("visible")
+    assert tabs.tabCount == (2 if save else 1)
+    if save:
+        assert len(tabs.scheduledGoals) == 1
+        assert tabs.scheduledGoals[0]["startDate"] == date
+        assert tabs.scheduledGoals[0]["endDate"] == "2032-03-02"
+        assert host.property("action") == "open-goal-1"
+    overview.setProperty("goalModel", None)
+
+
+def test_goal_bar_double_click_does_not_create_goal(calendar_ui, app):
+    root, _, overview, calendar, _, _ = calendar_ui
+    calendar.setProperty("goals", [dict(id="a", name="Existing", color="",
+                                       startDate="2032-02-10", endDate="2032-02-12")])
+    app.processEvents()
+    requests = []
+    calendar.dateDoubleClicked.connect(requests.append)
+    bar = find(root, "goalBar_a_1")
+    point = bar.mapToScene(QPointF(bar.width()/2, 11)).toPoint()
+    QTest.mouseClick(root, Qt.LeftButton, Qt.NoModifier, point)
+    QTest.mouseDClick(root, Qt.LeftButton, Qt.NoModifier, point)
+    QTest.mouseRelease(root, Qt.LeftButton, Qt.NoModifier, point)
+    app.processEvents()
+    assert not requests
+    assert not overview.findChild(QObject, "goalRangeDialog").property("visible")
+
+
 def test_overview_goal_selection_dialog_and_open(calendar_ui, app):
     root, host, overview, calendar, _, click = calendar_ui
     tabs = TabModel()

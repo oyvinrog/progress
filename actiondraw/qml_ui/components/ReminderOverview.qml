@@ -134,6 +134,10 @@ Column {
             nowTimestamp: overview.nowTimestamp
             selectedDate: overview.selectedDate
             onDateSelected: function(date) { overview.selectedDate = date }
+            onDateDoubleClicked: function(date) {
+                overview.selectedDate = date
+                goalDialog.show(null, date)
+            }
         }
         ColumnLayout {
             Layout.fillWidth: true
