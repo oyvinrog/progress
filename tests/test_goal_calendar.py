@@ -306,3 +306,72 @@ def test_mindmap_created_goal_appears_in_calendar(calendar_ui, app):
     assert find(root, 'reminderDay_2032-02-28').property('goalsCount') == 1
     assert find(root, 'reminderDay_2032-02-29').property('goalsCount') == 1
     overview.setProperty('goalModel', None)
+
+
+@pytest.mark.parametrize('count', [0, 2, 10, 50])
+def test_dense_calendar_overflow_and_agenda(calendar_ui, app, count):
+    root, _, overview, calendar, _, click = calendar_ui
+    tabs = TabModel()
+    tabs.addTab('Main')
+    overview.setProperty('goalModel', tabs)
+    for i in range(count):
+        tabs.createScheduledGoal('Goal %02d' % i, '2032-02-01', '2032-03-02')
+    app.processEvents()
+    weeks = value(calendar, 'weeks')
+    assert calendar.property('gridHeight') == 432
+    assert all(w['height'] == 72 for w in weeks)
+    assert all(len(w['bars']) <= 2 for w in weeks)
+    assert len(value(overview, 'filteredGoals')) == count
+    more = find(root, 'calendarMore_2032-02-29')
+    assert more.property('hiddenGoals') == max(0, count - 2)
+    assert more.isVisible() == (count > 2)
+    if count > 2:
+        click('calendarMore_2032-02-29')
+        assert overview.property('selectedDate') == '2032-02-29'
+        assert find(root, 'planningAgenda').property('activeFocus')
+        assert len(value(overview, 'filteredGoals')) == count
+        tabs.clearGoalRange(tabs.scheduledGoals[-1]['id'])
+        app.processEvents()
+        assert more.property('hiddenGoals') == count - 3
+        assert len(value(overview, 'filteredGoals')) == count - 1
+    overview.setProperty('goalModel', None)
+
+
+def test_calendar_lane_order_is_stable(calendar_ui, app):
+    root, _, overview, calendar, _, _ = calendar_ui
+    goals = [dict(id=key, name=key, color='', startDate='2032-02-10', endDate='2032-02-12')
+             for key in ['c', 'b', 'a']]
+    calendar.setProperty('goals', goals)
+    app.processEvents()
+    assert [b['goal']['id'] for b in value(calendar, 'weeks')[2]['bars']] == ['a', 'b']
+    calendar.setProperty('goals', list(reversed(goals)))
+    app.processEvents()
+    assert [b['goal']['id'] for b in value(calendar, 'weeks')[2]['bars']] == ['a', 'b']
+    # The hidden third lane cannot capture a background double-click on another day.
+    day = find(root, 'reminderDay_2032-02-09')
+    point = day.mapToScene(QPointF(day.width()/2, 63)).toPoint()
+    QTest.mouseDClick(root, Qt.LeftButton, Qt.NoModifier, point)
+    app.processEvents()
+    assert overview.findChild(QObject, 'goalRangeDialog').property('visible')
+
+
+def test_agenda_goal_actions_update_calendar(calendar_ui, app):
+    root, _, overview, calendar, _, click = calendar_ui
+    tabs = TabModel()
+    tabs.addTab('Main')
+    overview.setProperty('goalModel', tabs)
+    goal = tabs.createScheduledGoal('Release', '2032-02-28', '2032-02-29')
+    app.processEvents()
+    click('goalActions_' + goal)
+    click('editGoalRange_' + goal)
+    dialog = overview.findChild(QObject, 'goalRangeDialog')
+    assert dialog.property('visible')
+    dialog.findChild(QObject, 'goalRangeEnd').setProperty('text', '2032-03-02')
+    click('saveGoalRange')
+    assert find(root, 'reminderDay_2032-03-02').property('goalsCount') == 1
+    click('goalActions_' + goal)
+    click('clearGoalRange_' + goal)
+    assert not value(overview, 'filteredGoals')
+    assert find(root, 'reminderDay_2032-03-02').property('goalsCount') == 0
+    assert tabs.tabCount == 2
+    overview.setProperty('goalModel', None)

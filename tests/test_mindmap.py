@@ -2502,6 +2502,9 @@ def test_qml_node_reminder_controls_and_overview(project, app, tmp_path, actiond
     try:
         overview = find(window.contentItem(), 'reminderOverview')
         assert overview.isVisible()
+        overview.setProperty('selectedDate', '')
+        m.select(node_id, 'only')
+        QTest.qWait(40)
         click(window.findChild(QObject, 'mindmapActionsButton'))
         button = window.findChild(QObject, 'mindmapReminder')
         click(button)
@@ -2513,6 +2516,8 @@ def test_qml_node_reminder_controls_and_overview(project, app, tmp_path, actiond
         QMetaObject.invokeMethod(dialog, 'accept')
         QTest.qWait(80)
         assert m.reminderData(node_id)['reminderAt'] == date + ' ' + clock
+        QMetaObject.invokeMethod(window.findChild(QObject, 'mindmapPane'), 'fitMap')
+        QTest.qWait(80)
         badge = find(window.contentItem(), 'mindmapReminderBadge_' + node_id)
         assert badge.isVisible()
         click(badge)
@@ -2525,8 +2530,10 @@ def test_qml_node_reminder_controls_and_overview(project, app, tmp_path, actiond
         pm.showTabCanvas()
         QTest.qWait(40)
         assert overview.isVisible()
+        click(find(window.contentItem(), 'reminderActions_' + node_id))
         click(find(window.contentItem(), 'openReminder_' + node_id))
         assert pm.mindmapVisible and m.selectedId == node_id
+        click(find(window.contentItem(), 'reminderActions_' + node_id))
         click(find(window.contentItem(), 'editReminder_' + node_id))
         assert dialog.property('nodeId') == node_id
         assert dialog.property('dateValue') == date
@@ -2557,6 +2564,7 @@ def test_qml_node_reminder_controls_and_overview(project, app, tmp_path, actiond
             assert viewport_bottom <= window.height()
             window.grabWindow().save(str(tmp_path / f"mindmap-reminders-{width}-{zoom}.png"))
         window.grabWindow().save(str(tmp_path / 'mindmap-reminders.png'))
+        click(find(window.contentItem(), 'reminderActions_' + node_id))
         click(find(window.contentItem(), 'clearReminder_' + node_id))
         assert not m.reminders
         m.select(next(iter(m.links)), 'toggle')
@@ -4039,6 +4047,7 @@ def test_qml_weekday_actions_reminder_reschedule_cancel_and_badge(project, app, 
     engine.warnings.connect(lambda messages: warnings.extend(message.toString() for message in messages))
     window = engine.rootObjects()[0]
     window.show()
+    window.findChild(QObject, "reminderOverview").setProperty("selectedDate", "")
     pm.showMindmap()
     QTest.qWait(100)
 
@@ -4080,9 +4089,12 @@ def test_qml_weekday_actions_reminder_reschedule_cancel_and_badge(project, app, 
         assert badge.x() + badge.width() <= label.x()
         row = find(window.contentItem(), 'reminderRow_plan_' + node_id)
         assert row and row.isVisible()
+        actions = find(window.contentItem(), 'reminderActions_plan_' + node_id)
+        QMetaObject.invokeMethod(actions, 'clicked')
+        QTest.qWait(30)
         edit = find(window.contentItem(), 'editReminder_plan_' + node_id)
         assert edit.property('text') == 'Reschedule'
-        QMetaObject.invokeMethod(edit, 'clicked')
+        QMetaObject.invokeMethod(edit, 'triggered')
         QTest.qWait(30)
         menu = row.findChild(QObject, 'reschedulePlanMenu_' + node_id)
         assert menu and menu.property('visible')
@@ -4098,8 +4110,10 @@ def test_qml_weekday_actions_reminder_reschedule_cancel_and_badge(project, app, 
         QTest.qWait(50)
         assert m.planData(node_id)['planState'] == 'combined'
         window.grabWindow().save(str(tmp_path / 'weekday-planning.png'))
+        QMetaObject.invokeMethod(find(window.contentItem(), 'reminderActions_plan_' + node_id), 'clicked')
+        QTest.qWait(30)
         cancel = find(window.contentItem(), 'clearReminder_plan_' + node_id)
-        QMetaObject.invokeMethod(cancel, 'clicked')
+        QMetaObject.invokeMethod(cancel, 'triggered')
         QTest.qWait(30)
         assert node_id not in m.plan_schedules
         assert node_id in m.reminders
