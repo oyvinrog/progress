@@ -232,6 +232,14 @@ class MindMapController(QObject):
     def _tab_id(self, node):
         return self.links.get(_content(node).id) if node is not None else None
 
+    @Slot(str, result='QVariantMap')
+    def goalData(self, node_id):
+        """Return the existing goal for a node or one of its references."""
+        tab_id = self._tab_id(self._find(node_id))
+        if self._tabs is None or tab_id is None:
+            return {}
+        return self._tabs.getTabSummary(self._tabs.goalIndex(tab_id))
+
     @staticmethod
     def _validate_references(mindmap, links, references):
         if not isinstance(references, dict):

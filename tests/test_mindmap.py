@@ -4259,6 +4259,59 @@ def test_qml_create_scheduled_node_goal(project, app, actiondraw_window, action_
     assert tabs.scheduledGoals[0]['endDate'] == '2032-03-02'
 
 
+@pytest.mark.parametrize('action_name', ['mindmapEditGoalRange', 'mindmapContextEditGoalRange'])
+def test_qml_set_range_on_existing_goal(project, app, actiondraw_window, action_name):
+    pm, tabs, tasks, diagram = project
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    m = pm.mindmap
+    node = next(iter(m.links))
+    goal_id = m.links[node]
+    m.select(node)
+    QTest.qWait(100)
+    window.findChild(QObject, 'mindmapNodeMenu').setProperty('targetNodeId', node)
+    action = window.findChild(QObject, action_name)
+    dialog = window.findChild(QObject, 'mindmapGoalRangeDialog')
+    count = tabs.tabCount
+
+    def invoke(obj, method):
+        assert QMetaObject.invokeMethod(obj, method)
+        QTest.qWait(30)
+
+    assert action.property('enabled')
+    invoke(action, 'triggered')
+    assert dialog.property('visible') and dialog.property('goalId') == goal_id
+    assert dialog.findChild(QObject, 'goalRangeName').property('readOnly')
+    start = dialog.findChild(QObject, 'goalRangeStart')
+    end = dialog.findChild(QObject, 'goalRangeEnd')
+    start.setProperty('text', '2032-02-29')
+    end.setProperty('text', '2032-03-02')
+    invoke(dialog.findChild(QObject, 'cancelGoalRange'), 'clicked')
+    assert not tabs.scheduledGoals
+    invoke(action, 'triggered')
+    start.setProperty('text', '2032-02-29')
+    end.setProperty('text', '2032-03-02')
+    # Saving must retain the captured goal if the mindmap selection changes.
+    m.select(m.map.root.id)
+    invoke(dialog.findChild(QObject, 'saveGoalRange'), 'clicked')
+    assert not dialog.property('visible')
+    assert tabs.tabCount == count and m.links[node] == goal_id
+    assert tabs.scheduledGoals[0]['id'] == goal_id
+    assert tabs.scheduledGoals[0]['startDate'] == '2032-02-29'
+    assert tabs.scheduledGoals[0]['endDate'] == '2032-03-02'
+    assert pm.hasUnsavedChanges() and pm.mindmapVisible
+    assert not action.property('enabled')
+    m.select(node)
+    invoke(action, 'triggered')
+    assert start.property('text') == '2032-02-29'
+    assert end.property('text') == '2032-03-02'
+    end.setProperty('text', '2032-03-05')
+    invoke(dialog.findChild(QObject, 'saveGoalRange'), 'clicked')
+    assert tabs.scheduledGoals[0]['endDate'] == '2032-03-05'
+
+
 def test_completion_checkbox_follows_immediate_parent(project):
     m = project[0].mindmap
     parent = m.map.root.add_child('Measured parent')

@@ -383,6 +383,12 @@ FocusScope {
                             onTriggered: nodeGoalRangeDialog.showForNode(pane.controller.selectedId, pane.controller.selectedNode.text)
                         }
                         MenuItem {
+                            objectName: "mindmapEditGoalRange"
+                            text: "Set/Edit time range…"
+                            enabled: pane.controller && pane.controller.selectedNode.isTab === true
+                            onTriggered: nodeGoalRangeDialog.showExistingGoal(pane.controller.selectedId)
+                        }
+                        MenuItem {
                             text: "Open goal"
                             enabled: pane.controller && pane.controller.selectedNode.isTab === true
                             onTriggered: pane.controller.activate(pane.controller.selectedId)
@@ -1390,6 +1396,13 @@ FocusScope {
                 enabled: pane.controller && pane.controller.canCreateTab
                 onTriggered: nodeGoalRangeDialog.showForNode(nodeMenu.targetNodeId, pane.controller.selectedNode.text)
             }
+            IconMenuItem {
+                iconKey: "tab"
+                objectName: "mindmapContextEditGoalRange"
+                text: "Set/Edit time range…"
+                enabled: pane.controller && pane.controller.selectedNode.isTab === true
+                onTriggered: nodeGoalRangeDialog.showExistingGoal(nodeMenu.targetNodeId)
+            }
             MenuSeparator {}
             IconMenuItem {
                 iconKey: "progress"
@@ -1471,6 +1484,11 @@ FocusScope {
         id: nodeGoalRangeDialog
         objectName: "mindmapGoalRangeDialog"
         nodeController: pane.controller
+        goalModel: pane.tabModel
+        function showExistingGoal(nodeId) {
+            var goal = pane.controller.goalData(nodeId)
+            if (goal.id) show(goal, "")
+        }
         onClosed: pane.focusMap()
     }
     Dialog {
