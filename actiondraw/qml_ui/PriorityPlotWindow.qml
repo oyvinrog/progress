@@ -12,6 +12,7 @@ Window {
     title: "Priority Plot"
     color: "#0a141d"
 
+    property var planController: null
     property var tabModel: null
     property var tabModelRef: tabModel
     property var projectManager: null
@@ -20,6 +21,17 @@ Window {
     property int pendingDeleteTabIndex: -1
     property string pendingDeleteTabName: ""
     property string savedSelectionId: ""
+
+    function openGoalPlan(tabIndex) {
+        if (!planController || tabIndex < 0 || tabIndex >= modelCount()) return
+        goalPlanMenu.goalId = tabModelRef.getTabSummary(tabIndex).id
+        goalPlanMenu.popup()
+    }
+    GoalPlanMenu {
+        id: goalPlanMenu
+        objectName: "priorityGoalPlanMenu"
+        controller: root.planController
+    }
 
     function rememberSelection() {
         savedSelectionId = tabModelRef && selectedTabIndex >= 0
@@ -142,7 +154,7 @@ Window {
                 }
 
                 Text {
-                    text: "Drag points and release to update time, value, and tab priority ordering."
+                    text: "Drag points to adjust priorities. Right-click a point to add it to your plan."
                     color: "#9ec6e2"
                     font.pixelSize: 12
                 }
@@ -243,6 +255,7 @@ Window {
                 Layout.fillHeight: true
                 tabModel: root.tabModelRef
                 selectedTabIndex: root.selectedTabIndex
+                onPointPlanRequested: function(tabIndex) { root.openGoalPlan(tabIndex) }
                 onPointClicked: function(tabIndex) {
                     root.selectedTabIndex = tabIndex
                 }
@@ -265,7 +278,7 @@ Window {
                     spacing: 8
 
                     Text {
-                        text: "Tab Scores"
+                        text: "Goal Scores"
                         color: "#d9efff"
                         font.pixelSize: 14
                         font.bold: true
@@ -287,7 +300,7 @@ Window {
 
                         delegate: Rectangle {
                             width: tabScoreList.width
-                            height: 92
+                            height: 116
                             radius: 8
                             property bool isSelected: index === root.selectedTabIndex
                             color: isSelected ? "#244e67" : "#173245"
@@ -318,6 +331,14 @@ Window {
                                     font.pixelSize: 10
                                     elide: Text.ElideRight
                                     width: parent.width
+                                }
+
+                                Button {
+                                    objectName: "priorityAddToPlan_" + index
+                                    text: "Add to plan"
+                                    height: 24
+                                    enabled: !!root.planController
+                                    onClicked: root.openGoalPlan(index)
                                 }
 
                                 Row {
@@ -463,7 +484,7 @@ Window {
                 wrapMode: Text.WordWrap
                 color: "#9fc6de"
                 font.pixelSize: 11
-                text: "This removes the underlying tab and its saved tasks."
+                text: "This removes the underlying goal and its saved tasks."
             }
         }
     }

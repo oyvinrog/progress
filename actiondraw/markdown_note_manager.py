@@ -132,7 +132,7 @@ class MarkdownNoteManager(QObject):
             tab_model = getattr(self._project_manager, "_tab_model", None)
             if tab_model is not None:
                 tab_name = str(getattr(tab_model, "currentTabName", "") or "").strip()
-        title = f"{tab_name} Markdown" if tab_name else "Tab Markdown"
+        title = f"{tab_name} Markdown" if tab_name else "Goal Markdown"
         self._set_editor_state("tab", "", float(x), float(y), True)
         self._editor.open(
             "",

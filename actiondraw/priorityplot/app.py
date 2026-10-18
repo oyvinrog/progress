@@ -10,6 +10,7 @@ from PySide6.QtQml import QQmlApplicationEngine
 from PySide6.QtWidgets import QApplication
 
 from actiondraw.qml import QML_DIR
+from actiondraw.mindmap import MindMapController
 from actiondraw.theme import configure_actiondraw_theme
 from task_model import Tab, TabModel
 
@@ -57,7 +58,8 @@ def main() -> int:
 
     engine = QQmlApplicationEngine()
     tab_model = _build_demo_tab_model()
-    engine.setInitialProperties({"tabModel": tab_model})
+    plan_controller = MindMapController(tab_model)
+    engine.setInitialProperties({"tabModel": tab_model, "planController": plan_controller})
     engine.addImportPath(str(QML_DIR))
     engine.load(QUrl.fromLocalFile(str(PRIORITY_PLOT_QML_PATH)))
 

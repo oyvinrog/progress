@@ -12,6 +12,15 @@ MenuBar {
     property var saveDialog: null
     property var loadDialog: null
     property var notificationSettingsDialog: null
+    property var server: null
+
+    ServerDialog {
+        id: serverDialog
+        parent: root ? root.contentItem : menuBar
+        server: menuBar.server
+        manager: menuBar.projectManager
+        windowRoot: menuBar.root
+    }
 
     function hasDiagramModel() {
         return diagramModel !== null && diagramModel !== undefined
@@ -61,9 +70,9 @@ MenuBar {
         }
 
         MenuItem {
-            text: "Tab Markdown...\tCtrl+Alt+M"
+            text: "Goal Markdown...\tCtrl+Alt+M"
             icon.name: "document-edit"
-            enabled: hasDiagramModel()
+            enabled: hasDiagramModel() && !root.emptyProject
             onTriggered: root.openTabMarkdownHub()
         }
 
@@ -108,6 +117,12 @@ MenuBar {
         MenuSeparator {}
 
         MenuItem {
+            text: menuBar.server && menuBar.server.running ? "Server…" : "Start Server…"
+            enabled: !!menuBar.server
+            onTriggered: serverDialog.open()
+        }
+
+        MenuItem {
             text: "Exit"
             onTriggered: root.close()
         }
@@ -115,7 +130,7 @@ MenuBar {
 
     Menu {
         title: "Edit"
-        enabled: !root.mindmapOpen
+        enabled: !root.emptyProject && !root.mindmapOpen
 
         MenuItem {
             text: "Copy\t\t\tCtrl+C"
@@ -171,7 +186,7 @@ MenuBar {
 
     Menu {
         title: "View"
-        enabled: !root.mindmapOpen
+        enabled: !root.emptyProject && !root.mindmapOpen
 
         MenuItem {
             text: "Show Grid"
@@ -224,13 +239,13 @@ MenuBar {
 
         MenuItem {
             text: "Connect All Items"
-            enabled: !root.mindmapOpen
+            enabled: !root.emptyProject && !root.mindmapOpen
             onTriggered: diagramModel && diagramModel.connectAllItems()
         }
 
         Menu {
             title: "Arrange Diagram"
-            enabled: !root.mindmapOpen && hasDiagramModel() && diagramModel.count > 0
+            enabled: !root.emptyProject && !root.mindmapOpen && hasDiagramModel() && diagramModel.count > 0
 
             MenuItem {
                 text: "Grid Layout"
@@ -257,16 +272,13 @@ MenuBar {
 
         MenuItem {
             id: drawingModeMenuItem
-            enabled: !root.mindmapOpen
+            enabled: !root.emptyProject && !root.mindmapOpen
             text: diagramModel && diagramModel.drawingMode ? "Exit Drawing Mode" : "Drawing Mode"
             checkable: true
             checked: !!(hasDiagramModel() && diagramModel.drawingMode)
             onTriggered: diagramModel && diagramModel.setDrawingMode(checked)
         }
-    }
-
-    Menu {
-        title: "Tools"
+        MenuSeparator {}
 
         MenuItem {
             text: "Notification Settings..."

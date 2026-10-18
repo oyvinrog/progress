@@ -120,7 +120,7 @@ Window {
                     continue
                 fallback.push({ itemId: "tab:" + summary.id, sourceType: "tab",
                                 sourceId: summary.id, tabIndex: i, name: summary.name,
-                                sourceLabel: "Tab", icon: summary.icon || "▣",
+                                sourceLabel: "Goal", icon: summary.icon || "▣",
                                 color: summary.color || "#4aa3ff",
                                 completionPercent: summary.completionPercent || 0,
                                 activeTaskTitle: summary.activeTaskTitle || "",
@@ -1070,7 +1070,7 @@ Window {
 
     Dialog {
         id: createTabDialog
-        title: "New Tab"
+        title: "New Goal"
         modal: true
         standardButtons: Dialog.Ok | Dialog.Cancel
         onAccepted: root.confirmCreateTab()
@@ -1088,7 +1088,7 @@ Window {
             TextField {
                 id: createNameField
                 Layout.fillWidth: true
-                placeholderText: "Tab name"
+                placeholderText: "Goal name"
                 selectByMouse: true
                 onAccepted: createTabDialog.accept()
             }

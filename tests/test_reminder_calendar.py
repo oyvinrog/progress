@@ -3,7 +3,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
-from PySide6.QtCore import QObject, Qt, QUrl
+from PySide6.QtCore import QObject, Qt, QUrl, QPointF
 from PySide6.QtQml import QQmlComponent, QQmlEngine
 from PySide6.QtTest import QTest
 from PySide6.QtQuick import QQuickWindow
@@ -30,6 +30,7 @@ Window {
     QtObject {
         id: manager
         function addStandaloneReminder(title, date, notify) { host.savedReminder = date; return true }
+        function switchTab(index) { host.action = "open-goal-" + index }
         function openTabTask(tab, task) { host.action = "open-task" }
         function openMindmapReminder(node) { host.action = "open-node" }
         function clearReminder(tab, task) { host.action = "clear-task" }
@@ -49,6 +50,7 @@ Window {
     }
     ReminderOverview {
         width: parent.width
+        nowTimestamp: new Date(2032, 1, 28, 12).getTime() / 1000
         windowRoot: host; projectManager: manager; dialogs: dialogs; planController: plan
     }
 }
@@ -103,7 +105,8 @@ def calendar_ui(app, request, qml_cleanup):
     def click(name):
         QTest.qWait(30)
         item = find(root, name)
-        point = item.mapToScene(item.boundingRect().center()).toPoint()
+        local = QPointF(item.width()/2, 10) if name.startswith("reminderDay_") else item.boundingRect().center()
+        point = item.mapToScene(local).toPoint()
         QTest.mouseClick(root, Qt.LeftButton, Qt.NoModifier, point)
         app.processEvents()
 
@@ -122,7 +125,7 @@ def test_counts_local_dates_future_only_and_all_kinds(calendar_ui):
                 reminder("2032-02-27T23:59:00")]
     refresh(entries)
     assert value(overview, "dayCounts") == {"2032-02-28": 4, "2032-02-29": 1}
-    assert len(value(overview, "filteredReminders")) == 5
+    assert len(value(overview, "filteredReminders")) == 4
     assert calendar.property("todayKey") == "2032-02-28"
     assert find(calendar.window(), "reminderDay_2032-02-28").property("reminderCount") == 4
     overview.setProperty("nowTimestamp", datetime(2032, 2, 29, 0, 0).timestamp())
@@ -145,7 +148,7 @@ def test_selection_reset_and_live_updates(calendar_ui):
     assert calendar.property("displayedMonth") == 1
     assert value(overview, "filteredReminders") == []
     assert find(root, "reminderEmptyDay").isVisible()
-    assert find(root, "reminderEmptyDay").property("text") == "No reminders for this day"
+    assert find(root, "reminderEmptyDay").property("text") == "No goals or reminders for this day"
     click("reminderAllDays")
     assert overview.property("selectedDate") == ""
     assert len(value(overview, "filteredReminders")) == 2
@@ -169,7 +172,7 @@ def test_monday_grid_leap_year_and_month_navigation(calendar_ui):
     assert calendar.property("displayedMonth") == 11
     click("reminderToday")
     assert calendar.property("displayedMonth") == 1
-    assert overview.property("selectedDate") == "2032-02-29"
+    assert overview.property("selectedDate") == "2032-02-28"
     calendar.setProperty("displayedYear", 2033)
     assert sum(d["inMonth"] for d in value(calendar, "calendarDays")) == 28
 
@@ -178,10 +181,14 @@ def test_responsive_layout_collapse_and_row_actions(calendar_ui, app):
     root, host, _, _, refresh, click = calendar_ui
     refresh([reminder("2032-02-29T18:00:00")])
     assert find(root, "reminderCalendarContent").property("columns") == 2
+    click("reminderDay_2032-02-29")
+    click("reminderActions_task")
     click("openReminder_task")
     assert host.property("action") == "open-task"
+    click("reminderActions_task")
     click("editReminder_task")
     assert host.property("action") == "edit-task"
+    click("reminderActions_task")
     click("clearReminder_task")
     assert host.property("action") == "refresh"
     root.setWidth(600)
@@ -201,13 +208,17 @@ def test_responsive_layout_collapse_and_row_actions(calendar_ui, app):
 def test_other_reminder_actions_preserved(calendar_ui, kind, node, open_action, edit_action):
     _, host, _, _, refresh, click = calendar_ui
     refresh([reminder("2032-02-29T18:00:00", kind, node)])
+    click("reminderDay_2032-02-29")
     suffix = ("plan_" if kind == "kanban_schedule" else "") + (node or kind)
     if open_action:
+        click("reminderActions_" + suffix)
         click("openReminder_" + suffix)
         assert host.property("action") == open_action
     if edit_action:
+        click("reminderActions_" + suffix)
         click("editReminder_" + suffix)
         assert host.property("action") == edit_action
+    click("reminderActions_" + suffix)
     click("clearReminder_" + suffix)
     assert host.property("action") == "refresh"
 
@@ -237,3 +248,58 @@ def test_new_reminder_uses_selected_date_and_all_days_defaults(calendar_ui, app)
     actual = datetime.fromisoformat(dialog.property("dateValue") + "T" + dialog.property("timeValue")).timestamp()
     assert before - 60 <= actual <= after
     dialog.reject()
+
+
+def test_today_initial_selection_and_sorted_agenda(calendar_ui):
+    _, _, overview, calendar, refresh, click = calendar_ui
+    assert overview.property('selectedDate') == '2032-02-28'
+    refresh([reminder('2032-02-28T22:00:00'), reminder('2032-02-28T15:00:00')])
+    assert [r['reminderText'] for r in value(overview, 'filteredReminders')] == [
+        '2032-02-28T15:00:00', '2032-02-28T22:00:00']
+    click('reminderAllDays')
+    overview.setProperty('nowTimestamp', datetime(2032, 2, 29, 12).timestamp())
+    assert overview.property('selectedDate') == ''
+    click('reminderToday')
+    assert overview.property('selectedDate') == '2032-02-29'
+
+
+@pytest.mark.parametrize('width,height', [(1200, 800), (600, 850), (1000, 420)])
+def test_compact_layout_geometry(calendar_ui, app, tmp_path, width, height):
+    from task_model import TabModel
+    root, host, overview, calendar, refresh, _ = calendar_ui
+    tabs = TabModel()
+    tabs.addTab('Main')
+    overview.setProperty('goalModel', tabs)
+    for i in range(10):
+        tabs.createScheduledGoal('Release milestone %02d with a long title' % i, '2032-02-01', '2032-03-02')
+    refresh([reminder('2032-02-28T18:00:00')])
+    root.setWidth(width)
+    root.setHeight(height)
+    # The fixture host normally omits height; bind the actual window for this check.
+    calendar.setProperty('viewportHeightLimit', max(130, min(456, height * (.5 if width >= 960 else .3) - 30)))
+    QTest.qWait(100)
+    agenda = find(root, 'planningAgenda')
+    assert agenda.width() <= width
+    assert calendar.property('gridHeight') == 432
+    if width >= 960:
+        assert round(agenda.width()) == 300
+        assert agenda.x() >= calendar.x() + calendar.width()
+    else:
+        assert agenda.height() <= 180
+        assert agenda.y() >= calendar.y() + calendar.height()
+    assert root.grabWindow().save(str(tmp_path / ('compact-%s-%s.png' % (width, height))))
+    overview.setProperty('goalModel', None)
+
+
+def test_countdown_refresh_keeps_reminder_menu_open(calendar_ui):
+    root, host, _, _, refresh, click = calendar_ui
+    entry = reminder('2032-02-28T18:00:00')
+    refresh([entry])
+    click('reminderActions_task')
+    action = find(root, 'editReminder_task')
+    assert action.isVisible()
+    refresh([dict(entry, countdownText='0:59')])
+    assert find(root, 'editReminder_task') == action
+    assert action.isVisible()
+    click('editReminder_task')
+    assert host.property('action') == 'edit-task'

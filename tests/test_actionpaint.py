@@ -120,6 +120,7 @@ def test_action_paint_is_isolated_per_tab_and_serialized(app):
     task_model = TaskModel()
     diagram_model = DiagramModel(task_model=task_model)
     tab_model = TabModel()
+    tab_model.addTab("Main")
     manager = ProjectManager(task_model, diagram_model, tab_model)
     paint = ActionPaintModel(tab_model=tab_model)
 
@@ -139,6 +140,7 @@ def test_action_paint_is_isolated_per_tab_and_serialized(app):
 
 def test_legacy_tab_defaults_to_empty_action_paint(app):
     tab_model = TabModel()
+    tab_model.addTab("Main")
     assert tab_model.getCurrentTabData().action_paint == empty_action_paint_state()
 
 
@@ -151,6 +153,7 @@ def test_encrypted_project_round_trip_and_dirty_detection(app, tmp_path, monkeyp
     task_model = TaskModel()
     diagram_model = DiagramModel(task_model=task_model)
     tab_model = TabModel()
+    tab_model.addTab("Main")
     manager = ProjectManager(task_model, diagram_model, tab_model)
     paint = ActionPaintModel(tab_model=tab_model)
     manager._last_saved_snapshot = manager._serialize_project_payload(manager._build_project_data())
@@ -164,6 +167,7 @@ def test_encrypted_project_round_trip_and_dirty_detection(app, tmp_path, monkeyp
     task_model_2 = TaskModel()
     diagram_model_2 = DiagramModel(task_model=task_model_2)
     tab_model_2 = TabModel()
+    tab_model_2.addTab("Main")
     manager_2 = ProjectManager(task_model_2, diagram_model_2, tab_model_2)
     paint_2 = ActionPaintModel(tab_model=tab_model_2)
     manager_2.loadProject(str(path))
@@ -196,6 +200,7 @@ def test_actionpaint_mindmap_sequence_order_scope_and_undo(app):
     tasks = TaskModel()
     diagram = DiagramModel(task_model=tasks)
     tabs = TabModel()
+    tabs.addTab("Main")
     manager = ProjectManager(tasks, diagram, tabs)
     paint = ActionPaintModel(tab_model=tabs)
     mindmap = manager.mindmap
@@ -243,6 +248,7 @@ def test_actionpaint_mindmap_sequence_persists(app, tmp_path, monkeypatch):
     tasks = TaskModel()
     diagram = DiagramModel(task_model=tasks)
     tabs = TabModel()
+    tabs.addTab("Main")
     manager = ProjectManager(tasks, diagram, tabs)
     paint = ActionPaintModel(tab_model=tabs)
     paint.addAction('Prepare', 30, 10)
@@ -267,6 +273,7 @@ def test_integrated_actionpaint_window_opens(app, actiondraw_window):
     task_model = TaskModel()
     diagram_model = DiagramModel(task_model=task_model)
     tab_model = TabModel()
+    tab_model.addTab("Main")
     manager = ProjectManager(task_model, diagram_model, tab_model)
     engine = actiondraw_window(diagram_model, task_model, manager, tab_model=tab_model)
     root = engine.rootObjects()[0]
@@ -318,6 +325,7 @@ def test_actionpaint_add_to_mindmap_button(app, actiondraw_window):
     tasks = TaskModel()
     diagram = DiagramModel(task_model=tasks)
     tabs = TabModel()
+    tabs.addTab("Main")
     manager = ProjectManager(tasks, diagram, tabs)
     engine = actiondraw_window(diagram, tasks, manager, tab_model=tabs)
     root = engine.rootObjects()[0]

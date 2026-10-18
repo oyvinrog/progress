@@ -13,6 +13,7 @@ from task_model import ProjectManager, TabModel, TaskModel
 @pytest.fixture
 def project(app):
     tasks, tabs = TaskModel(), TabModel()
+    tabs.addTab("Main")
     diagram = DiagramModel(tasks)
     pm = ProjectManager(tasks, diagram, tabs)
     tabs.addTab('dagens oppgaver')
@@ -197,7 +198,7 @@ def test_qml_add_tab_search_and_edit(project, app, actiondraw_window):
     QTest.qWait(100)
 
     def find_item(item, name):
-        if item.objectName() == name:
+        if item.objectName() == name or item.property('text') == name:
             return item
         for nested in item.childItems():
             found = find_item(nested, name)
@@ -212,7 +213,9 @@ def test_qml_add_tab_search_and_edit(project, app, actiondraw_window):
 
     try:
         click(find_item(window.contentItem(), 'mindmapNodeMouse_' + roots[daily]), Qt.RightButton)
+        click(find_item(window.contentItem(), 'Goals & progress'))
         action = window.findChild(QObject, 'mindmapAddTab')
+        assert action.isVisible()
         click(action)
         dialog = window.findChild(QObject, 'mindmapTabReferenceDialog')
         assert dialog.property('visible')
@@ -434,3 +437,42 @@ def test_plan_scheduling_references_deduplicate_and_share_badges(project):
     m.scheduleNodeToWeekday(roots[lunch], 0)
     tabs.removeTab(next(i for i, tab in enumerate(tabs.getAllTabs()) if tab.id == lunch))
     assert roots[lunch] not in m.plan_schedules
+
+
+def test_named_child_from_plus_uses_shared_branch_and_single_undo(project):
+    m = project[0].mindmap
+    ref = reference(project)
+    before = m.to_dict()
+    assert not m.addChildNamed(ref, '   ')
+    assert not m.addChildNamed('missing', 'Thought')
+    assert m.to_dict() == before
+    assert m.addChildNamed(ref, '  New shared thought  ')
+    added = m.selectedNode['sourceId']
+    assert m.map.find(added).text == 'New shared thought'
+    assert m.map.find(added).parent.id == project[6][project[5]]
+    assert m.map.find(ref).children == []
+    m.undo()
+    assert m.to_dict() == before
+
+
+def test_completion_checkboxes_use_reference_placement_parent(project):
+    pm, tabs, tasks, diagram, daily, lunch, roots, child = project
+    m = pm.mindmap
+    ref = reference(project)
+    projected_child = occurrence(m, child, ref)
+
+    def checkboxes():
+        return {n['id']: n['showCompletionCheckbox'] for n in m.nodes}
+
+    m.toggleMeasureProgress(roots[daily])
+    assert checkboxes()[ref]
+    assert not checkboxes()[projected_child]
+    m.toggleMeasureProgress(roots[lunch])
+    assert checkboxes()[projected_child]
+    m.set_scope(lunch)
+    assert not checkboxes()[roots[lunch]]
+    assert checkboxes()[child]
+    m.set_scope(daily)
+    m.toggleMeasureProgress(roots[daily])
+    assert not checkboxes()[ref]
+    assert checkboxes()[projected_child]

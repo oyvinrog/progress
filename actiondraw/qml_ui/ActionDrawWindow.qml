@@ -13,6 +13,8 @@ ApplicationWindow {
     title: {
         var tabName = activeTabDisplayName()
         var projectName = projectDisplayName()
+        if (root.emptyProject)
+            return "ActionDraw - " + (projectName || "New project")
         if (projectName !== "")
             return "ActionDraw - " + tabName + " - " + projectName
         return "ActionDraw - " + tabName
@@ -72,6 +74,7 @@ ApplicationWindow {
     property var taskModelRef: taskModel
     property var projectManagerRef: projectManager
     property var markdownNoteManagerRef: markdownNoteManager
+    readonly property bool emptyProject: tabModelRef && tabModelRef.tabCount === 0
     property var tabModelRef: tabModel
     property var priorityPlotWindowRef: null
     property var kanbanWindowRef: null
@@ -89,6 +92,7 @@ ApplicationWindow {
     property string _itemTooltipHoveredId: ""
 
     menuBar: ActionMenuBar {
+        server: typeof actiondrawServer !== "undefined" ? actiondrawServer : null
         root: root
         diagramModel: diagramModelRef
         projectManager: projectManagerRef
@@ -141,7 +145,7 @@ ApplicationWindow {
             if (name.length > 0)
                 return name
         }
-        return "Main"
+        return "New project"
     }
 
     function projectDisplayName() {
@@ -173,7 +177,8 @@ ApplicationWindow {
         }
         var win = component.createObject(root, {
             "tabModel": tabModelRef,
-            "projectManager": projectManagerRef
+            "projectManager": projectManagerRef,
+            "planController": typeof mindmapController !== "undefined" ? mindmapController : null
         })
         if (!win) {
             console.log("Failed to instantiate PriorityPlotWindow")
@@ -224,6 +229,7 @@ ApplicationWindow {
     }
 
     function openCausalModelWindow() {
+        if (root.emptyProject) return
         if (causalModelWindowRef) {
             causalModelWindowRef.show()
             causalModelWindowRef.raise()
@@ -245,6 +251,7 @@ ApplicationWindow {
     }
 
     function openActionPaintWindow() {
+        if (root.emptyProject) return
         if (actionPaintWindowRef) {
             actionPaintWindowRef.show()
             actionPaintWindowRef.raise()
@@ -404,7 +411,7 @@ ApplicationWindow {
         activeReminders = projectManager.getActiveReminders()
         if ((!hadReminders || !reminderOverviewTouched) && activeReminders.length > 0)
             reminderOverviewExpanded = true
-        if (activeReminders.length === 0)
+        if (activeReminders.length === 0 && (!root.tabModelRef || root.tabModelRef.scheduledGoals.length === 0))
             reminderOverviewTouched = false
     }
 
@@ -524,11 +531,14 @@ ApplicationWindow {
         viewport.contentY = targetY
     }
 
+    property bool defaultViewPending: false
     function applyDefaultView() {
-        if (!viewport || viewport.width <= 0 || viewport.height <= 0) {
-            Qt.callLater(root.applyDefaultView)
+        // The legacy canvas has no size while the mindmap is open. Wait for
+        // visibility/geometry changes instead of requeuing an endless idle loop.
+        defaultViewPending = true
+        if (!viewport || !viewport.visible || viewport.width <= 0 || viewport.height <= 0)
             return
-        }
+        defaultViewPending = false
 
         root.zoomLevel = clampZoom(0.95)
 
@@ -618,13 +628,13 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Ctrl+C"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
         onActivated: root.copySelectionToClipboard()
     }
 
     Shortcut {
         sequence: "Ctrl+V"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
         onActivated: {
             root.pasteFromClipboard()
         }
@@ -632,7 +642,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "F2"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null || tabModelRef !== null)
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null || tabModelRef !== null)
         onActivated: {
             if (root.selectedItemId && root.selectedItemId.length > 0) {
                 root.renameSelectedItem()
@@ -644,49 +654,49 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Ctrl+Return"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen))
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen))
         onActivated: root.addTaskOrConnectedTask()
     }
 
     Shortcut {
         sequence: "Ctrl+-"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen))
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen))
         onActivated: root.addTaskOrConnectedTaskBackward()
     }
 
     Shortcut {
         sequence: "Ctrl+Minus"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen))
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen))
         onActivated: root.addTaskOrConnectedTaskBackward()
     }
 
     Shortcut {
         sequence: "Ctrl+M"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
         onActivated: root.openMarkdownNoteForSelection()
     }
 
     Shortcut {
         sequence: "Ctrl+Alt+M"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
         onActivated: root.openTabMarkdownHub()
     }
 
     Shortcut {
         sequence: "Ctrl+Shift+M"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
         onActivated: root.openWorkspaceMarkdownHub()
     }
 
     Shortcut {
         sequence: "Ctrl+N"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen))
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null && (!markdownNoteManager || !markdownNoteManager.editorOpen))
         onActivated: root.addConnectedNote()
     }
 
     Shortcut {
         sequence: "Ctrl+K"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (tabModelRef !== null)
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (tabModelRef !== null)
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
             && !contractPopup.visible
@@ -699,7 +709,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Delete"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
@@ -709,7 +719,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Left"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
@@ -719,7 +729,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Right"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
@@ -729,7 +739,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Up"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
@@ -739,7 +749,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Down"
-        enabled: !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
+        enabled: !root.emptyProject && !root.mindmapOpen && !nodeTextPreview.visible && (diagramModel !== null)
             && root.selectedItemId.length > 0
             && (!dialogs || !dialogs.anyDialogVisible)
             && !reminderPopup.visible
@@ -749,9 +759,11 @@ ApplicationWindow {
 
     Timer {
         id: overviewRefreshTimer
+        objectName: "overviewRefreshTimer"
         interval: 1000
         repeat: true
-        running: true
+        running: root.visible && root.visibility !== Window.Minimized
+            && (root.activeReminders.length > 0 || root.activeContracts.length > 0)
         onTriggered: root.refreshOverviewData()
     }
 
@@ -1037,7 +1049,10 @@ ApplicationWindow {
         return Qt.point(vx, vy)
     }
 
+    property string tabDragCalendarDate: ""
     function clearTabDragPreview() {
+        tabDragCalendarDate = ""
+        planningOverview.clearGoalDrop()
         root.tabDragActive = false
         root.tabDragInsideViewport = false
         root.tabDragPreviewName = ""
@@ -1045,13 +1060,15 @@ ApplicationWindow {
         root.tabDragPreviewY = 0
     }
 
-    function updateTabDragHover(tabIndex, tabName, sceneX, sceneY, active) {
+    function updateTabDragHover(tabIndex, tabName, sceneX, sceneY, active, goalId) {
         if (!active) {
             root.clearTabDragPreview()
             return
         }
         root.tabDragActive = true
         root.tabDragPreviewName = tabName || ""
+        root.tabDragCalendarDate = planningOverview.updateGoalDrop(sceneX, sceneY)
+        if (root.tabDragCalendarDate) { root.tabDragInsideViewport = false; return }
 
         if (!diagramModel || tabIndex === undefined || tabIndex < 0) {
             root.tabDragInsideViewport = false
@@ -1073,7 +1090,14 @@ ApplicationWindow {
         root.tabDragPreviewY = snapped.y
     }
 
-    function handleTabDragRelease(tabIndex, sceneX, sceneY) {
+    function handleTabDragRelease(tabIndex, sceneX, sceneY, goalId) {
+        if (!goalId && tabModelRef && tabIndex >= 0)
+            goalId = tabModelRef.getTabSummary(tabIndex).id
+        if (planningOverview.dropGoal(goalId, sceneX, sceneY)) {
+            root.clearTabDragPreview()
+            return
+        }
+
         if (!projectManager || !diagramModel) {
             root.clearTabDragPreview()
             return
@@ -1201,6 +1225,7 @@ ApplicationWindow {
     }
 
     function openTabMarkdownHub() {
+        if (root.emptyProject) return
         if (!markdownNoteManager || !markdownNoteManager.openTabMarkdown)
             return
         var center = root.snapPoint(root.diagramCenterPoint())
@@ -1293,12 +1318,32 @@ ApplicationWindow {
         edgeCanvas: edgeCanvas
     }
 
+    Shortcut {
+        sequence: "Ctrl+Z"
+        enabled: root.emptyProject && emptyProjectPage.actionFocused
+        onActivated: mindmapController.undo()
+    }
+    Shortcut {
+        sequence: "Ctrl+Y"
+        enabled: root.emptyProject && emptyProjectPage.actionFocused
+        onActivated: mindmapController.redo()
+    }
+
+    EmptyProjectPage {
+        id: emptyProjectPage
+        anchors.fill: parent
+        visible: root.emptyProject
+        onAddGoalRequested: sidebarTabs.addNewTab()
+    }
+
     RowLayout {
+        visible: !root.emptyProject
         anchors.fill: parent
         anchors.margins: 18
         spacing: 14
 
         SidebarTabs {
+            selectedCalendarDate: planningOverview.selectedDate
             id: sidebarTabs
             tabModel: tabModelRef
             projectManager: projectManagerRef
@@ -1312,6 +1357,8 @@ ApplicationWindow {
             spacing: 10
 
             ReminderOverview {
+                id: planningOverview
+                goalModel: root.tabModelRef
                 planController: typeof mindmapController !== "undefined" ? mindmapController : null
                 Layout.fillWidth: true
                 windowRoot: root
@@ -1343,14 +1390,7 @@ ApplicationWindow {
                 dialogs.openMindmapReminderDialog(controller.sourceNodeId(nodeId), data.reminderAt, data.reminderSendNotification)
             }
             onQuickReminderRequested: function(nodeId, minutesFromNow) {
-                var data = controller.reminderData(nodeId)
-                var reminderAt = new Date()
-                reminderAt.setMinutes(reminderAt.getMinutes() + minutesFromNow)
-                projectManager.setMindmapReminder(
-                    nodeId,
-                    Qt.formatDateTime(reminderAt, "yyyy-MM-dd HH:mm"),
-                    data.reminderActive ? data.reminderSendNotification : false
-                )
+                projectManager.setMindmapReminderIn(nodeId, minutesFromNow)
             }
             onClearReminderRequested: function(nodeId) { projectManager.clearMindmapReminder(nodeId) }
         }
@@ -1517,7 +1557,7 @@ ApplicationWindow {
                         Layout.alignment: Qt.AlignVCenter
 
                         Text {
-                            text: "Current Tab: " + root.activeTabDisplayName()
+                            text: "Current Goal: " + root.activeTabDisplayName()
                             color: "#dfefff"
                             font.pixelSize: 13
                             font.bold: true
@@ -1538,7 +1578,7 @@ ApplicationWindow {
 
                     Button {
                         id: tabMarkdownButton
-                        text: "Tab Markdown"
+                        text: "Goal Markdown"
                         flat: true
                         padding: 0
                         Layout.alignment: Qt.AlignVCenter
@@ -1719,7 +1759,7 @@ ApplicationWindow {
                     spacing: 6
 
                     Text {
-                        text: "Linked From Tabs"
+                        text: "Linked From Goals"
                         color: "#9ed1f2"
                         font.pixelSize: 10
                         font.bold: true
@@ -1815,6 +1855,10 @@ ApplicationWindow {
 
             Flickable {
                 id: viewport
+                objectName: "diagramViewport"
+                onVisibleChanged: if (visible && root.defaultViewPending) Qt.callLater(root.applyDefaultView)
+                onWidthChanged: if (root.defaultViewPending) Qt.callLater(root.applyDefaultView)
+                onHeightChanged: if (root.defaultViewPending) Qt.callLater(root.applyDefaultView)
                 anchors.fill: parent
                 contentWidth: root.sceneWidth * root.zoomLevel
                 contentHeight: root.sceneHeight * root.zoomLevel
@@ -1942,7 +1986,7 @@ ApplicationWindow {
                         }
                         MenuItem {
                             id: drillToTabMenuItem
-                            text: "Drill to Tab"
+                            text: "Drill to Goal"
                             icon.name: "go-next"
                             visible: {
                                 if (!diagramModel || !projectManager || !tabModel || !diagramLayer.contextMenuItemId)
@@ -2727,7 +2771,7 @@ ApplicationWindow {
 
                                     Text {
                                         id: linkedSubtabPercent
-                                        text: Math.round(itemRect.linkedSubtabCompletion) + "% subtab"
+                                        text: Math.round(itemRect.linkedSubtabCompletion) + "% subgoal"
                                         color: "#8fd9ff"
                                         font.pixelSize: 9
                                         font.bold: true
@@ -4294,7 +4338,7 @@ ApplicationWindow {
                     model: [
                         "Ctrl+Enter  New Task",
                         "Ctrl+N  Connected Note",
-                        "Ctrl+K  Find Tab",
+                        "Ctrl+K  Find Goal",
                         "Ctrl+-  Backward Chain",
                         "Delete  Remove Node",
                         "Arrows  Connected Task",
@@ -4349,9 +4393,9 @@ ApplicationWindow {
             color: "#eaf7ff"
             font.pixelSize: 12
             font.bold: true
-            text: root.tabDragInsideViewport
+            text: root.tabDragCalendarDate ? "Drop to schedule on " + root.tabDragCalendarDate : root.tabDragInsideViewport
                 ? "Drop to create drill task"
-                : "Drag into drawing area"
+                : "Drag to a calendar day or drawing area"
         }
     }
 
@@ -4664,6 +4708,7 @@ ApplicationWindow {
     Connections {
         target: projectManager
         enabled: projectManager !== null
+        function onStandaloneRemindersChanged() { root.refreshActiveReminders() }
         function onTaskReminderDue(tabIndex, taskIndex, taskTitle, sendNotification) {
             root.showWindow()
             root.refreshActiveReminders()

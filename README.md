@@ -57,7 +57,7 @@ Encryption protects the saved project content. The outer file includes format
 and encryption metadata so ActionDraw can decrypt it. While a project is open,
 its content and cached key material are available to the running application.
 
-Optional `ntfy` notifications send reminder titles and tab or scope labels to
+Optional `ntfy` notifications send reminder titles and goal or scope labels to
 the configured server. Enable them only for content you intend to share with
 that service. See [Notifications](#notifications) for configuration.
 
@@ -76,24 +76,28 @@ To run the standalone priority plot:
 priorityplot
 ```
 
-Start a project, add your first tabs, and choose **Mindmap** to connect the
-plan. Save the project to select its encryption mode.
+New projects open on a blank starting page. Choose **Add goal**, give it a name,
+and start organizing its steps in the goal’s mind map. Deleting the last goal
+returns to the starting page; empty projects can also be saved and reopened.
+Save the project to select its encryption mode.
 
 [Follow the walkthrough](#plan-a-project-with-the-mindmap) ·
 [View keyboard shortcuts](#mindmap-shortcuts)
 
 ## Plan a project with the mindmap
 
-The screenshots use a fictional **Autumn launch** project. Each project tab is
+The screenshots use a fictional **Autumn launch** project. Each project goal is
 also a node in the map, so you can organize the big picture and open the work
 behind it from the same place.
 
 ### 1. Lay out the whole project
 
-Choose **Mindmap** above the sidebar tabs to open the full project map. Start
-with tabs such as **Website launch**, **Customer research**, and **Launch
-checklist**, then select a node and choose **Add child** to break it into smaller
-steps. Use **Sibling** for another step at the same level.
+Choose **Mindmap** above the sidebar goals to open the full project map. Start
+with goals such as **Website launch**, **Customer research**, and **Launch
+checklist**, then select a node and click **+** beside it to add a child. Enter
+a title and press **Enter**; canceling leaves the map unchanged. Use the smaller
+**+** above or below a node to add a sibling. Click a node’s checkbox to mark it
+complete or incomplete.
 
 In the overview above, the website branch contains content and quality checks,
 while research and the launch checklist sit on the left. Drag a node onto
@@ -101,29 +105,29 @@ another node to nest it, or onto its top or bottom edge to reorder it. Use the
 right-click menu to place a branch on the left or right. Scroll to zoom, drag
 the background to pan, and choose **Fit** to see the whole map.
 
-Click **−** on a node to fold its branch, or **+** to unfold it. The map toolbar
+Click **▾** on a node to fold its branch, or **▸** to unfold it. The map toolbar
 also offers **Fold all** and **Unfold all** for the current view. Fold all keeps
 the view root and its immediate children visible; unfold all opens every nested
 branch. In a focused branch view these actions affect that branch. Each action
 can be undone with **Ctrl+Z**.
 
 Blue shades and one, two, or three filled bars show lower, middle, or higher
-relative priority for tabs included in the priority plot. Numbered badges mark
+relative priority for goals included in the priority plot. Numbered badges mark
 the top three; hover over a node for its score. The scale compares all included
-project tabs, so folding or focusing a branch does not change its priority.
+project goals, so folding or focusing a branch does not change its priority.
 Tied scores share a level; a single task or all-equal scores use the middle level.
-Notes and excluded tabs have no priority indicator.
+Notes and excluded goals have no priority indicator.
 
 ### 2. Open a branch and focus on the next steps
 
-Click a tab node to open it. Tabs with children open their own mindmap branch;
-use **Canvas** to switch to that tab's diagram. The tab's **Mindmap** control
+Click a goal node to open it. Goals with children open their own mindmap branch;
+use **Canvas** to switch to that goal's diagram. The goal's **Mindmap** control
 opens or starts its branch, while the sidebar **Mindmap** returns to the full
 project map. **Alt+Left** returns to the previous view.
 
-To reuse a tab's branch elsewhere, right-click a node, choose **Add tab…**, and
-search for the existing tab. The ↗ reference shows the same children, and edits
-made inside it appear everywhere that branch is used. **Remove tab reference**
+To reuse a goal's branch elsewhere, right-click a node, choose **Add goal…**, and
+search for the existing goal. The ↗ reference shows the same children, and edits
+made inside it appear everywhere that branch is used. **Remove goal reference**
 removes only that placement; deleting a child changes the shared branch.
 Circular references are rejected, including those introduced by moving branches.
 
@@ -133,7 +137,7 @@ Here, **Website launch** is the branch root. The finished homepage draft has a
 check mark, and **Review with design** has a reminder. Both the full map and
 this focused view edit the same nodes and share undo/redo.
 
-Select a thought and choose **Create tab** when it needs its own workspace.
+Select a thought and choose **Create goal** when it needs its own workspace.
 Use **Bookmark** to keep a frequently visited node within reach; its button
 appears above the map.
 
@@ -147,7 +151,7 @@ has an agenda and a clear completion condition.
 
 Choose **Reminder** for a selected node to set a date and time, with optional
 notifications. An orange bell and date appear beneath its title. Every node
-supports a reminder, including tab nodes and the project root.
+supports a reminder, including goal nodes and the project root.
 
 **Waiting Reminders** stays visible above both the canvas and mindmap. Choose
 **Open Node** to reveal the relevant node, even inside a folded branch. The
@@ -182,20 +186,82 @@ date. Moving a card preserves its entry time; removing and re-adding resets it.
 
 ### 4. Reorganize as the plan changes
 
-**Ctrl+click** toggles nodes in the selection without opening tabs.
+**Ctrl+click** toggles nodes in the selection without opening goals.
 **Shift+click** selects a range, and **Shift+arrow keys** extend the selection.
 To move several branches, select them, press **Ctrl+X**, select a destination,
-and press **Ctrl+V**. The move preserves descendants and tab links and can be
+and press **Ctrl+V**. The move preserves descendants and goal links and can be
 undone with **Ctrl+Z**.
 
 Cut branches stay dimmed until pasted; **Escape** cancels the cut. Clicking a
-tab while a cut is pending selects it as the destination. Cut selections are
-local to the current project. Deleting a project tab keeps its map node as a
+goal while a cut is pending selects it as the destination. Cut selections are
+local to the current project. Deleting a project goal keeps its map node as a
 thought.
 
 With no cut pending, **Ctrl+V** adds clipboard text beneath the selected node.
 Plain text uses one node per non-empty line and indentation for nesting; OPML
 outlines retain their hierarchy.
+
+## Open your plans on your phone
+
+Choose **File → Start Server…**, select the network address and press **Start
+Server**. ActionDraw prefers an available Tailscale interface; you can choose
+another local interface and port. Save the project first if prompted, then scan
+the QR code with your phone or use **Copy Link**. Keep ActionDraw running and the
+computer awake. Both devices must be able to reach each other over Tailscale or
+your private network; ActionDraw does not configure network access for you.
+
+The phone opens the **Mindmap** with secondary controls tucked under **Tools**.
+Choose **Expand map** for more screen space while keeping quick-add and notes
+available; **Exit expanded** restores navigation. **Tools** reveals search,
+other views, goals and undo/redo.
+
+Tap a node to select it. Use the **checkbox** beside it to mark it complete,
+or **+** to add a child with a short title-only form. The buttons remain
+finger-sized as you zoom. For repeated entry, use the quick-entry field and
+choose **Child** or **Sibling**. The new node is selected
+and brought into view so you can keep building the branch. **Parent**, **Child**,
+**Previous** and **Next** navigate without opening an editor. Double-tap a node
+(or choose **Focus**) to focus its branch; use breadcrumbs, **Up a branch** or
+**Whole map** to return. Pinch to zoom, drag to pan, and use **Expand/Collapse**
+for the selected branch. Search results jump to the matching node on the map.
+**Edit / Notes** opens the full node editor.
+
+**Outline**, **Calendar**, **Kanban** and **Notes** remain available. Goal
+settings include date ranges and Markdown tabs. Branches can be copied as text
+or imported and exported as OPML. The mobile client does not include the legacy
+canvas, drawing, causal models or priority-plot editing.
+
+Phone edits update the desktop project and save automatically with its existing
+encryption. **Connected · Saved** confirms persistence; **Retry Save** handles
+failed writes. Undo/redo uses the same history as the desktop. Browsing, selection,
+folding and zoom on the phone do not move the desktop view. Idle refreshes use
+small change-check responses and back off from two to ten seconds; hidden pages
+stop polling. Snapshots and map layouts are reused until data changes. Idle checks do not scan or serialize the project; model change signals invalidate
+the cache. Every submitted edit and full page refresh checks the current project
+before proceeding, including older editing paths that do not emit change signals.
+If the project changes
+while you are editing, your draft is retained and you can review the current
+content before resubmitting. Connection loss keeps the current draft in the open
+page, but offline edits are not queued and reloading discards that draft.
+
+The QR link grants editing access until you stop the server. Keep it private.
+The server uses HTTP on the selected interface: use Tailscale's encrypted network
+or another trusted private network. **File → Server… → Stop Server** revokes the
+link, as does loading another project, saving to a different destination or
+closing ActionDraw. Each start generates a new link. Scheduling uses the
+computer's local timezone, shown on the phone; goal periods are inclusive dates.
+
+If the phone cannot connect, check that Tailscale is active on both devices,
+the displayed interface is reachable, and the computer's firewall allows the
+selected port (8765 by default). An occupied port is reported in the server
+dialog; choose another port and start again.
+
+If the browser reports **ERR_SSL_PROTOCOL_ERROR** or says the site does not
+support secure connections, check that the address starts with `http://`, not
+`https://`. Keep the rest of the copied link, including `#key=…`, unchanged.
+Some browsers automatically attempt HTTPS. If offered, choose **Continue to
+site** for this private-network address. The current server does not provide TLS;
+Tailscale encrypts traffic between devices when you use its address.
 
 ## Mindmap shortcuts
 
@@ -206,7 +272,7 @@ These shortcuts apply while the mindmap has focus, outside dialogs and menus.
 | Select a nearby visible node | Arrow keys |
 | Extend the selection | Shift + arrow keys |
 | Add a child / sibling | Tab / Enter |
-| Open the selected tab | Ctrl + Enter |
+| Open the selected goal | Ctrl + Enter |
 | Edit title and notes | F2 |
 | Fold or unfold | Space |
 | Toggle completion | F4 |
@@ -227,13 +293,13 @@ These shortcuts apply while the mindmap has focus, outside dialogs and menus.
 - **Priority scoring** — compare tasks by impact and effort in the integrated priority plot.
 - **Obstacles and wishes** — use dedicated shapes for blockers and goals.
 - **Free drawing and images** — sketch on the canvas and paste external graphics.
-- **Action Paint** — sketch a scene, arrange numbered actions, then add them as a connected task chain in the diagram or as nodes in a tab's mindmap.
+- **Action Paint** — sketch a scene, arrange numbered actions, then add them as a connected task chain in the diagram or as nodes in a goal's mindmap.
 - **Causal models** — map causes and effects, record assumptions, and turn ordered actions into tasks.
 
 ### Causal models
 
 Open **Causal Model** beside Action Paint to build a causal diagram for the
-current tab. Double-click empty canvas space to add a variable, action, or
+current goal. Double-click empty canvas space to add a variable, action, or
 outcome node there. Drag a node's **→** handle onto another node to connect the
 cause to its effect; a preview arrow follows the pointer. Drop on empty space
 or press Escape to cancel. Connections must form a directed
@@ -252,7 +318,7 @@ and choose **Make action**. Action nodes are yellow and numbered, and appear in
 the **Action order** list. Drag its **≡** handles (or use the up/down arrows) to
 choose execution order, then **Add to ActionDraw** or **Add to mindmap** to copy their titles in
 that order. These copies are independent of the model, and the causal edges
-stay in the causal editor. Each tab's model is saved with the project.
+stay in the causal editor. Each goal's model is saved with the project.
 
 The action list also has **+ Add action** and a **Remove action** button on each
 row. Removing an action changes its node to a variable and preserves its label,
@@ -309,3 +375,23 @@ It does not load or save project files.
 The mindmap reuses the MIT-licensed [PyPlane](https://github.com/oyvinrog/pyplane)
 core, bundled with its [license](actiondraw/_vendor/pyplane/LICENSE) and
 [source revision](actiondraw/_vendor/pyplane/UPSTREAM.md).
+
+
+### Planning calendar and goal periods
+
+Workspace tabs are now called **Goals**; Markdown editor tabs remain tabs.
+Choose **Add Goal → Add Goal with Time Range** to give a goal inclusive start
+and end dates. Existing goals have **Set/Edit Time Range** and **Remove Time
+Range** actions in their context menu. An undated goal stays off the calendar.
+
+The planning calendar counts each goal on every day it covers, together with
+pending reminders. Select a day to see its goals and reminders, or select
+**All days** for all scheduled goals. Completed goals and past goal periods
+remain visible. Click a goal to open its workspace.
+
+Drag a goal bar to move its period, or drag its first/last edge to resize it.
+The preview shows the dates that will be saved on release; Escape cancels.
+Hover a month arrow during a drag to move across months. On smaller windows,
+scroll the calendar horizontally. **Edit Time Range** offers the same changes
+without dragging. Removing a time range does not delete the goal or change its
+Kanban placement, reminders, or notifications.

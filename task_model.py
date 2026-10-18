@@ -14,12 +14,13 @@ import random
 import subprocess
 import sys
 import threading
+import tempfile
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from PySide6.QtCore import (
@@ -456,6 +457,8 @@ class Tab:
         "outcomeUnderstanding": 1,
         "ambitionRaised": False,
     })
+    goal_start_date: Optional[str] = None
+    goal_end_date: Optional[str] = None
     kanban_status: str = "todo"
     kanban_duration_hours: int = 1
     kanban_slot_hour: int = -1
@@ -513,6 +516,7 @@ class TaskModel(QAbstractListModel):
     taskReminderChanged = Signal(int, arguments=['taskIndex'])
     taskReminderDue = Signal(int, str, bool, arguments=['taskIndex', 'taskTitle', 'sendNotification'])
     taskContractChanged = Signal(int, arguments=['taskIndex'])
+    taskContractTick = Signal(int, arguments=['taskIndex'])
     taskContractBreached = Signal(
         int,
         str,
@@ -1093,7 +1097,8 @@ class TaskModel(QAbstractListModel):
                     self.ContractPunishmentRole,
                 ],
             )
-            self.taskContractChanged.emit(i)
+            # Time passing is a display update, not a project mutation.
+            self.taskContractTick.emit(i)
 
         for i, task_title, send_notification in due_reminders:
             task = self._tasks[i]
@@ -1506,6 +1511,7 @@ class TabModel(QAbstractListModel):
     KanbanSlotHourRole = Qt.UserRole + 14
     KanbanDurationHoursRole = Qt.UserRole + 15
 
+    scheduledGoalsChanged = Signal()
     tabsChanged = Signal()
     currentTabChanged = Signal()
     currentTabIndexChanged = Signal()
@@ -1519,11 +1525,13 @@ class TabModel(QAbstractListModel):
 
     def __init__(self):
         super().__init__()
-        self._tabs: List[Tab] = [Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})]
-        self._current_tab_index: int = 0
+        self._tabs: List[Tab] = []
+        self._current_tab_index: int = -1
         self._recent_tab_indices: List[int] = []
         self._priority_value_weight = 1.0
         self._priority_time_weight = 1.0
+        for signal in (self.dataChanged, self.modelReset, self.rowsInserted, self.rowsRemoved, self.rowsMoved):
+            signal.connect(self.scheduledGoalsChanged)
         self.dataChanged.connect(self.priorityRanksChanged)
         self.modelReset.connect(self.priorityRanksChanged)
         self.rowsInserted.connect(self.priorityRanksChanged)
@@ -1801,16 +1809,73 @@ class TabModel(QAbstractListModel):
             "icon": tab.icon,
             "color": tab.color,
             "pinned": tab.pinned,
+            "goalStartDate": tab.goal_start_date,
+            "goalEndDate": tab.goal_end_date,
             "kanbanStatus": tab.kanban_status,
             "kanbanSlotHour": tab.kanban_slot_hour,
             "kanbanDurationHours": tab.kanban_duration_hours,
         }
 
+    @staticmethod
+    def normalizeGoalRange(start, end):
+        try:
+            if not isinstance(start, str) or not isinstance(end, str):
+                return None, None
+            first, last = date.fromisoformat(start), date.fromisoformat(end)
+            if first.isoformat() != start or last.isoformat() != end or last < first:
+                return None, None
+            return start, end
+        except ValueError:
+            return None, None
+
+    @Property("QVariantList", notify=scheduledGoalsChanged)
+    def scheduledGoals(self):
+        return sorted([
+            {"id": tab.id, "name": tab.name, "color": tab.color,
+             "startDate": tab.goal_start_date, "endDate": tab.goal_end_date}
+            for tab in self._tabs if tab.goal_start_date and tab.goal_end_date
+        ], key=lambda goal: (goal["startDate"], goal["name"], goal["id"]))
+
+    @Slot(str, result=int)
+    def goalIndex(self, goal_id):
+        return next((i for i, tab in enumerate(self._tabs) if tab.id == goal_id), -1)
+
+    @Slot(str, str, str, result=bool)
+    def setGoalRange(self, goal_id, start, end):
+        index = self.goalIndex(goal_id)
+        start, end = self.normalizeGoalRange(start, end)
+        if index < 0 or start is None:
+            return False
+        tab = self._tabs[index]
+        tab.goal_start_date, tab.goal_end_date = start, end
+        self.scheduledGoalsChanged.emit()
+        return True
+
+    @Slot(str, result=bool)
+    def clearGoalRange(self, goal_id):
+        index = self.goalIndex(goal_id)
+        if index < 0:
+            return False
+        self._tabs[index].goal_start_date = None
+        self._tabs[index].goal_end_date = None
+        self.scheduledGoalsChanged.emit()
+        return True
+
+    @Slot(str, str, str, result=str)
+    def createScheduledGoal(self, name, start, end):
+        start, end = self.normalizeGoalRange(start, end)
+        if not name.strip() or start is None:
+            return ""
+        self.addTab(name)
+        goal_id = self._tabs[-1].id
+        self.setGoalRange(goal_id, start, end)
+        return goal_id
+
     @Slot(str)
     def addTab(self, name: str = "") -> None:
         """Add a new empty tab."""
         if not name or not name.strip():
-            name = f"Tab {len(self._tabs) + 1}"
+            name = f"Goal {len(self._tabs) + 1}"
 
         new_tab = Tab(
             name=name.strip(),
@@ -1822,8 +1887,14 @@ class TabModel(QAbstractListModel):
 
         self.beginInsertRows(QModelIndex(), len(self._tabs), len(self._tabs))
         self._tabs.append(new_tab)
+        first_tab = self._current_tab_index < 0
+        if first_tab:
+            self._current_tab_index = 0
         self.endInsertRows()
         self.tabsChanged.emit()
+        if first_tab:
+            self.currentTabIndexChanged.emit()
+            self.currentTabChanged.emit()
         self._emitRecentTabsChanged()
 
     @Slot(str, str, int, result=int)
@@ -1836,29 +1907,22 @@ class TabModel(QAbstractListModel):
 
     @Slot(int)
     def removeTab(self, index: int) -> None:
-        """Remove a tab at the given index. Cannot remove last tab."""
-        if len(self._tabs) <= 1:
-            return  # Cannot remove last tab
+        """Remove a tab, allowing an empty project."""
         if index < 0 or index >= len(self._tabs):
             return
 
         previous_current_index = self._current_tab_index
         self.beginRemoveRows(QModelIndex(), index, index)
         self._tabs.pop(index)
-        self.endRemoveRows()
-
-        # Adjust current tab index if needed
+        # Observers of rowsRemoved must see the surviving goal (or -1) already.
         if self._current_tab_index >= len(self._tabs):
             self._current_tab_index = len(self._tabs) - 1
-            self.currentTabIndexChanged.emit()
         elif self._current_tab_index > index:
             self._current_tab_index -= 1
-            self.currentTabIndexChanged.emit()
-        elif self._current_tab_index == index:
-            self._current_tab_index = min(index, len(self._tabs) - 1)
-            self.currentTabIndexChanged.emit()
+        self.endRemoveRows()
 
         if self._current_tab_index != previous_current_index or index == previous_current_index:
+            self.currentTabIndexChanged.emit()
             self.currentTabChanged.emit()
 
         self.tabsChanged.emit()
@@ -2278,9 +2342,11 @@ class TabModel(QAbstractListModel):
         self.currentTabChanged.emit()
         self._recordRecentTab(previous_index)
 
-    def getCurrentTabData(self) -> Tab:
-        """Get the current tab's data."""
-        return self._tabs[self._current_tab_index]
+    def getCurrentTabData(self) -> Optional[Tab]:
+        """Get the current goal, or None for an empty project."""
+        if 0 <= self._current_tab_index < len(self._tabs):
+            return self._tabs[self._current_tab_index]
+        return None
 
     def setCurrentTabData(self, tasks: Dict[str, Any], diagram: Dict[str, Any]) -> None:
         """Update the current tab's data."""
@@ -2318,7 +2384,7 @@ class TabModel(QAbstractListModel):
             tab.priority_score = (self._computePriorityScore(tab.priority_subjective_value,
                                                             tab.priority_time_hours)
                                   if tab.include_in_priority_plot else 0.0)
-        self._current_tab_index = active_tab
+        self._current_tab_index = max(0, min(active_tab, len(tabs) - 1)) if tabs else -1
         self._recent_tab_indices = [index for tab_id in recent_ids
                                     for index, tab in enumerate(tabs) if tab.id == tab_id]
         self.endResetModel()
@@ -2334,7 +2400,7 @@ class TabModel(QAbstractListModel):
             scoring = priority_scoring if isinstance(priority_scoring, dict) else {}
             self._priority_value_weight = normalize_priority_weight(scoring.get("value_weight", 1.0))
             self._priority_time_weight = normalize_priority_weight(scoring.get("time_weight", 1.0))
-        self._tabs = tabs if tabs else [Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})]
+        self._tabs = tabs
         for tab in self._tabs:
             from actiondraw.actionpaint import normalize_action_paint_state
 
@@ -2366,7 +2432,7 @@ class TabModel(QAbstractListModel):
             tab.kanban_duration_hours = duration if type(duration) is int and 1 <= duration <= limit else 1
         # Reset observers must see the new tabs and their valid active index together.
         if active_tab < 0 or active_tab >= len(self._tabs):
-            active_tab = 0
+            active_tab = 0 if self._tabs else -1
         self._current_tab_index = active_tab
         self._recent_tab_indices = []
         self.endResetModel()
@@ -2378,9 +2444,8 @@ class TabModel(QAbstractListModel):
         self._emitRecentTabsChanged()
 
     def clear(self) -> None:
-        """Reset to a single empty tab."""
-        self.setTabs([Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})], 0,
-                     priority_scoring={})
+        """Reset to an empty project."""
+        self.setTabs([], -1, priority_scoring={})
 
     @Slot(int, int)
     def moveTab(self, from_index: int, to_index: int) -> None:
@@ -2432,6 +2497,7 @@ class ProjectManager(QObject):
     ENCRYPTED_PROJECT_VERSION = "1.2"
     MAX_RECENT_PROJECTS = 8
 
+    projectAccessEnding = Signal()  # Revoke remote access before replacing plaintext.
     saveCompleted = Signal(str)  # Emitted with file path after successful save
     loadCompleted = Signal(str)  # Emitted with file path after successful load
     errorOccurred = Signal(str)  # Emitted with error message on failure
@@ -2450,6 +2516,7 @@ class ProjectManager(QObject):
     taskDrillRequested = Signal(int, arguments=["taskIndex"])
     taskReminderDue = Signal(int, int, str, bool, arguments=["tabIndex", "taskIndex", "taskTitle", "sendNotification"])
     mindmapReminderDue = Signal(str, str, bool, arguments=["nodeId", "title", "sendNotification"])
+    standaloneRemindersChanged = Signal()
     standaloneReminderDue = Signal(str, bool, arguments=["title", "sendNotification"])
     taskContractBreached = Signal(
         int,
@@ -2526,6 +2593,7 @@ class ProjectManager(QObject):
         """
         import gc
 
+        self.projectAccessEnding.emit()
         # Zero the derived key — this is the one thing we can reliably scrub.
         if self._cached_key_material is not None:
             self._cached_key_material.scrub()
@@ -2575,7 +2643,10 @@ class ProjectManager(QObject):
         if self._tab_model is None:
             return
         self._saveCurrentTabState()
-        self.mindmap.set_scope(self._tab_model.getCurrentTabData().id)
+        tab = self._tab_model.getCurrentTabData()
+        if tab is None:
+            return
+        self.mindmap.set_scope(tab.id)
         self._setMindmapVisible(True)
 
     @Slot()
@@ -2590,6 +2661,8 @@ class ProjectManager(QObject):
         from actiondraw.actionpaint import normalize_action_paint_state
 
         tab = self._tab_model.getCurrentTabData()
+        if tab is None:
+            return []
         titles = [action['text'] for action in normalize_action_paint_state(tab.action_paint)['actions']]
         if not titles:
             return []
@@ -2629,7 +2702,7 @@ class ProjectManager(QObject):
 
     def _defaultTabView(self) -> None:
         tab = self._tab_model.getCurrentTabData()
-        self.mindmap.set_scope(tab.id)
+        self.mindmap.set_scope(tab.id if tab else None)
         self._setMindmapVisible(True)
 
     @Slot(str)
@@ -2723,7 +2796,7 @@ class ProjectManager(QObject):
             name = str(getattr(tabs[tab_index], "name", "")).strip()
             if name:
                 return name
-        return "Main" if tab_index == 0 else f"Tab {tab_index + 1}"
+        return "Main" if tab_index == 0 else f"Goal {tab_index + 1}"
 
     def _publishReminderNotification(
         self,
@@ -2740,7 +2813,7 @@ class ProjectManager(QObject):
         else:
             tab_name = self._tabDisplayName(tab_index)
             if tab_name:
-                message += f"\nTab: {tab_name}"
+                message += f"\nGoal: {tab_name}"
         _publish_ntfy_message_async(
             "ActionDraw Reminder",
             message,
@@ -2912,6 +2985,15 @@ class ProjectManager(QObject):
             return False
         return self.mindmap.set_reminder(node_id, timestamp, send_notification)
 
+    @Slot(str, int, result=bool)
+    def setMindmapReminderIn(self, node_id: str, minutes: int) -> bool:
+        if type(minutes) is not int or not 1 <= minutes <= 2147483647:
+            return False
+        data = self.mindmap.reminderData(node_id)
+        # Relative reminders measure elapsed time, including across DST changes.
+        return self.mindmap.set_reminder(
+            node_id, time.time() + minutes * 60, data['reminderSendNotification'])
+
     @Slot(str)
     def clearMindmapReminder(self, node_id: str) -> None:
         self.mindmap.clearReminder(node_id)
@@ -2986,6 +3068,7 @@ class ProjectManager(QObject):
             return
 
         self._standalone_reminders = remaining
+        self.standaloneRemindersChanged.emit()
         if sent_notification:
             self._save_after_reminder()
 
@@ -3106,7 +3189,7 @@ class ProjectManager(QObject):
                 tab_name = "Main"
             else:
                 tab = self._tab_model.getAllTabs()[tab_index]
-                tab_name = getattr(tab, "name", "") or "Tab"
+                tab_name = getattr(tab, "name", "") or "Goal"
 
             for task_index, task in enumerate(tasks):
                 if not isinstance(task, dict):
@@ -3205,7 +3288,7 @@ class ProjectManager(QObject):
             tasks = tab_tasks_payload.get("tasks", []) if isinstance(tab_tasks_payload, dict) else []
             if not isinstance(tasks, list):
                 continue
-            tab_name = getattr(tab, "name", "") or "Tab"
+            tab_name = getattr(tab, "name", "") or "Goal"
             for task_index, task in enumerate(tasks):
                 if not isinstance(task, dict):
                     continue
@@ -3316,6 +3399,7 @@ class ProjectManager(QObject):
             )
         )
         self._standalone_reminders.sort(key=lambda reminder: float(reminder.reminder_at))
+        self.standaloneRemindersChanged.emit()
         return True
 
     @Slot(int, str, str, result=bool)
@@ -3344,6 +3428,7 @@ class ProjectManager(QObject):
         reminder.reminder_at = reminder_at
         reminder.reminder_send_notification = bool(send_notification)
         self._standalone_reminders.sort(key=lambda item: float(item.reminder_at))
+        self.standaloneRemindersChanged.emit()
         return True
 
     @Slot(int)
@@ -3352,6 +3437,7 @@ class ProjectManager(QObject):
         if reminder_index < 0 or reminder_index >= len(self._standalone_reminders):
             return
         self._standalone_reminders.pop(reminder_index)
+        self.standaloneRemindersChanged.emit()
 
     def _string_setting(self, key: str, default: str = "") -> str:
         """Read a string setting from QSettings."""
@@ -3584,7 +3670,7 @@ class ProjectManager(QObject):
     def createTaskFromWorkspaceMarkdownSelection(self, selected_text: str, x: float, y: float) -> str:
         """Create a top-level task from selected workspace markdown text."""
         text = str(selected_text or "").strip()
-        if not text:
+        if not text or (self._tab_model is not None and self._tab_model.currentTabIndex < 0):
             return ""
         add_task_from_text = getattr(self._diagram_model, "addTaskFromText", None)
         if not callable(add_task_from_text):
@@ -3599,6 +3685,8 @@ class ProjectManager(QObject):
         y: float,
     ) -> List[str]:
         """Create a task chain from workspace or tab Markdown."""
+        if self._tab_model is not None and self._tab_model.currentTabIndex < 0:
+            return []
         create_tasks = getattr(self._diagram_model, "createTasksFromMarkdownListAtPosition", None)
         if not callable(create_tasks):
             return []
@@ -3683,6 +3771,8 @@ class ProjectManager(QObject):
                     "color": tab.color,
                     "pinned": tab.pinned,
                     "goals": tab.goals,
+                    "goal_start_date": tab.goal_start_date,
+                    "goal_end_date": tab.goal_end_date,
                     "assessment": TabModel._normalizeAssessment(tab.assessment),
                     "kanban_status": tab.kanban_status,
                     "kanban_slot_hour": tab.kanban_slot_hour,
@@ -4050,6 +4140,9 @@ class ProjectManager(QObject):
         if not file_path.endswith(".progress"):
             file_path += ".progress"
 
+        if file_path != self._current_file_path:
+            self.projectAccessEnding.emit()
+
         try:
             # Save current tab state first
             self._saveCurrentTabState()
@@ -4099,8 +4192,20 @@ class ProjectManager(QObject):
                 )
                 self._cached_encryption_file_path = file_path
 
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(encrypted_payload, f, ensure_ascii=False, separators=(",", ":"))
+            # Keep the previous encrypted file intact if writing fails.
+            temporary_path = None
+            try:
+                with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8",
+                        dir=os.path.dirname(os.path.abspath(file_path)),
+                        prefix=".actiondraw-", suffix=".tmp", delete=False) as f:
+                    temporary_path = f.name
+                    json.dump(encrypted_payload, f, ensure_ascii=False, separators=(",", ":"))
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(temporary_path, file_path)
+            finally:
+                if temporary_path and os.path.exists(temporary_path):
+                    os.unlink(temporary_path)
 
             self._current_file_path = file_path
             self.currentFilePathChanged.emit()
@@ -4153,6 +4258,7 @@ class ProjectManager(QObject):
             self.errorOccurred.emit(f"File not found: {file_path}")
             return
 
+        self.projectAccessEnding.emit()
         # Validate incoming data before replacing the open project.
         key_material = None
         credentials = None
@@ -4190,9 +4296,13 @@ class ProjectManager(QObject):
                 tabs_data = project_data.get("tabs", [])
                 tabs = []
                 for tab_data in tabs_data:
+                    goal_start, goal_end = TabModel.normalizeGoalRange(
+                        tab_data.get("goal_start_date"), tab_data.get("goal_end_date"))
                     tabs.append(Tab(
                         id=tab_data.get("id") or str(uuid.uuid4()),
-                        name=tab_data.get("name", "Tab"),
+                        name=tab_data.get("name", "Goal"),
+                        goal_start_date=goal_start,
+                        goal_end_date=goal_end,
                         tasks=tab_data.get("tasks", {"tasks": []}),
                         diagram=tab_data.get("diagram", {"items": [], "edges": [], "strokes": []}),
                         action_paint=tab_data.get("action_paint", {}),
@@ -4217,10 +4327,6 @@ class ProjectManager(QObject):
                         ),
                     ))
                 active_tab = project_data.get("active_tab", 0)
-
-                # Ensure at least one tab exists
-                if not tabs:
-                    tabs = [Tab(name="Main", tasks={"tasks": []}, diagram={"items": [], "edges": [], "strokes": []})]
 
             seen_tab_ids = set()
             for tab in tabs:
@@ -4259,7 +4365,7 @@ class ProjectManager(QObject):
 
             # Validate active_tab index
             if active_tab < 0 or active_tab >= len(tabs):
-                active_tab = 0
+                active_tab = 0 if tabs else -1
 
             # Update tab model if available
             if self._tab_model is not None:
@@ -4271,9 +4377,10 @@ class ProjectManager(QObject):
             self._setMindmapVisible(True)
 
             # Load the active tab's data into the models
-            active_tab_data = tabs[active_tab]
-            self._task_model.from_dict(active_tab_data.tasks)
-            self._diagram_model.from_dict(active_tab_data.diagram)
+            if tabs:
+                active_tab_data = tabs[active_tab]
+                self._task_model.from_dict(active_tab_data.tasks)
+                self._diagram_model.from_dict(active_tab_data.diagram)
 
             self._current_file_path = file_path
             self.currentFilePathChanged.emit()
@@ -4357,7 +4464,7 @@ class ProjectManager(QObject):
                     'sourceId': tab.id,
                     'tabIndex': index,
                     'name': tab.name,
-                    'sourceLabel': 'Tab',
+                    'sourceLabel': 'Goal',
                     'icon': tab.icon or '▣',
                     'color': tab.color or '#4aa3ff',
                     'completionPercent': self._tab_model._calculateTabCompletion(tab),
@@ -4618,8 +4725,8 @@ class ProjectManager(QObject):
 
         # Load new tab data into models
         tab_data = self._tab_model.getCurrentTabData()
-        self._task_model.from_dict(tab_data.tasks)
-        self._diagram_model.from_dict(tab_data.diagram)
+        self._task_model.from_dict(tab_data.tasks if tab_data else {"tasks": []})
+        self._diagram_model.from_dict(tab_data.diagram if tab_data else {"items": [], "edges": [], "strokes": []})
 
         self._defaultTabView()
         self.currentTabMarkdownTabsChanged.emit()
@@ -4629,8 +4736,6 @@ class ProjectManager(QObject):
     def removeTab(self, index: int) -> None:
         """Remove a tab while keeping live models aligned with the surviving tab."""
         if self._tab_model is None:
-            return
-        if self._tab_model.tabCount <= 1:
             return
         if index < 0 or index >= self._tab_model.tabCount:
             return
@@ -4654,10 +4759,9 @@ class ProjectManager(QObject):
         ids = set(state['ids'])
         tabs = model.getAllTabs()
         surviving = [tab for tab in tabs if tab.id not in ids]
-        if not surviving and not state['tabs']:
-            raise ValueError('Cannot delete this branch: at least one tab must remain.')
         self._saveCurrentTabState()
-        current_id = model.getCurrentTabData().id
+        current = model.getCurrentTabData()
+        current_id = current.id if current else None
         inverse = {'ids': ids,
                    'tabs': [(index, copy.deepcopy(tab)) for index, tab in enumerate(tabs)
                             if tab.id in ids],
@@ -4669,8 +4773,9 @@ class ProjectManager(QObject):
                       min(model.currentTabIndex, len(surviving) - 1))
         model.restoreMindmapTabs(surviving, active)
         tab = model.getCurrentTabData()
-        if tab.id != current_id:
-            tasks, diagram = copy.deepcopy((tab.tasks, tab.diagram))
+        if (tab.id if tab else None) != current_id:
+            tasks, diagram = (copy.deepcopy((tab.tasks, tab.diagram)) if tab else
+                              ({"tasks": []}, {"items": [], "edges": [], "strokes": []}))
             self._task_model.from_dict(tasks)
             self._diagram_model.from_dict(diagram)
         self.currentTabMarkdownTabsChanged.emit()
@@ -4688,8 +4793,8 @@ class ProjectManager(QObject):
             return
 
         tab_data = self._tab_model.getCurrentTabData()
-        self._task_model.from_dict(tab_data.tasks)
-        self._diagram_model.from_dict(tab_data.diagram)
+        self._task_model.from_dict(tab_data.tasks if tab_data else {"tasks": []})
+        self._diagram_model.from_dict(tab_data.diagram if tab_data else {"items": [], "edges": [], "strokes": []})
 
         self._defaultTabView()
         self.currentTabMarkdownTabsChanged.emit()

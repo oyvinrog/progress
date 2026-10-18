@@ -32,6 +32,10 @@ def create_actiondraw_window(
 
     configure_actiondraw_theme()
     engine = QQmlApplicationEngine()
+    from .server import ActionDrawServer
+    server = ActionDrawServer(project_manager, engine) if project_manager else None
+    engine._actiondraw_server = server
+    engine.rootContext().setContextProperty("actiondrawServer", server)
     if markdown_note_manager is None:
         markdown_note_manager = MarkdownNoteManager(diagram_model, project_manager)
     if markdown_image_paster is None:

@@ -66,7 +66,9 @@ def test_item_markdown_list_appends_connected_horizontal_chain(app):
 def test_workspace_markdown_list_starts_at_requested_position(app):
     task_model = TaskModel()
     diagram_model = DiagramModel(task_model=task_model)
-    project_manager = ProjectManager(task_model, diagram_model, TabModel())
+    tabs = TabModel()
+    tabs.addTab("Main")
+    project_manager = ProjectManager(task_model, diagram_model, tabs)
 
     created = project_manager.createTasksFromWorkspaceMarkdownList(
         "- First\n- Second\n- Third",

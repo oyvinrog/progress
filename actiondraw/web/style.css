@@ -1,0 +1,563 @@
+:root {
+  color-scheme: dark;
+  font-family: system-ui, sans-serif;
+  background: #0c1821;
+  color: #e1edf5;
+  font-size: 16px;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+  background: #1c3343;
+  border: 1px solid #3d5868;
+  border-radius: 9px;
+  padding: 11px;
+  min-height: 44px;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+button:hover {
+  background: #294c60;
+}
+button.active,
+button[type="submit"],
+#add {
+  background: #236b7b;
+  border-color: #64bdc9;
+}
+input,
+textarea,
+select {
+  width: 100%;
+  background: #10222e;
+}
+textarea {
+  min-height: 130px;
+  resize: vertical;
+  line-height: 1.5;
+}
+header {
+  padding: 14px 18px;
+  background: #10222e;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.brand {
+  font-weight: 700;
+  font-size: 1.2rem;
+  margin-right: auto;
+}
+small {
+  font-weight: 400;
+  color: #99b5c7;
+  font-size: 0.75rem;
+}
+#status {
+  font-size: 0.85rem;
+  color: #9bd5c3;
+}
+nav {
+  display: flex;
+  gap: 6px;
+  overflow: auto;
+  padding: 10px 14px;
+  background: #10222e;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+nav button {
+  flex: 1;
+}
+#toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 16px;
+}
+#search {
+  flex: 1;
+  min-width: 180px;
+}
+#bookmarks,
+#breadcrumbs {
+  display: flex;
+  gap: 6px;
+  overflow: auto;
+  padding: 4px 16px;
+}
+#breadcrumbs button {
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+  color: #89c8df;
+}
+main {
+  padding: 12px 16px;
+  max-width: 1300px;
+  margin: auto;
+}
+.row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  border-bottom: 1px solid #243b49;
+  padding: 7px 0;
+}
+.row .title {
+  flex: 1;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  overflow-wrap: anywhere;
+}
+.row .title small {
+  display: block;
+  margin-top: 4px;
+}
+.row .fold {
+  min-width: 44px;
+  background: transparent;
+  border: 0;
+}
+.completed {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+.card {
+  border: 1px solid #304b5c;
+  border-radius: 12px;
+  padding: 14px;
+  background: #132633;
+  margin-bottom: 10px;
+}
+.card h3 {
+  margin: 0 0 10px;
+}
+.muted {
+  color: #98afbe;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+.danger {
+  color: #ffacac;
+}
+.board {
+  display: flex;
+  gap: 12px;
+  overflow: auto;
+}
+.lane {
+  min-width: 260px;
+  flex: 1;
+  background: #10222e;
+  border-radius: 12px;
+  padding: 12px;
+}
+.lane h2 {
+  font-size: 1rem;
+}
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+.calendar-grid button {
+  padding: 6px;
+  min-height: 64px;
+  min-width: 0;
+}
+.calendar-grid small {
+  display: block;
+}
+.calendar-grid .chosen {
+  outline: 2px solid #70c8dc;
+}
+.calendar-grid .outside {
+  opacity: 0.4;
+}
+.calendar-grid .today {
+  border-color: #91d6b6;
+}
+.map-wrap {
+  height: 65vh;
+  overflow: hidden;
+  border: 1px solid #304b5c;
+  border-radius: 12px;
+  touch-action: none;
+}
+.map-wrap svg {
+  width: 100%;
+  height: 100%;
+  user-select: none;
+}
+.map-wrap text {
+  fill: #e1edf5;
+  font-size: 13px;
+}
+.map-wrap rect {
+  fill: #19384a;
+  stroke: #527d94;
+}
+.map-wrap path {
+  stroke: #567d91;
+  fill: none;
+  stroke-width: 2;
+}
+.map-wrap g {
+  cursor: pointer;
+}
+dialog {
+  width: min(620px, 100%);
+  max-height: 92dvh;
+  padding: 20px;
+  border: 1px solid #456779;
+  border-radius: 18px;
+  background: #10222e;
+  color: inherit;
+}
+dialog::backdrop {
+  background: #000a;
+}
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  position: sticky;
+  top: -20px;
+  background: #10222e;
+  z-index: 2;
+  padding: 8px 0;
+}
+.sheet-head h2 {
+  font-size: 1.15rem;
+}
+label {
+  display: block;
+  margin: 12px 0 6px;
+}
+label.check {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+label.check input {
+  width: auto;
+}
+footer {
+  padding-top: 18px;
+}
+#message,
+#editorError {
+  color: #ffc7a4;
+  white-space: pre-wrap;
+}
+#message {
+  margin: 10px 16px;
+  padding: 12px;
+  border: 1px solid #8c6147;
+  border-radius: 8px;
+}
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+  line-height: 1.6;
+}
+.note-tabs {
+  display: flex;
+  gap: 8px;
+  overflow: auto;
+}
+.badge {
+  color: #8fcce4;
+}
+@media (max-width: 600px) {
+  nav button {
+    padding: 10px 8px;
+    font-size: 0.9rem;
+  }
+  header {
+    padding: 10px 14px;
+  }
+  #toolbar {
+    padding: 10px;
+  }
+  main {
+    padding: 10px;
+  }
+  dialog {
+    margin: auto 0 0;
+    width: 100%;
+    max-width: 100%;
+    border-radius: 18px 18px 0 0;
+  }
+  .row {
+    gap: 2px;
+  }
+  .row .title {
+    padding: 8px 4px;
+  }
+  .lane {
+    min-width: 82vw;
+  }
+  .calendar-grid button {
+    font-size: 0.85rem;
+    min-height: 58px;
+  }
+}
+
+#editor footer {
+  position: sticky;
+  bottom: -20px;
+  padding: 12px 0;
+  background: #10222e;
+}
+#editor footer button {
+  width: 100%;
+}
+
+/* Keep map actions and quick capture within thumb reach. */
+#mapDock {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  background: #10222e;
+  border-top: 1px solid #456779;
+  padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+}
+#mapDock[hidden] {
+  display: none;
+}
+#mapSelection {
+  font-weight: 650;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#mapActions {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  margin: 6px 0;
+}
+#mapActions button {
+  flex-shrink: 0;
+}
+#quickAdd {
+  display: flex;
+  gap: 6px;
+}
+#quickTitle {
+  flex: 1;
+  min-width: 0;
+}
+#quickAdd button {
+  flex-shrink: 0;
+  background: #236b7b;
+}
+#quickContext {
+  display: block;
+  margin-top: 5px;
+}
+.map-wrap .selected-node rect {
+  stroke: #9ee6d0;
+  stroke-width: 3;
+  fill: #235269;
+}
+.mindmap-view .map-wrap {
+  height: max(240px, calc(100dvh - 410px));
+}
+.mindmap-view #content > .actions {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+.mindmap-view #content > .actions button {
+  flex-shrink: 0;
+}
+@media (max-width: 600px) {
+  #mapDock {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
+  #quickAdd button {
+    padding: 9px 7px;
+  }
+}
+
+/* Give the map the remaining viewport, without covering it with its controls. */
+body.mindmap-view {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+.mindmap-view > header,
+.mindmap-view > nav,
+.mindmap-view > #toolbar,
+.mindmap-view > #breadcrumbs,
+.mindmap-view > #bookmarks {
+  flex-shrink: 0;
+}
+.mindmap-view #toolbar {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+}
+.mindmap-view #toolbar button {
+  flex-shrink: 0;
+}
+.mindmap-view #search {
+  min-width: 140px;
+  width: 140px;
+}
+.mindmap-view #add {
+  display: none;
+}
+.mindmap-view #content {
+  flex: 1;
+  min-height: 180px;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.mindmap-view #content > .actions {
+  flex-shrink: 0;
+  margin-top: 0;
+}
+.mindmap-view .map-wrap {
+  flex: 1;
+  height: auto;
+  min-height: 100px;
+}
+.mindmap-view #mapDock {
+  position: relative;
+  flex-shrink: 0;
+}
+#bookmarks:empty {
+  display: none;
+}
+#mapSearchResults {
+  padding: 4px 16px;
+  max-height: 130px;
+  overflow: auto;
+  flex-shrink: 0;
+}
+#mapSearchResults button {
+  margin: 3px;
+}
+
+/* Map-first layout: secondary views/search are one tap away, not permanent rows. */
+#mapTools {
+  display: none;
+}
+.mindmap-view #mapTools {
+  display: block;
+}
+.mindmap-view:not(.map-tools-open) > nav,
+.mindmap-view:not(.map-tools-open) > #toolbar,
+.mindmap-view:not(.map-tools-open) > #bookmarks,
+.mindmap-view:not(.map-tools-open) .secondary-map-tool {
+  display: none;
+}
+.mindmap-view header {
+  padding: 4px 10px;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+.mindmap-view .brand {
+  font-size: 1rem;
+}
+.mindmap-view #zone {
+  display: none;
+}
+.mindmap-view #status {
+  font-size: 0.75rem;
+}
+.mindmap-view #breadcrumbs {
+  padding: 0 10px;
+}
+.mindmap-view #content {
+  padding: 4px 8px 8px;
+  max-width: none;
+}
+.mindmap-view #content > .actions {
+  margin-bottom: 6px;
+}
+.mindmap-view #quickContext {
+  display: none;
+}
+.mindmap-view #mapDock {
+  padding: 4px 8px calc(6px + env(safe-area-inset-bottom));
+}
+.map-selection-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+#mapSelection {
+  flex: 1;
+  min-width: 0;
+}
+#mapEdit {
+  flex-shrink: 0;
+  padding: 4px 10px;
+}
+.mindmap-view #mapActions {
+  margin: 2px 0 4px;
+}
+.mindmap-view #mapActions button {
+  padding: 6px 10px;
+}
+/* CSS expansion works on iPhone without relying on the Fullscreen API. */
+body.map-expanded > header,
+body.map-expanded > nav,
+body.map-expanded > #toolbar,
+body.map-expanded > #breadcrumbs,
+body.map-expanded > #bookmarks,
+body.map-expanded > #mapSearchResults,
+body.map-expanded #mapActions,
+body.map-expanded .secondary-map-tool {
+  display: none;
+}
+
+/* Keep the selected node's actions finger-sized at every map zoom. */
+.map-wrap { position: relative; }
+.map-node-controls {
+  position: absolute;
+  display: flex;
+  gap: 4px;
+  padding: 2px;
+  border-radius: 12px;
+  background: #102532;
+  box-shadow: 0 2px 8px #0006;
+}
+.map-node-controls button {
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  font-size: 26px;
+  line-height: 1;
+}
+.map-node-controls button[aria-pressed="true"] { color: #91d6b6; }
+
+.map-node-controls[hidden] { display: none; }

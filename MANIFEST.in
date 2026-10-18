@@ -4,3 +4,5 @@ include requirements.txt
 include requirements-dev.txt
 recursive-include actiondraw/qml_ui *.qml
 recursive-include actiondraw/qml_ui *.svg
+
+recursive-include actiondraw/web *.html *.css *.js

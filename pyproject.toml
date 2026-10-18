@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "actiondraw"
-version = "0.1.45"
+version = "0.1.46"
 description = "A diagramming module built with PySide6 and QML"
 readme = "README.md"
 authors = [
@@ -29,6 +29,8 @@ dependencies = [
     "PySide6==6.10.1; python_version < '3.12'",
     "PySide6>=6.6,<7; python_version >= '3.12'",
     "Pygments>=2.17",
+    "aiohttp>=3.10,<4",
+    "qrcode>=8,<9",
     "cryptography>=42.0.0",
     "argon2-cffi>=23.1.0",
 ]
@@ -55,5 +57,5 @@ packages = ["actiondraw", "actiondraw.priorityplot", "actiondraw._vendor", "acti
 py-modules = ["task_model", "markdown_note_editor", "progress_crypto", "eff_diceware"]
 
 [tool.setuptools.package-data]
-actiondraw = ["qml_ui/**/*.qml", "qml_ui/icons/*.svg"]
+actiondraw = ["qml_ui/**/*.qml", "qml_ui/icons/*.svg", "web/*"]
 "actiondraw._vendor.pyplane" = ["LICENSE", "UPSTREAM.md"]

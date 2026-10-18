@@ -82,6 +82,7 @@ class TestScrubProjectData:
         task_model = TaskModel()
         diagram_model = DiagramModel(task_model=task_model)
         tab_model = TabModel()
+        tab_model.addTab("Main")
         pm = ProjectManager(task_model, diagram_model, tab_model)
         return pm, task_model, diagram_model, tab_model
 

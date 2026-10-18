@@ -650,7 +650,7 @@ Item {
             }
 
             Button {
-                text: "Create Tab"
+                text: "Create Goal"
                 visible: root.allowCreateTab
                 enabled: root.currentSelectedText().length > 0
                 onClicked: {

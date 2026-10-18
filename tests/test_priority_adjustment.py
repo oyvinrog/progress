@@ -23,6 +23,7 @@ def make_tabs():
 def project(app):
     tasks = TaskModel()
     tabs = TabModel()
+    tabs.addTab("Main")
     tabs.setTabs(make_tabs())
     diagram = DiagramModel(tasks)
     manager = ProjectManager(tasks, diagram, tabs)
@@ -83,6 +84,7 @@ def test_deflate_values_spreads_included_tabs_and_preserves_state(project):
 @pytest.mark.parametrize('values', [[0.01, 0.02], [100, 200], [2, 8]])
 def test_deflate_low_high_and_existing_target_ranges(values):
     tabs = TabModel()
+    tabs.addTab("Main")
     tabs.setTabs([
         Tab(name=str(index), tasks={'tasks': []}, diagram={'items': [], 'edges': [], 'strokes': []},
             priority_subjective_value=value, priority_time_hours=math.e)
@@ -97,6 +99,7 @@ def test_deflate_low_high_and_existing_target_ranges(values):
 @pytest.mark.parametrize('values', [[9], [9, 9, 9]])
 def test_deflate_equal_or_single_values_centers_them(values):
     tabs = TabModel()
+    tabs.addTab("Main")
     tabs.setTabs([
         Tab(name=str(index), tasks={'tasks': []}, diagram={'items': [], 'edges': [], 'strokes': []},
             priority_subjective_value=value)
@@ -110,6 +113,7 @@ def test_deflate_equal_or_single_values_centers_them(values):
 
 def test_deflate_no_included_tabs_is_a_noop():
     tabs = TabModel()
+    tabs.addTab("Main")
     only = Tab(name='Excluded', tasks={'tasks': []}, diagram={'items': [], 'edges': [], 'strokes': []},
                priority_subjective_value=10, include_in_priority_plot=False)
     tabs.setTabs([only])
@@ -224,6 +228,7 @@ def test_qml_adjustments_keep_selection_and_matching_ranks(project, app, actiond
     warnings = []
     engine.warnings.connect(lambda messages: warnings.extend(m.toString() for m in messages))
     window = engine.rootObjects()[0]
+    window.findChild(QObject, 'reminderOverview').setProperty('selectedDate', '')
     QMetaObject.invokeMethod(window, 'openPriorityPlotWindow')
     plot = window.property('priorityPlotWindowRef')
     plot.show()
