@@ -2977,7 +2977,7 @@ def test_add_sibling_relative_scope_validation(project):
 def test_qml_sibling_insertion_controls(project, app, zoom, before, actiondraw_window):
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
-    a = m.map.root.add_child('Alpha', side='right')
+    a = m.map.root.add_child('Alpha insertion target', side='right')
     b = m.map.root.add_child('Beta', side='right')
     engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
@@ -3005,12 +3005,12 @@ def test_qml_sibling_insertion_controls(project, app, zoom, before, actiondraw_w
     pane.setProperty('panX', -140)
     pane.setProperty('panY', 50)
     QTest.qWait(30)
-    assert above.property('visible') and below.property('visible')
+    assert (above if before else below).property('visible')
     assert above.width() == 24 and above.height() == 24
     pane.setProperty('zoom', 0.2)
     assert below.y() >= above.y() + above.height()
     pane.setProperty('zoom', zoom)
-    # Hover the other node, then move onto its insertion button.
+    # Hovering another node must not move the selected node's controls.
     box = m._layout()[b]
     from PySide6.QtCore import QPointF
     center = viewport.mapToScene(QPointF(viewport.width() / 2 - 140 + (box.x + box.width / 2) * zoom,
@@ -3019,19 +3019,21 @@ def test_qml_sibling_insertion_controls(project, app, zoom, before, actiondraw_w
     QTest.qWait(30)
     assert pane.property('hoveredNodeId') == b.id
     button = above if before else below
+    assert m.selectedId == a.id
+    box = m._layout()[a]
     expected_y = (viewport.height() / 2 + 50 + box.center_y * zoom
-                  + (-1 if before else 1) * max(box.height * zoom / 2, 14))
+                  + (-1 if before else 1) * (box.height * zoom / 2 + button.height() / 2 + 8))
     assert button.y() + button.height() / 2 == pytest.approx(expected_y)
     point = button.mapToScene(button.boundingRect().center()).toPoint()
     QTest.mouseMove(window, point)
     QTest.qWait(180)
-    assert pane.property('hoveredNodeId') == b.id and button.property('visible')
+    assert m.selectedId == a.id and button.property('visible')
     original_ids = [n.id for n in m.map.root.children]
     QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, point)
     QTest.qWait(40)
     new = m.map.find(m.selectedId)
     expected = original_ids[:]
-    expected.insert(original_ids.index(b.id) + (0 if before else 1), new.id)
+    expected.insert(original_ids.index(a.id) + (0 if before else 1), new.id)
     assert [n.id for n in m.map.root.children] == expected
     assert new.text == 'New thought'
     editor = window.findChild(QObject, 'mindmapNodeEditor')
@@ -4792,4 +4794,49 @@ def test_qml_calendar_linked_title_editor(project, app, actiondraw_window, via_r
         assert not tabs.scheduledGoals
     m.undo()
     assert tabs.scheduledGoals[0]['id'] == goal
+    window.close()
+
+
+def test_qml_node_delete_button_and_undo(project, app, actiondraw_window):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    branch = m.map.root.add_child('Branch deletion target', side='right')
+    child = branch.add_child('Child')
+    neighbor = m.map.root.add_child('Neighbor', side='right')
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.setWidth(1300)
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+    pane = window.findChild(QObject, 'mindmapPane')
+
+    def find(item, name):
+        if item.objectName() == name:
+            return item
+        for nested in item.childItems():
+            result = find(nested, name)
+            if result is not None:
+                return result
+
+    button = find(window.contentItem(), 'mindmapDeleteNode')
+    assert not button.isVisible()  # The map root cannot be deleted.
+    m.select(branch.id)
+    pane.setProperty('zoom', 0.8)
+    pane.setProperty('panX', -140)
+    pane.setProperty('panY', 50)
+    QTest.qWait(40)
+    assert button.isVisible()
+    node = find(window.contentItem(), 'mindmapNode_' + branch.id)
+    assert button.mapToScene(button.boundingRect().topLeft()).x() > node.mapToScene(node.boundingRect().topRight()).x()
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                     button.mapToScene(button.boundingRect().center()).toPoint())
+    QTest.qWait(40)
+    assert m.map.find(branch.id) is None
+    assert m.map.find(child.id) is None
+    assert m.map.find(neighbor.id) is not None
+    assert not button.isVisible()
+    m.undo()
+    assert m.map.find(branch.id) is not None
+    assert m.map.find(child.id) is not None
     window.close()

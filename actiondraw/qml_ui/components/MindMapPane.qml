@@ -1072,7 +1072,8 @@ FocusScope {
                 anchors.fill: parent
                 readonly property var targetNode: {
                     if (!pane.controller) return null
-                    var id = pane.hoveredNodeId || pane.controller.selectedId
+                    // Keep actions stable while the pointer moves between nodes.
+                    var id = pane.controller.selectedId
                     var nodes = pane.sceneNodes
                     for (var i = 0; i < nodes.length; ++i)
                         if (nodes[i].id === id) return nodes[i]
@@ -1082,30 +1083,45 @@ FocusScope {
                          && !editor.visible && !quickChildDialog.visible && !nodeMenu.visible && !actionsMenu.visible
                          && !helpDialog.visible && !deadlineDialog.visible && !nodeGoalRangeDialog.visible && !pane.reminderDialogOpen
                 Repeater {
-                    model: 3
+                    model: 4
                     id: insertionButtons
                     delegate: ToolButton {
                         id: insertionButton
                         required property int index
+                        readonly property bool removal: index === 3
                         readonly property bool child: index === 2
                         readonly property bool before: index === 0
-                        visible: child || !insertionControls.targetNode || !insertionControls.targetNode.isViewRoot
-                        objectName: child ? "mindmapAddChild" : before ? "mindmapAddAbove" : "mindmapAddBelow"
+                        // At low zoom, neighboring nodes can occupy the action area.
+                        // Let those nodes receive clicks instead of covering them.
+                        readonly property bool overlapsNode: {
+                            var nodes = pane.sceneNodes
+                            for (var i = 0; i < nodes.length; ++i) {
+                                var node = nodes[i]
+                                if (insertionControls.targetNode && node.id === insertionControls.targetNode.id) continue
+                                var left = viewport.width / 2 + pane.panX + node.x * pane.zoom
+                                var top = viewport.height / 2 + pane.panY + node.y * pane.zoom
+                                if (x < left + node.width * pane.zoom && x + width > left
+                                    && y < top + node.height * pane.zoom && y + height > top) return true
+                            }
+                            return false
+                        }
+                        visible: !overlapsNode && (child || !insertionControls.targetNode || !insertionControls.targetNode.isViewRoot)
+                        objectName: removal ? "mindmapDeleteNode" : child ? "mindmapAddChild" : before ? "mindmapAddAbove" : "mindmapAddBelow"
                         width: child ? 36 : 24
                         height: width
                         x: insertionControls.targetNode
                            ? viewport.width / 2 + pane.panX
                              + (insertionControls.targetNode.x + insertionControls.targetNode.width / 2) * pane.zoom
-                             + (child ? (insertionControls.targetNode.x < 0 && !insertionControls.targetNode.isViewRoot ? -1 : 1)
-                                * (insertionControls.targetNode.width * pane.zoom / 2 + 22) : 0) - width / 2 : 0
+                             + (insertionControls.targetNode.x < 0 && !insertionControls.targetNode.isViewRoot ? -1 : 1)
+                                * (insertionControls.targetNode.width * pane.zoom / 2 + width / 2 + 8 + (removal ? 32 : 0)) - width / 2 : 0
                         y: insertionControls.targetNode
                            ? viewport.height / 2 + pane.panY
                              + (insertionControls.targetNode.y + insertionControls.targetNode.height / 2) * pane.zoom
-                             + (child ? 0 : before ? -1 : 1) * Math.max(insertionControls.targetNode.height * pane.zoom / 2, 14) - height / 2 : 0
+                             + (child ? 0 : before ? -1 : 1) * (insertionControls.targetNode.height * pane.zoom / 2 + height / 2 + 8) - height / 2 : 0
                         focusPolicy: Qt.NoFocus
                         hoverEnabled: true
-                        Accessible.name: child ? "Add child" : before ? "Add sibling above" : "Add sibling below"
-                        ToolTip.text: child ? "Add child" : before ? "Add sibling above" : "Add sibling below"
+                        Accessible.name: removal ? (insertionControls.targetNode && insertionControls.targetNode.isReference ? "Remove goal reference" : "Delete branch") : child ? "Add child" : before ? "Add sibling above" : "Add sibling below"
+                        ToolTip.text: removal ? Accessible.name + " (including children) · Ctrl+Z to undo" : Accessible.name
                         ToolTip.visible: hovered
                         ToolTip.delay: 500
                         onHoveredChanged: {
@@ -1114,12 +1130,21 @@ FocusScope {
                         }
                         background: Rectangle {
                             radius: width / 2
-                            color: insertionButton.hovered ? "#467da3" : "#254d6c"
-                            border.color: "#a5d9ff"
+                            color: insertionButton.removal
+                                   ? (insertionButton.hovered ? "#813d46" : "#303c4b")
+                                   : (insertionButton.hovered ? "#467da3" : "#254d6c")
+                            border.color: insertionButton.removal ? (insertionButton.hovered ? "#ed9ca4" : "#677889") : "#a5d9ff"
                         }
                         contentItem: Text {
-                            text: "+"
+                            text: insertionButton.removal ? "" : "+"
                             color: "#e5f0fa"
+                            Image {
+                                anchors.centerIn: parent
+                                width: 14
+                                height: 14
+                                visible: insertionButton.removal
+                                source: "../icons/trash.svg"
+                            }
                             font.pixelSize: 20
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
@@ -1128,7 +1153,11 @@ FocusScope {
                             var nodeId = insertionControls.targetNode.id
                             pane.hoveredNodeId = ""
                             pane.focusMap()
-                            if (child) {
+                            if (removal) {
+                                // This local action deletes only the node it belongs to.
+                                pane.controller.select(nodeId)
+                                pane.controller.deleteSelected()
+                            } else if (child) {
                                 quickChildDialog.targetNodeId = nodeId
                                 quickChildTitle.text = ""
                                 quickChildDialog.open()
