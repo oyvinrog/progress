@@ -407,12 +407,7 @@ ApplicationWindow {
             activeReminders = []
             return
         }
-        var hadReminders = activeReminders && activeReminders.length > 0
         activeReminders = projectManager.getActiveReminders()
-        if ((!hadReminders || !reminderOverviewTouched) && activeReminders.length > 0)
-            reminderOverviewExpanded = true
-        if (activeReminders.length === 0 && (!root.tabModelRef || root.tabModelRef.scheduledGoals.length === 0))
-            reminderOverviewTouched = false
     }
 
     function refreshActiveContracts() {
@@ -599,8 +594,6 @@ ApplicationWindow {
     property var activeReminders: []
     property var activeContracts: []
     readonly property bool mindmapOpen: projectManagerRef ? projectManagerRef.mindmapVisible : false
-    property bool reminderOverviewExpanded: false
-    property bool reminderOverviewTouched: false
     property bool contractOverviewExpanded: true
     property bool tabDragActive: false
     property bool tabDragInsideViewport: false
@@ -1358,6 +1351,7 @@ ApplicationWindow {
 
             ReminderOverview {
                 id: planningOverview
+                availableContentHeight: parent.height
                 goalModel: root.tabModelRef
                 planController: typeof mindmapController !== "undefined" ? mindmapController : null
                 Layout.fillWidth: true

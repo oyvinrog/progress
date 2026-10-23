@@ -200,10 +200,10 @@ def test_mindmap_plan_card_save_and_undo(calendar_ui, app):
 def test_overflow_and_card_layout(scheduled_calendar, app, tmp_path, width, height):
     root, _, overview, calendar, tabs, click = scheduled_calendar
     root.setWidth(width); root.setHeight(height)
-    calendar.setProperty('viewportHeightLimit', max(130, min(624, height * (.5 if width >= 960 else .3) - 30)))
     for i in range(10):
         tabs.createScheduledGoal('Long activity title %02d across multiple calendar weeks' % i, '2032-01-26', '2032-03-02')
     app.processEvents()
+    QTest.qWait(100)
     click('calendarMore_2032-01-26')
     popup = overview.findChild(QObject, 'calendarOverflow')
     assert popup.property('visible')

@@ -185,7 +185,11 @@ Rectangle {
     }
     function finishOverflowGesture() { finishGesture(); overflow.close() }
     function cancelGesture() { gesture=null; hoverMonth=0; validDrop=false }
-    Keys.onEscapePressed: { cancelGesture(); pointer.pressedCell=-1; overflow.close() }
+    Keys.onEscapePressed: function(event) {
+        if (gesture || pointer.pressedCell >= 0 || overflow.visible) {
+            cancelGesture(); pointer.pressedCell = -1; overflow.close()
+        } else event.accepted = false
+    }
 
     Timer { interval: 650; repeat: true; running: calendar.gesture !== null && calendar.hoverMonth !== 0; onTriggered: calendar.changeMonth(calendar.hoverMonth) }
     implicitHeight: column.implicitHeight+12
