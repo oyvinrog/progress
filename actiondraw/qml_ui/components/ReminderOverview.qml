@@ -20,7 +20,66 @@ Column {
     readonly property var filteredGoals: scheduledGoals.filter(function(g) {
         return !overview.selectedDate || (g.startDate <= overview.selectedDate && g.endDate >= overview.selectedDate)
     })
+    property var undoChange: null
+    property bool savingCalendarRange: false
+    property string calendarMessage: ""
+    function saveCalendarRange(id, start, end) {
+        var before = scheduledGoals.find(function(g) { return g.id === id })
+        var model = rangeModel(id)
+        if (!before || !model) { calendarMessage = "This activity is no longer available."; return false }
+        if (before.startDate === start && before.endDate === end) return true
+        // QML model objects may be updated in place by the synchronous model signal.
+        var oldStart = String(before.startDate), oldEnd = String(before.endDate)
+        savingCalendarRange = true
+        var success = model.setGoalRange(id, start, end)
+        savingCalendarRange = false
+        if (!success) { calendarMessage = "Could not save dates. Please try again."; return false }
+        undoChange = {id:id, start:oldStart, end:oldEnd, afterStart:start, afterEnd:end}
+        calendarMessage = "Activity dates updated."
+        return true
+    }
+    function undoCalendarRange() {
+        var change = undoChange
+        if (!change) return
+        var current = scheduledGoals.find(function(g) { return g.id === change.id })
+        if (!current || current.startDate !== change.afterStart || current.endDate !== change.afterEnd) {
+            undoChange = null; calendarMessage = "Dates changed elsewhere; Undo is no longer available."; return
+        }
+        savingCalendarRange = true
+        var model = rangeModel(change.id)
+        var success = model && model.setGoalRange(change.id, change.start, change.end)
+        savingCalendarRange = false
+        if (success) { undoChange = null; calendarMessage = "Date change undone." }
+        else calendarMessage = "Could not undo the date change. Try again."
+    }
+    function showActivityDetails(id, sceneX, sceneY) {
+        var goal = scheduledGoals.find(function(g) { return g.id === id })
+        if (!goal) return
+        var point = activityCard.parent.mapFromItem(null, sceneX, sceneY)
+        activityCard.anchorX = point.x; activityCard.anchorY = point.y
+        activityCard.show(goal, "")
+    }
+    GoalRangeDialog {
+        id: activityCard
+        objectName: "calendarActivityCard"
+        activityCard: true
+        saveHandler: overview.saveCalendarRange
+        onActivityOpened: function(id) { overview.openGoal(id) }
+        onClosed: calendar.selectedGoalId = ""
+    }
     onScheduledGoalsChanged: {
+        if (!savingCalendarRange && undoChange) {
+            var changed = scheduledGoals.find(function(g) { return g.id === undoChange.id })
+            if (!changed || changed.startDate !== undoChange.afterStart || changed.endDate !== undoChange.afterEnd) {
+                undoChange = null; calendarMessage = "Dates changed elsewhere; Undo is no longer available."
+            }
+        }
+        if (!savingCalendarRange && activityCard.visible) {
+            var activity = scheduledGoals.find(function(g) { return g.id === activityCard.goalId })
+            if (!activity) activityCard.close()
+            else if (activity.startDate !== activityCard.sourceStart || activity.endDate !== activityCard.sourceEnd)
+                activityCard.show(activity, "")
+        }
         if (windowRoot && scheduledGoals.length && !windowRoot.reminderOverviewTouched)
             windowRoot.reminderOverviewExpanded = true
     }
@@ -177,11 +236,16 @@ Column {
             Layout.alignment: Qt.AlignTop
             Layout.minimumWidth: 0
             viewportHeightLimit: overview.windowRoot && overview.windowRoot.height !== undefined
-                ? Math.max(130, Math.min(456, overview.windowRoot.height * (calendarContent.columns === 2 ? 0.5 : 0.3) - reminderHeader.implicitHeight))
-                : 456
+                ? Math.max(130, Math.min(624, overview.windowRoot.height * (calendarContent.columns === 2 ? 0.5 : 0.3) - reminderHeader.implicitHeight))
+                : 624
             goals: overview.scheduledGoals
             onGoalOpened: function(id) { overview.openGoal(id) }
-            onRangeEdited: function(id, start, end) { if (overview.rangeModel(id)) overview.rangeModel(id).setGoalRange(id, start, end) }
+            onActivityRequested: function(id, sceneX, sceneY) { overview.showActivityDetails(id, sceneX, sceneY) }
+            onRangeEdited: function(id, start, end) { overview.saveCalendarRange(id, start, end) }
+            statusMessage: overview.calendarMessage
+            undoAvailable: overview.undoChange !== null
+            onUndoRequested: overview.undoCalendarRange()
+            onStatusDismissed: overview.calendarMessage = ""
             dayCounts: overview.dayCounts
             nowTimestamp: overview.nowTimestamp
             selectedDate: overview.selectedDate
@@ -228,6 +292,7 @@ Column {
                         required property var modelData
                         width: agendaRows.width; height: 52
                         radius: 4; color: "#263744"
+                        border.color: calendar.selectedGoalId === modelData.id ? "#7dbde8" : "transparent"
                         RowLayout {
                             anchors.fill: parent; anchors.margins: 4
                             Button {
@@ -241,7 +306,10 @@ Column {
                                     Text { width: parent.width; text: goalRow.modelData.name; elide: Text.ElideRight; color: "#e0e9ef"; font.pixelSize: 12 }
                                     Text { width: parent.width; text: goalRow.modelData.startDate + " → " + goalRow.modelData.endDate; elide: Text.ElideRight; color: "#9aafbd"; font.pixelSize: 10 }
                                 }
-                                onClicked: overview.openGoal(goalRow.modelData.id)
+                                onClicked: {
+                                    var point = mapToItem(null, 0, height)
+                                    calendar.showActivity(goalRow.modelData.id, point.x, point.y)
+                                }
                             }
                             ToolButton {
                                 objectName: "goalActions_" + goalRow.modelData.id

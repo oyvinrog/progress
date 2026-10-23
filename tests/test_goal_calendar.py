@@ -112,7 +112,7 @@ def test_drag_cancel_and_civil_days(calendar_ui, app):
     changes = []
     calendar.rangeEdited.connect(lambda *args: changes.append(args))
     bar = find(root, "goalBar_a_5")
-    start = bar.mapToScene(QPointF(20,11)).toPoint()
+    start = bar.mapToScene(QPointF(30,11)).toPoint()
     QTest.mousePress(root, Qt.LeftButton, Qt.NoModifier, start)
     QTest.mouseMove(root, start + QPoint(-50,0), 20)
     QTest.keyClick(root, Qt.Key_Escape)
@@ -130,7 +130,7 @@ def test_cross_month_hover_and_outside_drop(calendar_ui, app):
     changes = []
     calendar.rangeEdited.connect(lambda gid, a, b: changes.append((gid, a, b)))
     bar = find(root, "goalBar_a_5")
-    start = bar.mapToScene(QPointF(20,11)).toPoint()
+    start = bar.mapToScene(QPointF(30,11)).toPoint()
     next_month = find(root, "reminderNextMonth")
     arrow = next_month.mapToScene(next_month.boundingRect().center()).toPoint()
     QTest.mousePress(root, Qt.LeftButton, Qt.NoModifier, start)
@@ -146,7 +146,7 @@ def test_cross_month_hover_and_outside_drop(calendar_ui, app):
     calendar.setProperty("goals", [dict(id="a", name="Moved", color="", startDate="2032-03-08", endDate="2032-03-09")])
     app.processEvents()
     bar = find(root, "goalBar_a_0")
-    start = bar.mapToScene(QPointF(20,11)).toPoint()
+    start = bar.mapToScene(QPointF(30,11)).toPoint()
     QTest.mousePress(root, Qt.LeftButton, Qt.NoModifier, start)
     QTest.mouseMove(root, QPoint(1,1), 20)
     QTest.mouseRelease(root, Qt.LeftButton, Qt.NoModifier, QPoint(1,1))
@@ -221,6 +221,7 @@ def test_overview_goal_selection_dialog_and_open(calendar_ui, app):
     click("reminderDay_2032-02-29")
     assert [g["id"] for g in value(overview, "filteredGoals")] == [goal]
     click("openGoal_" + goal)
+    click("openCalendarActivity")
     assert host.property("action") == "open-goal-1"
     dialog = overview.findChild(QObject, "goalRangeDialog")
     dialog.show(None, "2032-02-29")
@@ -318,8 +319,8 @@ def test_dense_calendar_overflow_and_agenda(calendar_ui, app, count):
         tabs.createScheduledGoal('Goal %02d' % i, '2032-02-01', '2032-03-02')
     app.processEvents()
     weeks = value(calendar, 'weeks')
-    assert calendar.property('gridHeight') == 432
-    assert all(w['height'] == 72 for w in weeks)
+    assert calendar.property('gridHeight') == 600
+    assert all(w['height'] == 100 for w in weeks)
     assert all(len(w['bars']) <= 2 for w in weeks)
     assert len(value(overview, 'filteredGoals')) == count
     more = find(root, 'calendarMore_2032-02-29')
@@ -327,8 +328,9 @@ def test_dense_calendar_overflow_and_agenda(calendar_ui, app, count):
     assert more.isVisible() == (count > 2)
     if count > 2:
         click('calendarMore_2032-02-29')
-        assert overview.property('selectedDate') == '2032-02-29'
-        assert find(root, 'planningAgenda').property('activeFocus')
+        popup = overview.findChild(QObject, 'calendarOverflow')
+        assert popup.property('visible')
+        assert len(value(popup, 'activities')) == count
         assert len(value(overview, 'filteredGoals')) == count
         tabs.clearGoalRange(tabs.scheduledGoals[-1]['id'])
         app.processEvents()

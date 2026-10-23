@@ -7,7 +7,7 @@ Rectangle {
     objectName: "reminderCalendar"
     property var dayCounts: ({})
     property var goals: []
-    property real viewportHeightLimit: 456
+    property real viewportHeightLimit: 624
     property double nowTimestamp: Date.now() / 1000
     property string selectedDate: ""
     property int displayedYear: new Date().getFullYear()
@@ -38,6 +38,59 @@ Rectangle {
             return column >= b.column && column < b.column + b.span
         }).length
     }
+    readonly property int weekHeight: 100
+    readonly property int barHeight: 28
+    readonly property int lanePitch: 30
+    property string selectedGoalId: ""
+    property string hoveredGoalId: ""
+    property string statusMessage: ""
+    property bool undoAvailable: false
+    signal undoRequested()
+    signal statusDismissed()
+    signal activityRequested(string goalId, real sceneX, real sceneY)
+    function showActivity(id, sceneX, sceneY) {
+        selectedGoalId = id
+        activityRequested(id, sceneX, sceneY)
+    }
+    onGoalsChanged: {
+        var selected = goals.find(function(g) { return g.id === selectedGoalId })
+        if (!selected) selectedGoalId = ""
+        if (gesture) {
+            var current = goals.find(function(g) { return g.id === gesture.id })
+            if (!current || dayNumber(current.startDate) !== gesture.start || dayNumber(current.endDate) !== gesture.end)
+                cancelGesture()
+        }
+    }
+    function barAt(x, y) {
+        var cell = cellAt(x, y)
+        if (cell < 0) return null
+        var week = weeks[Math.floor(cell / 7)]
+        for (var i = 0; i < week.bars.length; ++i) {
+            var b = week.bars[i], top = week.top + 22 + b.lane * lanePitch
+            var left = b.column * grid.width / 7 + 2, right = (b.column + b.span) * grid.width / 7 - 4
+            if (x < left || x > right || y < top || y >= top + barHeight) continue
+            return {bar:b, mode:x-left < 24 && b.first ? "start" : right-x < 24 && b.last ? "end" : "move"}
+        }
+        return null
+    }
+    function showOverflow(key, item) {
+        overflow.date = key
+        var point = item.mapToItem(Overlay.overlay, 0, item.height)
+        overflow.x = Math.max(8, Math.min(point.x, Overlay.overlay.width - overflow.width - 8))
+        overflow.y = Math.max(8, Math.min(point.y, Overlay.overlay.height - overflow.height - 8))
+        overflow.open()
+    }
+    function updateSceneGesture(sceneX, sceneY) {
+        var point = grid.mapFromItem(null, sceneX, sceneY)
+        updateGesture(point.x, point.y)
+        var a = previous.mapFromItem(null, sceneX, sceneY), b = next.mapFromItem(null, sceneX, sceneY)
+        hoverMonth = a.x >= 0 && a.x < previous.width && a.y >= 0 && a.y < previous.height ? -1 :
+                     b.x >= 0 && b.x < next.width && b.y >= 0 && b.y < next.height ? 1 : 0
+        if (point.x > viewport.contentX + viewport.width - 20) viewport.contentX = Math.max(0, Math.min(viewport.contentWidth - viewport.width, viewport.contentX + 8))
+        if (point.x < viewport.contentX + 20) viewport.contentX = Math.max(0, viewport.contentX - 8)
+        if (point.y > viewport.contentY + viewport.height - 35) viewport.contentY = Math.max(0, Math.min(viewport.contentHeight - viewport.height, viewport.contentY + 8))
+        if (point.y < viewport.contentY + 15) viewport.contentY = Math.max(0, viewport.contentY - 8)
+    }
     readonly property var weeks: {
         var result = [], top = 0
         for (var w = 0; w < 6; ++w) {
@@ -51,7 +104,7 @@ Rectangle {
                 bars.push({goal:g, column:a-start, span:b-a+1, lane:lane,
                            first:a === dayNumber(g.startDate), last:b === dayNumber(g.endDate)})
             })
-            var h = 72
+            var h = weekHeight
             result.push({top:top, height:h, bars:bars.filter(function(b) { return b.lane < 2 }), hiddenBars:bars.filter(function(b) { return b.lane >= 2 })})
             top += h
         }
@@ -97,10 +150,11 @@ Rectangle {
     function beginGesture(goal, mode, x, y) {
         var cell = cellAt(x,y)
         if (cell < 0) return
+        previewStart = goal.startDate; previewEnd = goal.endDate
         gesture = {id:goal.id, mode:mode, start:dayNumber(goal.startDate), end:dayNumber(goal.endDate),
                    anchor:dayNumber(calendarDays[cell].key), x:x, y:y}
-        previewStart = goal.startDate; previewEnd = goal.endDate
         validDrop = true; moved = false
+        selectedGoalId = goal.id
         forceActiveFocus()
     }
     function updateGesture(x,y) {
@@ -121,11 +175,17 @@ Rectangle {
         if (!gesture) return
         var g=gesture, commit=validDrop && moved
         gesture=null; hoverMonth=0
-        if (commit) rangeEdited(g.id,previewStart,previewEnd)
-        else if (!moved && validDrop) goalOpened(g.id)
+        if (commit && (previewStart !== dayKey(g.start) || previewEnd !== dayKey(g.end)))
+            rangeEdited(g.id,previewStart,previewEnd)
+        else if (!moved && validDrop) {
+            var point = grid.mapToItem(null, g.x, g.y)
+            showActivity(g.id, point.x, point.y)
+        }
     }
+    function finishOverflowGesture() { finishGesture(); overflow.close() }
     function cancelGesture() { gesture=null; hoverMonth=0; validDrop=false }
-    Keys.onEscapePressed: { cancelGesture(); pointer.pressedCell=-1 }
+    Keys.onEscapePressed: { cancelGesture(); pointer.pressedCell=-1; overflow.close() }
+
     Timer { interval: 650; repeat: true; running: calendar.gesture !== null && calendar.hoverMonth !== 0; onTriggered: calendar.changeMonth(calendar.hoverMonth) }
     implicitHeight: column.implicitHeight+12
     implicitWidth: 700
@@ -145,9 +205,16 @@ Rectangle {
                 palette.buttonText: "#c5d5df"
                 Accessible.name: "Calendar help"
                 ToolTip.visible: hovered || activeFocus
-                ToolTip.text: "Double-click a day to add a goal. Drag goals to move, drag ends to resize. Escape cancels."
+                ToolTip.text: "Double-click a day to add a goal. Drag goals to move, drag ends to resize. Click an activity to edit its dates. Use + more to see and drag hidden activities. Date changes can be undone. Escape cancels."
             }
             Button { objectName:"reminderAllDays"; text:"All days"; highlighted:calendar.selectedDate===""; onClicked:calendar.dateSelected("") }
+        }
+        RowLayout {
+            Layout.fillWidth: true
+            visible: calendar.statusMessage !== ""
+            Label { Layout.fillWidth: true; text: calendar.statusMessage; color: "#e0e9ef"; wrapMode: Text.WordWrap }
+            Button { objectName: "calendarUndo"; text: "Undo"; visible: calendar.undoAvailable; onClicked: calendar.undoRequested() }
+            ToolButton { text: "×"; Accessible.name: "Dismiss notification"; onClicked: calendar.statusDismissed() }
         }
         Label {
             parent: calendar
@@ -189,7 +256,7 @@ Rectangle {
                         x:(index%7)*grid.width/7; y:calendar.weeks[Math.floor(index/7)].top
                         width:grid.width/7-2; height:calendar.weeks[Math.floor(index/7)].height
                         Accessible.name:modelData.key+", "+goalsCount+" goals, "+reminderCount+" reminders"
-                        onClicked:calendar.dateSelected(modelData.key)
+                        onClicked: calendar.dateSelected(modelData.key)
                         background:Rectangle {
                             color:calendar.externalDropDate===day.modelData.key ? "#386a62" : calendar.selectedDate===day.modelData.key ? "#354e63" : "#263744"
                             border.color:day.modelData.key===calendar.todayKey ? "#ffe3a8" : "#304450"
@@ -214,15 +281,30 @@ Rectangle {
                                 id:bar
                                 required property var modelData
                                 objectName:"goalBar_"+modelData.goal.id+"_"+modelData.column
-                                x:modelData.column*grid.width/7+2; y:22+modelData.lane*18
-                                width:modelData.span*grid.width/7-6; height:16; radius:3
-                                color:"#243d50"; border.color:modelData.goal.color || "#7dbde8"; border.width:1
-                                Text { anchors {fill:parent; leftMargin:12; rightMargin:12} text:bar.modelData.goal.name; elide:Text.ElideRight; color:"white"; verticalAlignment:Text.AlignVCenter; font.pixelSize:10 }
-                                Text { visible:bar.modelData.first; text:"│"; color:"white"; anchors.left:parent.left }
-                                Text { visible:bar.modelData.last; text:"│"; color:"white"; anchors.right:parent.right }
+                                x:modelData.column*grid.width/7+2; y:22+modelData.lane*calendar.lanePitch
+                                readonly property bool focused: modelData.goal.id === calendar.selectedGoalId || modelData.goal.id === calendar.hoveredGoalId
+                                width:modelData.span*grid.width/7-6; height:calendar.barHeight; radius:3
+                                color:focused ? "#386a62" : "#243d50"; border.color:modelData.goal.color || "#7dbde8"; border.width:1
+                                Text { anchors {fill:parent; leftMargin:24; rightMargin:24} text:bar.modelData.goal.name; elide:Text.ElideRight; color:"white"; verticalAlignment:Text.AlignVCenter; font.pixelSize:11 }
+                                Text { anchors.verticalCenter: parent.verticalCenter; width: 24; horizontalAlignment: Text.AlignHCenter; visible:bar.modelData.first && bar.focused; text:bar.focused ? "↔" : "│"; color:"white"; anchors.left:parent.left }
+                                Text { anchors.verticalCenter: parent.verticalCenter; width: 24; horizontalAlignment: Text.AlignHCenter; visible:bar.modelData.last && bar.focused; text:bar.focused ? "↔" : "│"; color:"white"; anchors.right:parent.right }
 
                             }
                         }
+                    }
+                }
+                Repeater {
+                    model: calendar.gesture && calendar.moved ? calendar.weeks : []
+                    delegate: Rectangle {
+                        required property var modelData
+                        required property int index
+                        readonly property int weekStart: calendar.dayNumber(calendar.calendarDays[index*7].key)
+                        readonly property int firstDay: Math.max(weekStart, calendar.dayNumber(calendar.previewStart))
+                        readonly property int lastDay: Math.min(weekStart+6, calendar.dayNumber(calendar.previewEnd))
+                        visible: lastDay >= firstDay
+                        x: (firstDay-weekStart)*grid.width/7+2; y: modelData.top+22
+                        width: Math.max(0, lastDay-firstDay+1)*grid.width/7-6; height: calendar.barHeight
+                        color: "#663b9588"; border.color: "#9df0d7"; border.width: 2; radius: 3
                     }
                 }
                 MouseArea {
@@ -232,42 +314,36 @@ Rectangle {
                     onPressed: function(mouse) {
                         pressedCell=calendar.cellAt(mouse.x,mouse.y)
                         if (pressedCell<0) return
-                        var week=calendar.weeks[Math.floor(pressedCell/7)]
-                        var column=pressedCell%7
-                        var lane=Math.floor((mouse.y-week.top-22)/18)
-                        for (var i=0;i<week.bars.length;++i) {
-                            var b=week.bars[i]
-                            if (b.lane!==lane || column<b.column || column>=b.column+b.span) continue
-                            var left=b.column*grid.width/7+2, right=(b.column+b.span)*grid.width/7-4
-                            if (mouse.x < left || mouse.x > right || mouse.y-week.top-(22+b.lane*18) >= 16) continue
-                            var mode=mouse.x-left<10 && b.first ? "start" : right-mouse.x<10 && b.last ? "end" : "move"
-                            calendar.beginGesture(b.goal,mode,mouse.x,mouse.y)
-                            return
-                        }
+                        var hit = calendar.barAt(mouse.x, mouse.y)
+                        if (hit) calendar.beginGesture(hit.bar.goal, hit.mode, mouse.x, mouse.y)
                     }
+
                     onDoubleClicked: function(mouse) {
-                        if (calendar.gesture) return
+                        if (calendar.gesture || calendar.barAt(mouse.x, mouse.y)) return
                         var cell = calendar.cellAt(mouse.x, mouse.y)
                         if (cell < 0) return
                         pressedCell = -1
                         calendar.dateDoubleClicked(calendar.calendarDays[cell].key)
                     }
+                    hoverEnabled: true
+                    cursorShape: calendar.gesture ? Qt.ClosedHandCursor : (calendar.hoveredGoalId ? Qt.OpenHandCursor : Qt.ArrowCursor)
+                    onExited: calendar.hoveredGoalId = ""
                     onPositionChanged: function(mouse) {
-                        if (!calendar.gesture) return
-                        calendar.updateGesture(mouse.x,mouse.y)
-                        var a=mapToItem(previous,mouse.x,mouse.y), b=mapToItem(next,mouse.x,mouse.y)
-                        calendar.hoverMonth=a.x>=0 && a.x<previous.width && a.y>=0 && a.y<previous.height ? -1 :
-                                            b.x>=0 && b.x<next.width && b.y>=0 && b.y<next.height ? 1 : 0
-                        if (mouse.x>viewport.contentX+viewport.width-20) viewport.contentX=Math.max(0,Math.min(viewport.contentWidth-viewport.width,viewport.contentX+8))
-                        if (mouse.x<viewport.contentX+20) viewport.contentX=Math.max(0,viewport.contentX-8)
-                        if (mouse.y>viewport.contentY+viewport.height-35)
-                            viewport.contentY=Math.min(viewport.contentHeight-viewport.height,viewport.contentY+8)
-                        if (mouse.y<viewport.contentY+15) viewport.contentY=Math.max(0,viewport.contentY-8)
+                        if (!calendar.gesture) {
+                            var hit = calendar.barAt(mouse.x, mouse.y)
+                            calendar.hoveredGoalId = hit ? hit.bar.goal.id : ""
+                            cursorShape = hit ? (hit.mode === "move" ? Qt.OpenHandCursor : Qt.SizeHorCursor) : Qt.ArrowCursor
+                            return
+                        }
+                        var point = mapToItem(null, mouse.x, mouse.y)
+                        calendar.updateSceneGesture(point.x, point.y)
                     }
                     onReleased: function(mouse) {
                         if (calendar.gesture) calendar.finishGesture()
-                        else if (pressedCell>=0 && calendar.cellAt(mouse.x,mouse.y)===pressedCell)
-                            calendar.dateSelected(calendar.calendarDays[pressedCell].key)
+                        else if (pressedCell>=0 && calendar.cellAt(mouse.x,mouse.y)===pressedCell) {
+                            var key = calendar.calendarDays[pressedCell].key
+                            calendar.dateSelected(key)
+                        }
                         pressedCell=-1
                     }
                     onCanceled: { calendar.cancelGesture(); pressedCell=-1 }
@@ -281,17 +357,129 @@ Rectangle {
                         objectName: "calendarMore_" + modelData.key
                         visible: hiddenGoals > 0
                         x: (index % 7) * grid.width / 7 + 2
-                        y: calendar.weeks[Math.floor(index / 7)].top + 58
+                        y: calendar.weeks[Math.floor(index / 7)].top + 80
                         width: grid.width / 7 - 4
-                        height: 14
+                        height: 20
                         padding: 0
                         text: "+" + hiddenGoals + " more"
                         Accessible.name: "Show " + hiddenGoals + " more goals for " + modelData.key
                         contentItem: Text { text: parent.text; color: "#9cbed5"; font.pixelSize: 10; elide: Text.ElideRight }
-                        onClicked: calendar.dateSelected(modelData.key)
+                        onClicked: calendar.showOverflow(modelData.key, this)
                     }
                 }
             }
         }
     }
+    Popup {
+        id: overflow
+        objectName: "calendarOverflow"
+        parent: Overlay.overlay
+        property string date: ""
+        readonly property var activities: calendar.goals.filter(function(g) { return g.startDate <= date && g.endDate >= date }).sort(calendar.compareGoals)
+        width: Math.min(340, parent.width - 16)
+        height: Math.min(parent.height - 16, 380, 78 + activities.length * 54)
+        padding: 10; focus: true; modal: false
+        // Keep the mouse grab alive while dragging out of the panel.
+        opacity: calendar.gesture && calendar.gesture.fromOverflow ? 0 : 1
+        onClosed: { if (calendar.gesture && calendar.gesture.fromOverflow) calendar.cancelGesture() }
+        background: Rectangle { color: "#21313d"; border.color: "#7dbde8"; radius: 8 }
+        contentItem: ColumnLayout {
+            RowLayout {
+                Label { text: overflow.date; color: "white"; font.bold: true; Layout.fillWidth: true }
+                ToolButton { text: "×"; palette.buttonText: "#c5d5df"; Accessible.name: "Close activities"; onClicked: overflow.close() }
+            }
+            Label { Layout.fillWidth: true; wrapMode: Text.WordWrap; text: "Drag middle to move · Drag Start or End to resize"; color: "#c5d5df"; font.pixelSize: 11 }
+            ListView {
+                id: overflowList
+                objectName: "calendarOverflowList"
+                Layout.fillWidth: true; Layout.fillHeight: true; clip: true; spacing: 4
+                model: overflow.activities
+                ScrollBar.vertical: ScrollBar {}
+                delegate: Rectangle {
+                    id: overflowRow
+                    required property var modelData
+                    width: overflowList.width; height: 50; radius: 4
+                    color: rowPointer.containsMouse || activeFocus ? "#354e63" : "#263744"
+                    border.color: modelData.color || "#7dbde8"
+                    objectName: "overflowGoal_" + modelData.id
+                    activeFocusOnTab: true
+                    ToolTip.visible: rowPointer.containsMouse
+                    ToolTip.text: rowPointer.hoverMode === "start" ? "Drag to set start date"
+                        : rowPointer.hoverMode === "end" ? "Drag to set end date" : modelData.name + " · Click for details"
+                    Accessible.role: Accessible.Button
+                    Accessible.name: modelData.name + ", " + modelData.startDate + " to " + modelData.endDate
+                    function openDetails() {
+                        var point = mapToItem(null, 0, height)
+                        overflow.close()
+                        calendar.showActivity(modelData.id, point.x, point.y)
+                    }
+                    Keys.onReturnPressed: openDetails()
+                    Keys.onSpacePressed: openDetails()
+                    Repeater {
+                        model: ["start", "end"]
+                        delegate: Rectangle {
+                            required property string modelData
+                            objectName: "overflowHandle_" + modelData + "_" + overflowRow.modelData.id
+                            width: 32; height: parent.height - 2; y: 1
+                            x: modelData === "start" ? 1 : parent.width - width - 1
+                            radius: 3; color: rowPointer.hoverMode === modelData && rowPointer.containsMouse ? "#4a6b81" : "#304858"
+                            Accessible.role: Accessible.StaticText
+                            Accessible.name: "Drag to set " + modelData + " date for " + overflowRow.modelData.name
+                            Column {
+                                anchors.centerIn: parent
+                                Text { anchors.horizontalCenter: parent.horizontalCenter; text: "↔"; color: "#e0e9ef"; font.pixelSize: 16 }
+                                Text { anchors.horizontalCenter: parent.horizontalCenter; text: modelData === "start" ? "Start" : "End"; color: "#c5d5df"; font.pixelSize: 9 }
+                            }
+                        }
+                    }
+                    Column {
+                        anchors.fill: parent; anchors.margins: 6; anchors.leftMargin: 39; anchors.rightMargin: 39
+                        Text { width: parent.width; text: overflowRow.modelData.name; color: "white"; elide: Text.ElideRight }
+                        Text { width: parent.width; text: overflowRow.modelData.startDate + " → " + overflowRow.modelData.endDate; color: "#c5d5df"; font.pixelSize: 11 }
+                    }
+                    MouseArea {
+                        id: rowPointer
+                        anchors.fill: parent; hoverEnabled: true
+                        cursorShape: pressed ? (dragMode === "move" ? Qt.ClosedHandCursor : Qt.SizeHorCursor)
+                            : (hoverMode === "move" ? Qt.OpenHandCursor : Qt.SizeHorCursor)
+                        readonly property string hoverMode: modeAt(mouseX)
+                        property string dragMode: "move"
+                        function modeAt(x) { return x < 33 ? "start" : x >= width - 33 ? "end" : "move" }
+                        property point pressPoint
+                        property bool dragging: false
+                        property bool canceled: false
+                        onPressed: function(mouse) {
+                            pressPoint = mapToItem(null, mouse.x, mouse.y)
+                            dragMode = modeAt(mouse.x)
+                            dragging = false; canceled = false
+                        }
+                        onPositionChanged: function(mouse) {
+                            if (!pressed || canceled) return
+                            var point = mapToItem(null, mouse.x, mouse.y)
+                            if (!dragging && Math.abs(point.x-pressPoint.x)+Math.abs(point.y-pressPoint.y)>6) {
+                                var g = overflowRow.modelData
+                                calendar.previewStart = g.startDate; calendar.previewEnd = g.endDate
+                                // Resize anchors to the actual endpoint, even when it is outside this month.
+                                // Moves retain the offset of the day from which the panel was opened.
+                                var anchorDate = dragMode === "start" ? g.startDate : dragMode === "end" ? g.endDate : overflow.date
+                                calendar.moved = true; calendar.validDrop = false
+                                calendar.gesture = {id:g.id, mode:dragMode, start:calendar.dayNumber(g.startDate), end:calendar.dayNumber(g.endDate),
+                                    anchor:calendar.dayNumber(anchorDate), x:0, y:0, fromOverflow:true}
+                                calendar.selectedGoalId = g.id
+                                dragging = true
+                            }
+                            if (dragging && calendar.gesture) calendar.updateSceneGesture(point.x, point.y)
+                        }
+                        onReleased: {
+                            if (canceled) return
+                            if (dragging) calendar.finishOverflowGesture()
+                            else overflowRow.openDetails()
+                        }
+                        onCanceled: { canceled = true; calendar.cancelGesture() }
+                    }
+                }
+            }
+        }
+    }
+
 }

@@ -15,7 +15,7 @@ import QtQuick.Controls 2.15
 import QtQuick.Window 2.15
 import "%s"
 Window {
-    width: 1000; height: 650; visible: true
+    width: 1000; height: 800; visible: true
     QtObject {
         id: host
         objectName: "host"
@@ -280,7 +280,7 @@ def test_compact_layout_geometry(calendar_ui, app, tmp_path, width, height):
     QTest.qWait(100)
     agenda = find(root, 'planningAgenda')
     assert agenda.width() <= width
-    assert calendar.property('gridHeight') == 432
+    assert calendar.property('gridHeight') == 600
     if width >= 960:
         assert round(agenda.width()) == 300
         assert agenda.x() >= calendar.x() + calendar.width()
