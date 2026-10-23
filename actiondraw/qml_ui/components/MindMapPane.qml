@@ -461,6 +461,22 @@ FocusScope {
             Item { Layout.fillWidth: true; Layout.minimumWidth: 0 }
         }
         RowLayout {
+            objectName: "mindmapCalendarFilter"
+            Layout.fillWidth: true
+            visible: !!pane.controller && pane.controller.calendarFilterActive
+            Label {
+                Layout.fillWidth: true
+                text: pane.controller ? pane.controller.calendarFilterText : ""
+                elide: Text.ElideRight
+                color: "#e5f0fa"
+            }
+            ToolButton {
+                objectName: "mindmapClearCalendarFilter"
+                text: "Clear filter"
+                onClicked: pane.controller.clearCalendarFilter()
+            }
+        }
+        RowLayout {
             objectName: "mindmapViewToolbar"
             Layout.fillWidth: true
             spacing: 5

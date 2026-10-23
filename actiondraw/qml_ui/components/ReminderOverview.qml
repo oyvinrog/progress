@@ -52,6 +52,9 @@ Column {
         if (success) { undoChange = null; calendarMessage = "Date change undone." }
         else calendarMessage = "Could not undo the date change. Try again."
     }
+    function selectActivity(id) {
+        if (planController && planController.setActivityFilter) planController.setActivityFilter(id)
+    }
     function showActivityDetails(id, sceneX, sceneY) {
         var goal = scheduledGoals.find(function(g) { return g.id === id })
         if (!goal) return
@@ -65,7 +68,6 @@ Column {
         activityCard: true
         saveHandler: overview.saveCalendarRange
         onActivityOpened: function(id) { overview.openGoal(id) }
-        onClosed: calendar.selectedGoalId = ""
     }
     onScheduledGoalsChanged: {
         if (!savingCalendarRange && undoChange) {
@@ -123,6 +125,7 @@ Column {
         if (planController && planController.setDateFilter) planController.setDateFilter(selectedDate)
     }
     function selectDate(day) {
+        calendar.selectedGoalId = ""
         // Selecting the already-highlighted initial day must still filter the map.
         if (selectedDate === day) applyDateFilter()
         else selectedDate = day
@@ -240,7 +243,8 @@ Column {
                 : 624
             goals: overview.scheduledGoals
             onGoalOpened: function(id) { overview.openGoal(id) }
-            onActivityRequested: function(id, sceneX, sceneY) { overview.showActivityDetails(id, sceneX, sceneY) }
+            onActivityRequested: function(id, sceneX, sceneY) { overview.selectActivity(id) }
+            onActivityDetailsRequested: function(id, sceneX, sceneY) { overview.showActivityDetails(id, sceneX, sceneY) }
             onRangeEdited: function(id, start, end) { overview.saveCalendarRange(id, start, end) }
             statusMessage: overview.calendarMessage
             undoAvailable: overview.undoChange !== null

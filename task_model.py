@@ -2651,6 +2651,7 @@ class ProjectManager(QObject):
 
     @Slot()
     def showTabCanvas(self) -> None:
+        self.mindmap.clearCalendarFilter()
         self._setMindmapVisible(False)
 
     @Slot(result='QStringList')
@@ -4715,6 +4716,7 @@ class ProjectManager(QObject):
 
         if index < 0 or index >= self._tab_model.tabCount:
             return
+        self.mindmap.clearCalendarFilter()
         self._setMindmapVisible(False)
 
         # Save current tab state

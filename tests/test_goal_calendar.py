@@ -221,6 +221,7 @@ def test_overview_goal_selection_dialog_and_open(calendar_ui, app):
     click("reminderDay_2032-02-29")
     assert [g["id"] for g in value(overview, "filteredGoals")] == [goal]
     click("openGoal_" + goal)
+    click("calendarActivityDetails")
     click("openCalendarActivity")
     assert host.property("action") == "open-goal-1"
     dialog = overview.findChild(QObject, "goalRangeDialog")

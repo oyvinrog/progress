@@ -39,6 +39,7 @@ def test_local_overflow_details_keyboard_and_open(scheduled_calendar, app, count
     row.forceActiveFocus()
     QTest.keyClick(root, Qt.Key_Return)
     app.processEvents()
+    click('calendarActivityDetails')
     card = overview.findChild(QObject, 'calendarActivityCard')
     assert card.property('visible')
     assert not popup.property('visible')
@@ -133,6 +134,7 @@ def test_activity_card_date_picker_validation_and_undo(scheduled_calendar, app):
     bar = find(root, 'goalBar_' + goal + '_0')
     QTest.mouseClick(root, Qt.LeftButton, Qt.NoModifier, point(bar))
     app.processEvents()
+    click('calendarActivityDetails')
     card = overview.findChild(QObject, 'calendarActivityCard')
     assert card.property('visible')
     click('goalRangeEnd')
@@ -145,6 +147,7 @@ def test_activity_card_date_picker_validation_and_undo(scheduled_calendar, app):
     click('calendarUndo')
     assert tabs.getTabSummary(tabs.goalIndex(goal))['goalEndDate'] == '2032-05-01'
     click('openGoal_' + goal)
+    click('calendarActivityDetails')
     card.findChild(QObject, 'goalRangeEnd').setProperty('text', '2032-01-31')
     click('saveGoalRange')
     assert card.property('visible')
@@ -183,6 +186,7 @@ def test_mindmap_plan_card_save_and_undo(calendar_ui, app):
     overview.setProperty('planController', mindmap)
     app.processEvents()
     click('openGoal_' + goal)
+    click('calendarActivityDetails')
     card = overview.findChild(QObject, 'calendarActivityCard')
     card.findChild(QObject, 'goalRangeEnd').setProperty('text', '2032-03-10')
     click('saveGoalRange')
@@ -209,6 +213,7 @@ def test_overflow_and_card_layout(scheduled_calendar, app, tmp_path, width, heig
     assert root.grabWindow().save(str(tmp_path / ('overflow-%s-%s.png' % (width, height))))
     first = value(popup, 'activities')[0]['id']
     click('overflowGoal_' + first)
+    click('calendarActivityDetails')
     card = overview.findChild(QObject, 'calendarActivityCard')
     assert card.property('visible')
     assert card.property('x') >= 0 and card.property('y') >= 0
@@ -248,3 +253,51 @@ def test_overflow_resize_offscreen_endpoints_across_months(scheduled_calendar, a
     assert (summary['goalStartDate'], summary['goalEndDate']) == expected
     click('calendarUndo')
     assert tabs.scheduledGoals == original
+
+
+@pytest.mark.parametrize('entry', ['bar', 'agenda', 'overflow'])
+def test_activity_entry_points_filter_complete_branch(scheduled_calendar, app, entry):
+    from actiondraw.mindmap import MindMapController
+    root, host, overview, calendar, tabs, click = scheduled_calendar
+    mindmap = MindMapController(tabs)
+    overview.setProperty('planController', mindmap)
+    try:
+        ids = [tabs.createScheduledGoal('Activity %02d' % i, '2032-02-28', '2032-03-02')
+               for i in range(4)]
+        app.processEvents()
+        if entry == 'overflow':
+            goal = value(calendar, 'weeks')[4]['hiddenBars'][0]['goal']['id']
+        elif entry == 'bar':
+            goal = value(calendar, 'weeks')[4]['bars'][0]['goal']['id']
+        else:
+            goal = ids[0]
+        node_id = next(key for key, tab in mindmap.links.items() if tab == goal)
+        child = mindmap.map.find(node_id).add_child('Unscheduled child')
+        mindmap.map.find(node_id).folded = True
+        calendar.dateSelected.emit('2032-02-28')
+        if entry == 'bar':
+            column = value(calendar, 'weeks')[4]['bars'][0]['column']
+            click('goalBar_' + goal + '_' + str(column))
+        elif entry == 'agenda':
+            click('openGoal_' + goal)
+        else:
+            click('calendarMore_2032-02-29')
+            QTest.qWait(80)
+            row = find(root, 'overflowGoal_' + goal)
+            row.forceActiveFocus()
+            QTest.keyClick(root, Qt.Key_Return)
+            app.processEvents()
+        assert mindmap.activityFilter == goal
+        assert child.id in {n['id'] for n in mindmap.nodes}
+        card = overview.findChild(QObject, 'calendarActivityCard')
+        assert not card.property('visible')
+        mindmap.select(child.id)
+        assert mindmap.activityFilter == goal
+        assert {n['id'] for n in mindmap.nodes} == {node_id, child.id}
+        click('calendarActivityDetails')
+        assert card.property('visible')
+        card.close()
+        assert mindmap.activityFilter == goal
+        assert overview.property('selectedDate') == '2032-02-28'
+    finally:
+        overview.setProperty('planController', None)

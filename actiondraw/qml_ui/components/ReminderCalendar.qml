@@ -48,6 +48,7 @@ Rectangle {
     signal undoRequested()
     signal statusDismissed()
     signal activityRequested(string goalId, real sceneX, real sceneY)
+    signal activityDetailsRequested(string goalId, real sceneX, real sceneY)
     function showActivity(id, sceneX, sceneY) {
         selectedGoalId = id
         activityRequested(id, sceneX, sceneY)
@@ -205,9 +206,19 @@ Rectangle {
                 palette.buttonText: "#c5d5df"
                 Accessible.name: "Calendar help"
                 ToolTip.visible: hovered || activeFocus
-                ToolTip.text: "Double-click a day to add a goal. Drag goals to move, drag ends to resize. Click an activity to edit its dates. Use + more to see and drag hidden activities. Date changes can be undone. Escape cancels."
+                ToolTip.text: "Double-click a day to add a goal. Drag goals to move, drag ends to resize. Click an activity to select its branch. Use Details to edit its dates. Use + more to see and drag hidden activities. Date changes can be undone. Escape cancels."
             }
             Button { objectName:"reminderAllDays"; text:"All days"; highlighted:calendar.selectedDate===""; onClicked:calendar.dateSelected("") }
+            Button {
+                objectName: "calendarActivityDetails"
+                text: "Details"
+                enabled: calendar.selectedGoalId !== ""
+                Accessible.name: "Edit selected activity details"
+                onClicked: {
+                    var point = mapToItem(null, 0, height)
+                    calendar.activityDetailsRequested(calendar.selectedGoalId, point.x, point.y)
+                }
+            }
         }
         RowLayout {
             Layout.fillWidth: true
@@ -405,16 +416,16 @@ Rectangle {
                     activeFocusOnTab: true
                     ToolTip.visible: rowPointer.containsMouse
                     ToolTip.text: rowPointer.hoverMode === "start" ? "Drag to set start date"
-                        : rowPointer.hoverMode === "end" ? "Drag to set end date" : modelData.name + " · Click for details"
+                        : rowPointer.hoverMode === "end" ? "Drag to set end date" : modelData.name + " · Click to select"
                     Accessible.role: Accessible.Button
                     Accessible.name: modelData.name + ", " + modelData.startDate + " to " + modelData.endDate
-                    function openDetails() {
+                    function selectActivity() {
                         var point = mapToItem(null, 0, height)
                         overflow.close()
                         calendar.showActivity(modelData.id, point.x, point.y)
                     }
-                    Keys.onReturnPressed: openDetails()
-                    Keys.onSpacePressed: openDetails()
+                    Keys.onReturnPressed: selectActivity()
+                    Keys.onSpacePressed: selectActivity()
                     Repeater {
                         model: ["start", "end"]
                         delegate: Rectangle {
@@ -473,7 +484,7 @@ Rectangle {
                         onReleased: {
                             if (canceled) return
                             if (dragging) calendar.finishOverflowGesture()
-                            else overflowRow.openDetails()
+                            else overflowRow.selectActivity()
                         }
                         onCanceled: { canceled = true; calendar.cancelGesture() }
                     }

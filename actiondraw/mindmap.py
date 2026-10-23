@@ -145,6 +145,7 @@ class MindMapController(QObject):
         self.plan_schedules = {}
         self.plan_ranges = {}
         self._date_filter = ""
+        self._activity_filter = ""
         self._scope_tab = None
         self._view_selections = {}
         self._selected = self.map.root.id
@@ -181,6 +182,9 @@ class MindMapController(QObject):
 
     @property
     def _canonical_root(self):
+        activity = self._activity_node()
+        if activity is not None:
+            return activity
         if self._scope_tab:
             for node_id, tab_id in self.links.items():
                 if tab_id == self._scope_tab:
@@ -327,6 +331,7 @@ class MindMapController(QObject):
         return self._scope_tab is not None
 
     def set_scope(self, tab_id=None):
+        self.clearCalendarFilter()
         if self._scope_tab == tab_id:
             return
         self.clearSearch()
@@ -790,6 +795,7 @@ class MindMapController(QObject):
         self.references = dict((payload or {}).get('tab_references', {}))
         self._search_query = ''
         self._date_filter = ''
+        self._activity_filter = ''
         self._priority_filter = 1.0
         self._completed = set((payload or {}).get('completed', []))
         self._measure_progress = set((payload or {}).get('measure_progress', []))
@@ -842,6 +848,7 @@ class MindMapController(QObject):
 
     @Slot(str)
     def searchText(self, query):
+        self._leave_calendar_for(self._selected)
         self._search_query = query
         self.navigateSearch(0)
 
@@ -986,6 +993,7 @@ class MindMapController(QObject):
         self.changed.emit()
 
     def reveal_reminder(self, node_id):
+        self._leave_calendar_for(node_id)
         source_id = self.sourceNodeId(node_id)
         node = next((n for n in self.view_root.walk() if n.id == node_id), None)
         if node is None:
@@ -1079,7 +1087,9 @@ class MindMapController(QObject):
         return retained
 
     def _sync_filter_selection(self):
-        if self._priority_filter == 1 and not self._date_filter:
+        if self._activity_filter and self._activity_node() is None:
+            self._activity_filter = ''
+        if self._priority_filter == 1 and not self.calendarFilterActive:
             return
         if not self.priorityFilterEnabled:
             self._priority_filter = 1.0
@@ -1134,23 +1144,85 @@ class MindMapController(QObject):
     def dateFilter(self):
         return self._date_filter
 
+    @Property(str, notify=changed)
+    def activityFilter(self):
+        return self._activity_filter
+
+    @Property(bool, notify=changed)
+    def calendarFilterActive(self):
+        return bool(self._date_filter or self._activity_filter)
+
+    @Property(str, notify=changed)
+    def calendarFilterText(self):
+        if self._date_filter:
+            return "Day: " + self._date_filter
+        node = self._activity_node()
+        return "Activity: " + node.text if node else ""
+
+    def _activity_node(self, activity_id=None):
+        activity_id = self._activity_filter if activity_id is None else activity_id
+        if not activity_id:
+            return None
+        if activity_id.startswith('plan:'):
+            return self.map.find(activity_id[5:])
+        return next((self.map.find(key) for key, tab in self.links.items()
+                     if tab == activity_id), None)
+
+    @Slot()
+    def clearCalendarFilter(self):
+        if not self.calendarFilterActive:
+            return
+        self._date_filter = ''
+        self._activity_filter = ''
+        self.sceneChanged.emit()
+        self.changed.emit()
+
+    def _leave_calendar_for(self, node_id):
+        if not self.calendarFilterActive:
+            return False
+        node = self._find(node_id)
+        # Restore normal folds, but never hide the navigation destination.
+        if node is not None:
+            for ancestor in node.ancestors():
+                ancestor.folded = False
+        self.clearCalendarFilter()
+        return True
+
     @Slot(str)
     def setDateFilter(self, day):
         if day and not self._valid_plan_range(day, day):
             return
-        self._date_filter = day
         if day:
-            # The calendar covers the whole project, not only the open tab.
             self.set_scope()
             self._priority_filter = 1.0
+        self._activity_filter = ''
+        self._date_filter = day
         self._sync_filter_selection()
         self.sceneChanged.emit()
         self.changed.emit()
         self.resetView.emit()
 
+    @Slot(str)
+    def setActivityFilter(self, activity_id):
+        node = self._activity_node(activity_id)
+        if node is None:
+            return
+        self.set_scope()
+        self.clearSearch()
+        self._priority_filter = 1.0
+        self._date_filter = ''
+        self._activity_filter = activity_id
+        self._set_selection([node.id])
+        self.sceneChanged.emit()
+        self.changed.emit()
+        self.resetView.emit()
+        self.revealNode.emit(node.id)
+
     def _date_nodes(self):
         root = self.view_root
-        if not self._date_filter:
+        if not self.calendarFilterActive:
+            return set(root.walk())
+        if self._activity_filter:
             return set(root.walk())
         day = self._date_filter
         goals = {g['id']: g for g in self._tabs.scheduledGoals} if self._tabs else {}
@@ -1189,7 +1261,7 @@ class MindMapController(QObject):
 
         def visible_nodes(node):
             yield node
-            if not node.folded or self._date_filter:
+            if not node.folded or self.calendarFilterActive:
                 for child in node.children:
                     yield from visible_nodes(child)
 
@@ -1218,17 +1290,17 @@ class MindMapController(QObject):
             sizes[node] = (width, 40.0 + (24.0 if _content(node).id in self.reminders else 0.0)
                            + (24.0 if _content(node).id in self._measure_progress else 0.0)
                            + (28.0 if _content(node).id in self.deadlines else 0.0))
-        if root.folded and not self._date_filter:
+        if root.folded and not self.calendarFilterActive:
             width, height = sizes[root]
             return {root: Box(-width / 2, -height / 2, width, height)}
         # Layout only needs a root; keep the canonical tree's parent links intact.
-        if self._priority_filter == 1 and not self._date_filter:
+        if self._priority_filter == 1 and not self.calendarFilterActive:
             return layout(SimpleNamespace(root=root), sizes)
-        retained = self._priority_nodes(priorities) & self._date_nodes()
+        retained = self._date_nodes() if self.calendarFilterActive else self._priority_nodes(priorities)
         sides = assigned_sides(SimpleNamespace(root=root))
         projected = {node: copy.copy(node) for node in retained}
         for node, clone in projected.items():
-            if self._date_filter:
+            if self.calendarFilterActive:
                 clone.folded = False
             clone.children = [projected[child] for child in node.children if child in retained]
             clone.parent = projected.get(node.parent)
@@ -1258,7 +1330,7 @@ class MindMapController(QObject):
                  'isReference': _placement(n).id in self.references, 'text': n.text, 'note': n.note or '', 'x': b.x, 'y': b.y,
                  'width': b.width, 'height': b.height, 'isTab': self._tab_id(n) is not None,
                  'hasNote': bool(n.note and n.note.strip()),
-                 'folded': n.folded and not bool(self._date_filter), 'hasChildren': bool(n.children), 'bold': bool(n.style.bold),
+                 'folded': n.folded and not self.calendarFilterActive, 'hasChildren': bool(n.children), 'bold': bool(n.style.bold),
                  'isViewRoot': n is root, 'completed': _content(n).id in self._completed,
                  'showCompletionCheckbox': self._show_completion_checkbox(n, root),
                  'bookmarked': _content(n).id in bookmarks,
@@ -1590,7 +1662,7 @@ class MindMapController(QObject):
         if direction in ('left', 'right'):
             if current is self.view_root:
                 root_center = origin.x + origin.width / 2
-                target = None if current.folded else next(
+                target = None if current.folded and not self.calendarFilterActive else next(
                     (child for child in current.children if child in boxes
                      and ((boxes[child].x + boxes[child].width / 2 < root_center)
                           == (direction == 'left'))), None)
@@ -1603,7 +1675,7 @@ class MindMapController(QObject):
                     target = parent
                 else:
                     target = (next((child for child in current.children if child in boxes), None)
-                              if not current.folded else None)
+                              if not current.folded or self.calendarFilterActive else None)
             if target is not None:
                 self.select(target.id, 'add' if extend else 'replace')
             self.revealNode.emit(self._selected)
@@ -1709,11 +1781,13 @@ class MindMapController(QObject):
         selection = self._selection_state()
         cut, query, priority = list(self._cut_ids), self._search_query, self._priority_filter
         date_filter = self._date_filter
+        activity_filter = self._activity_filter
         was_blocked = self.blockSignals(True)
         try:
             self._scope_tab = None
             self._search_query = ''
             self._date_filter = ''
+            self._activity_filter = ''
             self._priority_filter = 1.0
             self._cut_ids = []
             if node_id is not None:
@@ -1725,6 +1799,9 @@ class MindMapController(QObject):
             self._scope_tab = scope if scope in self.links.values() else None
             self._search_query, self._priority_filter = query, priority
             self._date_filter = date_filter
+            self._activity_filter = activity_filter
+            if self._activity_filter and self._activity_node() is None:
+                self._activity_filter = ''
             self._cut_ids = [key for key in cut if self._find(key)]
             self._restore_selection(selection)
             valid = [key for key in self._selected_ids if self._in_scope(self._find(key))]

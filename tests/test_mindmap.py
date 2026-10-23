@@ -4566,3 +4566,138 @@ def test_calendar_filter_matches_pending_plan_even_with_another_retained_range(p
     m.plan_schedules[node] = {'at': datetime(2026, 10, 19, 8).timestamp()}
     m.setDateFilter('2026-10-19')
     assert node in {n['id'] for n in m.nodes}
+
+
+def test_calendar_activity_complete_branch_and_navigation(project):
+    m = project[0].mindmap
+    parent = m.map.root.add_child('Context')
+    activity = parent.add_child('Activity')
+    child = activity.add_child('Unscheduled')
+    grandchild = child.add_child('Deep child')
+    unrelated = parent.add_child('Other')
+    parent.folded = activity.folded = child.folded = True
+    m.setGoalRange('plan:' + activity.id, '2032-02-28', '2032-02-28')
+    m.setDateFilter('2032-02-28')
+    m.setActivityFilter('plan:' + activity.id)
+    assert m.dateFilter == ''
+    assert m.activityFilter == 'plan:' + activity.id
+    assert m.selectedId == activity.id
+    assert {n['id'] for n in m.nodes} == {
+        activity.id, child.id, grandchild.id}
+    assert parent.folded and activity.folded and child.folded
+    # Selection changes neither the calendar scope nor the saved folds.
+    before = m.scene
+    m.select(grandchild.id)
+    assert m.calendarFilterActive
+    assert m.selectedId == grandchild.id
+    assert m.scene == before
+    assert unrelated.id not in {n['id'] for n in m.nodes}
+    assert parent.folded and activity.folded and child.folded
+    m.setDateFilter('2032-02-28')
+    assert m.calendarFilterActive and not m.activityFilter
+
+
+@pytest.mark.parametrize('action', ['search', 'reminder', 'scope', 'tab'])
+def test_calendar_external_navigation_clears_filter(project, action):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    activity = m.map.root.add_child('Activity')
+    child = activity.add_child('Child')
+    m.setActivityFilter('plan:' + activity.id)
+    if action == 'same':
+        m.select(activity.id)
+    elif action in ('toggle', 'range'):
+        m.select(child.id, action)
+    elif action == 'arrow':
+        m.navigate('right')
+    elif action == 'search':
+        m.searchText('Child')
+    elif action == 'reminder':
+        m.reveal_reminder(child.id)
+    elif action == 'scope':
+        m.set_scope()
+    else:
+        pm.switchTab(tabs.currentTabIndex)
+    assert not m.calendarFilterActive
+    assert m.selectedId in {n['id'] for n in m.nodes}
+
+
+def test_calendar_activity_transient_and_deleted_target(project):
+    m = project[0].mindmap
+    activity = m.map.root.add_child('Activity')
+    m.setActivityFilter('plan:' + activity.id)
+    with m.independent_view():
+        assert not m.calendarFilterActive
+    assert m.activityFilter == 'plan:' + activity.id
+    m.editSelected('Renamed activity', '')
+    assert m.calendarFilterText == 'Activity: Renamed activity'
+    assert m.calendarFilterActive
+    with m.independent_view(activity.id):
+        m.deleteSelected()
+    assert not m.calendarFilterActive
+    m.setDateFilter('2032-02-28')
+    payload = m.to_dict()
+    m.load(payload)
+    assert not m.calendarFilterActive
+
+
+def test_calendar_activity_qml_lifecycle(project, actiondraw_window, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    activity = m.map.root.add_child('Activity')
+    child = activity.add_child('Child')
+    m.setGoalRange('plan:' + activity.id, '2032-02-28', '2032-02-28')
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    overview = window.findChild(QObject, 'reminderOverview')
+    calendar = window.findChild(QObject, 'reminderCalendar')
+    calendar.dateSelected.emit('2032-02-28')
+    calendar.activityRequested.emit('plan:' + activity.id, 100, 100)
+    app.processEvents()
+    assert m.activityFilter == 'plan:' + activity.id
+    assert child.id in {n['id'] for n in m.nodes}
+    card = overview.findChild(QObject, 'calendarActivityCard')
+    assert not card.property('visible')
+    assert m.calendarFilterActive
+    indicator = window.findChild(QObject, 'mindmapCalendarFilter')
+    assert indicator.property('visible')
+    clear = window.findChild(QObject, 'mindmapClearCalendarFilter')
+    clear.clicked.emit()
+    assert not m.calendarFilterActive
+    assert overview.property('selectedDate') == '2032-02-28'
+    calendar.dateSelected.emit('2032-02-28')
+    assert m.dateFilter == '2032-02-28'
+    before = m.scene
+    m.select(child.id)
+    assert m.dateFilter == '2032-02-28'
+    assert m.scene == before
+    m.editSelected('Renamed child', '')
+    assert m.dateFilter == '2032-02-28'
+    assert overview.property('selectedDate') == '2032-02-28'
+
+
+@pytest.mark.parametrize('filter_kind', ['day', 'activity'])
+@pytest.mark.parametrize('action', ['same', 'toggle', 'range', 'arrow'])
+def test_calendar_map_navigation_preserves_scope(project, filter_kind, action):
+    m = project[0].mindmap
+    parent = m.map.root.add_child('Context')
+    activity = parent.add_child('Activity')
+    child = activity.add_child('Child')
+    other = m.map.root.add_child('Other')
+    m.setGoalRange('plan:' + activity.id, '2032-02-28', '2032-02-28')
+    activity.folded = True
+    m.setActivityFilter('plan:' + activity.id)
+    if filter_kind == 'day':
+        m.setDateFilter('2032-02-28')
+    before = m.scene
+    if action == 'arrow':
+        positions = {n['id']: n['x'] for n in m.nodes}
+        m.navigate('right' if positions[child.id] > positions[activity.id] else 'left')
+        assert m.selectedId == child.id
+    else:
+        m.select(activity.id if action == 'same' else child.id,
+                 'replace' if action == 'same' else action)
+    assert m.calendarFilterActive
+    assert m.scene == before
+    assert activity.folded
+    assert other.id not in {n['id'] for n in m.nodes}
