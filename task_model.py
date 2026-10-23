@@ -515,6 +515,7 @@ class TaskModel(QAbstractListModel):
     taskCountdownChanged = Signal(int, arguments=['taskIndex'])
     taskReminderChanged = Signal(int, arguments=['taskIndex'])
     taskReminderDue = Signal(int, str, bool, arguments=['taskIndex', 'taskTitle', 'sendNotification'])
+    taskReminderTriggered = Signal(int, str, bool, float)
     taskContractChanged = Signal(int, arguments=['taskIndex'])
     taskContractTick = Signal(int, arguments=['taskIndex'])
     taskContractBreached = Signal(
@@ -1035,7 +1036,7 @@ class TaskModel(QAbstractListModel):
         current_time = time.time()
         changed = False
         countdown_task_indices = []
-        due_reminders: List[Tuple[int, str, bool]] = []
+        due_reminders: List[Tuple[int, str, bool, float]] = []
         contract_task_indices = []
         due_contracts: List[Tuple[int, str, str, str]] = []
 
@@ -1051,7 +1052,7 @@ class TaskModel(QAbstractListModel):
                 countdown_task_indices.append(i)
 
             if task.reminder_at is not None and not task.completed and task.reminder_at <= current_time:
-                due_reminders.append((i, task.title, bool(task.reminder_send_notification)))
+                due_reminders.append((i, task.title, bool(task.reminder_send_notification), task.reminder_at))
 
             if self._isContractActive(task):
                 contract_task_indices.append(i)
@@ -1100,7 +1101,7 @@ class TaskModel(QAbstractListModel):
             # Time passing is a display update, not a project mutation.
             self.taskContractTick.emit(i)
 
-        for i, task_title, send_notification in due_reminders:
+        for i, task_title, send_notification, reminder_at in due_reminders:
             task = self._tasks[i]
             task.reminder_at = None
             idx = self.index(i, 0)
@@ -1108,6 +1109,7 @@ class TaskModel(QAbstractListModel):
             self.taskReminderChanged.emit(i)
             self.taskReminderDue.emit(i, task_title, send_notification)
             task.reminder_send_notification = False
+            self.taskReminderTriggered.emit(i, task_title, send_notification, reminder_at)
 
         for i, task_title, punishment, deadline_text in due_contracts:
             task = self._tasks[i]
@@ -2518,6 +2520,7 @@ class ProjectManager(QObject):
     mindmapReminderDue = Signal(str, str, bool, arguments=["nodeId", "title", "sendNotification"])
     standaloneRemindersChanged = Signal()
     standaloneReminderDue = Signal(str, bool, arguments=["title", "sendNotification"])
+    dueReminder = Signal("QVariantMap", arguments=["reminder"])
     taskContractBreached = Signal(
         int,
         int,
@@ -2554,12 +2557,15 @@ class ProjectManager(QObject):
         self._sidebar_expanded = self._load_sidebar_expanded_setting()
         self._recent_projects: List[str] = self._load_recent_projects()
         self._standalone_reminders: List[StandaloneReminder] = []
+        self._due_reminders: Dict[str, Dict[str, Any]] = {}
+        self.projectAccessEnding.connect(self._due_reminders.clear)
         self._navigation_back_stack: List[NavigationSnapshot] = []
         self._restoring_navigation = False
         self._reminder_timer = QTimer(self)
         self._reminder_timer.timeout.connect(self._processReminderTimers)
         self._reminder_timer.start(1000)
         self._task_model.taskReminderDue.connect(self._onCurrentTabReminderDue)
+        self._task_model.taskReminderTriggered.connect(self._onCurrentTaskReminderTriggered)
         self._task_model.taskContractBreached.connect(self._onCurrentTabContractBreached)
         if self._tab_model is not None:
             self._task_model.taskCompletionChanged.connect(self._refreshCurrentTabTasks)
@@ -2877,6 +2883,82 @@ class ProjectManager(QObject):
             self._plan_options_day = day
             self.mindmap.planChanged.emit()
 
+    def _onCurrentTaskReminderTriggered(self, task_index, title, notify, reminder_at):
+        tab_index = self._tab_model.currentTabIndex if self._tab_model is not None else 0
+        self._emitDueReminder('task', title, notify, reminder_at,
+                              tabIndex=tab_index, taskIndex=task_index)
+
+    def _emitDueReminder(self, kind, title, notify, reminder_at=None, **source):
+        """Capture conversion context before the consumed reminder is lost."""
+        token = str(uuid.uuid4()) if reminder_at is not None else ''
+        payload = dict(kind=kind, title=title, sendNotification=bool(notify),
+                       tabIndex=-1, taskIndex=-1, nodeId='', conversionId=token,
+                       scheduledDate=(datetime.fromtimestamp(reminder_at).date().isoformat()
+                                      if reminder_at is not None else ''))
+        payload.update(source)
+        if token:
+            context = dict(payload)
+            if kind == 'task' and self._tab_model is not None:
+                tabs = self._tab_model.getAllTabs()
+                index = payload['tabIndex']
+                if 0 <= index < len(tabs):
+                    context['sourceTab'] = tabs[index]
+                    tasks = (self._task_model.to_dict() if index == self._tab_model.currentTabIndex
+                             else tabs[index].tasks).get('tasks', [])
+                    row = payload['taskIndex']
+                    if 0 <= row < len(tasks):
+                        context['sourceTitle'] = tasks[row].get('title')
+            self._due_reminders[token] = context
+        self.dueReminder.emit(payload)
+
+    @Slot(str)
+    def releaseDueReminder(self, conversion_id):
+        self._due_reminders.pop(conversion_id, None)
+
+    @Slot(str, result=str)
+    def convertDueReminderToGoal(self, conversion_id):
+        """Convert a captured alert once, without depending on the active tab."""
+        context = self._due_reminders.get(conversion_id)
+        if context is None or self._tab_model is None:
+            self.errorOccurred.emit('This reminder is no longer available to convert.')
+            return ''
+        if context.get('goalId'):
+            return context['goalId']
+        day = context['scheduledDate']
+        goal_id = ''
+        if context['kind'] == 'standalone':
+            goal_id = self._tab_model.createScheduledGoal(context['title'], day, day)
+        elif context['kind'] == 'mindmap':
+            goal_id = self.mindmap.scheduleReminderSource(context['nodeId'], day)
+        elif context['kind'] == 'task':
+            tabs = self._tab_model.getAllTabs()
+            source_tab = context.get('sourceTab')
+            index = next((i for i, tab in enumerate(tabs) if tab is source_tab), -1)
+            if index >= 0:
+                # Rows have no stable IDs. Reject ambiguous/deleted/renamed sources
+                # rather than promoting whichever task now occupies the old row.
+                payload = (self._task_model.to_dict()
+                           if index == self._tab_model.currentTabIndex else source_tab.tasks)
+                matches = [i for i, task in enumerate(payload.get('tasks', []))
+                           if task.get('title') == context.get('sourceTitle')]
+                if len(matches) == 1:
+                    model = TaskModel()
+                    model._timer.stop()
+                    try:
+                        model.from_dict(payload)
+                        target = self._findOrCreateDrillTab(matches[0], model)
+                        if target >= 0:
+                            goal_id = self._tab_model.getAllTabs()[target].id
+                            self._tab_model.setGoalRange(goal_id, day, day)
+                    finally:
+                        model.deleteLater()
+        if not goal_id:
+            self.errorOccurred.emit('The reminder source is unavailable or ambiguous; it could not be converted.')
+            return ''
+        context['goalId'] = goal_id
+        self._save_after_reminder()
+        return goal_id
+
     def _onCurrentTabReminderDue(self, task_index: int, task_title: str, send_notification: bool) -> None:
         tab_index = self._tab_model.currentTabIndex if self._tab_model is not None else 0
         sent_notification = False
@@ -2939,6 +3021,8 @@ class ProjectManager(QObject):
                         self._publishReminderNotification(tab_index, title)
                         sent_notification = True
                     self.taskReminderDue.emit(tab_index, task_index, title, send_notification)
+                    self._emitDueReminder('task', title, send_notification, reminder_ts,
+                                          tabIndex=tab_index, taskIndex=task_index)
 
                 deadline_at = task.get("contract_deadline_at")
                 punishment = str(task.get("contract_punishment", "")).strip()
@@ -3028,6 +3112,7 @@ class ProjectManager(QObject):
                 title = node.text + ' → Kanban Ready'
                 self._publishReminderNotification(0, title, scope_label="Plan")
                 self.mindmapReminderDue.emit(node_id, title, True)
+                self._emitDueReminder('mindmap', title, True, nodeId=node_id)
         if delivered:
             self._save_after_reminder()
 
@@ -3043,6 +3128,8 @@ class ProjectManager(QObject):
             if reminder['send_notification']:
                 self._publishReminderNotification(0, node.text, scope_label="Mindmap")
             self.mindmapReminderDue.emit(node_id, node.text, reminder['send_notification'])
+            self._emitDueReminder('mindmap', node.text, reminder['send_notification'],
+                                  reminder['at'], nodeId=node_id)
         if due:
             self._save_after_reminder()
 
@@ -3064,6 +3151,8 @@ class ProjectManager(QObject):
                 self._publishReminderNotification(0, reminder.title, scope_label="Project")
                 sent_notification = True
             self.standaloneReminderDue.emit(reminder.title, bool(reminder.reminder_send_notification))
+            self._emitDueReminder('standalone', reminder.title, reminder.reminder_send_notification,
+                                  reminder.reminder_at)
 
         if len(remaining) == len(self._standalone_reminders):
             return
@@ -4621,14 +4710,15 @@ class ProjectManager(QObject):
         self._tab_model.setKanbanPlacement(target_index, "ready", -1)
         return target_index
 
-    def _findOrCreateDrillTab(self, task_index: int) -> int:
+    def _findOrCreateDrillTab(self, task_index: int, task_model=None) -> int:
         """Return the tab backing a task drill target, creating it when needed."""
+        task_model = task_model if task_model is not None else self._task_model
         if self._tab_model is None:
             return -1
-        if task_index < 0 or task_index >= self._task_model.rowCount():
+        if task_index < 0 or task_index >= task_model.rowCount():
             return -1
 
-        task_title = self._task_model.getTaskTitle(task_index).strip()
+        task_title = task_model.getTaskTitle(task_index).strip()
         if not task_title:
             return -1
 
@@ -4639,7 +4729,7 @@ class ProjectManager(QObject):
                 break
 
         if target_index == -1:
-            subtasks_data = self._task_model.getSubtasksData(task_index)
+            subtasks_data = task_model.getSubtasksData(task_index)
             diagram_data = {
                 "items": [],
                 "edges": [],

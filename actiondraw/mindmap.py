@@ -1483,6 +1483,14 @@ class MindMapController(QObject):
             return ''
         return self._promote_node(node, start, end)
 
+    def scheduleReminderSource(self, node_id, day):
+        """Schedule the linked goal, or promote a reminder's thought in place."""
+        node = self._find(node_id)
+        goal_id = self._tab_id(node)
+        if goal_id is not None:
+            return goal_id if self._tabs.setGoalRange(goal_id, day, day) else ''
+        return self.createScheduledGoalFromNode(node_id, day, day)
+
     def _promote_node(self, node, start=None, end=None):
         # addTab emits tabsChanged synchronously. Defer reconciliation until the
         # new tab is linked here, otherwise it would get a duplicate root node.
