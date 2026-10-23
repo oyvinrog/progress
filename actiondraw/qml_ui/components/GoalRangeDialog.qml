@@ -23,6 +23,7 @@ Dialog {
     x: activityCard ? Math.max(8, Math.min(anchorX, parent.width - width - 8)) : 0
     y: activityCard ? Math.max(8, Math.min(anchorY, parent.height - height - 8)) : 0
     width: Math.min(360, parent ? parent.width - 16 : 360)
+    function refreshName(name) { nameField.text = name }
     function show(goal, selectedDate) {
         nodeId = ""
         goalId = goal ? goal.id : ""

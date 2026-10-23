@@ -1813,11 +1813,32 @@ class MindMapController(QObject):
         node = self._find(node_id)
         if node is None:
             return False
+        tab_id = self._tab_id(node)
+        tab_state = None
+        if tab_id is not None:
+            text = text.strip()
+            if not text:
+                self.errorOccurred.emit('Enter a goal name.')
+                return False
+            index = self._tabs.goalIndex(tab_id)
+            old_name = self._tabs.getTabSummary(index)['name']
+            if old_name != text:
+                tab_state = {'names': {tab_id: old_name}}
+
         def mutate():
-            if self._tab_id(node) is None:
-                node.text = text
+            if tab_state:
+                self._tabs.renameTab(index, text)
+            node.text = text
             node.note = note or None
-        return self._commit(mutate)
+
+        self._changing_tabs = True
+        try:
+            result = self._commit(mutate, tab_state)
+            if not result and tab_state:
+                self._exchange_history_tabs(tab_state)
+        finally:
+            self._changing_tabs = False
+        return result
 
     def importBranchText(self, node_id, text):
         target = self._find(node_id)
@@ -2010,9 +2031,13 @@ class MindMapController(QObject):
     @Slot()
     def deleteSelected(self):
         roots = self._structural_roots(self._selected_ids)
-        if not roots or self.view_root in roots:
+        if not roots:
+            return
+        if self.view_root in roots and not (
+                self._activity_filter and _placement(self.view_root).parent is not None):
             return
         placements = [_placement(node) for node in roots]
+        parent_id = (roots[0].parent or placements[0].parent).id
         removed_ids = {n.id for node in placements for n in node.walk()}
         tab_ids = {self.links[key] for key in removed_ids if key in self.links}
         tab_state = None
@@ -2029,7 +2054,9 @@ class MindMapController(QObject):
             finally:
                 self._changing_tabs = False
         def mutate():
-            self._set_selection([roots[0].parent.id])
+            if self._activity_node() is not None and self._activity_node().id in removed_ids:
+                self._activity_filter = ''
+            self._set_selection([parent_id])
             for key in removed_ids:
                 self.links.pop(key, None)
             for node in placements:
@@ -2121,6 +2148,18 @@ class MindMapController(QObject):
         index = sum(boxes[n].center_y < center_y for n in siblings if n is not node)
         self._reorder(node, siblings, index)
 
+    def _exchange_history_tabs(self, state):
+        # Renames exchange only names so later changes to goal content survive.
+        if 'names' not in state:
+            return self.exchange_tabs(state)
+        inverse = {}
+        for tab_id, name in state['names'].items():
+            index = self._tabs.goalIndex(tab_id)
+            if index >= 0:
+                inverse[tab_id] = self._tabs.getTabSummary(index)['name']
+                self._tabs.renameTab(index, name)
+        return {'names': inverse}
+
     def _restore(self, source, destination):
         if not source:
             return
@@ -2129,7 +2168,7 @@ class MindMapController(QObject):
         if tab_state is not None:
             self._changing_tabs = True
             try:
-                inverse = self.exchange_tabs(tab_state)
+                inverse = self._exchange_history_tabs(tab_state)
             except ValueError as exc:
                 self.errorOccurred.emit(str(exc))
                 return

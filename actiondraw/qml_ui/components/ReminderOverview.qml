@@ -81,6 +81,7 @@ Column {
             if (!activity) activityCard.close()
             else if (activity.startDate !== activityCard.sourceStart || activity.endDate !== activityCard.sourceEnd)
                 activityCard.show(activity, "")
+            else activityCard.refreshName(activity.name)
         }
         if (windowRoot && scheduledGoals.length && !windowRoot.reminderOverviewTouched)
             windowRoot.reminderOverviewExpanded = true

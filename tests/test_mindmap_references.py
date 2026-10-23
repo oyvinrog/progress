@@ -495,3 +495,22 @@ def test_calendar_activity_includes_reference_descendants(project):
     assert m.activityFilter == daily
     assert m.scene == before
     assert m.selectedId in {n['id'] for n in m.nodes}
+
+
+def test_reference_rename_updates_shared_goal_and_history(project):
+    pm, tabs, _, _, _, lunch, roots, _ = project
+    m = pm.mindmap
+    ref = reference(project)
+    tabs.setGoalRange(lunch, '2032-02-28', '2032-03-02')
+    original = m.map.find(roots[lunch]).text
+    m.select(ref)
+    m.editSelected('Shared renamed goal', 'Shared note')
+    assert m.map.find(roots[lunch]).text == 'Shared renamed goal'
+    assert m.selectedNode['text'] == 'Shared renamed goal'
+    assert tabs.scheduledGoals[0]['name'] == 'Shared renamed goal'
+    m.undo()
+    assert m.selectedNode['text'] == original
+    assert tabs.scheduledGoals[0]['name'] == original
+    m.redo()
+    assert m.selectedNode['text'] == 'Shared renamed goal'
+    assert tabs.scheduledGoals[0]['startDate'] == '2032-02-28'

@@ -235,7 +235,6 @@ FocusScope {
         if (!controller) return
         var node = controller.selectedNode
         titleField.text = node.text || ""
-        titleField.readOnly = !!node.isTab
         noteField.text = node.note || ""
         editor.open()
     }

@@ -834,7 +834,7 @@ def test_edit_move_fold_delete_and_cycle_guard(project):
     assert m.map.find(branch).side == 'left'
 
 
-def test_reordering_and_tab_label_readonly(project):
+def test_reordering_and_tab_label_editable(project):
     m = project[0].mindmap
     a = thought(m, 'A')
     m.select(m.map.root.id)
@@ -845,7 +845,7 @@ def test_reordering_and_tab_label_readonly(project):
     assert m.map.root.children.index(m.map.find(b)) > m.map.root.children.index(m.map.find(a))
     m.select(next(iter(m.links)))
     m.editSelected('Attempt to rename tab', 'Tab reasoning')
-    assert m.selectedNode['text'] == 'Main'
+    assert m.selectedNode['text'] == 'Attempt to rename tab'
     assert m.selectedNode['note'] == 'Tab reasoning'
 
 
@@ -4701,3 +4701,95 @@ def test_calendar_map_navigation_preserves_scope(project, filter_kind, action):
     assert m.scene == before
     assert activity.folded
     assert other.id not in {n['id'] for n in m.nodes}
+
+
+@pytest.mark.parametrize('scheduled', [False, True])
+def test_linked_rename_history_preserves_goal_content(project, scheduled):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    node = next(iter(m.links))
+    goal = m.links[node]
+    if scheduled:
+        tabs.setGoalRange(goal, '2032-02-28', '2032-03-02')
+        m.setActivityFilter(goal)
+    m.select(node)
+    assert m.editNode(node, '  Renamed goal  ', 'Updated notes')
+    assert tabs.getTabSummary(tabs.goalIndex(goal))['name'] == 'Renamed goal'
+    assert m.selectedNode['text'] == 'Renamed goal'
+    before = m.to_dict()
+    assert not m.editNode(node, '  ', 'Rejected notes')
+    assert m.to_dict() == before
+    tabs.getAllTabs()[0].markdown_tabs = [{'name': 'Later', 'text': 'Keep me'}]
+    m.undo()
+    assert m.map.find(node).text == 'Main'
+    assert tabs.getTabSummary(tabs.goalIndex(goal))['name'] == 'Main'
+    m.redo()
+    assert m.map.find(node).text == 'Renamed goal'
+    assert m.map.find(node).note == 'Updated notes'
+    assert tabs.getAllTabs()[0].markdown_tabs == [{'name': 'Later', 'text': 'Keep me'}]
+    if scheduled:
+        assert tabs.scheduledGoals[0]['name'] == 'Renamed goal'
+        assert tabs.scheduledGoals[0]['startDate'] == '2032-02-28'
+
+
+@pytest.mark.parametrize('linked', [False, True])
+@pytest.mark.parametrize('references', [False, True])
+def test_delete_calendar_activity_root_and_history(project, linked, references):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    if linked:
+        goal = tabs.createScheduledGoal('Activity', '2032-02-28', '2032-03-02')
+        node = next(key for key, value in m.links.items() if value == goal)
+    else:
+        node = thought(m, 'Activity')
+        goal = 'plan:' + node
+        m.setGoalRange(goal, '2032-02-28', '2032-03-02')
+    child = m.map.find(node).add_child('Child').id
+    if references:
+        other = next(iter(m.links.values()))
+        assert m.addTabReference(m.map.root.id, other)
+    before = m.to_dict()
+    m.setActivityFilter(goal)
+    m.deleteSelected()
+    assert m.map.find(node) is None and m.map.find(child) is None
+    assert m.activityFilter == ''
+    assert m.selectedId == m.map.root.id
+    assert goal not in {g['id'] for g in tabs.scheduledGoals + m.plannedGoals}
+    m.undo()
+    assert m.to_dict() == before
+    assert goal in {g['id'] for g in tabs.scheduledGoals + m.plannedGoals}
+    m.redo()
+    assert m.map.find(node) is None
+
+
+@pytest.mark.parametrize('via_reference', [False, True])
+def test_qml_calendar_linked_title_editor(project, app, actiondraw_window, via_reference):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    goal = tabs.createScheduledGoal('Activity', '2032-02-28', '2032-03-02')
+    pm.showMindmap()
+    engine = actiondraw_window(diagram, tasks, tab_model=tabs, project_manager=pm)
+    window = engine.rootObjects()[0]
+    if via_reference:
+        assert m.addTabReference(m.map.root.id, goal)
+    else:
+        m.setActivityFilter(goal)
+    QTest.qWait(50)
+    pane = window.findChild(QObject, 'mindmapPane')
+    assert QMetaObject.invokeMethod(pane, 'editNode')
+    title = window.findChild(QObject, 'mindmapNodeTitle')
+    assert not title.property('readOnly')
+    title.setProperty('text', 'Edited in mindmap')
+    QTest.keyClick(window, Qt.Key_Return)
+    assert tabs.scheduledGoals[0]['name'] == 'Edited in mindmap'
+    m.undo()
+    assert tabs.scheduledGoals[0]['name'] == 'Activity'
+    QTest.keyClick(window, Qt.Key_Delete)
+    if via_reference:
+        assert tabs.scheduledGoals[0]['id'] == goal
+        assert not m.references
+    else:
+        assert not tabs.scheduledGoals
+    m.undo()
+    assert tabs.scheduledGoals[0]['id'] == goal
+    window.close()

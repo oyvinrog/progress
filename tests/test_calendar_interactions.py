@@ -301,3 +301,21 @@ def test_activity_entry_points_filter_complete_branch(scheduled_calendar, app, e
         assert overview.property('selectedDate') == '2032-02-28'
     finally:
         overview.setProperty('planController', None)
+
+
+def test_open_card_rename_preserves_pending_dates(scheduled_calendar, app):
+    root, _, overview, calendar, tabs, click = scheduled_calendar
+    goal = tabs.createScheduledGoal('Activity', '2032-02-28', '2032-03-02')
+    app.processEvents()
+    click('openGoal_' + goal)
+    click('calendarActivityDetails')
+    card = overview.findChild(QObject, 'calendarActivityCard')
+    card.findChild(QObject, 'goalRangeEnd').setProperty('text', '2032-03-10')
+    tabs.renameTab(tabs.goalIndex(goal), 'Renamed activity')
+    app.processEvents()
+    assert card.findChild(QObject, 'goalRangeName').property('text') == 'Renamed activity'
+    assert card.findChild(QObject, 'goalRangeEnd').property('text') == '2032-03-10'
+    assert card.property('visible')
+    tabs.removeTab(tabs.goalIndex(goal))
+    app.processEvents()
+    assert not card.property('visible')
