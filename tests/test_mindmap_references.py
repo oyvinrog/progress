@@ -514,3 +514,12 @@ def test_reference_rename_updates_shared_goal_and_history(project):
     m.redo()
     assert m.selectedNode['text'] == 'Shared renamed goal'
     assert tabs.scheduledGoals[0]['startDate'] == '2032-02-28'
+
+
+def test_calendar_identity_resolves_projected_children(project):
+    m = project[0].mindmap
+    ref = reference(project)
+    projected_child = occurrence(m, project[7], ref)
+    assert m.calendarActivityId(ref) == project[5]
+    assert m.calendarActivityId(projected_child) == 'plan:' + project[7]
+    assert m.calendarActivityId('missing') == ''

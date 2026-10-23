@@ -104,6 +104,24 @@ Item {
             selectDate(day)
         return true
     }
+    function dropNode(nodeId, sceneX, sceneY) {
+        var day = dateAtScene(sceneX, sceneY)
+        clearGoalDrop()
+        if (!day) return false
+        // Defer model changes until the node's release handler has returned.
+        Qt.callLater(function() {
+            var id = planController ? planController.calendarActivityId(nodeId) : ""
+            if (!id) { calendarMessage = "This activity is no longer available."; return }
+            var existing = scheduledGoals.find(function(g) { return g.id === id })
+            var duration = existing ? calendar.dayNumber(existing.endDate) - calendar.dayNumber(existing.startDate) : 0
+            var model = rangeModel(id)
+            if (model && model.setGoalRange(id, day, calendar.dayKey(calendar.dayNumber(day) + duration))) {
+                calendarMessage = ""
+                selectDate(day)
+            } else calendarMessage = "Could not save dates. Please try again."
+        })
+        return true
+    }
     function rangeModel(id) { return id.indexOf("plan:") === 0 ? planController : goalModel }
     function openGoal(id) {
         if (id.indexOf("plan:") === 0) {
@@ -222,7 +240,7 @@ Item {
             ToolButton { palette.buttonText: "#e0e9ef"; objectName: "nextWeek"; text: "›"; implicitWidth: 28; implicitHeight: 30; Accessible.name: "Next week"; onClicked: overview.shiftWeek(1) }
             Label {
                 Layout.fillWidth: true; Layout.minimumWidth: 0
-                text: overview.weekStart ? overview.shortDate(overview.weekStart) + " – " + overview.shortDate(calendar.dayKey(calendar.dayNumber(overview.weekStart)+6)) : ""
+                text: overview.calendarMessage && !planning.visible ? overview.calendarMessage : overview.weekStart ? overview.shortDate(overview.weekStart) + " – " + overview.shortDate(calendar.dayKey(calendar.dayNumber(overview.weekStart)+6)) : ""
                 color: "#e0e9ef"; font.pixelSize: 12; elide: Text.ElideRight
             }
             ToolButton { palette.buttonText: "#e0e9ef";
@@ -292,7 +310,7 @@ Item {
     Popup {
         id: calendarHelp; parent: Overlay.overlay; anchors.centerIn: parent
         width: Math.min(380, parent.width - 32); modal: true; focus: true
-        contentItem: Label { text: "Select a day to filter the map. Open its counts to see activities. Double-click a day to add a goal, or drop a goal onto a date. Open month to drag activities and resize their date ranges. Escape cancels a drag."; wrapMode: Text.WordWrap }
+        contentItem: Label { text: "Select a day to filter the map. Open its counts to see activities. Double-click a day to add a goal, or drop a goal or mindmap node onto a date. Open month to drag activities and resize their date ranges. Escape cancels a drag."; wrapMode: Text.WordWrap }
     }
     Popup {
         id: dayAgenda; objectName: "weekAgendaPopup"; parent: Overlay.overlay

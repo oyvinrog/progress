@@ -1358,6 +1358,9 @@ ApplicationWindow {
             objectName: "mindmapPane"
             tabModel: root.tabModelRef
             toolDialogOpen: dialogs.assessmentDialog.visible
+            nodeDropHandler: function(nodeId, sceneX, sceneY) { return planningOverview.dropNode(nodeId, sceneX, sceneY) }
+            onNodeDragMoved: function(nodeId, sceneX, sceneY) { planningOverview.updateGoalDrop(sceneX, sceneY) }
+            onNodeDragCleared: planningOverview.clearGoalDrop()
             onAssessmentRequested: dialogs.assessmentDialog.open()
             onActionPaintRequested: root.openActionPaintWindow()
             onCausalDiagramRequested: root.openCausalModelWindow()

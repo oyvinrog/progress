@@ -78,6 +78,15 @@ FocusScope {
     signal reminderRequested(string nodeId)
     signal quickReminderRequested(string nodeId, int minutesFromNow)
     signal clearReminderRequested(string nodeId)
+    signal nodeDragMoved(string nodeId, real sceneX, real sceneY)
+    signal nodeDragCleared()
+    property var nodeDropHandler: null
+    property var activeNodeDrag: null
+    Shortcut {
+        sequence: "Escape"
+        enabled: pane.activeNodeDrag !== null
+        onActivated: pane.activeNodeDrag.cancelDrag()
+    }
     property bool reminderDialogOpen: false
     property var controller
     // Read Python scene/selection properties once per notification, not per delegate.
@@ -885,10 +894,21 @@ FocusScope {
                                 onExited: insertionHoverExit.restart()
                                 onPressedChanged: { pane.nodePressed = pressed; nodeLoader.dragging = pressed }
                                 cursorShape: Qt.PointingHandCursor
-                                drag.target: pressedButtons === Qt.LeftButton ? nodeItem : null
+                                drag.target: !canceled && pressedButtons === Qt.LeftButton ? nodeItem : null
                                 drag.axis: reorderDrag ? Drag.YAxis : Drag.XAndYAxis
                                 property bool wasDragged: false
                                 property bool reorderDrag: false
+                                property bool canceled: false
+                                function clearDrag() {
+                                    pane.activeNodeDrag = null
+                                    pane.nodeDragCleared()
+                                }
+                                function cancelDrag() {
+                                    canceled = true
+                                    restorePosition()
+                                    wasDragged = true
+                                    clearDrag()
+                                }
                                 function restorePosition() {
                                     nodeItem.x = Qt.binding(function() { return nodeItem.modelData.x })
                                     nodeItem.y = Qt.binding(function() { return nodeItem.modelData.y })
@@ -896,12 +916,30 @@ FocusScope {
                                 onPressed: function(mouse) {
                                     pane.focusMap()
                                     wasDragged = false
+                                    canceled = false
                                     reorderDrag = mouse.button === Qt.LeftButton && !!(mouse.modifiers & Qt.ControlModifier)
                                 }
-                                onPositionChanged: if (drag.active) wasDragged = true
-                                onCanceled: { restorePosition(); wasDragged = true; reorderDrag = false }
+                                onPositionChanged: function(mouse) {
+                                    if (!drag.active || canceled) return
+                                    wasDragged = true
+                                    pane.activeNodeDrag = nodeMouse
+                                    if (!reorderDrag) {
+                                        var scenePoint = nodeMouse.mapToItem(null, mouse.x, mouse.y)
+                                        pane.nodeDragMoved(nodeItem.modelData.id, scenePoint.x, scenePoint.y)
+                                    }
+                                }
+                                onCanceled: cancelDrag()
                                 onReleased: function(mouse) {
+                                    clearDrag()
+                                    if (canceled) { restorePosition(); return }
                                     if (!wasDragged) return
+                                    var point = nodeItem.mapToItem(world, mouse.x, mouse.y)
+                                    if (!reorderDrag && pane.nodeDropHandler) {
+                                        var scenePoint = nodeMouse.mapToItem(null, mouse.x, mouse.y)
+                                        var draggedId = nodeItem.modelData.id
+                                        restorePosition()
+                                        if (pane.nodeDropHandler(draggedId, scenePoint.x, scenePoint.y)) return
+                                    }
                                     if (reorderDrag) {
                                         var reorderId = nodeItem.modelData.id
                                         var centerY = nodeItem.y + nodeItem.height / 2
@@ -909,7 +947,6 @@ FocusScope {
                                         Qt.callLater(pane.controller.reorderNodeAt, reorderId, centerY)
                                         return
                                     }
-                                    var point = nodeItem.mapToItem(world, mouse.x, mouse.y)
                                     var nodes = pane.sceneNodes
                                     var targetId = "", placement = "child"
                                     for (var i = 0; i < nodes.length; ++i) {
@@ -1185,7 +1222,7 @@ FocusScope {
             spacing: 16
             Label {
                 Layout.fillWidth: true
-                text: "Drag the priority slider left for highest scores, right to include more; All restores every branch · Children of progress-measuring nodes have completion checkboxes · Select a node and click + beside it to add a child, or above/below to add a sibling · Type to find node titles, including folded branches · Enter / Shift+Enter cycles matches · Backspace edits search · Escape clears search · Double-click a goal node to open it · Double-click empty space to add a thought · Ctrl+B toggles bold · Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+C / Ctrl+V copies branches · Ctrl+X / Ctrl+V moves branches · F4 or the Complete menu action toggles completion on any node · Arrows navigate · Tab adds a child · Ctrl+Enter opens a goal"
+                text: "Drag the priority slider left for highest scores, right to include more; All restores every branch · Children of progress-measuring nodes have completion checkboxes · Select a node and click + beside it to add a child, or above/below to add a sibling · Type to find node titles, including folded branches · Enter / Shift+Enter cycles matches · Backspace edits search · Escape clears search · Double-click a goal node to open it · Double-click empty space to add a thought · Ctrl+B toggles bold · Drag a node onto a calendar day to schedule it · Escape cancels a drag · Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+C / Ctrl+V copies branches · Ctrl+X / Ctrl+V moves branches · F4 or the Complete menu action toggles completion on any node · Arrows navigate · Tab adds a child · Ctrl+Enter opens a goal"
                 wrapMode: Text.WordWrap
                 color: "#a9bfd1"
             }
@@ -1680,7 +1717,7 @@ FocusScope {
     Shortcut { sequence: "Ctrl+C"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.copySelected() }
     Shortcut { sequence: "Ctrl+X"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.cutSelected() }
     Shortcut { sequence: "Ctrl+V"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.pasteSelected() }
-    Shortcut { sequence: "Escape"; enabled: pane.shortcutsEnabled && (pane.searching || pane.controller.canPaste); onActivated: { if (pane.searching) pane.controller.clearSearch(); else pane.controller.cancelCut() } }
+    Shortcut { sequence: "Escape"; enabled: !pane.activeNodeDrag && pane.shortcutsEnabled && (pane.searching || pane.controller.canPaste); onActivated: { if (pane.searching) pane.controller.clearSearch(); else pane.controller.cancelCut() } }
     Shortcut { sequence: "Shift+Left"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.navigate("left", true) }
     Shortcut { sequence: "Shift+Right"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.navigate("right", true) }
     Shortcut { sequence: "Shift+Up"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.navigate("up", true) }

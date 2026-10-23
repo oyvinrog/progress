@@ -239,6 +239,17 @@ class MindMapController(QObject):
     def _tab_id(self, node):
         return self.links.get(_content(node).id) if node is not None else None
 
+    @Slot(str, result=str)
+    def calendarActivityId(self, node_id):
+        """Resolve placements to the existing goal or canonical node activity."""
+        node = self._find(node_id)
+        if node is None:
+            return ''
+        tab_id = self._tab_id(node)
+        if tab_id is not None:
+            return tab_id if self._tabs is not None and self._tabs.goalIndex(tab_id) >= 0 else ''
+        return 'plan:' + _content(node).id
+
     @Slot(str, result='QVariantMap')
     def goalData(self, node_id):
         """Return the existing goal for a node or one of its references."""

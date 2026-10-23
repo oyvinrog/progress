@@ -319,3 +319,31 @@ def test_open_card_rename_preserves_pending_dates(scheduled_calendar, app):
     tabs.removeTab(tabs.goalIndex(goal))
     app.processEvents()
     assert not card.property('visible')
+
+
+@pytest.mark.parametrize('kind', ['node', 'goal'])
+def test_mindmap_drop_on_month_and_stale_source(calendar_ui, app, kind):
+    from actiondraw.mindmap import MindMapController
+    root, _, overview, calendar, _, _ = calendar_ui
+    tabs = TabModel()
+    tabs.addTab('Linked goal')
+    mindmap = MindMapController(tabs)
+    node = mindmap.map.find(next(iter(mindmap.links))) if kind == 'goal' else mindmap.map.root.add_child('Activity')
+    activity_id = mindmap.calendarActivityId(node.id)
+    model = tabs if kind == 'goal' else mindmap
+    model.setGoalRange(activity_id, '2032-02-01', '2032-02-04')
+    overview.setProperty('goalModel', tabs)
+    overview.setProperty('planController', mindmap)
+    try:
+        end = point(find(root, 'reminderDay_2032-02-29'), y=10)
+        assert overview.dropNode(node.id, end.x(), end.y())
+        app.processEvents()
+        activities = tabs.scheduledGoals if kind == 'goal' else mindmap.plannedGoals
+        activity = next(g for g in activities if g['id'] == activity_id)
+        assert (activity['startDate'], activity['endDate']) == ('2032-02-29', '2032-03-03')
+        assert overview.dropNode('deleted-node', end.x(), end.y())
+        app.processEvents()
+        assert overview.property('calendarMessage') == 'This activity is no longer available.'
+    finally:
+        overview.setProperty('goalModel', None)
+        overview.setProperty('planController', None)

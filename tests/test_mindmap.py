@@ -4840,3 +4840,76 @@ def test_qml_node_delete_button_and_undo(project, app, actiondraw_window):
     assert m.map.find(branch.id) is not None
     assert m.map.find(child.id) is not None
     window.close()
+
+
+@pytest.mark.parametrize('kind,duration,surface', [('node', 0, 'week'), ('node', 3, 'week'), ('goal', 0, 'week'), ('goal', 3, 'week'), ('reference', 3, 'week'), ('node', 3, 'month')])
+@pytest.mark.parametrize('outcome', ['save', 'escape', 'outside', 'ungrab'])
+def test_qml_node_calendar_drop(project, app, actiondraw_window, kind, duration, surface, outcome):
+    from datetime import date, timedelta
+    from test_reminder_calendar import find
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    goal_node = m.map.find(next(iter(m.links)))
+    node = goal_node.add_child('Calendar activity') if kind == 'node' else goal_node
+    if kind == 'reference':
+        holder = m.map.root.add_child('Reference holder')
+        assert m.addTabReference(holder.id, m.links[goal_node.id])
+        node = m._find(m.selectedId)
+    node_id = node.id
+    activity_id = m.calendarActivityId(node_id)
+    model = m if kind == 'node' else tabs
+    if duration:
+        assert model.setGoalRange(activity_id, '2032-02-01', '2032-02-04')
+    before_parent = node.parent.id
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(120)
+    pane = window.findChild(QObject, 'mindmapPane')
+    pane.setProperty('zoom', 0.65)
+    layout_node = m._find(node_id)
+    pane.setProperty('panX', 40 - m._layout()[layout_node].x * 0.65)
+    pane.setProperty('panY', 20 - m._layout()[layout_node].y * 0.65)
+    QTest.qWait(30)
+    overview = window.findChild(QObject, 'reminderOverview')
+    day = overview.property('weekStart')
+    target = find(window, 'weekDay_' + day)
+    end = target.mapToScene(target.boundingRect().center()).toPoint()
+    item = find(window, 'mindmapNode_' + node_id)
+    area = find(window, 'mindmapNodeMouse_' + node_id)
+    start = item.mapToScene(item.boundingRect().center()).toPoint()
+    before = model.plannedGoals if kind == 'node' else tabs.scheduledGoals
+    QTest.mousePress(window, Qt.LeftButton, Qt.NoModifier, start)
+    QTest.mouseMove(window, start + QPoint(0, -16), 30)
+    if surface == 'month':
+        # Open while the source owns the grab, then exercise month hit testing.
+        overview.openPlanning()
+        QTest.qWait(50)
+        target = find(window, 'reminderDay_' + day)
+        end = target.mapToScene(QPoint(20, 10)).toPoint()
+    QTest.mouseMove(window, end, 30)
+    assert (model.plannedGoals if kind == 'node' else tabs.scheduledGoals) == before
+    if outcome == 'escape':
+        QTest.keyClick(window, Qt.Key_Escape)
+    elif outcome == 'outside':
+        end = QPoint(1, 1)
+        QTest.mouseMove(window, end, 30)
+    elif outcome == 'ungrab':
+        area.ungrabMouse()
+    QTest.mouseRelease(window, Qt.LeftButton, Qt.NoModifier, end)
+    QTest.qWait(40)
+    assert m._find(node_id).parent.id == before_parent
+    if outcome == 'save':
+        activities = model.plannedGoals if kind == 'node' else tabs.scheduledGoals
+        activity = next(g for g in activities if g['id'] == activity_id)
+        assert activity['startDate'] == day
+        assert activity['endDate'] == (date.fromisoformat(day) + timedelta(days=duration)).isoformat()
+        assert overview.property('selectedDate') == day
+        if kind != 'node':
+            assert not m.plan_ranges
+        payload = m.to_dict()
+        m.load(payload)
+        assert m.to_dict()['plan_ranges'] == payload['plan_ranges']
+    else:
+        assert (model.plannedGoals if kind == 'node' else tabs.scheduledGoals) == before
