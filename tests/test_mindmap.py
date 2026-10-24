@@ -834,7 +834,7 @@ def test_edit_move_fold_delete_and_cycle_guard(project):
     assert m.map.find(branch).side == 'left'
 
 
-def test_reordering_and_tab_label_readonly(project):
+def test_reordering_and_tab_label_editable(project):
     m = project[0].mindmap
     a = thought(m, 'A')
     m.select(m.map.root.id)
@@ -845,7 +845,7 @@ def test_reordering_and_tab_label_readonly(project):
     assert m.map.root.children.index(m.map.find(b)) > m.map.root.children.index(m.map.find(a))
     m.select(next(iter(m.links)))
     m.editSelected('Attempt to rename tab', 'Tab reasoning')
-    assert m.selectedNode['text'] == 'Main'
+    assert m.selectedNode['text'] == 'Attempt to rename tab'
     assert m.selectedNode['note'] == 'Tab reasoning'
 
 
@@ -2482,6 +2482,7 @@ def test_qml_node_reminder_controls_and_overview(project, app, tmp_path, actiond
     warnings = []
     engine.warnings.connect(lambda messages: warnings.extend(message.toString() for message in messages))
     window = engine.rootObjects()[0]
+    window.setWidth(1280)
     window.show()
     pm.showMindmap()
     QTest.qWait(150)
@@ -2530,6 +2531,7 @@ def test_qml_node_reminder_controls_and_overview(project, app, tmp_path, actiond
         pm.showTabCanvas()
         QTest.qWait(40)
         assert overview.isVisible()
+        click(find(window.contentItem(), 'openPlanningMonth'))
         click(find(window.contentItem(), 'reminderActions_' + node_id))
         click(find(window.contentItem(), 'openReminder_' + node_id))
         assert pm.mindmapVisible and m.selectedId == node_id
@@ -2539,6 +2541,7 @@ def test_qml_node_reminder_controls_and_overview(project, app, tmp_path, actiond
         assert dialog.property('dateValue') == date
         QMetaObject.invokeMethod(dialog, 'reject')
         QTest.qWait(40)
+        click(find(window.contentItem(), 'closePlanningMonth'))
         # Narrow layouts and multiple zoom factors keep the badge inside its node.
         pane = window.findChild(QObject, 'mindmapPane')
         for width, zoom in [(800, 0.7), (800, 1.4), (1280, 1.0)]:
@@ -2564,9 +2567,11 @@ def test_qml_node_reminder_controls_and_overview(project, app, tmp_path, actiond
             assert viewport_bottom <= window.height()
             window.grabWindow().save(str(tmp_path / f"mindmap-reminders-{width}-{zoom}.png"))
         window.grabWindow().save(str(tmp_path / 'mindmap-reminders.png'))
+        click(find(window.contentItem(), 'openPlanningMonth'))
         click(find(window.contentItem(), 'reminderActions_' + node_id))
         click(find(window.contentItem(), 'clearReminder_' + node_id))
         assert not m.reminders
+        click(find(window.contentItem(), 'closePlanningMonth'))
         m.select(next(iter(m.links)), 'toggle')
         QTest.qWait(30)
         assert not button.isEnabled()
@@ -2977,7 +2982,7 @@ def test_add_sibling_relative_scope_validation(project):
 def test_qml_sibling_insertion_controls(project, app, zoom, before, actiondraw_window):
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
-    a = m.map.root.add_child('Alpha', side='right')
+    a = m.map.root.add_child('Alpha insertion target', side='right')
     b = m.map.root.add_child('Beta', side='right')
     engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
@@ -3005,12 +3010,12 @@ def test_qml_sibling_insertion_controls(project, app, zoom, before, actiondraw_w
     pane.setProperty('panX', -140)
     pane.setProperty('panY', 50)
     QTest.qWait(30)
-    assert above.property('visible') and below.property('visible')
+    assert (above if before else below).property('visible')
     assert above.width() == 24 and above.height() == 24
     pane.setProperty('zoom', 0.2)
     assert below.y() >= above.y() + above.height()
     pane.setProperty('zoom', zoom)
-    # Hover the other node, then move onto its insertion button.
+    # Hovering another node must not move the selected node's controls.
     box = m._layout()[b]
     from PySide6.QtCore import QPointF
     center = viewport.mapToScene(QPointF(viewport.width() / 2 - 140 + (box.x + box.width / 2) * zoom,
@@ -3019,19 +3024,21 @@ def test_qml_sibling_insertion_controls(project, app, zoom, before, actiondraw_w
     QTest.qWait(30)
     assert pane.property('hoveredNodeId') == b.id
     button = above if before else below
+    assert m.selectedId == a.id
+    box = m._layout()[a]
     expected_y = (viewport.height() / 2 + 50 + box.center_y * zoom
-                  + (-1 if before else 1) * max(box.height * zoom / 2, 14))
+                  + (-1 if before else 1) * (box.height * zoom / 2 + button.height() / 2 + 8))
     assert button.y() + button.height() / 2 == pytest.approx(expected_y)
     point = button.mapToScene(button.boundingRect().center()).toPoint()
     QTest.mouseMove(window, point)
     QTest.qWait(180)
-    assert pane.property('hoveredNodeId') == b.id and button.property('visible')
+    assert m.selectedId == a.id and button.property('visible')
     original_ids = [n.id for n in m.map.root.children]
     QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, point)
     QTest.qWait(40)
     new = m.map.find(m.selectedId)
     expected = original_ids[:]
-    expected.insert(original_ids.index(b.id) + (0 if before else 1), new.id)
+    expected.insert(original_ids.index(a.id) + (0 if before else 1), new.id)
     assert [n.id for n in m.map.root.children] == expected
     assert new.text == 'New thought'
     editor = window.findChild(QObject, 'mindmapNodeEditor')
@@ -4046,6 +4053,7 @@ def test_qml_weekday_actions_reminder_reschedule_cancel_and_badge(project, app, 
     warnings = []
     engine.warnings.connect(lambda messages: warnings.extend(message.toString() for message in messages))
     window = engine.rootObjects()[0]
+    window.setWidth(1280)
     window.show()
     window.findChild(QObject, "reminderOverview").setProperty("selectedDate", "")
     pm.showMindmap()
@@ -4087,6 +4095,10 @@ def test_qml_weekday_actions_reminder_reschedule_cancel_and_badge(project, app, 
         assert badge and badge.isVisible()
         label = find(window.contentItem(), 'mindmapNodeText_' + node_id)
         assert badge.x() + badge.width() <= label.x()
+        opener = find(window.contentItem(), 'openPlanningMonth')
+        QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                         opener.mapToScene(opener.boundingRect().center()).toPoint())
+        QTest.qWait(50)
         row = find(window.contentItem(), 'reminderRow_plan_' + node_id)
         assert row and row.isVisible()
         actions = find(window.contentItem(), 'reminderActions_plan_' + node_id)
@@ -4566,3 +4578,348 @@ def test_calendar_filter_matches_pending_plan_even_with_another_retained_range(p
     m.plan_schedules[node] = {'at': datetime(2026, 10, 19, 8).timestamp()}
     m.setDateFilter('2026-10-19')
     assert node in {n['id'] for n in m.nodes}
+
+
+def test_calendar_activity_complete_branch_and_navigation(project):
+    m = project[0].mindmap
+    parent = m.map.root.add_child('Context')
+    activity = parent.add_child('Activity')
+    child = activity.add_child('Unscheduled')
+    grandchild = child.add_child('Deep child')
+    unrelated = parent.add_child('Other')
+    parent.folded = activity.folded = child.folded = True
+    m.setGoalRange('plan:' + activity.id, '2032-02-28', '2032-02-28')
+    m.setDateFilter('2032-02-28')
+    m.setActivityFilter('plan:' + activity.id)
+    assert m.dateFilter == ''
+    assert m.activityFilter == 'plan:' + activity.id
+    assert m.selectedId == activity.id
+    assert {n['id'] for n in m.nodes} == {
+        activity.id, child.id, grandchild.id}
+    assert parent.folded and activity.folded and child.folded
+    # Selection changes neither the calendar scope nor the saved folds.
+    before = m.scene
+    m.select(grandchild.id)
+    assert m.calendarFilterActive
+    assert m.selectedId == grandchild.id
+    assert m.scene == before
+    assert unrelated.id not in {n['id'] for n in m.nodes}
+    assert parent.folded and activity.folded and child.folded
+    m.setDateFilter('2032-02-28')
+    assert m.calendarFilterActive and not m.activityFilter
+
+
+@pytest.mark.parametrize('action', ['search', 'reminder', 'scope', 'tab'])
+def test_calendar_external_navigation_clears_filter(project, action):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    activity = m.map.root.add_child('Activity')
+    child = activity.add_child('Child')
+    m.setActivityFilter('plan:' + activity.id)
+    if action == 'same':
+        m.select(activity.id)
+    elif action in ('toggle', 'range'):
+        m.select(child.id, action)
+    elif action == 'arrow':
+        m.navigate('right')
+    elif action == 'search':
+        m.searchText('Child')
+    elif action == 'reminder':
+        m.reveal_reminder(child.id)
+    elif action == 'scope':
+        m.set_scope()
+    else:
+        pm.switchTab(tabs.currentTabIndex)
+    assert not m.calendarFilterActive
+    assert m.selectedId in {n['id'] for n in m.nodes}
+
+
+def test_calendar_activity_transient_and_deleted_target(project):
+    m = project[0].mindmap
+    activity = m.map.root.add_child('Activity')
+    m.setActivityFilter('plan:' + activity.id)
+    with m.independent_view():
+        assert not m.calendarFilterActive
+    assert m.activityFilter == 'plan:' + activity.id
+    m.editSelected('Renamed activity', '')
+    assert m.calendarFilterText == 'Activity: Renamed activity'
+    assert m.calendarFilterActive
+    with m.independent_view(activity.id):
+        m.deleteSelected()
+    assert not m.calendarFilterActive
+    m.setDateFilter('2032-02-28')
+    payload = m.to_dict()
+    m.load(payload)
+    assert not m.calendarFilterActive
+
+
+def test_calendar_activity_qml_lifecycle(project, actiondraw_window, app):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    activity = m.map.root.add_child('Activity')
+    child = activity.add_child('Child')
+    m.setGoalRange('plan:' + activity.id, '2032-02-28', '2032-02-28')
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    overview = window.findChild(QObject, 'reminderOverview')
+    calendar = window.findChild(QObject, 'reminderCalendar')
+    calendar.dateSelected.emit('2032-02-28')
+    calendar.activityRequested.emit('plan:' + activity.id, 100, 100)
+    app.processEvents()
+    assert m.activityFilter == 'plan:' + activity.id
+    assert child.id in {n['id'] for n in m.nodes}
+    card = overview.findChild(QObject, 'calendarActivityCard')
+    assert not card.property('visible')
+    assert m.calendarFilterActive
+    indicator = window.findChild(QObject, 'mindmapCalendarFilter')
+    assert indicator.property('visible')
+    clear = window.findChild(QObject, 'mindmapClearCalendarFilter')
+    clear.clicked.emit()
+    assert not m.calendarFilterActive
+    assert overview.property('selectedDate') == '2032-02-28'
+    calendar.dateSelected.emit('2032-02-28')
+    assert m.dateFilter == '2032-02-28'
+    before = m.scene
+    m.select(child.id)
+    assert m.dateFilter == '2032-02-28'
+    assert m.scene == before
+    m.editSelected('Renamed child', '')
+    assert m.dateFilter == '2032-02-28'
+    assert overview.property('selectedDate') == '2032-02-28'
+
+
+@pytest.mark.parametrize('filter_kind', ['day', 'activity'])
+@pytest.mark.parametrize('action', ['same', 'toggle', 'range', 'arrow'])
+def test_calendar_map_navigation_preserves_scope(project, filter_kind, action):
+    m = project[0].mindmap
+    parent = m.map.root.add_child('Context')
+    activity = parent.add_child('Activity')
+    child = activity.add_child('Child')
+    other = m.map.root.add_child('Other')
+    m.setGoalRange('plan:' + activity.id, '2032-02-28', '2032-02-28')
+    activity.folded = True
+    m.setActivityFilter('plan:' + activity.id)
+    if filter_kind == 'day':
+        m.setDateFilter('2032-02-28')
+    before = m.scene
+    if action == 'arrow':
+        positions = {n['id']: n['x'] for n in m.nodes}
+        m.navigate('right' if positions[child.id] > positions[activity.id] else 'left')
+        assert m.selectedId == child.id
+    else:
+        m.select(activity.id if action == 'same' else child.id,
+                 'replace' if action == 'same' else action)
+    assert m.calendarFilterActive
+    assert m.scene == before
+    assert activity.folded
+    assert other.id not in {n['id'] for n in m.nodes}
+
+
+@pytest.mark.parametrize('scheduled', [False, True])
+def test_linked_rename_history_preserves_goal_content(project, scheduled):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    node = next(iter(m.links))
+    goal = m.links[node]
+    if scheduled:
+        tabs.setGoalRange(goal, '2032-02-28', '2032-03-02')
+        m.setActivityFilter(goal)
+    m.select(node)
+    assert m.editNode(node, '  Renamed goal  ', 'Updated notes')
+    assert tabs.getTabSummary(tabs.goalIndex(goal))['name'] == 'Renamed goal'
+    assert m.selectedNode['text'] == 'Renamed goal'
+    before = m.to_dict()
+    assert not m.editNode(node, '  ', 'Rejected notes')
+    assert m.to_dict() == before
+    tabs.getAllTabs()[0].markdown_tabs = [{'name': 'Later', 'text': 'Keep me'}]
+    m.undo()
+    assert m.map.find(node).text == 'Main'
+    assert tabs.getTabSummary(tabs.goalIndex(goal))['name'] == 'Main'
+    m.redo()
+    assert m.map.find(node).text == 'Renamed goal'
+    assert m.map.find(node).note == 'Updated notes'
+    assert tabs.getAllTabs()[0].markdown_tabs == [{'name': 'Later', 'text': 'Keep me'}]
+    if scheduled:
+        assert tabs.scheduledGoals[0]['name'] == 'Renamed goal'
+        assert tabs.scheduledGoals[0]['startDate'] == '2032-02-28'
+
+
+@pytest.mark.parametrize('linked', [False, True])
+@pytest.mark.parametrize('references', [False, True])
+def test_delete_calendar_activity_root_and_history(project, linked, references):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    if linked:
+        goal = tabs.createScheduledGoal('Activity', '2032-02-28', '2032-03-02')
+        node = next(key for key, value in m.links.items() if value == goal)
+    else:
+        node = thought(m, 'Activity')
+        goal = 'plan:' + node
+        m.setGoalRange(goal, '2032-02-28', '2032-03-02')
+    child = m.map.find(node).add_child('Child').id
+    if references:
+        other = next(iter(m.links.values()))
+        assert m.addTabReference(m.map.root.id, other)
+    before = m.to_dict()
+    m.setActivityFilter(goal)
+    m.deleteSelected()
+    assert m.map.find(node) is None and m.map.find(child) is None
+    assert m.activityFilter == ''
+    assert m.selectedId == m.map.root.id
+    assert goal not in {g['id'] for g in tabs.scheduledGoals + m.plannedGoals}
+    m.undo()
+    assert m.to_dict() == before
+    assert goal in {g['id'] for g in tabs.scheduledGoals + m.plannedGoals}
+    m.redo()
+    assert m.map.find(node) is None
+
+
+@pytest.mark.parametrize('via_reference', [False, True])
+def test_qml_calendar_linked_title_editor(project, app, actiondraw_window, via_reference):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    goal = tabs.createScheduledGoal('Activity', '2032-02-28', '2032-03-02')
+    pm.showMindmap()
+    engine = actiondraw_window(diagram, tasks, tab_model=tabs, project_manager=pm)
+    window = engine.rootObjects()[0]
+    if via_reference:
+        assert m.addTabReference(m.map.root.id, goal)
+    else:
+        m.setActivityFilter(goal)
+    QTest.qWait(50)
+    pane = window.findChild(QObject, 'mindmapPane')
+    assert QMetaObject.invokeMethod(pane, 'editNode')
+    title = window.findChild(QObject, 'mindmapNodeTitle')
+    assert not title.property('readOnly')
+    title.setProperty('text', 'Edited in mindmap')
+    QTest.keyClick(window, Qt.Key_Return)
+    assert tabs.scheduledGoals[0]['name'] == 'Edited in mindmap'
+    m.undo()
+    assert tabs.scheduledGoals[0]['name'] == 'Activity'
+    QTest.keyClick(window, Qt.Key_Delete)
+    if via_reference:
+        assert tabs.scheduledGoals[0]['id'] == goal
+        assert not m.references
+    else:
+        assert not tabs.scheduledGoals
+    m.undo()
+    assert tabs.scheduledGoals[0]['id'] == goal
+    window.close()
+
+
+def test_qml_node_delete_button_and_undo(project, app, actiondraw_window):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    branch = m.map.root.add_child('Branch deletion target', side='right')
+    child = branch.add_child('Child')
+    neighbor = m.map.root.add_child('Neighbor', side='right')
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.setWidth(1300)
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+    pane = window.findChild(QObject, 'mindmapPane')
+
+    def find(item, name):
+        if item.objectName() == name:
+            return item
+        for nested in item.childItems():
+            result = find(nested, name)
+            if result is not None:
+                return result
+
+    button = find(window.contentItem(), 'mindmapDeleteNode')
+    assert not button.isVisible()  # The map root cannot be deleted.
+    m.select(branch.id)
+    pane.setProperty('zoom', 0.8)
+    pane.setProperty('panX', -140)
+    pane.setProperty('panY', 50)
+    QTest.qWait(40)
+    assert button.isVisible()
+    node = find(window.contentItem(), 'mindmapNode_' + branch.id)
+    assert button.mapToScene(button.boundingRect().topLeft()).x() > node.mapToScene(node.boundingRect().topRight()).x()
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                     button.mapToScene(button.boundingRect().center()).toPoint())
+    QTest.qWait(40)
+    assert m.map.find(branch.id) is None
+    assert m.map.find(child.id) is None
+    assert m.map.find(neighbor.id) is not None
+    assert not button.isVisible()
+    m.undo()
+    assert m.map.find(branch.id) is not None
+    assert m.map.find(child.id) is not None
+    window.close()
+
+
+@pytest.mark.parametrize('kind,duration,surface', [('node', 0, 'week'), ('node', 3, 'week'), ('goal', 0, 'week'), ('goal', 3, 'week'), ('reference', 3, 'week'), ('node', 3, 'month')])
+@pytest.mark.parametrize('outcome', ['save', 'escape', 'outside', 'ungrab'])
+def test_qml_node_calendar_drop(project, app, actiondraw_window, kind, duration, surface, outcome):
+    from datetime import date, timedelta
+    from test_reminder_calendar import find
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    goal_node = m.map.find(next(iter(m.links)))
+    node = goal_node.add_child('Calendar activity') if kind == 'node' else goal_node
+    if kind == 'reference':
+        holder = m.map.root.add_child('Reference holder')
+        assert m.addTabReference(holder.id, m.links[goal_node.id])
+        node = m._find(m.selectedId)
+    node_id = node.id
+    activity_id = m.calendarActivityId(node_id)
+    model = m if kind == 'node' else tabs
+    if duration:
+        assert model.setGoalRange(activity_id, '2032-02-01', '2032-02-04')
+    before_parent = node.parent.id
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(120)
+    pane = window.findChild(QObject, 'mindmapPane')
+    pane.setProperty('zoom', 0.65)
+    layout_node = m._find(node_id)
+    pane.setProperty('panX', 40 - m._layout()[layout_node].x * 0.65)
+    pane.setProperty('panY', 20 - m._layout()[layout_node].y * 0.65)
+    QTest.qWait(30)
+    overview = window.findChild(QObject, 'reminderOverview')
+    day = overview.property('weekStart')
+    target = find(window, 'weekDay_' + day)
+    end = target.mapToScene(target.boundingRect().center()).toPoint()
+    item = find(window, 'mindmapNode_' + node_id)
+    area = find(window, 'mindmapNodeMouse_' + node_id)
+    start = item.mapToScene(item.boundingRect().center()).toPoint()
+    before = model.plannedGoals if kind == 'node' else tabs.scheduledGoals
+    QTest.mousePress(window, Qt.LeftButton, Qt.NoModifier, start)
+    QTest.mouseMove(window, start + QPoint(0, -16), 30)
+    if surface == 'month':
+        # Open while the source owns the grab, then exercise month hit testing.
+        overview.openPlanning()
+        QTest.qWait(50)
+        target = find(window, 'reminderDay_' + day)
+        end = target.mapToScene(QPoint(20, 10)).toPoint()
+    QTest.mouseMove(window, end, 30)
+    assert (model.plannedGoals if kind == 'node' else tabs.scheduledGoals) == before
+    if outcome == 'escape':
+        QTest.keyClick(window, Qt.Key_Escape)
+    elif outcome == 'outside':
+        end = QPoint(1, 1)
+        QTest.mouseMove(window, end, 30)
+    elif outcome == 'ungrab':
+        area.ungrabMouse()
+    QTest.mouseRelease(window, Qt.LeftButton, Qt.NoModifier, end)
+    QTest.qWait(40)
+    assert m._find(node_id).parent.id == before_parent
+    if outcome == 'save':
+        activities = model.plannedGoals if kind == 'node' else tabs.scheduledGoals
+        activity = next(g for g in activities if g['id'] == activity_id)
+        assert activity['startDate'] == day
+        assert activity['endDate'] == (date.fromisoformat(day) + timedelta(days=duration)).isoformat()
+        assert overview.property('selectedDate') == day
+        if kind != 'node':
+            assert not m.plan_ranges
+        payload = m.to_dict()
+        m.load(payload)
+        assert m.to_dict()['plan_ranges'] == payload['plan_ranges']
+    else:
+        assert (model.plannedGoals if kind == 'node' else tabs.scheduledGoals) == before

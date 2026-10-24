@@ -6,14 +6,24 @@ Dialog {
     id: dialog
     objectName: "goalRangeDialog"
     property var goalModel
+    property bool activityCard: false
+    property real anchorX: 0
+    property real anchorY: 0
+    property var saveHandler: null
+    property string sourceStart: ""
+    property string sourceEnd: ""
+    signal activityOpened(string id)
     property var projectManager
     property string goalId: ""
     property var nodeController: null
     property string nodeId: ""
-    title: goalId ? "Edit Goal Time Range" : "Add Goal with Time Range"
-    modal: true
-    anchors.centerIn: parent
-    width: 360
+    title: activityCard ? "Activity details" : goalId ? "Edit Goal Time Range" : "Add Goal with Time Range"
+    modal: !activityCard
+    anchors.centerIn: activityCard ? null : parent
+    x: activityCard ? Math.max(8, Math.min(anchorX, parent.width - width - 8)) : 0
+    y: activityCard ? Math.max(8, Math.min(anchorY, parent.height - height - 8)) : 0
+    width: Math.min(360, parent ? parent.width - 16 : 360)
+    function refreshName(name) { nameField.text = name }
     function show(goal, selectedDate) {
         nodeId = ""
         goalId = goal ? goal.id : ""
@@ -21,6 +31,7 @@ Dialog {
         var today = selectedDate || Qt.formatDate(new Date(), "yyyy-MM-dd")
         startField.text = goal ? (goal.startDate || goal.goalStartDate || today) : today
         endField.text = goal ? (goal.endDate || goal.goalEndDate || today) : today
+        sourceStart = startField.text; sourceEnd = endField.text
         errorLabel.text = ""
         open()
     }
@@ -30,6 +41,7 @@ Dialog {
         nameField.text = name
         startField.text = Qt.formatDate(new Date(), "yyyy-MM-dd")
         endField.text = startField.text
+        sourceStart = startField.text; sourceEnd = endField.text
         errorLabel.text = ""
         open()
     }
@@ -40,6 +52,11 @@ Dialog {
                 return
             }
             dialog.close()
+            return
+        }
+        if (dialog.saveHandler) {
+            if (dialog.saveHandler(dialog.goalId, startField.text, endField.text)) dialog.close()
+            else errorLabel.text = "Could not save. Choose a valid end date on or after the start date and try again."
             return
         }
         if (!dialog.goalModel) return
@@ -136,12 +153,17 @@ Dialog {
         }
     }
     contentItem: ColumnLayout {
-        TextField { id: nameField; objectName: "goalRangeName"; Layout.fillWidth: true; placeholderText: "Goal name"; readOnly: !!dialog.goalId || !!dialog.nodeId }
+        TextField { id: nameField; objectName: "goalRangeName"; visible: !dialog.activityCard; Layout.fillWidth: true; placeholderText: "Goal name"; readOnly: !!dialog.goalId || !!dialog.nodeId }
+        Label { visible: dialog.activityCard; text: nameField.text; Layout.fillWidth: true; wrapMode: Text.WordWrap; font.bold: true }
         Label { text: "Start date (inclusive)" }
         Button { id: startField; objectName: "goalRangeStart"; Layout.fillWidth: true; Accessible.name: "Choose start date: " + text; onClicked: datePicker.showFor(startField) }
         Label { text: "End date (inclusive)" }
         Button { id: endField; objectName: "goalRangeEnd"; Layout.fillWidth: true; Accessible.name: "Choose end date: " + text; onClicked: datePicker.showFor(endField) }
         Label { id: errorLabel; objectName: "goalRangeError"; Layout.fillWidth: true; wrapMode: Text.WordWrap; color: "#ffaaa0"; visible: text.length > 0 }
+        Button {
+            visible: dialog.activityCard; text: "Open activity"; objectName: "openCalendarActivity"
+            onClicked: { dialog.activityOpened(dialog.goalId); dialog.close() }
+        }
         RowLayout {
             Button {
                 text: "Save"; objectName: "saveGoalRange"

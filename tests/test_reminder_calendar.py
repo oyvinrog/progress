@@ -15,13 +15,11 @@ import QtQuick.Controls 2.15
 import QtQuick.Window 2.15
 import "%s"
 Window {
-    width: 1000; height: 650; visible: true
+    width: 1000; height: 800; visible: true
     QtObject {
         id: host
         objectName: "host"
         property var activeReminders: []
-        property bool reminderOverviewExpanded: true
-        property bool reminderOverviewTouched: false
         property string action: ""
         property string savedReminder: ""
         function presetTitle(name) { return name }
@@ -50,6 +48,7 @@ Window {
     }
     ReminderOverview {
         width: parent.width
+        availableContentHeight: parent.height
         nowTimestamp: new Date(2032, 1, 28, 12).getTime() / 1000
         windowRoot: host; projectManager: manager; dialogs: dialogs; planController: plan
     }
@@ -94,6 +93,8 @@ def calendar_ui(app, request, qml_cleanup):
     assert root is not None, component.errorString()
     host = root.findChild(QObject, "host")
     overview = find(root, "reminderOverview")
+    overview.openPlanning()
+    QTest.qWait(40)
     calendar = find(root, "reminderCalendar")
 
     def refresh(entries):
@@ -180,7 +181,7 @@ def test_monday_grid_leap_year_and_month_navigation(calendar_ui):
 def test_responsive_layout_collapse_and_row_actions(calendar_ui, app):
     root, host, _, _, refresh, click = calendar_ui
     refresh([reminder("2032-02-29T18:00:00")])
-    assert find(root, "reminderCalendarContent").property("columns") == 2
+    assert not find(root, "planningAgendaTab").isVisible()
     click("reminderDay_2032-02-29")
     click("reminderActions_task")
     click("openReminder_task")
@@ -193,10 +194,10 @@ def test_responsive_layout_collapse_and_row_actions(calendar_ui, app):
     assert host.property("action") == "refresh"
     root.setWidth(600)
     app.processEvents()
-    assert find(root, "reminderCalendarContent").property("columns") == 1
-    click("toggleReminderOverview")
-    assert not find(root, "reminderCalendar").isVisible()
-    click("toggleReminderOverview")
+    assert find(root, "planningAgendaTab").isVisible()
+    click("closePlanningMonth")
+    assert not root.findChild(QObject, "planningOverlay").property("visible")
+    click("openPlanningMonth")
     assert find(root, "reminderCalendar").isVisible()
 
 
@@ -275,18 +276,18 @@ def test_compact_layout_geometry(calendar_ui, app, tmp_path, width, height):
     refresh([reminder('2032-02-28T18:00:00')])
     root.setWidth(width)
     root.setHeight(height)
-    # The fixture host normally omits height; bind the actual window for this check.
-    calendar.setProperty('viewportHeightLimit', max(130, min(456, height * (.5 if width >= 960 else .3) - 30)))
     QTest.qWait(100)
     agenda = find(root, 'planningAgenda')
-    assert agenda.width() <= width
-    assert calendar.property('gridHeight') == 432
-    if width >= 960:
-        assert round(agenda.width()) == 300
-        assert agenda.x() >= calendar.x() + calendar.width()
+    overlay = root.findChild(QObject, 'planningOverlay')
+    assert overview.height() == (88 if height < 600 else 104)
+    assert overlay.property('width') <= width - 32
+    assert overlay.property('height') <= height - 32
+    assert calendar.property('gridHeight') == 600
+    if overlay.property('width') >= 960:
+        assert round(agenda.width()) == 280
+        assert agenda.mapToScene(QPointF()).x() >= calendar.mapToScene(QPointF(calendar.width(), 0)).x()
     else:
-        assert agenda.height() <= 180
-        assert agenda.y() >= calendar.y() + calendar.height()
+        assert not agenda.isVisible()
     assert root.grabWindow().save(str(tmp_path / ('compact-%s-%s.png' % (width, height))))
     overview.setProperty('goalModel', None)
 

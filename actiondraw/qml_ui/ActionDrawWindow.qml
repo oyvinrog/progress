@@ -354,6 +354,7 @@ ApplicationWindow {
             return
         root.reminderPopupBusy = true
         var nextReminder = root.reminderQueue.shift()
+        root.pendingReminderConversionId = nextReminder.conversionId || ""
         root.pendingReminderKind = nextReminder.kind || "task"
         root.pendingReminderNodeId = nextReminder.nodeId || ""
         root.pendingReminderTabIndex = nextReminder.tabIndex
@@ -364,16 +365,7 @@ ApplicationWindow {
         reminderPopup.open()
     }
 
-    function showReminderAlert(tabIndex, taskIndex, taskTitle, kind, standaloneIndex, sendNotification, nodeId) {
-        var reminder = {
-            nodeId: nodeId || "",
-            kind: kind && kind.length > 0 ? kind : "task",
-            tabIndex: tabIndex,
-            taskIndex: taskIndex,
-            standaloneIndex: standaloneIndex !== undefined ? standaloneIndex : -1,
-            title: taskTitle && taskTitle.length > 0 ? taskTitle : "Reminder",
-            sendNotification: sendNotification || false,
-        }
+    function showReminderAlert(reminder) {
         root.reminderQueue.push(reminder)
         if (!reminderPopup.visible)
             root.showNextReminderAlert()
@@ -407,12 +399,7 @@ ApplicationWindow {
             activeReminders = []
             return
         }
-        var hadReminders = activeReminders && activeReminders.length > 0
         activeReminders = projectManager.getActiveReminders()
-        if ((!hadReminders || !reminderOverviewTouched) && activeReminders.length > 0)
-            reminderOverviewExpanded = true
-        if (activeReminders.length === 0 && (!root.tabModelRef || root.tabModelRef.scheduledGoals.length === 0))
-            reminderOverviewTouched = false
     }
 
     function refreshActiveContracts() {
@@ -580,6 +567,7 @@ ApplicationWindow {
     property string selectedItemId: ""
     property string lastCreatedTaskId: ""
     readonly property var actionDialogsRef: dialogs
+    property string pendingReminderConversionId: ""
     property string pendingReminderNodeId: ""
     property int pendingReminderTabIndex: 0
     property int pendingReminderTaskIndex: -1
@@ -599,8 +587,6 @@ ApplicationWindow {
     property var activeReminders: []
     property var activeContracts: []
     readonly property bool mindmapOpen: projectManagerRef ? projectManagerRef.mindmapVisible : false
-    property bool reminderOverviewExpanded: false
-    property bool reminderOverviewTouched: false
     property bool contractOverviewExpanded: true
     property bool tabDragActive: false
     property bool tabDragInsideViewport: false
@@ -1358,6 +1344,7 @@ ApplicationWindow {
 
             ReminderOverview {
                 id: planningOverview
+                availableContentHeight: parent.height
                 goalModel: root.tabModelRef
                 planController: typeof mindmapController !== "undefined" ? mindmapController : null
                 Layout.fillWidth: true
@@ -1371,6 +1358,9 @@ ApplicationWindow {
             objectName: "mindmapPane"
             tabModel: root.tabModelRef
             toolDialogOpen: dialogs.assessmentDialog.visible
+            nodeDropHandler: function(nodeId, sceneX, sceneY) { return planningOverview.dropNode(nodeId, sceneX, sceneY) }
+            onNodeDragMoved: function(nodeId, sceneX, sceneY) { planningOverview.updateGoalDrop(sceneX, sceneY) }
+            onNodeDragCleared: planningOverview.clearGoalDrop()
             onAssessmentRequested: dialogs.assessmentDialog.open()
             onActionPaintRequested: root.openActionPaintWindow()
             onCausalDiagramRequested: root.openCausalModelWindow()
@@ -4531,7 +4521,21 @@ ApplicationWindow {
                 wrapMode: Text.WordWrap
             }
 
-            RowLayout {
+            Button {
+                objectName: "convertDueReminderToGoal"
+                text: "Convert to goal"
+                Layout.fillWidth: true
+                visible: root.pendingReminderConversionId.length > 0
+                onClicked: {
+                    if (projectManager.convertDueReminderToGoal(root.pendingReminderConversionId)) {
+                        root.refreshOverviewData()
+                        reminderPopup.close()
+                    }
+                }
+            }
+
+            Flow {
+                Layout.fillWidth: true
                 spacing: 8
 
                 Button {
@@ -4570,6 +4574,8 @@ ApplicationWindow {
         }
 
         onClosed: {
+            projectManager.releaseDueReminder(root.pendingReminderConversionId)
+            root.pendingReminderConversionId = ""
             root.reminderPopupBusy = false
             root.showNextReminderAlert()
         }
@@ -4709,20 +4715,14 @@ ApplicationWindow {
         target: projectManager
         enabled: projectManager !== null
         function onStandaloneRemindersChanged() { root.refreshActiveReminders() }
-        function onTaskReminderDue(tabIndex, taskIndex, taskTitle, sendNotification) {
+        function onDueReminder(reminder) {
             root.showWindow()
             root.refreshActiveReminders()
-            root.showReminderAlert(tabIndex, taskIndex, taskTitle, "task", -1, sendNotification)
+            root.showReminderAlert(reminder)
         }
-        function onMindmapReminderDue(nodeId, title, sendNotification) {
-            root.showWindow()
-            root.refreshActiveReminders()
-            root.showReminderAlert(-1, -1, title, "mindmap", -1, sendNotification, nodeId)
-        }
-        function onStandaloneReminderDue(title, sendNotification) {
-            root.showWindow()
-            root.refreshActiveReminders()
-            root.showReminderAlert(-1, -1, title, "standalone", -1, sendNotification)
+        function onProjectAccessEnding() {
+            root.reminderQueue = []
+            reminderPopup.close()
         }
         function onTaskContractBreached(tabIndex, taskIndex, taskTitle, punishment, deadlineText) {
             root.showWindow()

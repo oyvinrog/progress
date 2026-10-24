@@ -476,3 +476,50 @@ def test_completion_checkboxes_use_reference_placement_parent(project):
     m.toggleMeasureProgress(roots[daily])
     assert not checkboxes()[ref]
     assert checkboxes()[projected_child]
+
+
+def test_calendar_activity_includes_reference_descendants(project):
+    pm, tabs, _, _, daily, lunch, roots, child = project
+    m = pm.mindmap
+    ref = reference(project)
+    m.setActivityFilter(daily)
+    assert not m.tabScoped
+    visible = {n['id'] for n in m.nodes}
+    assert {roots[daily], ref} <= visible
+    assert roots[lunch] not in visible
+    assert occurrence(m, child, ref) in visible
+    m.setPriorityFilter(0)
+    projected_child = occurrence(m, child, ref)
+    before = m.scene
+    m.select(projected_child)
+    assert m.activityFilter == daily
+    assert m.scene == before
+    assert m.selectedId in {n['id'] for n in m.nodes}
+
+
+def test_reference_rename_updates_shared_goal_and_history(project):
+    pm, tabs, _, _, _, lunch, roots, _ = project
+    m = pm.mindmap
+    ref = reference(project)
+    tabs.setGoalRange(lunch, '2032-02-28', '2032-03-02')
+    original = m.map.find(roots[lunch]).text
+    m.select(ref)
+    m.editSelected('Shared renamed goal', 'Shared note')
+    assert m.map.find(roots[lunch]).text == 'Shared renamed goal'
+    assert m.selectedNode['text'] == 'Shared renamed goal'
+    assert tabs.scheduledGoals[0]['name'] == 'Shared renamed goal'
+    m.undo()
+    assert m.selectedNode['text'] == original
+    assert tabs.scheduledGoals[0]['name'] == original
+    m.redo()
+    assert m.selectedNode['text'] == 'Shared renamed goal'
+    assert tabs.scheduledGoals[0]['startDate'] == '2032-02-28'
+
+
+def test_calendar_identity_resolves_projected_children(project):
+    m = project[0].mindmap
+    ref = reference(project)
+    projected_child = occurrence(m, project[7], ref)
+    assert m.calendarActivityId(ref) == project[5]
+    assert m.calendarActivityId(projected_child) == 'plan:' + project[7]
+    assert m.calendarActivityId('missing') == ''

@@ -25,14 +25,13 @@ def test_sidebar_pointer_drop_on_calendar(project, actiondraw_window, existing, 
     engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
     window.show()
-    window.setProperty('reminderOverviewExpanded', True)
     pm.showMindmap()
-    calendar = find(window, 'reminderCalendar')
-    calendar.setProperty('displayedYear', 2032)
-    calendar.setProperty('displayedMonth', 1)
+    overview = find(window, 'reminderOverview')
+    overview.setProperty('weekStart', '2032-01-26')
+    calendar = overview.findChild(QObject, 'reminderCalendar')
     QTest.qWait(100)
     source = find(window, 'sidebarGoal_1')
-    day = find(window, 'reminderDay_2032-01-31')
+    day = find(window, 'weekDay_2032-01-31')
     start = source.mapToScene(source.boundingRect().center()).toPoint()
     end = day.mapToScene(QPointF(day.width()/2, 10)).toPoint()
     changes = []
@@ -123,7 +122,6 @@ def test_sidebar_drop_routes_calendar_and_drawing_separately(project, actiondraw
     engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
     window.show()
-    window.setProperty('reminderOverviewExpanded', True)
     pm.showTabCanvas()
     QTest.qWait(100)
     source = find(window, 'sidebarGoal_1')
