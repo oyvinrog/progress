@@ -2482,6 +2482,7 @@ def test_qml_node_reminder_controls_and_overview(project, app, tmp_path, actiond
     warnings = []
     engine.warnings.connect(lambda messages: warnings.extend(message.toString() for message in messages))
     window = engine.rootObjects()[0]
+    window.setWidth(1280)
     window.show()
     pm.showMindmap()
     QTest.qWait(150)
@@ -2530,6 +2531,7 @@ def test_qml_node_reminder_controls_and_overview(project, app, tmp_path, actiond
         pm.showTabCanvas()
         QTest.qWait(40)
         assert overview.isVisible()
+        click(find(window.contentItem(), 'openPlanningMonth'))
         click(find(window.contentItem(), 'reminderActions_' + node_id))
         click(find(window.contentItem(), 'openReminder_' + node_id))
         assert pm.mindmapVisible and m.selectedId == node_id
@@ -2539,6 +2541,7 @@ def test_qml_node_reminder_controls_and_overview(project, app, tmp_path, actiond
         assert dialog.property('dateValue') == date
         QMetaObject.invokeMethod(dialog, 'reject')
         QTest.qWait(40)
+        click(find(window.contentItem(), 'closePlanningMonth'))
         # Narrow layouts and multiple zoom factors keep the badge inside its node.
         pane = window.findChild(QObject, 'mindmapPane')
         for width, zoom in [(800, 0.7), (800, 1.4), (1280, 1.0)]:
@@ -2564,9 +2567,11 @@ def test_qml_node_reminder_controls_and_overview(project, app, tmp_path, actiond
             assert viewport_bottom <= window.height()
             window.grabWindow().save(str(tmp_path / f"mindmap-reminders-{width}-{zoom}.png"))
         window.grabWindow().save(str(tmp_path / 'mindmap-reminders.png'))
+        click(find(window.contentItem(), 'openPlanningMonth'))
         click(find(window.contentItem(), 'reminderActions_' + node_id))
         click(find(window.contentItem(), 'clearReminder_' + node_id))
         assert not m.reminders
+        click(find(window.contentItem(), 'closePlanningMonth'))
         m.select(next(iter(m.links)), 'toggle')
         QTest.qWait(30)
         assert not button.isEnabled()
@@ -4048,6 +4053,7 @@ def test_qml_weekday_actions_reminder_reschedule_cancel_and_badge(project, app, 
     warnings = []
     engine.warnings.connect(lambda messages: warnings.extend(message.toString() for message in messages))
     window = engine.rootObjects()[0]
+    window.setWidth(1280)
     window.show()
     window.findChild(QObject, "reminderOverview").setProperty("selectedDate", "")
     pm.showMindmap()
@@ -4089,6 +4095,10 @@ def test_qml_weekday_actions_reminder_reschedule_cancel_and_badge(project, app, 
         assert badge and badge.isVisible()
         label = find(window.contentItem(), 'mindmapNodeText_' + node_id)
         assert badge.x() + badge.width() <= label.x()
+        opener = find(window.contentItem(), 'openPlanningMonth')
+        QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                         opener.mapToScene(opener.boundingRect().center()).toPoint())
+        QTest.qWait(50)
         row = find(window.contentItem(), 'reminderRow_plan_' + node_id)
         assert row and row.isVisible()
         actions = find(window.contentItem(), 'reminderActions_plan_' + node_id)
