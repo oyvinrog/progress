@@ -4516,13 +4516,17 @@ def test_calendar_date_filter_keeps_matching_branches_and_ancestors(project):
 
 
 @pytest.mark.parametrize('key', [Qt.Key_Tab, Qt.Key_Return, Qt.Key_Enter])
-@pytest.mark.parametrize('target', ['root', 'context', 'planned'])
+@pytest.mark.parametrize('target', ['root', 'context', 'planned', 'child', 'grandchild'])
 def test_calendar_filtered_node_creation_edits_new_node(
         project, actiondraw_window, key, target):
     pm, tabs, tasks, diagram = project
     m = pm.mindmap
     context = m.map.root.add_child('Context')
     planned = context.add_child('Planned')
+    child = planned.add_child('Child')
+    grandchild = child.add_child('Grandchild')
+    unrelated = m.map.root.add_child('Unrelated')
+    planned.folded = True
     m.setGoalRange('plan:' + planned.id, '2032-02-28', '2032-02-28')
     engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
     window = engine.rootObjects()[0]
@@ -4530,7 +4534,8 @@ def test_calendar_filtered_node_creation_edits_new_node(
     pm.showMindmap()
     QTest.qWait(150)
     m.setDateFilter('2032-02-28')
-    selected = {'root': m.map.root, 'context': context, 'planned': planned}[target]
+    selected = {'root': m.map.root, 'context': context, 'planned': planned,
+                'child': child, 'grandchild': grandchild}[target]
     m.select(selected.id)
     pane = window.findChild(QObject, 'mindmapPane')
     pane.forceActiveFocus()
@@ -4554,7 +4559,14 @@ def test_calendar_filtered_node_creation_edits_new_node(
     assert m.map.find(created).text == 'new idea'
     assert all(m.map.find(node_id).text == text for node_id, text in before.items())
     # Children of a matching activity already belong to the day view.
-    assert bool(m.dateFilter) == (target == 'planned' and key == Qt.Key_Tab)
+    inside_day_branch = target in {'child', 'grandchild'} or (
+        target == 'planned' and key == Qt.Key_Tab)
+    assert bool(m.dateFilter) == inside_day_branch
+    if inside_day_branch:
+        assert m.dateFilter == '2032-02-28'
+        visible = {node['id'] for node in m.nodes}
+        assert {planned.id, child.id, grandchild.id, created} <= visible
+        assert unrelated.id not in visible
     assert created not in m.plan_ranges
 
 
