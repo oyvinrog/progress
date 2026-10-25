@@ -248,8 +248,7 @@ FocusScope {
         editor.open()
     }
     function addThought(sibling) {
-        controller.addThought(sibling)
-        editNode()
+        if (controller.addThought(sibling)) editNode()
     }
     onVisibleChanged: if (visible) {
         deadlineNow = Date.now() / 1000

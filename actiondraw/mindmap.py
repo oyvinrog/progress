@@ -1760,6 +1760,18 @@ class MindMapController(QObject):
         if any(n.id not in previous_ids and n.id not in retained_ids
                for n in self.map.walk()):
             self._priority_filter = 1.0
+        if self._date_filter:
+            retained = self._date_nodes()
+            inserted = [self._find(key) for key in self._selected_ids
+                        if key not in previous_ids]
+            if any(node is not None and node not in retained for node in inserted):
+                # Keep insertion focused on the new thought, not its nearest
+                # visible ancestor (which the name editor would then rename).
+                self._date_filter = ''
+                for node in inserted:
+                    if node is not None:
+                        for ancestor in node.ancestors():
+                            ancestor.folded = False
         self._sync_filter_selection()
         self.sceneChanged.emit()
         self.changed.emit()
@@ -1879,7 +1891,7 @@ class MindMapController(QObject):
                 parents.append(parent.add_child(entry['text']))
         return self._commit(mutate)
 
-    @Slot(bool)
+    @Slot(bool, result=bool)
     def addThought(self, sibling=False):
         parent = self._find(self._selected) or self.view_root
         if sibling and parent is not self.view_root and parent.parent:
@@ -1887,8 +1899,10 @@ class MindMapController(QObject):
         def mutate():
             parent.folded = False
             self._set_selection([parent.add_child('New thought').id])
-        self._commit(mutate)
+        if not self._commit(mutate):
+            return False
         self.revealNode.emit(self._selected)
+        return True
 
     @Slot(str, str, result=bool)
     def addChildNamed(self, node_id, title):
