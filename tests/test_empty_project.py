@@ -109,7 +109,8 @@ def test_empty_page_first_goal_flow(empty_project, app, actiondraw_window, size)
     assert page.property('visible')
 
 
-def test_empty_page_keyboard_undo_restores_goal(empty_project, app, actiondraw_window):
+@pytest.mark.parametrize("focus_recent", [False, True])
+def test_empty_page_keyboard_undo_restores_goal(empty_project, app, actiondraw_window, focus_recent):
     pm, tabs, tasks, diagram = empty_project
     tabs.addTab('Recover me')
     engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
@@ -119,6 +120,12 @@ def test_empty_page_keyboard_undo_restores_goal(empty_project, app, actiondraw_w
     pm.mindmap.deleteSelected()
     QTest.qWait(100)
     assert window.property('emptyProject')
+    if focus_recent:
+        pm._recent_projects = ['/unused/recent.progress']
+        pm.recentProjectsChanged.emit()
+        QTest.qWait(50)
+        QTest.keyClick(window, Qt.Key_Tab)
+        assert window.findChild(QObject, 'emptyProjectOpenRecent').property('activeFocus')
     QTest.keyClick(window, Qt.Key_Z, Qt.ControlModifier)
     QTest.qWait(100)
     assert tabs.currentTabName == 'Recover me'
@@ -145,3 +152,80 @@ def test_empty_project_markdown_cannot_create_orphan_tasks(empty_project):
     assert pm.createTaskFromWorkspaceMarkdownSelection('Task', 0, 0) == ''
     assert pm.createTasksFromWorkspaceMarkdownList('- Task', 0, 0) == []
     assert tasks.rowCount() == 0 and diagram.count == 0
+
+
+@pytest.mark.parametrize('size', [(1100, 800), (640, 480)])
+def test_empty_page_open_recent_project(empty_project, actiondraw_window, tmp_path, monkeypatch, size):
+    import json
+    from PySide6.QtCore import QPointF
+
+    pm, tabs, tasks, diagram = empty_project
+    monkeypatch.setattr(pm, '_save_recent_projects', lambda: None)
+    tabs.addTab('First')
+    tabs.addTab('Last selected')
+    pm.switchTab(1)
+    path = tmp_path / 'recent.progress'
+    path.write_text(json.dumps(pm._build_project_data()))
+    pm.scrubProjectData()
+    pm._recent_projects = []
+
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.resize(*size)
+    QTest.qWait(100)
+    page = window.findChild(QObject, 'emptyProjectPage')
+    add = window.findChild(QObject, 'emptyProjectAddGoal')
+    recent = window.findChild(QObject, 'emptyProjectOpenRecent')
+    assert page.property('visible')
+    assert add.property('activeFocus')
+    assert not recent.property('visible')
+
+    pm._recent_projects = [str(path), str(tmp_path / 'older.progress')]
+    pm.recentProjectsChanged.emit()
+    QTest.qWait(50)
+    assert page.property('recentProjectPath') == str(path)
+    assert recent.property('visible')
+    assert tabs.tabCount == 0  # History availability does not auto-load.
+    for button in (add, recent):
+        position = button.mapToScene(QPointF(0, 0))
+        assert position.x() >= 0 and position.y() >= 0
+        assert position.x() + button.width() <= window.width()
+        assert position.y() + button.height() <= window.height()
+
+    QTest.keyClick(window, Qt.Key_Tab)
+    assert recent.property('activeFocus')
+    assert page.property('actionFocused')
+    QTest.keyClick(window, Qt.Key_Space)
+    QTest.qWait(100)
+    assert pm.currentFilePath == str(path)
+    assert tabs.tabCount == 2
+    assert tabs.currentTabName == 'Last selected'
+    assert not page.property('visible')
+
+
+@pytest.mark.parametrize('failure', ['missing', 'corrupt', 'cancelled'])
+def test_empty_page_recent_load_failure(empty_project, actiondraw_window, tmp_path, monkeypatch, failure):
+    pm, tabs, tasks, diagram = empty_project
+    monkeypatch.setattr(pm, '_save_recent_projects', lambda: None)
+    path = tmp_path / 'recent.progress'
+    if failure == 'corrupt':
+        path.write_text('invalid json')
+    elif failure == 'cancelled':
+        monkeypatch.setattr(ProjectManager, '_prompt_encryption_credentials',
+                            lambda *args: EncryptionCredentials(passphrase='recent-test'))
+        tabs.addTab('Saved goal')
+        assert pm.saveProject(str(path))
+        pm.scrubProjectData()
+        monkeypatch.setattr(ProjectManager, '_prompt_encryption_credentials', lambda *args: None)
+    pm._recent_projects = [str(path)]
+    errors = []
+    pm.errorOccurred.connect(errors.append)
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    QTest.qWait(100)
+    recent = window.findChild(QObject, 'emptyProjectOpenRecent')
+    QMetaObject.invokeMethod(recent, 'clicked')
+    QTest.qWait(50)
+    assert tabs.tabCount == 0
+    assert window.findChild(QObject, 'emptyProjectPage').property('visible')
+    assert bool(errors) == (failure != 'cancelled')

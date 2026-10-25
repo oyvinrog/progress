@@ -1319,7 +1319,12 @@ ApplicationWindow {
         id: emptyProjectPage
         anchors.fill: parent
         visible: root.emptyProject
+        recentProjectPath: root.projectManagerRef && root.projectManagerRef.recentProjects.length > 0
+            ? root.projectManagerRef.recentProjects[0] : ""
         onAddGoalRequested: sidebarTabs.addNewTab()
+        onOpenRecentProjectRequested: function(filePath) {
+            root.projectManagerRef.loadProject(filePath)
+        }
     }
 
     RowLayout {
