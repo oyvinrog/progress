@@ -1,7 +1,7 @@
 """Compact planning stays bounded and independent of map navigation."""
 import pytest
 from PySide6.QtCore import QObject, QPointF, Qt
-from PySide6.QtTest import QTest
+from PySide6.QtTest import QTest, QSignalSpy
 
 from test_mindmap import project
 from test_reminder_calendar import calendar_ui, find, reminder, value
@@ -125,4 +125,41 @@ def test_week_double_click_opens_bounded_goal_dialog(calendar_ui, app):
     assert dialog.property('y') >= 0
     assert dialog.property('y') + dialog.property('height') <= root.height()
     dialog.close()
+    overview.setProperty('goalModel', None)
+
+
+@pytest.mark.parametrize('dropdown_date', ['2032-02-28', '2032-02-29'])
+def test_dropdown_browses_day_without_refreshing_map(project, calendar_ui, app, dropdown_date):
+    pm, tabs, _, _ = project
+    root, _, overview, _, refresh, click = calendar_ui
+    overview.setProperty('planController', pm.mindmap)
+    overview.setProperty('goalModel', tabs)
+    goal_id = tabs.createScheduledGoal('Dropdown goal', dropdown_date, dropdown_date)
+    refresh([reminder(dropdown_date + 'T18:00:00')])
+    click('closePlanningMonth')
+    overview.setProperty('weekStart', '2032-02-23')
+    overview.selectDate('2032-02-28')
+    scene = pm.mindmap.scene
+    reset = QSignalSpy(pm.mindmap.resetView)
+    changed = QSignalSpy(pm.mindmap.sceneChanged)
+    click('weekAgenda_' + dropdown_date)
+    assert overview.property('selectedDate') == '2032-02-28'
+    assert pm.mindmap.dateFilter == '2032-02-28'
+    assert pm.mindmap.scene == scene
+    assert reset.count() == 0 and changed.count() == 0
+    assert overview.property('agendaDate') == dropdown_date
+    assert [g['id'] for g in value(overview, 'filteredGoals')] == [goal_id]
+    assert len(value(overview, 'filteredReminders')) == 1
+    assert find(root, 'reminderRow_task').isVisible()
+    popup = overview.findChild(QObject, 'weekAgendaPopup')
+    popup.close()
+    app.processEvents()
+    assert overview.property('agendaDate') == '2032-02-28'
+    assert reset.count() == 0 and changed.count() == 0
+    day = find(root, 'weekDay_' + dropdown_date)
+    QTest.mouseClick(root, Qt.LeftButton, Qt.NoModifier,
+                    day.mapToScene(QPointF(day.width()/2, 10)).toPoint())
+    assert pm.mindmap.dateFilter == dropdown_date
+    assert reset.count() == 1
+    overview.setProperty('planController', None)
     overview.setProperty('goalModel', None)

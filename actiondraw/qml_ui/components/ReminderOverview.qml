@@ -18,7 +18,7 @@ Item {
         return result.sort(calendar.compareGoals)
     }
     readonly property var filteredGoals: scheduledGoals.filter(function(g) {
-        return !overview.selectedDate || (g.startDate <= overview.selectedDate && g.endDate >= overview.selectedDate)
+        return !overview.agendaDate || (g.startDate <= overview.agendaDate && g.endDate >= overview.agendaDate)
     })
     property var undoChange: null
     property bool savingCalendarRange: false
@@ -138,6 +138,8 @@ Item {
     property var planController
     property double nowTimestamp: Date.now() / 1000
     property string selectedDate: ""
+    property string dropdownDate: ""
+    readonly property string agendaDate: dayAgenda.visible ? dropdownDate : selectedDate
     property bool initializingDate: true
     function applyDateFilter() {
         if (planController && planController.setDateFilter) planController.setDateFilter(selectedDate)
@@ -168,7 +170,7 @@ Item {
         return counts
     }
     readonly property var filteredReminders: futureReminders.filter(function(entry) {
-        return !overview.selectedDate || calendar.dateKey(new Date(Number(entry.reminderAt) * 1000)) === overview.selectedDate
+        return !overview.agendaDate || calendar.dateKey(new Date(Number(entry.reminderAt) * 1000)) === overview.agendaDate
     }).sort(function(a, b) { return Number(a.reminderAt) - Number(b.reminderAt) })
     // Update reminder roles in place so countdown ticks do not destroy open menus.
     ListModel { id: agendaReminders; dynamicRoles: true }
@@ -235,7 +237,7 @@ Item {
     }
     function showDayAgenda(key, item) {
         deletionError = ""
-        selectDate(key)
+        dropdownDate = key
         dayAgenda.anchorItem = item
         dayAgenda.open()
     }
@@ -415,7 +417,7 @@ Item {
             width: agenda.availableWidth
             spacing: 4
             Label {
-                text: overview.selectedDate || "All scheduled items"
+                text: overview.agendaDate || "All scheduled items"
                 color: "#e0e9ef"; font.bold: true
             }
             Label {
@@ -429,7 +431,7 @@ Item {
                 width: parent.width
                 wrapMode: Text.WordWrap
                 visible: overview.filteredReminders.length === 0 && overview.filteredGoals.length === 0
-                text: overview.selectedDate ? "No goals or reminders for this day" : "No scheduled goals or waiting reminders"
+                text: overview.agendaDate ? "No goals or reminders for this day" : "No scheduled goals or waiting reminders"
                 color: "#9aafbd"
             }
             Label { text: "Goals · " + overview.filteredGoals.length; color: "#9aafbd" }
