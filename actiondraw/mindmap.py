@@ -2069,6 +2069,17 @@ class MindMapController(QObject):
         if self.view_root in roots and not (
                 self._activity_filter and _placement(self.view_root).parent is not None):
             return
+        self._delete_roots(roots)
+
+    @Slot(str, result=bool)
+    def deleteNode(self, node_id):
+        """Delete a calendar source independently of the current view or selection."""
+        node = self.map.find(self.sourceNodeId(node_id))
+        if node is None or node is self.map.root:
+            return False
+        return self._delete_roots([node])
+
+    def _delete_roots(self, roots):
         placements = [_placement(node) for node in roots]
         parent_id = (roots[0].parent or placements[0].parent).id
         removed_ids = {n.id for node in placements for n in node.walk()}
@@ -2077,13 +2088,13 @@ class MindMapController(QObject):
         if tab_ids:
             if self.exchange_tabs is None:
                 self.errorOccurred.emit('Goal deletion requires a project manager.')
-                return
+                return False
             self._changing_tabs = True
             try:
                 tab_state = self.exchange_tabs({'ids': tab_ids, 'tabs': []})
             except ValueError as exc:
                 self.errorOccurred.emit(str(exc))
-                return
+                return False
             finally:
                 self._changing_tabs = False
         def mutate():
@@ -2099,6 +2110,8 @@ class MindMapController(QObject):
             self._view_selections = {key: value for key, value in self._view_selections.items()
                                      if key not in tab_ids}
             self.changed.emit()
+            return True
+        return False
 
     @Slot(str, str, str)
     def moveNode(self, node_id, target_id, placement):

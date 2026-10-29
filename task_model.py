@@ -6,6 +6,7 @@ independent use by actiondraw.
 """
 
 import copy
+import hashlib
 import uuid
 import json
 import math
@@ -3231,6 +3232,82 @@ class ProjectManager(QObject):
             [self._tab_model.CompletionRole, self._tab_model.ActiveTaskTitleRole],
         )
 
+    @staticmethod
+    def _calendar_task_signature(tasks):
+        # Ignore ticking timers, but reject stale row indices after structural edits.
+        payload = [(t.get("title"), t.get("reminder_at"),
+                    t.get("indent_level", 0), t.get("parent_index", -1)) for t in tasks]
+        return hashlib.sha256(json.dumps(payload).encode()).hexdigest()
+
+    @Slot("QVariantMap", result=bool)
+    def deleteCalendarItem(self, entry):
+        """Delete the source of an agenda row, never just its calendar schedule."""
+        kind = entry.get("kind")
+        if kind == "goal":
+            goal_id = entry.get("id", "")
+            if goal_id.startswith("plan:"):
+                return self.mindmap.deleteNode(goal_id[5:])
+            index = self._tab_model.goalIndex(goal_id) if self._tab_model else -1
+            if index < 0:
+                return False
+            node_id = next((key for key, value in self.mindmap.links.items()
+                            if value == goal_id), None)
+            if node_id is not None:
+                return self.mindmap.deleteNode(node_id)
+            self.removeTab(index)
+            return True
+        if kind in ("mindmap", "kanban_schedule"):
+            return self.mindmap.deleteNode(entry.get("nodeId", ""))
+        if kind == "standalone":
+            token = entry.get("deletionToken")
+            index = next((i for i, item in enumerate(self._standalone_reminders)
+                          if str(id(item)) == token), -1)
+            if index < 0:
+                return False
+            self.clearStandaloneReminder(index)
+            return True
+        if kind != "task":
+            return False
+        tab_id = entry.get("tabId", "")
+        index = self._tab_model.goalIndex(tab_id) if self._tab_model else 0
+        tasks = self._get_cross_tab_tasks(index)
+        row = entry.get("taskIndex", -1)
+        if (tasks is None or not isinstance(row, int) or not 0 <= row < len(tasks)
+                or entry.get("deletionToken") != self._calendar_task_signature(tasks)):
+            return False
+        current = self._tab_model is None or index == self._tab_model.currentTabIndex
+        tab = self._tab_model.getAllTabs()[index] if self._tab_model else None
+        diagram = copy.deepcopy(self._diagram_model.to_dict() if current else tab.diagram)
+        tasks = copy.deepcopy(tasks)
+        end = row + 1
+        while end < len(tasks) and tasks[end].get("indent_level", 0) > tasks[row].get("indent_level", 0):
+            end += 1
+
+        def remap(value):
+            if row <= value < end:
+                return -1
+            return value - (end - row) if value >= end else value
+
+        del tasks[row:end]
+        for task in tasks:
+            task["parent_index"] = remap(task.get("parent_index", -1))
+        removed = {item["id"] for item in diagram.get("items", [])
+                   if row <= item.get("task_index", -1) < end}
+        diagram["items"] = [item for item in diagram.get("items", []) if item["id"] not in removed]
+        for item in diagram["items"]:
+            item["task_index"] = remap(item.get("task_index", -1))
+        diagram["edges"] = [edge for edge in diagram.get("edges", [])
+                            if edge["from_id"] not in removed and edge["to_id"] not in removed]
+        diagram["current_task_index"] = remap(diagram.get("current_task_index", -1))
+        if current:
+            self._task_model.from_dict({"tasks": tasks})
+            self._diagram_model.from_dict(diagram)
+            self._saveCurrentTabState()
+        else:
+            tab.tasks, tab.diagram = {"tasks": tasks}, diagram
+        self._emit_tab_summary_changed(index)
+        return True
+
     @Slot(result="QVariantList")
     def getActiveStandaloneReminders(self) -> List[Dict[str, Any]]:
         """Return active project-wide standalone reminders sorted by soonest first."""
@@ -3254,6 +3331,9 @@ class ProjectManager(QObject):
                     now=now,
                 )
             )
+
+        for entry in reminders:
+            entry["deletionToken"] = str(id(self._standalone_reminders[entry["standaloneIndex"]]))
 
         reminders.sort(key=lambda entry: float(entry.get("reminderAt", 0.0)))
         return reminders
@@ -3310,6 +3390,14 @@ class ProjectManager(QObject):
                         now=now,
                     )
                 )
+
+        signatures = {}
+        for entry in reminders:
+            index = entry["tabIndex"]
+            entry["tabId"] = self._tab_model.getAllTabs()[index].id if self._tab_model else ""
+            if index not in signatures:
+                signatures[index] = self._calendar_task_signature(self._get_cross_tab_tasks(index))
+            entry["deletionToken"] = signatures[index]
 
         for node_id, reminder in self.mindmap.reminders.items():
             node = self.mindmap.map.find(node_id)

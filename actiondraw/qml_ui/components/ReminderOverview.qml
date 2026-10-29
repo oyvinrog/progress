@@ -223,7 +223,18 @@ Item {
         if (point.x < 0 || point.x >= weekDays.width || point.y < 0 || point.y >= weekDays.height) return ""
         return calendar.dayKey(calendar.dayNumber(weekStart) + Math.floor(point.x / (weekDays.width / 7)))
     }
+    property string deletionError: ""
+    function deleteAgendaItem(entry) {
+        if (!projectManager || !projectManager.deleteCalendarItem(entry)) {
+            deletionError = "Could not delete this item. It may have changed; reopen the daily list and try again."
+            return false
+        }
+        deletionError = ""
+        if (windowRoot) windowRoot.refreshActiveReminders()
+        return true
+    }
     function showDayAgenda(key, item) {
+        deletionError = ""
         selectDate(key)
         dayAgenda.anchorItem = item
         dayAgenda.open()
@@ -408,6 +419,12 @@ Item {
                 color: "#e0e9ef"; font.bold: true
             }
             Label {
+                objectName: "calendarDeletionError"
+                visible: overview.deletionError !== ""
+                text: overview.deletionError
+                width: parent.width; wrapMode: Text.WordWrap; color: "#ffb4a9"
+            }
+            Label {
                 objectName: "reminderEmptyDay"
                 width: parent.width
                 wrapMode: Text.WordWrap
@@ -426,6 +443,15 @@ Item {
                     border.color: calendar.selectedGoalId === modelData.id ? "#7dbde8" : "transparent"
                     RowLayout {
                         anchors.fill: parent; anchors.margins: 4
+                        CheckBox {
+                            objectName: "deleteGoal_" + goalRow.modelData.id
+                            Accessible.name: "Delete " + goalRow.modelData.name + " from project"
+                            ToolTip.visible: hovered; ToolTip.text: Accessible.name
+                            onClicked: {
+                                checked = false
+                                overview.deleteAgendaItem({kind: "goal", id: goalRow.modelData.id})
+                            }
+                        }
                         Button {
                             objectName: "openGoal_" + goalRow.modelData.id
                             Layout.fillWidth: true; Layout.minimumWidth: 0
@@ -491,10 +517,19 @@ Item {
                         anchors.right: parent.right
                         anchors.top: parent.top
                         anchors.margins: 6
-                        columns: 2
+                        columns: 3
                         columnSpacing: 8
                         rowSpacing: 4
 
+                        CheckBox {
+                            objectName: "deleteReminder_" + (reminderRow.isPlan ? "plan_" : "") + (reminderRow.entry.nodeId || reminderRow.entry.kind)
+                            Accessible.name: "Delete " + (reminderRow.entry.title || reminderRow.entry.taskTitle) + " from project"
+                            ToolTip.visible: hovered; ToolTip.text: Accessible.name
+                            onClicked: {
+                                checked = false
+                                overview.deleteAgendaItem(reminderRow.entry)
+                            }
+                        }
                         Column {
                             Layout.fillWidth: true
                             Layout.minimumWidth: 0
