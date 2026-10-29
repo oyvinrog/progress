@@ -326,6 +326,23 @@ Rectangle {
                     id: pointer
                     anchors.fill: parent
                     property int pressedCell: -1
+                    ToolTip {
+                        id: activityTooltip
+                        objectName: "calendarGoalTooltip"
+                        readonly property var goal: calendar.goals.find(function(g) { return g.id === calendar.hoveredGoalId })
+                        visible: pointer.containsMouse && !!goal && !calendar.gesture
+                        delay: 500
+                        text: goal ? goal.name + "\n" + goal.startDate + " → " + goal.endDate : ""
+                        x: Math.max(0, Math.min(pointer.mouseX + 12, pointer.width - width))
+                        y: pointer.mouseY + 20
+                        width: Math.min(implicitWidth, Math.max(160, calendar.width - 24), 420)
+                        contentItem: Label {
+                            text: activityTooltip.text
+                            textFormat: Text.PlainText
+                            wrapMode: Text.Wrap
+                            color: activityTooltip.palette.toolTipText
+                        }
+                    }
                     onPressed: function(mouse) {
                         pressedCell=calendar.cellAt(mouse.x,mouse.y)
                         if (pressedCell<0) return

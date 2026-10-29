@@ -611,6 +611,22 @@ Item {
                             Layout.fillWidth: true
                             Layout.minimumWidth: 0
                             spacing: 1
+                            HoverHandler { id: reminderTextHover }
+                            ToolTip {
+                                id: reminderTextTooltip
+                                objectName: "reminderTextTooltip_" + (reminderRow.entry.nodeId || reminderRow.entry.kind)
+                                visible: reminderTextHover.hovered && !overview.agendaDrag
+                                delay: 500
+                                text: "[" + reminderRow.entry.tabName + "] " + (reminderRow.entry.title || reminderRow.entry.taskTitle)
+                                    + "\n" + (reminderRow.isPlan ? "Add and notify at " : "Remind at ") + reminderRow.entry.reminderText
+                                width: Math.min(implicitWidth, Math.max(160, overview.width - 32), 420)
+                                contentItem: Label {
+                                    text: reminderTextTooltip.text
+                                    textFormat: Text.PlainText
+                                    wrapMode: Text.Wrap
+                                    color: reminderTextTooltip.palette.toolTipText
+                                }
+                            }
                             Text {
                                 width: parent.width
                                 text: "[" + reminderRow.entry.tabName + "] " + (reminderRow.entry.title || reminderRow.entry.taskTitle)
