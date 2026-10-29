@@ -175,6 +175,7 @@ Item {
     // Update reminder roles in place so countdown ticks do not destroy open menus.
     ListModel { id: agendaReminders; dynamicRoles: true }
     function syncAgendaReminders() {
+        if (agendaDrag) return
         for (var i = 0; i < filteredReminders.length; ++i) {
             var entry = filteredReminders[i]
             var key = entry.kind + ":" + (entry.nodeId ||
@@ -220,10 +221,72 @@ Item {
     }
     function dateAtScene(x, y) {
         if (planning.visible) return calendar.visible ? calendar.dateAtScene(x, y) : ""
-        if (dayAgenda.visible) return ""
         var point = weekDays.mapFromItem(null, x, y)
         if (point.x < 0 || point.x >= weekDays.width || point.y < 0 || point.y >= weekDays.height) return ""
         return calendar.dayKey(calendar.dayNumber(weekStart) + Math.floor(point.x / (weekDays.width / 7)))
+    }
+    property var agendaDrag: null
+    property real agendaDragX: 0
+    property real agendaDragY: 0
+    function beginAgendaDrag(entry, x, y) {
+        agendaDrag = JSON.parse(JSON.stringify(entry))
+        deletionError = ""
+        updateAgendaDrag(x, y)
+    }
+    function updateAgendaDrag(x, y) {
+        if (!agendaDrag) return
+        agendaDragX = x; agendaDragY = y
+        updateGoalDrop(x, y)
+    }
+    function cancelAgendaDrag() {
+        agendaDrag = null
+        clearGoalDrop()
+        syncAgendaReminders()
+    }
+    function finishAgendaDrag(x, y) {
+        if (!agendaDrag) return
+        var entry = agendaDrag
+        var day = dateAtScene(x, y)
+        cancelAgendaDrag()
+        if (!day) return
+        // The row may disappear on save; finish its release handler first.
+        Qt.callLater(function() {
+            var success = false
+            if (entry.kind === "goal") {
+                var current = scheduledGoals.find(function(g) { return g.id === entry.id })
+                if (current && current.startDate === entry.startDate && current.endDate === entry.endDate) {
+                    var duration = calendar.dayNumber(entry.endDate) - calendar.dayNumber(entry.startDate)
+                    success = saveCalendarRange(entry.id, day, calendar.dayKey(calendar.dayNumber(day) + duration))
+                }
+            } else if (projectManager) success = projectManager.moveCalendarReminder(entry, day)
+            if (!success) {
+                deletionError = "Could not move this item. Choose a future date or reopen the list and try again."
+                return
+            }
+            if (windowRoot) windowRoot.refreshActiveReminders()
+            if (dayAgenda.visible) {
+                dropdownDate = day
+                dayAgenda.anchorItem = weekDayRepeater.itemAt(calendar.dayNumber(day) - calendar.dayNumber(weekStart))
+            }
+        })
+    }
+    Shortcut {
+        sequence: "Escape"
+        enabled: overview.agendaDrag !== null
+        onActivated: overview.cancelAgendaDrag()
+    }
+    Rectangle {
+        parent: Overlay.overlay
+        z: 10000
+        visible: overview.agendaDrag !== null
+        x: Math.max(0, Math.min(overview.agendaDragX + 14, parent.width - width))
+        y: Math.max(0, Math.min(overview.agendaDragY + 16, parent.height - height))
+        width: dragCaption.implicitWidth + 20; height: 36
+        radius: 6; color: "#263744"; border.color: "#7dbde8"
+        Label {
+            id: dragCaption; anchors.centerIn: parent; color: "#e0e9ef"
+            text: calendar.externalDropDate ? "Move to " + overview.shortDate(calendar.externalDropDate) : "Drop on a day · Esc to cancel"
+        }
     }
     property string deletionError: ""
     function deleteAgendaItem(entry) {
@@ -284,6 +347,7 @@ Item {
             id: weekDays
             anchors { left: parent.left; right: parent.right; top: stripHeader.bottom; bottom: parent.bottom; margins: 6; topMargin: 2 }
             Repeater {
+                id: weekDayRepeater
                 model: overview.weekStart ? 7 : 0
                 delegate: Rectangle {
                     id: weekDay
@@ -323,7 +387,7 @@ Item {
     Popup {
         id: calendarHelp; parent: Overlay.overlay; anchors.centerIn: parent
         width: Math.min(380, parent.width - 32); modal: true; focus: true
-        contentItem: Label { text: "Select a day to filter the map. Open its counts to see activities. Double-click a day to add a goal, or drop a goal or mindmap node onto a date. Open month to drag activities and resize their date ranges. Escape cancels a drag."; wrapMode: Text.WordWrap }
+        contentItem: Label { text: "Select a day to filter the map. Open its counts to see activities. Double-click a day to add a goal, or drop a goal or mindmap node onto a date. Drag the grip beside a daily-list item onto another day to move it. Open month to resize date ranges. Escape cancels a drag."; wrapMode: Text.WordWrap }
     }
     Popup {
         id: dayAgenda; objectName: "weekAgendaPopup"; parent: Overlay.overlay
@@ -333,7 +397,8 @@ Item {
         x: Math.max(16, Math.min(anchorPoint.x, parent.width - width - 16))
         y: Math.max(16, Math.min(anchorPoint.y, parent.height - height - 16))
         padding: 8; focus: true
-        onClosed: if (anchorItem) anchorItem.forceActiveFocus()
+        closePolicy: overview.agendaDrag ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        onClosed: { overview.cancelAgendaDrag(); if (anchorItem) anchorItem.forceActiveFocus() }
         background: Rectangle { color: "#21313d"; border.color: "#3b566a"; radius: 8 }
         contentItem: Item { id: popoverAgendaSlot }
     }
@@ -445,6 +510,11 @@ Item {
                     border.color: calendar.selectedGoalId === modelData.id ? "#7dbde8" : "transparent"
                     RowLayout {
                         anchors.fill: parent; anchors.margins: 4
+                        AgendaDragHandle {
+                            objectName: "dragGoal_" + goalRow.modelData.id
+                            dragOverview: overview
+                            entry: ({kind: "goal", id: goalRow.modelData.id, startDate: goalRow.modelData.startDate, endDate: goalRow.modelData.endDate})
+                        }
                         CheckBox {
                             objectName: "deleteGoal_" + goalRow.modelData.id
                             Accessible.name: "Delete " + goalRow.modelData.name + " from project"
@@ -519,10 +589,15 @@ Item {
                         anchors.right: parent.right
                         anchors.top: parent.top
                         anchors.margins: 6
-                        columns: 3
+                        columns: 4
                         columnSpacing: 8
                         rowSpacing: 4
 
+                        AgendaDragHandle {
+                            objectName: "dragReminder_" + (reminderRow.isPlan ? "plan_" : "") + (reminderRow.entry.nodeId || reminderRow.entry.kind)
+                            dragOverview: overview
+                            entry: reminderRow.entry
+                        }
                         CheckBox {
                             objectName: "deleteReminder_" + (reminderRow.isPlan ? "plan_" : "") + (reminderRow.entry.nodeId || reminderRow.entry.kind)
                             Accessible.name: "Delete " + (reminderRow.entry.title || reminderRow.entry.taskTitle) + " from project"

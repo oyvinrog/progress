@@ -3239,6 +3239,56 @@ class ProjectManager(QObject):
                     t.get("indent_level", 0), t.get("parent_index", -1)) for t in tasks]
         return hashlib.sha256(json.dumps(payload).encode()).hexdigest()
 
+    @Slot("QVariantMap", str, result=bool)
+    def moveCalendarReminder(self, entry, day):
+        """Move a live agenda reminder to a date, preserving its local time."""
+        try:
+            target = date.fromisoformat(day)
+            if target.isoformat() != day:
+                return False
+        except (TypeError, ValueError):
+            return False
+        kind = entry.get("kind")
+        def matches(current):
+            if current["kind"] != kind or current["reminderAt"] != entry.get("reminderAt"):
+                return False
+            if kind in ("mindmap", "kanban_schedule"):
+                return current.get("nodeId") == entry.get("nodeId")
+            if kind == "standalone":
+                return current.get("deletionToken") == entry.get("deletionToken")
+            return (kind == "task" and current.get("tabId") == entry.get("tabId")
+                    and current["taskIndex"] == entry.get("taskIndex")
+                    and current.get("deletionToken") == entry.get("deletionToken"))
+        current = next((item for item in self.getActiveReminders() if matches(item)), None)
+        if current is None:
+            return False
+        old = datetime.fromtimestamp(current["reminderAt"])
+        moved = datetime.combine(target, old.time())
+        if moved.timestamp() <= time.time():
+            return False
+        if old.date() == target:
+            return True
+        text = moved.strftime("%Y-%m-%d %H:%M:%S")
+        notify = current["sendNotification"]
+        if kind == "task":
+            return self.setReminder(current["tabIndex"], current["taskIndex"], text, notify)
+        if kind == "standalone":
+            return self.updateStandaloneReminder(current["standaloneIndex"], current["title"], text, notify)
+        if kind == "mindmap":
+            return self.setMindmapReminder(current["nodeId"], text, notify)
+        node_id = current["nodeId"]
+        def mutate():
+            self.mindmap.plan_schedules[node_id] = {'at': moved.timestamp()}
+            previous = self.mindmap.plan_ranges.get(node_id)
+            if previous:
+                delta = target - old.date()
+                self.mindmap.plan_ranges[node_id] = {
+                    key: (date.fromisoformat(previous[key]) + delta).isoformat()
+                    for key in ('startDate', 'endDate')}
+            else:
+                self.mindmap.plan_ranges[node_id] = {'startDate': day, 'endDate': day}
+        return self.mindmap._commit(mutate)
+
     @Slot("QVariantMap", result=bool)
     def deleteCalendarItem(self, entry):
         """Delete the source of an agenda row, never just its calendar schedule."""
