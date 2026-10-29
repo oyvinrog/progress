@@ -123,6 +123,7 @@ class MindMapController(QObject):
     resetView = Signal()
     scopeChanging = Signal(str, str)
     tabActivated = Signal(str)
+    parentContextRequested = Signal(str)
     revealNode = Signal(str)
     errorOccurred = Signal(str)
     clipboardChanged = Signal()
@@ -301,6 +302,94 @@ class MindMapController(QObject):
             elif node is not None:
                 target_id = next(k for k, v in self.links.items() if v == tab)
                 node.text = self.map.find(target_id).text
+
+    @Property(str, notify=changed)
+    def openedNodeId(self):
+        node = self._activity_node() or self.view_root
+        return _placement(node).id
+
+    @Property(bool, notify=changed)
+    def canNavigateToParent(self):
+        return bool(self.parentContext(self.openedNodeId))
+
+    @Slot(str, result='QVariantMap')
+    def parentContext(self, node_id):
+        node = self._find(node_id)
+        if node is None:
+            return {}
+        node = _placement(node)
+        return {'nodeId': node.id, 'parentId': node.parent.id} if node.parent else {}
+
+    @Slot(str)
+    def navigateToParent(self, node_id):
+        if self.parentContext(node_id):
+            self.parentContextRequested.emit(node_id)
+
+    @Slot(str, result=bool)
+    def canAssignParent(self, node_id):
+        node = self._find(node_id)
+        return node is not None and _placement(node) is not self.map.root
+
+    def _parent_destination(self, node):
+        if node is None:
+            return None
+        node = _content(node)
+        tab = self.references.get(node.id)
+        if tab:
+            return self.map.find(next((key for key, value in self.links.items() if value == tab), ''))
+        return node
+
+    def _parent_forbidden(self, node):
+        # Follow reference edges as well as structural children to reject DAG cycles.
+        targets = {tab: key for key, tab in self.links.items()}
+        nodes = {item.id: item for item in self.map.walk()}
+        pending, forbidden = [node.id], set()
+        while pending:
+            key = pending.pop()
+            if key in forbidden:
+                continue
+            forbidden.add(key)
+            pending.extend(child.id for child in nodes[key].children)
+            if key in self.references:
+                target = targets.get(self.references[key])
+                if target:
+                    pending.append(target)
+        return forbidden
+
+    @Slot(str, str, result='QVariantList')
+    def parentOptions(self, node_id, query):
+        if not self.canAssignParent(node_id):
+            return []
+        node = _placement(self._find(node_id))
+        forbidden = self._parent_forbidden(node)
+        query = query.strip().casefold()
+        result = []
+        for candidate in self.map.walk():
+            target = self._parent_destination(candidate)
+            if target is None or target.id in forbidden or target is node.parent:
+                continue
+            path = ' / '.join(n.text for n in [*reversed(list(candidate.ancestors())), candidate])
+            if not query or query in path.casefold():
+                result.append({'nodeId': candidate.id, 'name': target.text, 'path': path})
+        return sorted(result, key=lambda item: (item['path'].casefold(), item['nodeId']))
+
+    @Slot(str, str, result=bool)
+    def assignParent(self, node_id, parent_id):
+        if not self.canAssignParent(node_id):
+            self.errorOccurred.emit('This node can no longer be moved.')
+            return False
+        node = _placement(self._find(node_id))
+        target = self._parent_destination(self._find(parent_id))
+        if target is None or target is node.parent or target.id in self._parent_forbidden(node):
+            self.errorOccurred.emit('Choose a different parent outside this branch; circular references are not allowed.')
+            return False
+        def mutate():
+            node.move_to(target)
+            target.folded = False
+        if not self._commit(mutate):
+            return False
+        self.parentContextRequested.emit(node.id)
+        return True
 
     @Slot(str, result='QVariantList')
     def tabReferenceOptions(self, query):

@@ -483,6 +483,9 @@ class NavigationSnapshot:
     tab_index: int
     task_index: int = -1
     view_kind: str = "diagram"
+    date_filter: str = ""
+    activity_filter: str = ""
+    selected_node: str = ""
 
 
 class TaskModel(QAbstractListModel):
@@ -2588,6 +2591,7 @@ class ProjectManager(QObject):
         self.mindmap = MindMapController(self._tab_model, self)
         self.mindmap.exchange_tabs = self._exchangeMindmapTabs
         self.mindmap.tabActivated.connect(self.openMindmapTab)
+        self.mindmap.parentContextRequested.connect(self.openNodeParent)
         self.mindmap.errorOccurred.connect(self.errorOccurred)
         self.mindmap.planChanged.connect(self.kanbanChanged)
         self._last_saved_snapshot = self._serialize_project_payload(self._build_project_data())
@@ -2723,6 +2727,28 @@ class ProjectManager(QObject):
                 self.switchTab(index)
                 return
 
+    @Slot(str)
+    def openNodeParent(self, node_id):
+        context = self.mindmap.parentContext(node_id)
+        if not context:
+            return
+        self._pushNavigationSnapshot(self._currentNavigationSnapshot())
+        parent_id = context['parentId']
+        tab_id = self.mindmap.links.get(parent_id)
+        if tab_id and self._tab_model is not None:
+            self.switchTab(self._tab_model.goalIndex(tab_id))
+        else:
+            self.showMindmap()
+            if parent_id != self.mindmap.map.root.id:
+                self.mindmap.setActivityFilter('plan:' + parent_id)
+        parent = self.mindmap.map.find(parent_id)
+        parent.folded = False
+        self.mindmap.setPriorityFilter(1.0)
+        self.mindmap.select(context['nodeId'])
+        self.mindmap.sceneChanged.emit()
+        self.mindmap.changed.emit()
+        self.mindmap.revealNode.emit(context['nodeId'])
+
     @Property(bool, notify=canGoBackChanged)
     def canGoBack(self) -> bool:
         """Return whether drill-navigation history is available."""
@@ -2740,7 +2766,10 @@ class ProjectManager(QObject):
             task_index = current_task_index
         return NavigationSnapshot(tab_index=tab_index, task_index=task_index,
                                   view_kind=("tab_mindmap" if self.mindmap.tabScoped else "mindmap")
-                                  if self._mindmap_visible else "diagram")
+                                  if self._mindmap_visible else "diagram",
+                                  date_filter=self.mindmap.dateFilter,
+                                  activity_filter=self.mindmap.activityFilter,
+                                  selected_node=self.mindmap.selectedId)
 
     def _pushNavigationSnapshot(self, snapshot: NavigationSnapshot) -> None:
         if self._restoring_navigation:
@@ -4896,6 +4925,13 @@ class ProjectManager(QObject):
             self._restoring_navigation = True
             try:
                 self._restoreNavigationSnapshot(snapshot)
+                if snapshot.view_kind in ("mindmap", "tab_mindmap"):
+                    if snapshot.activity_filter:
+                        self.mindmap.setActivityFilter(snapshot.activity_filter)
+                    elif snapshot.date_filter:
+                        self.mindmap.setDateFilter(snapshot.date_filter)
+                    if self.mindmap._find(snapshot.selected_node):
+                        self.mindmap.select(snapshot.selected_node)
             finally:
                 self._restoring_navigation = False
             return
