@@ -18,7 +18,7 @@ Item {
         return result.sort(calendar.compareGoals)
     }
     readonly property var filteredGoals: scheduledGoals.filter(function(g) {
-        return !overview.selectedDate || (g.startDate <= overview.selectedDate && g.endDate >= overview.selectedDate)
+        return !overview.agendaDate || (g.startDate <= overview.agendaDate && g.endDate >= overview.agendaDate)
     })
     property var undoChange: null
     property bool savingCalendarRange: false
@@ -138,6 +138,8 @@ Item {
     property var planController
     property double nowTimestamp: Date.now() / 1000
     property string selectedDate: ""
+    property string dropdownDate: ""
+    readonly property string agendaDate: dayAgenda.visible ? dropdownDate : selectedDate
     property bool initializingDate: true
     function applyDateFilter() {
         if (planController && planController.setDateFilter) planController.setDateFilter(selectedDate)
@@ -168,11 +170,12 @@ Item {
         return counts
     }
     readonly property var filteredReminders: futureReminders.filter(function(entry) {
-        return !overview.selectedDate || calendar.dateKey(new Date(Number(entry.reminderAt) * 1000)) === overview.selectedDate
+        return !overview.agendaDate || calendar.dateKey(new Date(Number(entry.reminderAt) * 1000)) === overview.agendaDate
     }).sort(function(a, b) { return Number(a.reminderAt) - Number(b.reminderAt) })
     // Update reminder roles in place so countdown ticks do not destroy open menus.
     ListModel { id: agendaReminders; dynamicRoles: true }
     function syncAgendaReminders() {
+        if (agendaDrag) return
         for (var i = 0; i < filteredReminders.length; ++i) {
             var entry = filteredReminders[i]
             var key = entry.kind + ":" + (entry.nodeId ||
@@ -218,13 +221,86 @@ Item {
     }
     function dateAtScene(x, y) {
         if (planning.visible) return calendar.visible ? calendar.dateAtScene(x, y) : ""
-        if (dayAgenda.visible) return ""
         var point = weekDays.mapFromItem(null, x, y)
         if (point.x < 0 || point.x >= weekDays.width || point.y < 0 || point.y >= weekDays.height) return ""
         return calendar.dayKey(calendar.dayNumber(weekStart) + Math.floor(point.x / (weekDays.width / 7)))
     }
+    property var agendaDrag: null
+    property real agendaDragX: 0
+    property real agendaDragY: 0
+    function beginAgendaDrag(entry, x, y) {
+        agendaDrag = JSON.parse(JSON.stringify(entry))
+        deletionError = ""
+        updateAgendaDrag(x, y)
+    }
+    function updateAgendaDrag(x, y) {
+        if (!agendaDrag) return
+        agendaDragX = x; agendaDragY = y
+        updateGoalDrop(x, y)
+    }
+    function cancelAgendaDrag() {
+        agendaDrag = null
+        clearGoalDrop()
+        syncAgendaReminders()
+    }
+    function finishAgendaDrag(x, y) {
+        if (!agendaDrag) return
+        var entry = agendaDrag
+        var day = dateAtScene(x, y)
+        cancelAgendaDrag()
+        if (!day) return
+        // The row may disappear on save; finish its release handler first.
+        Qt.callLater(function() {
+            var success = false
+            if (entry.kind === "goal") {
+                var current = scheduledGoals.find(function(g) { return g.id === entry.id })
+                if (current && current.startDate === entry.startDate && current.endDate === entry.endDate) {
+                    var duration = calendar.dayNumber(entry.endDate) - calendar.dayNumber(entry.startDate)
+                    success = saveCalendarRange(entry.id, day, calendar.dayKey(calendar.dayNumber(day) + duration))
+                }
+            } else if (projectManager) success = projectManager.moveCalendarReminder(entry, day)
+            if (!success) {
+                deletionError = "Could not move this item. Choose a future date or reopen the list and try again."
+                return
+            }
+            if (windowRoot) windowRoot.refreshActiveReminders()
+            if (dayAgenda.visible) {
+                dropdownDate = day
+                dayAgenda.anchorItem = weekDayRepeater.itemAt(calendar.dayNumber(day) - calendar.dayNumber(weekStart))
+            }
+        })
+    }
+    Shortcut {
+        sequence: "Escape"
+        enabled: overview.agendaDrag !== null
+        onActivated: overview.cancelAgendaDrag()
+    }
+    Rectangle {
+        parent: Overlay.overlay
+        z: 10000
+        visible: overview.agendaDrag !== null
+        x: Math.max(0, Math.min(overview.agendaDragX + 14, parent.width - width))
+        y: Math.max(0, Math.min(overview.agendaDragY + 16, parent.height - height))
+        width: dragCaption.implicitWidth + 20; height: 36
+        radius: 6; color: "#263744"; border.color: "#7dbde8"
+        Label {
+            id: dragCaption; anchors.centerIn: parent; color: "#e0e9ef"
+            text: calendar.externalDropDate ? "Move to " + overview.shortDate(calendar.externalDropDate) : "Drop on a day · Esc to cancel"
+        }
+    }
+    property string deletionError: ""
+    function deleteAgendaItem(entry) {
+        if (!projectManager || !projectManager.deleteCalendarItem(entry)) {
+            deletionError = "Could not delete this item. It may have changed; reopen the daily list and try again."
+            return false
+        }
+        deletionError = ""
+        if (windowRoot) windowRoot.refreshActiveReminders()
+        return true
+    }
     function showDayAgenda(key, item) {
-        selectDate(key)
+        deletionError = ""
+        dropdownDate = key
         dayAgenda.anchorItem = item
         dayAgenda.open()
     }
@@ -271,6 +347,7 @@ Item {
             id: weekDays
             anchors { left: parent.left; right: parent.right; top: stripHeader.bottom; bottom: parent.bottom; margins: 6; topMargin: 2 }
             Repeater {
+                id: weekDayRepeater
                 model: overview.weekStart ? 7 : 0
                 delegate: Rectangle {
                     id: weekDay
@@ -310,7 +387,7 @@ Item {
     Popup {
         id: calendarHelp; parent: Overlay.overlay; anchors.centerIn: parent
         width: Math.min(380, parent.width - 32); modal: true; focus: true
-        contentItem: Label { text: "Select a day to filter the map. Open its counts to see activities. Double-click a day to add a goal, or drop a goal or mindmap node onto a date. Open month to drag activities and resize their date ranges. Escape cancels a drag."; wrapMode: Text.WordWrap }
+        contentItem: Label { text: "Select a day to filter the map. Open its counts to see activities. Double-click a day to add a goal, or drop a goal or mindmap node onto a date. Drag the grip beside a daily-list item onto another day to move it. Open month to resize date ranges. Escape cancels a drag."; wrapMode: Text.WordWrap }
     }
     Popup {
         id: dayAgenda; objectName: "weekAgendaPopup"; parent: Overlay.overlay
@@ -320,7 +397,8 @@ Item {
         x: Math.max(16, Math.min(anchorPoint.x, parent.width - width - 16))
         y: Math.max(16, Math.min(anchorPoint.y, parent.height - height - 16))
         padding: 8; focus: true
-        onClosed: if (anchorItem) anchorItem.forceActiveFocus()
+        closePolicy: overview.agendaDrag ? Popup.NoAutoClose : Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        onClosed: { overview.cancelAgendaDrag(); if (anchorItem) anchorItem.forceActiveFocus() }
         background: Rectangle { color: "#21313d"; border.color: "#3b566a"; radius: 8 }
         contentItem: Item { id: popoverAgendaSlot }
     }
@@ -404,15 +482,21 @@ Item {
             width: agenda.availableWidth
             spacing: 4
             Label {
-                text: overview.selectedDate || "All scheduled items"
+                text: overview.agendaDate || "All scheduled items"
                 color: "#e0e9ef"; font.bold: true
+            }
+            Label {
+                objectName: "calendarDeletionError"
+                visible: overview.deletionError !== ""
+                text: overview.deletionError
+                width: parent.width; wrapMode: Text.WordWrap; color: "#ffb4a9"
             }
             Label {
                 objectName: "reminderEmptyDay"
                 width: parent.width
                 wrapMode: Text.WordWrap
                 visible: overview.filteredReminders.length === 0 && overview.filteredGoals.length === 0
-                text: overview.selectedDate ? "No goals or reminders for this day" : "No scheduled goals or waiting reminders"
+                text: overview.agendaDate ? "No goals or reminders for this day" : "No scheduled goals or waiting reminders"
                 color: "#9aafbd"
             }
             Label { text: "Goals · " + overview.filteredGoals.length; color: "#9aafbd" }
@@ -426,6 +510,20 @@ Item {
                     border.color: calendar.selectedGoalId === modelData.id ? "#7dbde8" : "transparent"
                     RowLayout {
                         anchors.fill: parent; anchors.margins: 4
+                        AgendaDragHandle {
+                            objectName: "dragGoal_" + goalRow.modelData.id
+                            dragOverview: overview
+                            entry: ({kind: "goal", id: goalRow.modelData.id, startDate: goalRow.modelData.startDate, endDate: goalRow.modelData.endDate})
+                        }
+                        CheckBox {
+                            objectName: "deleteGoal_" + goalRow.modelData.id
+                            Accessible.name: "Delete " + goalRow.modelData.name + " from project"
+                            ToolTip.visible: hovered; ToolTip.text: Accessible.name
+                            onClicked: {
+                                checked = false
+                                overview.deleteAgendaItem({kind: "goal", id: goalRow.modelData.id})
+                            }
+                        }
                         Button {
                             objectName: "openGoal_" + goalRow.modelData.id
                             Layout.fillWidth: true; Layout.minimumWidth: 0
@@ -491,14 +589,44 @@ Item {
                         anchors.right: parent.right
                         anchors.top: parent.top
                         anchors.margins: 6
-                        columns: 2
+                        columns: 4
                         columnSpacing: 8
                         rowSpacing: 4
 
+                        AgendaDragHandle {
+                            objectName: "dragReminder_" + (reminderRow.isPlan ? "plan_" : "") + (reminderRow.entry.nodeId || reminderRow.entry.kind)
+                            dragOverview: overview
+                            entry: reminderRow.entry
+                        }
+                        CheckBox {
+                            objectName: "deleteReminder_" + (reminderRow.isPlan ? "plan_" : "") + (reminderRow.entry.nodeId || reminderRow.entry.kind)
+                            Accessible.name: "Delete " + (reminderRow.entry.title || reminderRow.entry.taskTitle) + " from project"
+                            ToolTip.visible: hovered; ToolTip.text: Accessible.name
+                            onClicked: {
+                                checked = false
+                                overview.deleteAgendaItem(reminderRow.entry)
+                            }
+                        }
                         Column {
                             Layout.fillWidth: true
                             Layout.minimumWidth: 0
                             spacing: 1
+                            HoverHandler { id: reminderTextHover }
+                            ToolTip {
+                                id: reminderTextTooltip
+                                objectName: "reminderTextTooltip_" + (reminderRow.entry.nodeId || reminderRow.entry.kind)
+                                visible: reminderTextHover.hovered && !overview.agendaDrag
+                                delay: 500
+                                text: "[" + reminderRow.entry.tabName + "] " + (reminderRow.entry.title || reminderRow.entry.taskTitle)
+                                    + "\n" + (reminderRow.isPlan ? "Add and notify at " : "Remind at ") + reminderRow.entry.reminderText
+                                width: Math.min(implicitWidth, Math.max(160, overview.width - 32), 420)
+                                contentItem: Label {
+                                    text: reminderTextTooltip.text
+                                    textFormat: Text.PlainText
+                                    wrapMode: Text.Wrap
+                                    color: reminderTextTooltip.palette.toolTipText
+                                }
+                            }
                             Text {
                                 width: parent.width
                                 text: "[" + reminderRow.entry.tabName + "] " + (reminderRow.entry.title || reminderRow.entry.taskTitle)

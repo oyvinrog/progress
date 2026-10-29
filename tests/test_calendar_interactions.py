@@ -103,7 +103,9 @@ def test_drag_hidden_activity_from_overflow(scheduled_calendar, app, outcome, mo
 def test_direct_drag_resize_preview_and_undo(scheduled_calendar, app, mode, expected):
     root, _, overview, calendar, tabs, click = scheduled_calendar
     goal = tabs.createScheduledGoal('Activity', '2032-02-28', '2032-03-02')
-    tabs.createScheduledGoal('Neighbor', '2032-02-28', '2032-03-02')
+    # Keep the dragged bar in the first lane; UUID tie-breaking can otherwise
+    # place its end handle below the clipped viewport in the final week.
+    tabs.createScheduledGoal('Neighbor', '2032-02-29', '2032-03-02')
     app.processEvents()
     before = tabs.scheduledGoals
     bars_before = value(calendar, 'weeks')

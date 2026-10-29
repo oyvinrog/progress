@@ -123,6 +123,7 @@ class MindMapController(QObject):
     resetView = Signal()
     scopeChanging = Signal(str, str)
     tabActivated = Signal(str)
+    parentContextRequested = Signal(str)
     revealNode = Signal(str)
     errorOccurred = Signal(str)
     clipboardChanged = Signal()
@@ -301,6 +302,94 @@ class MindMapController(QObject):
             elif node is not None:
                 target_id = next(k for k, v in self.links.items() if v == tab)
                 node.text = self.map.find(target_id).text
+
+    @Property(str, notify=changed)
+    def openedNodeId(self):
+        node = self._activity_node() or self.view_root
+        return _placement(node).id
+
+    @Property(bool, notify=changed)
+    def canNavigateToParent(self):
+        return bool(self.parentContext(self.openedNodeId))
+
+    @Slot(str, result='QVariantMap')
+    def parentContext(self, node_id):
+        node = self._find(node_id)
+        if node is None:
+            return {}
+        node = _placement(node)
+        return {'nodeId': node.id, 'parentId': node.parent.id} if node.parent else {}
+
+    @Slot(str)
+    def navigateToParent(self, node_id):
+        if self.parentContext(node_id):
+            self.parentContextRequested.emit(node_id)
+
+    @Slot(str, result=bool)
+    def canAssignParent(self, node_id):
+        node = self._find(node_id)
+        return node is not None and _placement(node) is not self.map.root
+
+    def _parent_destination(self, node):
+        if node is None:
+            return None
+        node = _content(node)
+        tab = self.references.get(node.id)
+        if tab:
+            return self.map.find(next((key for key, value in self.links.items() if value == tab), ''))
+        return node
+
+    def _parent_forbidden(self, node):
+        # Follow reference edges as well as structural children to reject DAG cycles.
+        targets = {tab: key for key, tab in self.links.items()}
+        nodes = {item.id: item for item in self.map.walk()}
+        pending, forbidden = [node.id], set()
+        while pending:
+            key = pending.pop()
+            if key in forbidden:
+                continue
+            forbidden.add(key)
+            pending.extend(child.id for child in nodes[key].children)
+            if key in self.references:
+                target = targets.get(self.references[key])
+                if target:
+                    pending.append(target)
+        return forbidden
+
+    @Slot(str, str, result='QVariantList')
+    def parentOptions(self, node_id, query):
+        if not self.canAssignParent(node_id):
+            return []
+        node = _placement(self._find(node_id))
+        forbidden = self._parent_forbidden(node)
+        query = query.strip().casefold()
+        result = []
+        for candidate in self.map.walk():
+            target = self._parent_destination(candidate)
+            if target is None or target.id in forbidden or target is node.parent:
+                continue
+            path = ' / '.join(n.text for n in [*reversed(list(candidate.ancestors())), candidate])
+            if not query or query in path.casefold():
+                result.append({'nodeId': candidate.id, 'name': target.text, 'path': path})
+        return sorted(result, key=lambda item: (item['path'].casefold(), item['nodeId']))
+
+    @Slot(str, str, result=bool)
+    def assignParent(self, node_id, parent_id):
+        if not self.canAssignParent(node_id):
+            self.errorOccurred.emit('This node can no longer be moved.')
+            return False
+        node = _placement(self._find(node_id))
+        target = self._parent_destination(self._find(parent_id))
+        if target is None or target is node.parent or target.id in self._parent_forbidden(node):
+            self.errorOccurred.emit('Choose a different parent outside this branch; circular references are not allowed.')
+            return False
+        def mutate():
+            node.move_to(target)
+            target.folded = False
+        if not self._commit(mutate):
+            return False
+        self.parentContextRequested.emit(node.id)
+        return True
 
     @Slot(str, result='QVariantList')
     def tabReferenceOptions(self, query):
@@ -1760,6 +1849,18 @@ class MindMapController(QObject):
         if any(n.id not in previous_ids and n.id not in retained_ids
                for n in self.map.walk()):
             self._priority_filter = 1.0
+        if self._date_filter:
+            retained = self._date_nodes()
+            inserted = [self._find(key) for key in self._selected_ids
+                        if key not in previous_ids]
+            if any(node is not None and node not in retained for node in inserted):
+                # Keep insertion focused on the new thought, not its nearest
+                # visible ancestor (which the name editor would then rename).
+                self._date_filter = ''
+                for node in inserted:
+                    if node is not None:
+                        for ancestor in node.ancestors():
+                            ancestor.folded = False
         self._sync_filter_selection()
         self.sceneChanged.emit()
         self.changed.emit()
@@ -1879,7 +1980,7 @@ class MindMapController(QObject):
                 parents.append(parent.add_child(entry['text']))
         return self._commit(mutate)
 
-    @Slot(bool)
+    @Slot(bool, result=bool)
     def addThought(self, sibling=False):
         parent = self._find(self._selected) or self.view_root
         if sibling and parent is not self.view_root and parent.parent:
@@ -1887,8 +1988,10 @@ class MindMapController(QObject):
         def mutate():
             parent.folded = False
             self._set_selection([parent.add_child('New thought').id])
-        self._commit(mutate)
+        if not self._commit(mutate):
+            return False
         self.revealNode.emit(self._selected)
+        return True
 
     @Slot(str, str, result=bool)
     def addChildNamed(self, node_id, title):
@@ -2055,6 +2158,17 @@ class MindMapController(QObject):
         if self.view_root in roots and not (
                 self._activity_filter and _placement(self.view_root).parent is not None):
             return
+        self._delete_roots(roots)
+
+    @Slot(str, result=bool)
+    def deleteNode(self, node_id):
+        """Delete a calendar source independently of the current view or selection."""
+        node = self.map.find(self.sourceNodeId(node_id))
+        if node is None or node is self.map.root:
+            return False
+        return self._delete_roots([node])
+
+    def _delete_roots(self, roots):
         placements = [_placement(node) for node in roots]
         parent_id = (roots[0].parent or placements[0].parent).id
         removed_ids = {n.id for node in placements for n in node.walk()}
@@ -2063,13 +2177,13 @@ class MindMapController(QObject):
         if tab_ids:
             if self.exchange_tabs is None:
                 self.errorOccurred.emit('Goal deletion requires a project manager.')
-                return
+                return False
             self._changing_tabs = True
             try:
                 tab_state = self.exchange_tabs({'ids': tab_ids, 'tabs': []})
             except ValueError as exc:
                 self.errorOccurred.emit(str(exc))
-                return
+                return False
             finally:
                 self._changing_tabs = False
         def mutate():
@@ -2085,6 +2199,8 @@ class MindMapController(QObject):
             self._view_selections = {key: value for key, value in self._view_selections.items()
                                      if key not in tab_ids}
             self.changed.emit()
+            return True
+        return False
 
     @Slot(str, str, str)
     def moveNode(self, node_id, target_id, placement):

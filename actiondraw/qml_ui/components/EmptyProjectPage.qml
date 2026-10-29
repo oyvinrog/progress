@@ -7,7 +7,9 @@ Rectangle {
     objectName: "emptyProjectPage"
     color: "#090f15"
     signal addGoalRequested()
-    readonly property bool actionFocused: addGoalButton.activeFocus
+    property string recentProjectPath: ""
+    signal openRecentProjectRequested(string filePath)
+    readonly property bool actionFocused: addGoalButton.activeFocus || openRecentButton.activeFocus
 
     ColumnLayout {
         anchors.centerIn: parent
@@ -32,29 +34,59 @@ Rectangle {
             wrapMode: Text.WordWrap
             lineHeight: 1.3
         }
-        Button {
-            id: addGoalButton
-            objectName: "emptyProjectAddGoal"
+        RowLayout {
             Layout.alignment: Qt.AlignHCenter
             Layout.topMargin: 10
-            implicitWidth: 148
-            implicitHeight: 46
-            text: "Add goal"
-            focusPolicy: Qt.StrongFocus
-            onClicked: page.addGoalRequested()
-            contentItem: Text {
-                text: addGoalButton.text
-                color: "#09121c"
-                font.pixelSize: 15
-                font.bold: true
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
+            spacing: 12
+            Button {
+                id: addGoalButton
+                objectName: "emptyProjectAddGoal"
+                implicitWidth: 148
+                implicitHeight: 46
+                text: "Add goal"
+                focusPolicy: Qt.StrongFocus
+                onClicked: page.addGoalRequested()
+                contentItem: Text {
+                    text: addGoalButton.text
+                    color: "#09121c"
+                    font.pixelSize: 15
+                    font.bold: true
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    radius: 7
+                    color: addGoalButton.down ? "#65a4dc" : addGoalButton.hovered ? "#a3d2ff" : "#85c1f5"
+                    border.width: addGoalButton.activeFocus ? 2 : 0
+                    border.color: "#ffffff"
+                }
             }
-            background: Rectangle {
-                radius: 7
-                color: addGoalButton.down ? "#65a4dc" : addGoalButton.hovered ? "#a3d2ff" : "#85c1f5"
-                border.width: addGoalButton.activeFocus ? 2 : 0
-                border.color: "#ffffff"
+            Button {
+                id: openRecentButton
+                objectName: "emptyProjectOpenRecent"
+                visible: page.recentProjectPath.length > 0
+                implicitWidth: 192
+                implicitHeight: 46
+                text: "Open recent project"
+                focusPolicy: Qt.StrongFocus
+                onClicked: page.openRecentProjectRequested(page.recentProjectPath)
+                ToolTip.visible: hovered || activeFocus
+                ToolTip.text: page.recentProjectPath
+                ToolTip.delay: 500
+                contentItem: Text {
+                    text: openRecentButton.text
+                    color: "#edf3f8"
+                    font.pixelSize: 15
+                    font.bold: true
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+                background: Rectangle {
+                    radius: 7
+                    color: openRecentButton.down ? "#29465d" : openRecentButton.hovered ? "#243c50" : "#182b3b"
+                    border.width: openRecentButton.activeFocus ? 2 : 1
+                    border.color: openRecentButton.activeFocus ? "#ffffff" : "#49647b"
+                }
             }
         }
         Label {

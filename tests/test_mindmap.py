@@ -4515,6 +4515,61 @@ def test_calendar_date_filter_keeps_matching_branches_and_ancestors(project):
     assert unrelated.id in {n['id'] for n in m.nodes}
 
 
+@pytest.mark.parametrize('key', [Qt.Key_Tab, Qt.Key_Return, Qt.Key_Enter])
+@pytest.mark.parametrize('target', ['root', 'context', 'planned', 'child', 'grandchild'])
+def test_calendar_filtered_node_creation_edits_new_node(
+        project, actiondraw_window, key, target):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    context = m.map.root.add_child('Context')
+    planned = context.add_child('Planned')
+    child = planned.add_child('Child')
+    grandchild = child.add_child('Grandchild')
+    unrelated = m.map.root.add_child('Unrelated')
+    planned.folded = True
+    m.setGoalRange('plan:' + planned.id, '2032-02-28', '2032-02-28')
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+    m.setDateFilter('2032-02-28')
+    selected = {'root': m.map.root, 'context': context, 'planned': planned,
+                'child': child, 'grandchild': grandchild}[target]
+    m.select(selected.id)
+    pane = window.findChild(QObject, 'mindmapPane')
+    pane.forceActiveFocus()
+    before = {node.id: node.text for node in m.map.walk()}
+
+    QTest.keyClick(window, key)
+
+    created_ids = {node.id for node in m.map.walk()} - before.keys()
+    assert len(created_ids) == 1
+    created = created_ids.pop()
+    assert m.selectedId == created
+    assert created in {node['id'] for node in m.nodes}
+    editor = window.findChild(QObject, 'mindmapNodeEditor')
+    title = window.findChild(QObject, 'mindmapNodeTitle')
+    assert editor.property('visible')
+    assert title.property('selectedText') == 'New thought'
+    for character in 'new idea':
+        QTest.keyClick(window, Qt.Key(ord(character.upper())))
+    QTest.keyClick(window, Qt.Key_Return)
+    assert not editor.property('visible')
+    assert m.map.find(created).text == 'new idea'
+    assert all(m.map.find(node_id).text == text for node_id, text in before.items())
+    # Children of a matching activity already belong to the day view.
+    inside_day_branch = target in {'child', 'grandchild'} or (
+        target == 'planned' and key == Qt.Key_Tab)
+    assert bool(m.dateFilter) == inside_day_branch
+    if inside_day_branch:
+        assert m.dateFilter == '2032-02-28'
+        visible = {node['id'] for node in m.nodes}
+        assert {planned.id, child.id, grandchild.id, created} <= visible
+        assert unrelated.id not in visible
+    assert created not in m.plan_ranges
+
+
 def test_calendar_selection_filters_map_in_qml(project, actiondraw_window):
     from datetime import datetime
     pm, tabs, tasks, diagram = project

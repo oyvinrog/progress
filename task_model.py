@@ -6,6 +6,7 @@ independent use by actiondraw.
 """
 
 import copy
+import hashlib
 import uuid
 import json
 import math
@@ -482,6 +483,9 @@ class NavigationSnapshot:
     tab_index: int
     task_index: int = -1
     view_kind: str = "diagram"
+    date_filter: str = ""
+    activity_filter: str = ""
+    selected_node: str = ""
 
 
 class TaskModel(QAbstractListModel):
@@ -2587,6 +2591,7 @@ class ProjectManager(QObject):
         self.mindmap = MindMapController(self._tab_model, self)
         self.mindmap.exchange_tabs = self._exchangeMindmapTabs
         self.mindmap.tabActivated.connect(self.openMindmapTab)
+        self.mindmap.parentContextRequested.connect(self.openNodeParent)
         self.mindmap.errorOccurred.connect(self.errorOccurred)
         self.mindmap.planChanged.connect(self.kanbanChanged)
         self._last_saved_snapshot = self._serialize_project_payload(self._build_project_data())
@@ -2722,6 +2727,28 @@ class ProjectManager(QObject):
                 self.switchTab(index)
                 return
 
+    @Slot(str)
+    def openNodeParent(self, node_id):
+        context = self.mindmap.parentContext(node_id)
+        if not context:
+            return
+        self._pushNavigationSnapshot(self._currentNavigationSnapshot())
+        parent_id = context['parentId']
+        tab_id = self.mindmap.links.get(parent_id)
+        if tab_id and self._tab_model is not None:
+            self.switchTab(self._tab_model.goalIndex(tab_id))
+        else:
+            self.showMindmap()
+            if parent_id != self.mindmap.map.root.id:
+                self.mindmap.setActivityFilter('plan:' + parent_id)
+        parent = self.mindmap.map.find(parent_id)
+        parent.folded = False
+        self.mindmap.setPriorityFilter(1.0)
+        self.mindmap.select(context['nodeId'])
+        self.mindmap.sceneChanged.emit()
+        self.mindmap.changed.emit()
+        self.mindmap.revealNode.emit(context['nodeId'])
+
     @Property(bool, notify=canGoBackChanged)
     def canGoBack(self) -> bool:
         """Return whether drill-navigation history is available."""
@@ -2739,7 +2766,10 @@ class ProjectManager(QObject):
             task_index = current_task_index
         return NavigationSnapshot(tab_index=tab_index, task_index=task_index,
                                   view_kind=("tab_mindmap" if self.mindmap.tabScoped else "mindmap")
-                                  if self._mindmap_visible else "diagram")
+                                  if self._mindmap_visible else "diagram",
+                                  date_filter=self.mindmap.dateFilter,
+                                  activity_filter=self.mindmap.activityFilter,
+                                  selected_node=self.mindmap.selectedId)
 
     def _pushNavigationSnapshot(self, snapshot: NavigationSnapshot) -> None:
         if self._restoring_navigation:
@@ -3231,6 +3261,132 @@ class ProjectManager(QObject):
             [self._tab_model.CompletionRole, self._tab_model.ActiveTaskTitleRole],
         )
 
+    @staticmethod
+    def _calendar_task_signature(tasks):
+        # Ignore ticking timers, but reject stale row indices after structural edits.
+        payload = [(t.get("title"), t.get("reminder_at"),
+                    t.get("indent_level", 0), t.get("parent_index", -1)) for t in tasks]
+        return hashlib.sha256(json.dumps(payload).encode()).hexdigest()
+
+    @Slot("QVariantMap", str, result=bool)
+    def moveCalendarReminder(self, entry, day):
+        """Move a live agenda reminder to a date, preserving its local time."""
+        try:
+            target = date.fromisoformat(day)
+            if target.isoformat() != day:
+                return False
+        except (TypeError, ValueError):
+            return False
+        kind = entry.get("kind")
+        def matches(current):
+            if current["kind"] != kind or current["reminderAt"] != entry.get("reminderAt"):
+                return False
+            if kind in ("mindmap", "kanban_schedule"):
+                return current.get("nodeId") == entry.get("nodeId")
+            if kind == "standalone":
+                return current.get("deletionToken") == entry.get("deletionToken")
+            return (kind == "task" and current.get("tabId") == entry.get("tabId")
+                    and current["taskIndex"] == entry.get("taskIndex")
+                    and current.get("deletionToken") == entry.get("deletionToken"))
+        current = next((item for item in self.getActiveReminders() if matches(item)), None)
+        if current is None:
+            return False
+        old = datetime.fromtimestamp(current["reminderAt"])
+        moved = datetime.combine(target, old.time())
+        if moved.timestamp() <= time.time():
+            return False
+        if old.date() == target:
+            return True
+        text = moved.strftime("%Y-%m-%d %H:%M:%S")
+        notify = current["sendNotification"]
+        if kind == "task":
+            return self.setReminder(current["tabIndex"], current["taskIndex"], text, notify)
+        if kind == "standalone":
+            return self.updateStandaloneReminder(current["standaloneIndex"], current["title"], text, notify)
+        if kind == "mindmap":
+            return self.setMindmapReminder(current["nodeId"], text, notify)
+        node_id = current["nodeId"]
+        def mutate():
+            self.mindmap.plan_schedules[node_id] = {'at': moved.timestamp()}
+            previous = self.mindmap.plan_ranges.get(node_id)
+            if previous:
+                delta = target - old.date()
+                self.mindmap.plan_ranges[node_id] = {
+                    key: (date.fromisoformat(previous[key]) + delta).isoformat()
+                    for key in ('startDate', 'endDate')}
+            else:
+                self.mindmap.plan_ranges[node_id] = {'startDate': day, 'endDate': day}
+        return self.mindmap._commit(mutate)
+
+    @Slot("QVariantMap", result=bool)
+    def deleteCalendarItem(self, entry):
+        """Delete the source of an agenda row, never just its calendar schedule."""
+        kind = entry.get("kind")
+        if kind == "goal":
+            goal_id = entry.get("id", "")
+            if goal_id.startswith("plan:"):
+                return self.mindmap.deleteNode(goal_id[5:])
+            index = self._tab_model.goalIndex(goal_id) if self._tab_model else -1
+            if index < 0:
+                return False
+            node_id = next((key for key, value in self.mindmap.links.items()
+                            if value == goal_id), None)
+            if node_id is not None:
+                return self.mindmap.deleteNode(node_id)
+            self.removeTab(index)
+            return True
+        if kind in ("mindmap", "kanban_schedule"):
+            return self.mindmap.deleteNode(entry.get("nodeId", ""))
+        if kind == "standalone":
+            token = entry.get("deletionToken")
+            index = next((i for i, item in enumerate(self._standalone_reminders)
+                          if str(id(item)) == token), -1)
+            if index < 0:
+                return False
+            self.clearStandaloneReminder(index)
+            return True
+        if kind != "task":
+            return False
+        tab_id = entry.get("tabId", "")
+        index = self._tab_model.goalIndex(tab_id) if self._tab_model else 0
+        tasks = self._get_cross_tab_tasks(index)
+        row = entry.get("taskIndex", -1)
+        if (tasks is None or not isinstance(row, int) or not 0 <= row < len(tasks)
+                or entry.get("deletionToken") != self._calendar_task_signature(tasks)):
+            return False
+        current = self._tab_model is None or index == self._tab_model.currentTabIndex
+        tab = self._tab_model.getAllTabs()[index] if self._tab_model else None
+        diagram = copy.deepcopy(self._diagram_model.to_dict() if current else tab.diagram)
+        tasks = copy.deepcopy(tasks)
+        end = row + 1
+        while end < len(tasks) and tasks[end].get("indent_level", 0) > tasks[row].get("indent_level", 0):
+            end += 1
+
+        def remap(value):
+            if row <= value < end:
+                return -1
+            return value - (end - row) if value >= end else value
+
+        del tasks[row:end]
+        for task in tasks:
+            task["parent_index"] = remap(task.get("parent_index", -1))
+        removed = {item["id"] for item in diagram.get("items", [])
+                   if row <= item.get("task_index", -1) < end}
+        diagram["items"] = [item for item in diagram.get("items", []) if item["id"] not in removed]
+        for item in diagram["items"]:
+            item["task_index"] = remap(item.get("task_index", -1))
+        diagram["edges"] = [edge for edge in diagram.get("edges", [])
+                            if edge["from_id"] not in removed and edge["to_id"] not in removed]
+        diagram["current_task_index"] = remap(diagram.get("current_task_index", -1))
+        if current:
+            self._task_model.from_dict({"tasks": tasks})
+            self._diagram_model.from_dict(diagram)
+            self._saveCurrentTabState()
+        else:
+            tab.tasks, tab.diagram = {"tasks": tasks}, diagram
+        self._emit_tab_summary_changed(index)
+        return True
+
     @Slot(result="QVariantList")
     def getActiveStandaloneReminders(self) -> List[Dict[str, Any]]:
         """Return active project-wide standalone reminders sorted by soonest first."""
@@ -3254,6 +3410,9 @@ class ProjectManager(QObject):
                     now=now,
                 )
             )
+
+        for entry in reminders:
+            entry["deletionToken"] = str(id(self._standalone_reminders[entry["standaloneIndex"]]))
 
         reminders.sort(key=lambda entry: float(entry.get("reminderAt", 0.0)))
         return reminders
@@ -3310,6 +3469,14 @@ class ProjectManager(QObject):
                         now=now,
                     )
                 )
+
+        signatures = {}
+        for entry in reminders:
+            index = entry["tabIndex"]
+            entry["tabId"] = self._tab_model.getAllTabs()[index].id if self._tab_model else ""
+            if index not in signatures:
+                signatures[index] = self._calendar_task_signature(self._get_cross_tab_tasks(index))
+            entry["deletionToken"] = signatures[index]
 
         for node_id, reminder in self.mindmap.reminders.items():
             node = self.mindmap.map.find(node_id)
@@ -4758,6 +4925,13 @@ class ProjectManager(QObject):
             self._restoring_navigation = True
             try:
                 self._restoreNavigationSnapshot(snapshot)
+                if snapshot.view_kind in ("mindmap", "tab_mindmap"):
+                    if snapshot.activity_filter:
+                        self.mindmap.setActivityFilter(snapshot.activity_filter)
+                    elif snapshot.date_filter:
+                        self.mindmap.setDateFilter(snapshot.date_filter)
+                    if self.mindmap._find(snapshot.selected_node):
+                        self.mindmap.select(snapshot.selected_node)
             finally:
                 self._restoring_navigation = False
             return

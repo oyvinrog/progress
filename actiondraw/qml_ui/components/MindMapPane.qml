@@ -129,7 +129,7 @@ FocusScope {
             pane.hoveredNodeId = ""
         }
     }
-    readonly property bool shortcutsEnabled: visible && activeFocus && !toolDialogOpen && !editor.visible && !quickChildDialog.visible && !nodeMenu.visible && !actionsButton.activeFocus && !prioritySlider.activeFocus && !actionsMenu.visible && !helpDialog.visible && !deadlineDialog.visible && !tabReferenceDialog.visible && !nodeGoalRangeDialog.visible && !reminderDialogOpen
+    readonly property bool shortcutsEnabled: visible && activeFocus && !toolDialogOpen && !editor.visible && !quickChildDialog.visible && !nodeMenu.visible && !actionsButton.activeFocus && !prioritySlider.activeFocus && !actionsMenu.visible && !helpDialog.visible && !deadlineDialog.visible && !tabReferenceDialog.visible && !parentDialog.visible && !nodeGoalRangeDialog.visible && !reminderDialogOpen
     readonly property bool searching: controller && controller.searchQuery.length > 0
     onSearchingChanged: if (searching) navigationHighlightId = ""
     onShortcutsEnabledChanged: if (!shortcutsEnabled && controller) controller.clearSearch()
@@ -248,8 +248,7 @@ FocusScope {
         editor.open()
     }
     function addThought(sibling) {
-        controller.addThought(sibling)
-        editNode()
+        if (controller.addThought(sibling)) editNode()
     }
     onVisibleChanged: if (visible) {
         deadlineNow = Date.now() / 1000
@@ -309,9 +308,19 @@ FocusScope {
         RowLayout {
             id: mindmapToolbar
             objectName: "mindmapToolbar"
-            readonly property bool compactTools: width < assessmentTool.labeledWidth + paintTool.labeledWidth + causalTool.labeledWidth + wanderingTool.implicitWidth + 5 + actionsButton.implicitWidth + (canvasButton.visible ? canvasButton.implicitWidth + 5 : 0) + 490
+            readonly property bool compactTools: width < assessmentTool.labeledWidth + paintTool.labeledWidth + causalTool.labeledWidth + wanderingTool.implicitWidth + 5 + actionsButton.implicitWidth + (canvasButton.visible ? canvasButton.implicitWidth + 5 : 0) + (parentButton.visible ? parentButton.implicitWidth + 5 : 0) + 490
             Layout.fillWidth: true
             spacing: 5
+            Button {
+                id: parentButton
+                objectName: "mindmapParentButton"
+                Accessible.name: "Show parent context"
+                text: "↑ Parent"
+                visible: pane.controller && pane.controller.canNavigateToParent
+                ToolTip.visible: hovered
+                ToolTip.text: "Show parent context"
+                onClicked: pane.controller.navigateToParent(pane.controller.openedNodeId)
+            }
             Button {
                 id: canvasButton
                 objectName: "tabMindmapCanvas"
@@ -1312,6 +1321,13 @@ FocusScope {
         IconMenuItem { iconKey: "notes"; text: "Edit / Notes"; onTriggered: pane.editNode() }
         IconMenuItem { iconKey: "child"; text: "Add child"; onTriggered: pane.addThought(false) }
         IconMenuItem { iconKey: "sibling"; text: "Add sibling"; onTriggered: pane.addThought(true) }
+        IconMenuItem {
+            iconKey: "up"
+            objectName: "mindmapAddParent"
+            text: "Add parent…"
+            enabled: pane.controller && pane.controller.canAssignParent(nodeMenu.targetNodeId)
+            onTriggered: { parentDialog.targetNodeId = nodeMenu.targetNodeId; parentDialog.open() }
+        }
         IconMenuItem { iconKey: "check"; text: "Complete"; enabled: pane.controller && pane.controller.selectedIds.length > 0; onTriggered: pane.controller.toggleCompleted() }
         IconMenuItem { iconKey: "fold"; text: "Fold / Unfold"; onTriggered: pane.controller.toggleFold() }
         MenuSeparator {}
@@ -1645,6 +1661,84 @@ FocusScope {
                 Layout.fillWidth: true
                 visible: tabReferenceDialog.errorText.length > 0
                 text: tabReferenceDialog.errorText
+                wrapMode: Text.Wrap
+                color: "#ffb4a9"
+            }
+        }
+    }
+    Dialog {
+        id: parentDialog
+        objectName: "mindmapParentDialog"
+        title: "Add parent"
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(600, pane.width - 20)
+        height: Math.min(440, pane.height - 20)
+        standardButtons: Dialog.Cancel
+        property string targetNodeId: ""
+        property var options: []
+        property string errorText: ""
+        function refresh() {
+            options = pane.controller ? pane.controller.parentOptions(targetNodeId, parentSearch.text) : []
+            parentList.currentIndex = options.length ? 0 : -1
+        }
+        function insert(index) {
+            if (index < 0 || index >= options.length) return
+            if (pane.controller.assignParent(targetNodeId, options[index].nodeId)) close()
+        }
+        onOpened: {
+            errorText = ""
+            parentSearch.text = ""
+            refresh()
+            parentSearch.forceActiveFocus()
+        }
+        onClosed: pane.focusMap()
+        Connections {
+            target: pane.controller
+            function onChanged() { if (parentDialog.visible) parentDialog.refresh() }
+            function onErrorOccurred(message) {
+                if (parentDialog.visible) parentDialog.errorText = message
+            }
+        }
+        ColumnLayout {
+            anchors.fill: parent
+            TextField {
+                id: parentSearch
+                objectName: "mindmapParentSearch"
+                Layout.fillWidth: true
+                placeholderText: "Search all nodes…"
+                onTextChanged: parentDialog.refresh()
+                onAccepted: parentDialog.insert(parentList.currentIndex)
+                Keys.onDownPressed: parentList.currentIndex = Math.min(parentList.count - 1, parentList.currentIndex + 1)
+                Keys.onUpPressed: parentList.currentIndex = Math.max(0, parentList.currentIndex - 1)
+            }
+            ListView {
+                id: parentList
+                objectName: "mindmapParentList"
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                clip: true
+                model: parentDialog.options
+                ScrollBar.vertical: ScrollBar {}
+                delegate: ItemDelegate {
+                    required property var modelData
+                    required property int index
+                    objectName: "mindmapParentOption_" + modelData.nodeId
+                    width: parentList.width
+                    highlighted: parentList.currentIndex === index
+                    text: modelData.name + "\n" + modelData.path
+                    onClicked: parentDialog.insert(index)
+                }
+                Label {
+                    anchors.centerIn: parent
+                    visible: parentList.count === 0
+                    text: "No eligible parents match your search"
+                }
+            }
+            Label {
+                Layout.fillWidth: true
+                visible: parentDialog.errorText.length > 0
+                text: parentDialog.errorText
                 wrapMode: Text.Wrap
                 color: "#ffb4a9"
             }
