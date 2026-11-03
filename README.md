@@ -298,9 +298,20 @@ These shortcuts apply while the mindmap has focus, outside dialogs and menus.
 
 ### Causal models
 
-Open **Causal Model** beside Action Paint to build a causal diagram for the
-current goal. Double-click empty canvas space to add a variable, action, or
-outcome node there. Drag a node's **→** handle onto another node to connect the
+Select a mind-map node and choose **Causal Diagram** beside Action Paint, or
+right-click the node and choose **Edit causal diagram**. Each node can have its
+own diagram, alongside its notes. A causal icon appears when the diagram has
+nodes or assumptions; click it to reopen the editor. References to a node share
+its diagram. Use **Remove causal diagram** in the node menu to remove it; Undo
+restores it.
+
+Edits save immediately to the project in memory. Changing the selected node
+does not redirect an open editor; its title identifies the owner. Changing tabs
+or deleting the owner closes the editor. The ActionDraw toolbar opens the current
+goal's root-node diagram. Older projects migrate each goal's diagram onto that
+root automatically.
+
+Double-click empty canvas space to add a variable, action, or outcome node there. Drag a node's **→** handle onto another node to connect the
 cause to its effect; a preview arrow follows the pointer. Drop on empty space
 or press Escape to cancel. Connections must form a directed
 acyclic graph; represent feedback with separate nodes for successive times.
@@ -318,7 +329,9 @@ and choose **Make action**. Action nodes are yellow and numbered, and appear in
 the **Action order** list. Drag its **≡** handles (or use the up/down arrows) to
 choose execution order, then **Add to ActionDraw** or **Add to mindmap** to copy their titles in
 that order. These copies are independent of the model, and the causal edges
-stay in the causal editor. Each goal's model is saved with the project.
+stay in the causal editor. Mind-map actions become children of the node owning
+the diagram; ActionDraw actions go to the active tab. Each node's diagram is
+saved with the project.
 
 The action list also has **+ Add action** and a **Remove action** button on each
 row. Removing an action changes its node to a variable and preserves its label,

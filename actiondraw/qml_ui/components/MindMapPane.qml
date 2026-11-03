@@ -7,7 +7,7 @@ FocusScope {
     id: pane
     signal assessmentRequested()
     signal actionPaintRequested()
-    signal causalDiagramRequested()
+    signal causalDiagramRequested(string nodeId)
     signal thoughtWanderingRequested()
     property var tabModel: null
     property int assessmentLevel: 0
@@ -457,7 +457,7 @@ FocusScope {
                 objectName: "mindmapCausalDiagramButton"
                 label: "Causal Diagram"
                 iconKey: "causal"
-                onClicked: { pane.focusMap(); pane.causalDiagramRequested() }
+                onClicked: { pane.focusMap(); pane.causalDiagramRequested(pane.controller.selectedId) }
             }
             ToolButton {
                 id: wanderingTool
@@ -740,11 +740,40 @@ FocusScope {
                                     }
                                 }
                             }
+                            Image {
+                                objectName: "mindmapCausalIcon_" + nodeItem.modelData.id
+                                visible: nodeItem.modelData.hasCausalDiagram
+                                source: Qt.resolvedUrl("../icons/causal.svg")
+                                width: 16; height: 16
+                                anchors.left: parent.left
+                                anchors.leftMargin: nodeItem.leadingInset + (nodeItem.modelData.hasNote ? 20 : 0)
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
+                                                              - (nodeItem.modelData.measureProgress ? 12 : 0)
+                                                              - (nodeItem.modelData.deadlineActive ? 14 : 0)
+                                z: 2
+                                Accessible.role: Accessible.Button
+                                Accessible.name: "Edit causal diagram"
+                                ToolTip.visible: causalHover.containsMouse
+                                ToolTip.delay: 300
+                                ToolTip.text: "Edit causal diagram"
+                                MouseArea {
+                                    id: causalHover
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        pane.controller.select(nodeItem.modelData.id)
+                                        pane.causalDiagramRequested(nodeItem.modelData.id)
+                                    }
+                                }
+                            }
                             Text {
                                 objectName: "mindmapBookmarkIcon_" + nodeItem.modelData.id
                                 visible: nodeItem.modelData.bookmarked
                                 anchors.left: parent.left
                                 anchors.leftMargin: nodeItem.leadingInset + (nodeItem.modelData.hasNote ? 20 : 0)
+                                                       + (nodeItem.modelData.hasCausalDiagram ? 20 : 0)
                                 anchors.verticalCenter: parent.verticalCenter
                                 anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
                                                               - (nodeItem.modelData.measureProgress ? 12 : 0)
@@ -760,6 +789,7 @@ FocusScope {
                                 width: 16; height: 18; radius: 3
                                 anchors.left: parent.left
                                 anchors.leftMargin: nodeItem.leadingInset + (nodeItem.modelData.hasNote ? 20 : 0)
+                                                       + (nodeItem.modelData.hasCausalDiagram ? 20 : 0)
                                                        + (nodeItem.modelData.bookmarked ? 20 : 0)
                                 anchors.verticalCenter: parent.verticalCenter
                                 anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
@@ -796,6 +826,7 @@ FocusScope {
                                                       + (nodeItem.modelData.measureProgress ? 24 : 0)
                                                       + (nodeItem.modelData.deadlineActive ? 28 : 0)
                                 anchors.leftMargin: nodeItem.leadingInset + (nodeItem.modelData.hasNote ? 20 : 0)
+                                                       + (nodeItem.modelData.hasCausalDiagram ? 20 : 0)
                                                        + (nodeItem.modelData.bookmarked ? 20 : 0)
                                                        + (nodeItem.modelData.planVisible ? 20 : 0)
                                 anchors.rightMargin: (nodeItem.modelData.priorityLevel > 0 ? 48 : 18)
@@ -1309,9 +1340,11 @@ FocusScope {
         property bool canMoveUp: false
         property bool canMoveDown: false
         property bool measuringProgress: false
+        property bool causalDiagramPresent: false
         onTargetNodeIdChanged: measuringProgress = pane.controller
                                ? pane.controller.measuresProgress(targetNodeId) : false
         onAboutToShow: {
+            causalDiagramPresent = pane.controller.hasCausalDiagram(targetNodeId)
             reminderData = pane.controller.reminderData(targetNodeId)
             deadlineData = pane.controller.deadlineData(targetNodeId)
             canMoveUp = pane.controller.canReorderNode(targetNodeId, -1)
@@ -1319,6 +1352,17 @@ FocusScope {
             measuringProgress = pane.controller.measuresProgress(targetNodeId)
         }
         IconMenuItem { iconKey: "notes"; text: "Edit / Notes"; onTriggered: pane.editNode() }
+        IconMenuItem {
+            objectName: "mindmapEditCausalDiagram"
+            iconKey: "causal"; text: "Edit causal diagram"
+            onTriggered: pane.causalDiagramRequested(nodeMenu.targetNodeId)
+        }
+        IconMenuItem {
+            objectName: "mindmapRemoveCausalDiagram"
+            iconKey: "trash"; text: "Remove causal diagram"
+            visible: nodeMenu.causalDiagramPresent
+            onTriggered: pane.controller.removeCausalDiagram(nodeMenu.targetNodeId)
+        }
         IconMenuItem { iconKey: "child"; text: "Add child"; onTriggered: pane.addThought(false) }
         IconMenuItem { iconKey: "sibling"; text: "Add sibling"; onTriggered: pane.addThought(true) }
         IconMenuItem {

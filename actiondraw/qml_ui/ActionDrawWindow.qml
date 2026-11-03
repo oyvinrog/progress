@@ -229,7 +229,21 @@ ApplicationWindow {
     }
 
     function openCausalModelWindow() {
-        if (root.emptyProject) return
+        if (causalModel.openCurrentTab()) root.showCausalModelWindow()
+    }
+
+    function openNodeCausalModelWindow(nodeId) {
+        if (causalModel.openAttachment(nodeId)) root.showCausalModelWindow()
+    }
+
+    Connections {
+        target: causalModel
+        function onAttachmentClosed() {
+            if (root.causalModelWindowRef) root.causalModelWindowRef.close()
+        }
+    }
+
+    function showCausalModelWindow() {
         if (causalModelWindowRef) {
             causalModelWindowRef.show()
             causalModelWindowRef.raise()
@@ -244,7 +258,11 @@ ApplicationWindow {
         var win = component.createObject(root, { "modelRef": causalModel, "hostRoot": root })
         if (!win) return
         causalModelWindowRef = win
-        win.closing.connect(function() { causalModelWindowRef = null })
+        win.closing.connect(function() {
+            causalModelWindowRef = null
+            causalModel.closeAttachment()
+            Qt.callLater(function() { win.destroy() })
+        })
         win.show()
         win.raise()
         win.requestActivate()
@@ -1368,7 +1386,7 @@ ApplicationWindow {
             onNodeDragCleared: planningOverview.clearGoalDrop()
             onAssessmentRequested: dialogs.assessmentDialog.open()
             onActionPaintRequested: root.openActionPaintWindow()
-            onCausalDiagramRequested: root.openCausalModelWindow()
+            onCausalDiagramRequested: function(nodeId) { root.openNodeCausalModelWindow(nodeId) }
             onThoughtWanderingRequested: root.projectManagerRef.openRandomTab()
             onCanvasRequested: root.projectManagerRef.showTabCanvas()
             Layout.fillWidth: true

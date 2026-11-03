@@ -5,7 +5,7 @@ import QtQuick.Layouts
 ApplicationWindow {
     id: root
     width: 1250; height: 820
-    title: "Causal Model"
+    title: modelRef && modelRef.ownerTitle ? "Causal diagram — " + modelRef.ownerTitle : "Causal diagram"
     property var modelRef
     property var hostRoot
     property string selectedNode: ""
@@ -438,7 +438,7 @@ ApplicationWindow {
                 Button {
                     objectName: "causalAddToActionDraw"
                     text: "Add to ActionDraw"; Layout.fillWidth: true
-                    enabled: modelRef.pendingActionDrawActions.length>0 && !!hostRoot
+                    enabled: modelRef.pendingActionDrawActions.length>0 && modelRef.canImportActionDraw && !!hostRoot
                     onClicked: {
                         var pending=modelRef.pendingActionDrawActions
                         var titles=pending.map(function(action) { return action.label })
@@ -457,7 +457,7 @@ ApplicationWindow {
                     onClicked: {
                         var pending=modelRef.pendingMindmapActions
                         var ids=pending.map(function(action) { return action.id })
-                        var created=hostRoot.projectManagerRef.addCausalModelToMindmap(ids)
+                        var created=hostRoot.projectManagerRef.addCausalModelToMindmap(modelRef.ownerId, ids)
                         root.statusText=created.length===pending.length ? "Actions added to mindmap" : "Could not add every action"
                     }
                 }

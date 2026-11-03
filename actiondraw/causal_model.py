@@ -102,19 +102,99 @@ class CausalModelModel(QObject):
     sceneChanged = Signal()
     resetView = Signal()
     errorChanged = Signal()
+    ownerChanged = Signal()
+    attachmentClosed = Signal()
 
-    def __init__(self, tab_model=None):
+    def __init__(self, tab_model=None, mindmap=None):
         super().__init__()
         self._tabs = weakref.proxy(tab_model) if tab_model is not None else None
+        self._mindmap = weakref.proxy(mindmap) if mindmap is not None else None
+        self._owner_id = ''
+        self._publishing = False
         self._state = empty_causal_model_state()
         self._undo, self._redo = [], []
         self._drag = None
         self._error = ''
         if tab_model is not None:
-            tab_model.currentTabChanged.connect(self.loadCurrentTab)
-            tab_model.modelReset.connect(self.loadCurrentTab)
-            tab_model.causalActionsImported.connect(self._on_actions_imported)
-            self.loadCurrentTab()
+            tab_model.currentTabChanged.connect(self.closeAttachment)
+            tab_model.modelReset.connect(self.closeAttachment)
+        if mindmap is not None:
+            mindmap.changed.connect(self._on_mindmap_changed)
+            mindmap.loading.connect(self.closeAttachment)
+            mindmap.historyRestored.connect(self._on_history_restored)
+
+    @Property(str, notify=ownerChanged)
+    def ownerId(self):
+        return self._owner_id
+
+    @Property(str, notify=ownerChanged)
+    def ownerTitle(self):
+        node = self._mindmap.map.find(self._owner_id) if self._mindmap is not None else None
+        return node.text if node is not None else ''
+
+    @Property(bool, notify=ownerChanged)
+    def canImportActionDraw(self):
+        return bool(self._owner_id and self._current_tab() is not None)
+
+    @Slot(result=bool)
+    def openCurrentTab(self):
+        tab = self._current_tab()
+        if tab is None or self._mindmap is None:
+            return False
+        key = next((key for key, tab_id in self._mindmap.links.items() if tab_id == tab.id), '')
+        return self.openAttachment(key)
+
+    @Slot(str, result=bool)
+    def openAttachment(self, node_id):
+        if self._mindmap is None:
+            return False
+        key = self._mindmap.sourceNodeId(node_id)
+        if self._mindmap.map.find(key) is None:
+            return False
+        if key == self._owner_id:
+            return True
+        self.endNodeDrag()
+        self._owner_id = key
+        self.from_dict(self._mindmap.causalDiagram(key))
+        self.ownerChanged.emit()
+        return True
+
+    @Slot()
+    def closeAttachment(self):
+        if not self._owner_id:
+            return
+        self.endNodeDrag()
+        self._owner_id = ''
+        self.from_dict(None)
+        self.ownerChanged.emit()
+        self.attachmentClosed.emit()
+
+    def _on_mindmap_changed(self):
+        if self._publishing or not self._owner_id:
+            return
+        if self._mindmap.map.find(self._owner_id) is None:
+            # Never publish an in-progress drag after its owner was deleted.
+            self._drag = None
+            self.closeAttachment()
+            return
+        state = self._mindmap.causalDiagram(self._owner_id)
+        if state != (self._drag if self._drag is not None else self._state):
+            # Import bookkeeping must survive graph undo without discarding it.
+            def graph_state(value):
+                return {k: v for k, v in value.items() if k != 'imported_action_ids'}
+            if graph_state(state) == graph_state(self._state):
+                for snapshot in [self._state] + self._undo + self._redo:
+                    snapshot['imported_action_ids'] = copy.deepcopy(state['imported_action_ids'])
+                if self._drag is not None:
+                    self._drag['imported_action_ids'] = copy.deepcopy(state['imported_action_ids'])
+                self.changed.emit()
+            else:
+                self.from_dict(state)
+        self.ownerChanged.emit()
+
+    def _on_history_restored(self):
+        if self._owner_id:
+            self.from_dict(self._mindmap.causalDiagram(self._owner_id))
 
     def _fail(self, message):
         self._error = message
@@ -133,15 +213,23 @@ class CausalModelModel(QObject):
             return None
 
     def _publish(self):
-        tab = self._current_tab()
-        if tab is not None:
-            tab.causal_model = self.to_dict()
+        # During dragging only the scene changes. Persist the completed drag as
+        # one mind-map transaction, sharing the causal editor's undo boundary.
+        if self._mindmap is not None and self._owner_id and self._drag is None:
+            self._publishing = True
+            try:
+                self._mindmap.setCausalDiagram(self._owner_id, self.to_dict())
+            finally:
+                self._publishing = False
         if self._drag is None:
             self.changed.emit()
         self.sceneChanged.emit()
         self.stateChanged.emit()
 
     def _commit(self, before):
+        if self._mindmap is not None and not self._owner_id:
+            self._state = before
+            return
         if before == self._state:
             return
         self._undo.append(before)
@@ -359,11 +447,6 @@ class CausalModelModel(QObject):
             record_causal_imports(snapshot, destination, keys)
         self._publish()
 
-    def _on_actions_imported(self, tab_id, destination, action_ids):
-        tab = self._current_tab()
-        if tab is not None and tab.id == tab_id:
-            self.markActionsImported(destination, action_ids)
-
     @Slot()
     def undo(self):
         self.endNodeDrag()
@@ -391,7 +474,3 @@ class CausalModelModel(QObject):
         self.errorChanged.emit()
         self.resetView.emit()
         self.changed.emit()
-
-    @Slot()
-    def loadCurrentTab(self):
-        self.from_dict(getattr(self._current_tab(), 'causal_model', None))

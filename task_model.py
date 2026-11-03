@@ -468,6 +468,7 @@ class Tab:
         "elements": [], "actions": [], "last_imported_signature": ""
     })
 
+    # Read-only legacy input; ProjectManager migrates this onto the mind-map root.
     causal_model: Dict[str, Any] = field(default_factory=lambda: {
         "version": 2, "nodes": [], "edges": [], "description": "",
         "action_order": [], "last_imported_signature": "",
@@ -1527,7 +1528,6 @@ class TabModel(QAbstractListModel):
     kanbanChanged = Signal()
     priorityRanksChanged = Signal()
     priorityWeightsChanged = Signal()
-    causalActionsImported = Signal(str, str, 'QStringList')
 
     def __init__(self):
         super().__init__()
@@ -2589,6 +2589,7 @@ class ProjectManager(QObject):
         self._workspace_markdown_tabs = normalize_editor_tabs([], fallback_text="")
         self._mindmap_visible = True
         self.mindmap = MindMapController(self._tab_model, self)
+        self.mindmap.migrate_causal_diagrams()
         self.mindmap.exchange_tabs = self._exchangeMindmapTabs
         self.mindmap.tabActivated.connect(self.openMindmapTab)
         self.mindmap.parentContextRequested.connect(self.openNodeParent)
@@ -2684,32 +2685,13 @@ class ProjectManager(QObject):
         self.showTabMindmap()
         return self.mindmap.add_siblings(parent_id, titles)
 
-    @Slot(result='QStringList')
-    @Slot('QStringList', result='QStringList')
-    def addCausalModelToMindmap(self, action_ids=None):
-        """Copy pending causal actions; optionally restrict their order by node ID."""
-        if self._tab_model is None or self._tab_model.currentTabIndex < 0:
-            return []
-        from actiondraw.causal_model import normalize_causal_model_state, record_causal_imports
-        tab = self._tab_model.getCurrentTabData()
-        state = normalize_causal_model_state(tab.causal_model)
-        labels = {node['id']: node['label'] for node in state['nodes']}
-        pending = set(state['action_order']) - set(state['imported_action_ids']['mindmap'])
-        keys = []
-        for key in state['action_order'] if action_ids is None else action_ids:
-            if key in pending and key not in keys:
-                keys.append(key)
-        titles = [labels[key] for key in keys]
-        parent_id = next((key for key, value in self.mindmap.links.items() if value == tab.id), None)
-        if not titles or parent_id is None:
-            return []
-        self.showTabMindmap()
-        created = self.mindmap.add_siblings(parent_id, titles)
+    @Slot(str, result='QStringList')
+    @Slot(str, 'QStringList', result='QStringList')
+    def addCausalModelToMindmap(self, owner_id, action_ids=None):
+        """Copy pending actions beneath the diagram's canonical owner."""
+        created = self.mindmap.import_causal_actions(owner_id, action_ids)
         if created:
-            imported = keys[:len(created)]
-            record_causal_imports(state, 'mindmap', imported)
-            tab.causal_model = state
-            self._tab_model.causalActionsImported.emit(tab.id, 'mindmap', imported)
+            self._setMindmapVisible(True)
         return created
 
     def _defaultTabView(self) -> None:
@@ -4017,7 +3999,6 @@ class ProjectManager(QObject):
                     "tasks": current_tasks if index == current_tab_index else tab.tasks,
                     "diagram": current_diagram if index == current_tab_index else tab.diagram,
                     "action_paint": copy.deepcopy(getattr(tab, "action_paint", {})),
-                    "causal_model": copy.deepcopy(getattr(tab, "causal_model", {})),
                     "markdown_tabs": normalize_editor_tabs(tab.markdown_tabs, fallback_text=""),
                     "priority": tab.priority,
                     "priority_time_hours": tab.priority_time_hours,
@@ -4055,7 +4036,6 @@ class ProjectManager(QObject):
                 "tasks": self._task_model.to_dict(),
                 "diagram": self._diagram_model.to_dict(),
                 "action_paint": {"elements": [], "actions": [], "last_imported_signature": ""},
-                "causal_model": {"version": 2, "nodes": [], "edges": [], "description": "", "action_order": [], "last_imported_signature": "", "imported_action_ids": {"actiondraw": [], "mindmap": []}},
             }],
             "active_tab": 0,
             "workspace_markdown_tabs": normalize_editor_tabs(self._workspace_markdown_tabs, fallback_text=""),
@@ -4630,6 +4610,7 @@ class ProjectManager(QObject):
                                         priority_scoring=project_data.get("priority_scoring") or {})
 
             self.mindmap.load(project_data.get("mindmap"))
+            self.mindmap.migrate_causal_diagrams()
             self.mindmap.set_scope()
             self._setMindmapVisible(True)
 

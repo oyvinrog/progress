@@ -23,7 +23,7 @@ def test_empty_project_roundtrip(empty_project, tmp_path, monkeypatch):
     pm.showTabMindmap()
     pm.reloadCurrentTab()
     assert pm.addActionPaintToMindmap() == []
-    assert pm.addCausalModelToMindmap() == []
+    assert pm.addCausalModelToMindmap(pm.mindmap.map.root.id) == []
     pm.mindmap.map.root.add_child('Project-level idea')
     monkeypatch.setattr(ProjectManager, '_prompt_encryption_credentials',
                         lambda *args: EncryptionCredentials(passphrase='empty-project-test'))

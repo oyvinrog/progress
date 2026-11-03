@@ -41,7 +41,7 @@ def create_actiondraw_window(
     if markdown_image_paster is None:
         markdown_image_paster = MarkdownImagePaster()
     action_paint_model = ActionPaintModel(tab_model=tab_model)
-    causal_model = CausalModelModel(tab_model=tab_model)
+    causal_model = CausalModelModel(tab_model=tab_model, mindmap=project_manager.mindmap if project_manager else None)
     causal_model.setParent(engine)
     markdown_preview_formatter = MarkdownPreviewFormatter()
     markdown_pdf_exporter = MarkdownPdfExporter(markdown_image_paster)

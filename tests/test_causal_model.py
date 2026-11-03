@@ -161,25 +161,33 @@ def test_legacy_import_history_migration(app):
         'actiondraw': [a], 'mindmap': []}
 
 
-def test_mindmap_partial_import_records_only_successful_actions(app, monkeypatch):
+def test_mindmap_import_rolls_back_failed_transaction(app, monkeypatch):
     tasks, diagram, tabs, manager, model = project()
     first = model.addNode('One', 'action', 10, 20)
     second = model.addNode('Two', 'action', 30, 20)
-    add_siblings = manager.mindmap.add_siblings
-    monkeypatch.setattr(manager.mindmap, 'add_siblings', lambda parent, titles: add_siblings(parent, titles[:1]))
-    assert len(manager.addCausalModelToMindmap([second, first, second, 'missing'])) == 1
-    assert [n['id'] for n in model.pendingMindmapActions] == [first]
-    assert [child.text for child in manager.mindmap.view_root.children] == ['Two']
-    monkeypatch.setattr(manager.mindmap, 'add_siblings', lambda parent, titles: [])
-    assert manager.addCausalModelToMindmap() == []
-    assert [n['id'] for n in model.pendingMindmapActions] == [first]
-    monkeypatch.setattr(manager.mindmap, 'add_siblings', add_siblings)
-    assert len(manager.addCausalModelToMindmap()) == 1
-    assert manager.addCausalModelToMindmap() == []
+    owner = model.ownerId
+    parent = manager.mindmap.map.find(owner)
+    add_child = type(parent).add_child
+    calls = []
+
+    def fail_second(node, *args, **kwargs):
+        calls.append(args)
+        if len(calls) == 2:
+            raise ValueError('Cannot create child')
+        return add_child(node, *args, **kwargs)
+
+    monkeypatch.setattr(type(parent), 'add_child', fail_second)
+    before = manager.mindmap.to_dict()
+    assert manager.addCausalModelToMindmap(owner, [second, first, second, 'missing']) == []
+    assert manager.mindmap.to_dict() == before
+    assert [n['id'] for n in model.pendingMindmapActions] == [first, second]
+    monkeypatch.setattr(type(parent), 'add_child', add_child)
+    assert len(manager.addCausalModelToMindmap(owner, [second, first, second, 'missing'])) == 2
+    assert manager.addCausalModelToMindmap(owner) == []
     model.undo()
     model.redo()
     assert model.pendingMindmapActions == []
-    assert [child.text for child in manager.mindmap.view_root.children] == ['Two', 'One']
+    assert [child.text for child in manager.mindmap.map.find(owner).children] == ['Two', 'One']
 
 
 def test_normalization_handles_damaged_and_legacy_data(app):
@@ -200,18 +208,15 @@ def project():
     tabs = TabModel()
     tabs.addTab("Main")
     manager = ProjectManager(tasks, diagram, tabs)
-    model = CausalModelModel(tab_model=tabs)
+    model = CausalModelModel(tab_model=tabs, mindmap=manager.mindmap)
+    assert model.openCurrentTab()
+    manager.showTabMindmap()
     return tasks, diagram, tabs, manager, model
 
 
 @pytest.mark.parametrize('active_tab, expected_index', [(0, 0), (1, 1), (99, 0), (-1, 0)])
-def test_reset_publishes_valid_current_tab_before_notifying_editors(app, active_tab, expected_index):
-    tabs = TabModel()
-    tabs.addTab("Main")
-    tabs.addTab('Old second')
-    tabs.addTab('Old third')
-    tabs.setCurrentTab(2)
-    model = CausalModelModel(tab_model=tabs)
+def test_reset_closes_editor_before_new_project_is_loaded(app, active_tab, expected_index):
+    tasks, diagram, tabs, manager, model = project()
     model.addNode('Old action', 'action', 10, 20)
     replacement = []
     for title in ['New first', 'New second']:
@@ -219,33 +224,30 @@ def test_reset_publishes_valid_current_tab_before_notifying_editors(app, active_
         saved.addNode(title, 'action', 30, 40)
         replacement.append(Tab(name=title, tasks={'tasks': []}, diagram={}, causal_model=saved.to_dict()))
     observed = []
-    tabs.modelReset.connect(lambda: observed.append((tabs.currentTabIndex, model.orderedTitles)))
-
+    tabs.modelReset.connect(lambda: observed.append((tabs.currentTabIndex, model.ownerId)))
     tabs.setTabs(replacement, active_tab)
-
-    assert observed == [(expected_index, [replacement[expected_index].name])]
-    assert not model.canUndo
-    model.setDescription('Saved to the new active tab')
-    assert replacement[expected_index].causal_model['description'] == 'Saved to the new active tab'
-    assert replacement[1 - expected_index].causal_model['description'] == ''
+    assert observed == [(expected_index, '')]
+    assert not model.canUndo and model.nodes == []
+    manager.mindmap.load()
+    manager.mindmap.migrate_causal_diagrams()
+    assert model.openCurrentTab()
+    assert model.orderedTitles == [replacement[expected_index].name]
     tabs.clear()
-    assert observed[-1] == (-1, [])
-    assert model.to_dict() == empty_causal_model_state()
+    assert model.ownerId == '' and model.nodes == []
 
 
 @pytest.mark.parametrize('invalid_index', [-1, 5])
 def test_causal_editor_tolerates_missing_current_tab_and_recovers(app, invalid_index):
-    tabs = TabModel()
-    tabs.addTab("Main")
-    model = CausalModelModel(tab_model=tabs)
-    model.addNode('Keep on tab', 'action', 10, 20)
-    saved = copy.deepcopy(tabs.getCurrentTabData().causal_model)
+    tasks, diagram, tabs, manager, model = project()
+    model.addNode('Keep on node', 'action', 10, 20)
+    saved = model.to_dict()
+    model.closeAttachment()
     tabs._current_tab_index = invalid_index
-    model.loadCurrentTab()
+    assert not model.openCurrentTab()
+    assert not model.canImportActionDraw
     assert model.to_dict() == empty_causal_model_state()
-    model.addNode('Unattached', 'action', 30, 40)
-    assert tabs.getAllTabs()[0].causal_model == saved
     tabs.setCurrentTab(0)
+    assert model.openCurrentTab()
     assert model.to_dict() == saved
 
 
@@ -264,6 +266,7 @@ def test_project_round_trip_tabs_and_dirty_detection(app, tmp_path, monkeypatch,
     tabs.addTab('Other')
     manager.switchTab(1)
     assert model.nodes == []
+    assert model.openCurrentTab()
     b = model.addNode('Second', 'action', 40, 50)
     model.markActionsImported('mindmap', [b])
     model.addNode('Outcome', 'outcome', 100, 50)
@@ -275,30 +278,35 @@ def test_project_round_trip_tabs_and_dirty_detection(app, tmp_path, monkeypatch,
         path.write_text(json.dumps(manager._build_project_data()), encoding="utf-8")
     _, _, loaded_tabs, loaded_manager, loaded = project()
     loaded_manager.loadProject(str(path))
+    assert loaded.openCurrentTab()
     assert loaded.orderedTitles == ['Second']
     assert loaded.description == 'Other assumptions'
     assert loaded.pendingMindmapActions == []
     assert len(loaded.pendingActionDrawActions) == 1
     loaded_manager.switchTab(0)
+    assert loaded.openCurrentTab()
     assert loaded.orderedTitles == ['First']
     assert loaded.nodes[0]['id'] == a
     assert loaded.pendingActionDrawActions == []
     assert len(loaded.pendingMindmapActions) == 1
-    duplicate = copy.deepcopy(loaded_tabs.getCurrentTabData())
-    duplicate.causal_model['nodes'][0]['label'] = 'Independent copy'
-    assert loaded_tabs.getCurrentTabData().causal_model['nodes'][0]['label'] == 'First'
+    duplicate = loaded_manager.mindmap.causalDiagram(loaded.ownerId)
+    duplicate['nodes'][0]['label'] = 'Independent copy'
+    assert loaded_manager.mindmap.causalDiagram(loaded.ownerId)['nodes'][0]['label'] == 'First'
+    assert all('causal_model' not in tab for tab in loaded_manager._build_project_data()['tabs'])
     # Loading replaces a longer tab list after scrubbing the old active tab.
     loaded_tabs.addTab('Third')
     loaded_manager.switchTab(2)
+    assert loaded.openCurrentTab()
     loaded.addNode('Discard on reload', 'action', 10, 20)
     loaded_manager.loadProject(str(path))
+    assert loaded.openCurrentTab()
     assert loaded.orderedTitles == ['Second']
     assert loaded_tabs.currentTabIndex == 1
 
 
 def test_import_destinations_and_undo(app):
     tasks, diagram, tabs, manager, model = project()
-    assert manager.addCausalModelToMindmap() == []
+    assert manager.addCausalModelToMindmap(model.ownerId) == []
     model.addNode('One', 'action', 10, 20)
     model.addNode('Observation', 'variable', 20, 20)
     model.addNode('Two', 'action', 30, 20)
@@ -307,9 +315,9 @@ def test_import_destinations_and_undo(app):
     assert len(created) == 2
     assert [item['title'] for item in tasks.to_dict()['tasks']] == ['Two', 'One']
     model.markImported()
-    ids = manager.addCausalModelToMindmap()
+    ids = manager.addCausalModelToMindmap(model.ownerId)
     assert [manager.mindmap.map.find(key).text for key in ids] == ['Two', 'One']
-    assert manager.addCausalModelToMindmap() == []
+    assert manager.addCausalModelToMindmap(model.ownerId) == []
     assert model.imported
 
 
@@ -648,9 +656,268 @@ def test_qml_companion_opens_and_tracks_tabs(app, actiondraw_window):
     assert controller.nodes == []
     manager.switchTab(0)
     app.processEvents()
+    assert root.property('causalModelWindowRef') is None
+    assert QMetaObject.invokeMethod(root, 'openCausalModelWindow', Qt.DirectConnection)
+    app.processEvents()
+    window = root.property('causalModelWindowRef')
     assert len(controller.edges) == 1
     assert not errors, '\n'.join(errors)
     window.close()
     root.setProperty("suppressClosePrompt", True)
     root.close()
     app.processEvents()
+
+
+def test_node_attachments_are_independent_and_follow_owner(app, tmp_path):
+    tasks, diagram, tabs, manager, model = project()
+    m = manager.mindmap
+    first, second = m.add_siblings(model.ownerId, ['First thought', 'Second thought'])
+    assert model.openAttachment(first)
+    assert first not in m.causal_diagrams
+    model.setDescription('First assumptions')
+    assert m.hasCausalDiagram(first)
+    action = model.addNode('First action', 'action', 10, 20)
+    m.select(second)
+    model.setDescription('Still first')
+    assert model.ownerId == first
+    assert not m.hasCausalDiagram(second)
+    created = manager.addCausalModelToMindmap(model.ownerId, [action])
+    assert m.map.find(created[0]).parent.id == first
+    assert manager.addCausalModelToMindmap(first) == []
+    first_state = model.to_dict()
+    assert model.openAttachment(second)
+    assert model.nodes == [] and not model.canUndo
+    model.addNode('Second outcome', 'outcome', 30, 40)
+    second_state = model.to_dict()
+    assert model.openAttachment(first)
+    assert model.to_dict() == first_state
+    assert m.causalDiagram(second) == second_state
+    m.select(first)
+    assert m.selectedNode['hasCausalDiagram']
+    assert next(n for n in m.nodes if n['id'] == first)['hasCausalDiagram']
+    model.setDescription('')
+    model.removeNode(action)
+    assert not m.hasCausalDiagram(first)
+    assert action in m.causalDiagram(first)['imported_action_ids']['mindmap']
+    model.undo()
+    assert m.hasCausalDiagram(first)
+    first_state = model.to_dict()
+    path = tmp_path / 'node-attachments.progress'
+    path.write_text(json.dumps(manager._build_project_data()))
+    manager.loadProject(str(path))
+    assert model.ownerId == ''
+    assert m.causalDiagram(first) == first_state
+    assert m.causalDiagram(second) == second_state
+    assert model.openAttachment(second) and model.to_dict() == second_state
+
+
+def test_attachment_history_drag_deletion_move_and_promotion(app):
+    tasks, diagram, tabs, manager, model = project()
+    m = manager.mindmap
+    first, second = m.add_siblings(model.ownerId, ['First thought', 'Second thought'])
+    model.openAttachment(first)
+    action = model.addNode('Action', 'action', 10, 20)
+    history = len(m._undo)
+    model.beginNodeDrag()
+    model.moveNode(action, 40, 50)
+    m.select(second)  # Selection during a drag must not discard it.
+    model.moveNode(action, 60, 70)
+    model.endNodeDrag()
+    assert len(m._undo) == history + 1
+    assert m.causalDiagram(first)['nodes'][0]['x'] == 60
+    model.undo()
+    assert m.causalDiagram(first)['nodes'][0]['x'] == 10
+    model.redo()
+    assert m.causalDiagram(first)['nodes'][0]['x'] == 60
+    m.undo()
+    assert model.nodes[0]['x'] == 10 and not model.canUndo
+    m.redo()
+    assert model.nodes[0]['x'] == 60 and not model.canRedo
+    saved = model.to_dict()
+    assert m.removeCausalDiagram(first)
+    assert model.nodes == [] and not m.hasCausalDiagram(first)
+    m.undo()
+    assert model.to_dict() == saved
+    m.moveNode(first, second, 'child')
+    assert m.map.find(first).parent.id == second
+    assert m.causalDiagram(first) == saved
+    m.select(first)
+    m.createTabFromSelected()
+    assert first in m.links and m.causalDiagram(first) == saved
+    m.select(second)
+    m.deleteSelected()
+    assert model.ownerId == '' and first not in m.causal_diagrams
+    m.undo()
+    assert m.causalDiagram(first) == saved
+    assert model.ownerId == ''  # Restoring a node does not reopen its window.
+    assert model.openAttachment(first) and model.to_dict() == saved
+
+
+def test_references_share_canonical_diagram_and_import_destination(app):
+    tasks, diagram, tabs, manager, model = project()
+    m = manager.mindmap
+    source = model.ownerId
+    child = m.add_siblings(source, ['Thought'])[0]
+    model.openAttachment(child)
+    action = model.addNode('Shared action', 'action', 10, 20)
+    tabs.addTab('Other')
+    other_tab = tabs.getAllTabs()[-1].id
+    m.set_scope(other_tab)
+    assert m.addTabReference(m.view_root.id, tabs.getAllTabs()[0].id)
+    ref = m.selectedId
+    occurrence = next(n['id'] for n in m.nodes if n['sourceId'] == child)
+    assert m.hasCausalDiagram(occurrence)
+    assert model.openAttachment(occurrence) and model.ownerId == child
+    model.setDescription('Shared assumptions')
+    assert m.causalDiagram(child)['description'] == 'Shared assumptions'
+    created = manager.addCausalModelToMindmap(occurrence, [action])
+    assert m.map.find(created[0]).parent.id == child
+    m.select(ref)
+    m.deleteSelected()
+    assert model.ownerId == child and m.hasCausalDiagram(child)
+    assert m.causalDiagram(child)['description'] == 'Shared assumptions'
+
+
+@pytest.mark.parametrize('with_mindmap', [False, True])
+@pytest.mark.parametrize('existing_attachment', [False, True])
+def test_legacy_project_migrates_once_without_losing_graph_data(app, tmp_path, with_mindmap, existing_attachment):
+    tasks, diagram, tabs, manager, model = project()
+    legacy, a, b, c, d = graph()
+    legacy.setDescription('Legacy assumptions')
+    legacy.moveAction(1, 0)
+    legacy.markActionsImported('actiondraw', [a])
+    legacy.markActionsImported('mindmap', [c])
+    payload = manager._build_project_data()
+    payload['tabs'][0]['causal_model'] = legacy.to_dict()
+    owner = model.ownerId
+    if existing_attachment and with_mindmap:
+        saved = CausalModelModel()
+        saved.addNode('Existing attachment', 'variable', 10, 20)
+        payload['mindmap']['causal_diagrams'][owner] = saved.to_dict()
+        expected = saved.to_dict()
+    else:
+        expected = legacy.to_dict()
+    if not with_mindmap:
+        del payload['mindmap']
+    path = tmp_path / 'legacy.progress'
+    path.write_text(json.dumps(payload))
+    manager.loadProject(str(path))
+    assert model.ownerId == '' and model.openCurrentTab()
+    assert model.to_dict() == expected
+    assert manager.mindmap.hasCausalDiagram(model.ownerId)
+    assert tabs.getCurrentTabData().causal_model == empty_causal_model_state()
+    migrated = manager._build_project_data()
+    assert 'causal_model' not in migrated['tabs'][0]
+    path.write_text(json.dumps(migrated))
+    manager.loadProject(str(path))
+    assert model.openCurrentTab() and model.to_dict() == expected
+    assert len(manager.mindmap.causal_diagrams) == 1
+    manager.mindmap.removeCausalDiagram(model.ownerId)
+    manager.mindmap.migrate_causal_diagrams()
+    assert not manager.mindmap.hasCausalDiagram(model.ownerId)
+
+
+def test_project_root_attachment_without_actiondraw_tab(app, actiondraw_window):
+    tasks, diagram, tabs = TaskModel(), DiagramModel(), TabModel()
+    manager = ProjectManager(tasks, diagram, tabs)
+    model = CausalModelModel(tab_model=tabs, mindmap=manager.mindmap)
+    owner = manager.mindmap.map.root.id
+    assert model.openAttachment(owner)
+    assert not model.canImportActionDraw
+    assert owner not in manager.mindmap.causal_diagrams
+    action = model.addNode('Project action', 'action', 10, 20)
+    created = manager.addCausalModelToMindmap(owner, [action])
+    assert manager.mindmap.map.find(created[0]).parent.id == owner
+    assert manager._build_project_data()['mindmap']['causal_diagrams'][owner] == model.to_dict()
+    engine = actiondraw_window(diagram, tasks, manager, tab_model=tabs)
+    root = engine.rootObjects()[0]
+    root.openNodeCausalModelWindow(owner)
+    app.processEvents()
+    window = root.property('causalModelWindowRef')
+    assert window is not None
+    assert not window.findChild(QObject, 'causalAddToActionDraw').property('enabled')
+    window.close()
+    root.setProperty('suppressClosePrompt', True)
+    root.close()
+    app.processEvents()
+
+
+def test_qml_node_attachment_controls_and_badge_layout(app, actiondraw_window, tmp_path):
+    tasks, diagram, tabs, manager, _ = project()
+    m = manager.mindmap
+    child, other = m.add_siblings(m.view_root.id, ['Thought with a diagram', 'Other thought'])
+    m.editNode(child, 'Thought with a diagram', 'Supporting notes')
+    m.toggleBookmark(child)
+    m.select(child)
+    engine = actiondraw_window(diagram, tasks, manager, tab_model=tabs)
+    warnings = []
+    engine.warnings.connect(lambda messages: warnings.extend(w.toString() for w in messages))
+    root = engine.rootObjects()[0]
+    root.show()
+    QTest.qWait(60)
+
+    def find(item, name):
+        if item.objectName() == name:
+            return item
+        for nested in item.childItems():
+            result = find(nested, name)
+            if result is not None:
+                return result
+        return None
+
+    def click(item):
+        QTest.mouseClick(root, Qt.LeftButton, Qt.NoModifier,
+                         item.mapToScene(item.boundingRect().center()).toPoint())
+        QTest.qWait(30)
+
+    icon_name = 'mindmapCausalIcon_' + child
+    assert not find(root.contentItem(), icon_name).isVisible()
+    click(root.findChild(QObject, 'mindmapCausalDiagramButton'))
+    window = root.property('causalModelWindowRef')
+    model = engine._causal_model
+    assert window is not None and model.ownerId == child
+    assert child not in m.causal_diagrams
+    model.addNode('Try an experiment', 'action', 50, 60)
+    assert child in m.causal_diagrams
+    window.close()
+    root.requestActivate()
+    QTest.qWait(30)
+    icon = find(root.contentItem(), icon_name)
+    note = find(root.contentItem(), 'mindmapNoteIcon_' + child)
+    bookmark = find(root.contentItem(), 'mindmapBookmarkIcon_' + child)
+    label = find(root.contentItem(), 'mindmapNodeText_' + child)
+    assert icon.isVisible() and note.isVisible() and bookmark.isVisible()
+    assert note.x() + note.width() <= icon.x()
+    assert icon.x() + icon.width() <= bookmark.x()
+    assert bookmark.x() + bookmark.width() <= label.x()
+    assert root.grabWindow().save(str(tmp_path / 'causal-node-attachments.png'))
+    click(icon)
+    window = root.property('causalModelWindowRef')
+    assert window is not None and model.ownerId == child
+    assert 'Thought with a diagram' in window.title()
+    m.select(other)
+    model.setDescription('Keeps its owner')
+    assert not m.hasCausalDiagram(other)
+    assert m.causalDiagram(child)['description'] == 'Keeps its owner'
+    window.close()
+    QTest.qWait(30)
+    menu = root.findChild(QObject, 'mindmapNodeMenu')
+    menu.setProperty('targetNodeId', child)
+    QMetaObject.invokeMethod(root.findChild(QObject, 'mindmapEditCausalDiagram'), 'triggered')
+    QTest.qWait(30)
+    assert model.ownerId == child
+    QMetaObject.invokeMethod(root.findChild(QObject, 'mindmapRemoveCausalDiagram'), 'triggered')
+    QTest.qWait(30)
+    assert not find(root.contentItem(), icon_name).isVisible()
+    assert model.nodes == []
+    m.undo()
+    QTest.qWait(30)
+    assert find(root.contentItem(), icon_name).isVisible()
+    assert model.nodes[0]['label'] == 'Try an experiment'
+    m.select(child)
+    m.deleteSelected()
+    QTest.qWait(30)
+    assert root.property('causalModelWindowRef') is None
+    assert not warnings, '\n'.join(warnings)
+    root.setProperty('suppressClosePrompt', True)
+    root.close()

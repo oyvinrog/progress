@@ -14,6 +14,9 @@ from PySide6.QtGui import QFont, QFontMetricsF, QGuiApplication
 from ._vendor.pyplane.model import MindMap, Node
 from ._vendor.pyplane.layout import Box, assigned_sides, layout
 from ._vendor.pyplane.mm import dumps, loads
+from .causal_model import (
+    empty_causal_model_state, normalize_causal_model_state, record_causal_imports,
+)
 from .outline_clipboard import (
     looks_like_opml,
     outline_to_indented_text,
@@ -128,6 +131,8 @@ class MindMapController(QObject):
     errorOccurred = Signal(str)
     clipboardChanged = Signal()
     planChanged = Signal()
+    loading = Signal()
+    historyRestored = Signal()
 
     def __init__(self, tab_model=None, parent=None):
         super().__init__(parent)
@@ -145,6 +150,7 @@ class MindMapController(QObject):
         self._kanban = {}
         self.plan_schedules = {}
         self.plan_ranges = {}
+        self.causal_diagrams = {}
         self._date_filter = ""
         self._activity_filter = ""
         self._scope_tab = None
@@ -749,6 +755,7 @@ class MindMapController(QObject):
         self.deadlines = {key: value for key, value in self.deadlines.items() if key in nodes}
         self.plan_schedules = {key: value for key, value in self.plan_schedules.items() if key in nodes}
         self.plan_ranges = {key: value for key, value in self.plan_ranges.items() if key in nodes}
+        self.causal_diagrams = {key: value for key, value in self.causal_diagrams.items() if key in nodes}
         self._kanban = {key: value for key, value in self._kanban.items()
                         if key in nodes and key not in self.links}
         self._selected_ids = [key for key in self._selected_ids if self._in_scope(self._find(key))]
@@ -768,7 +775,8 @@ class MindMapController(QObject):
                 'deadlines': copy.deepcopy(self.deadlines),
                 'kanban': copy.deepcopy(self._kanban),
                 'plan_schedules': copy.deepcopy(self.plan_schedules),
-                'plan_ranges': copy.deepcopy(self.plan_ranges)}
+                'plan_ranges': copy.deepcopy(self.plan_ranges),
+                'causal_diagrams': copy.deepcopy(self.causal_diagrams)}
 
     @staticmethod
     def decode(payload):
@@ -784,6 +792,11 @@ class MindMapController(QObject):
             if paragraph is not None and not len(paragraph):
                 node.note = paragraph.text or ''
                 node._original_note = node.note
+        diagrams = payload.get('causal_diagrams', {})
+        if (not isinstance(diagrams, dict)
+                or any(not isinstance(key, str) or mindmap.find(key) is None
+                       or not isinstance(value, dict) for key, value in diagrams.items())):
+            raise ValueError('Malformed mindmap causal diagrams')
         links = payload['tab_links']
         if any(not isinstance(k, str) or not isinstance(v, str) or mindmap.find(k) is None
                for k, v in links.items()):
@@ -891,6 +904,7 @@ class MindMapController(QObject):
             raise ValueError('Invalid plan timestamp') from exc
 
     def load(self, payload=None):
+        self.loading.emit()
         self.map, self.links = self.decode(payload) if payload is not None else (MindMap('Project'), {})
         self.references = dict((payload or {}).get('tab_references', {}))
         self._search_query = ''
@@ -905,6 +919,8 @@ class MindMapController(QObject):
         self._kanban = copy.deepcopy((payload or {}).get('kanban', {}))
         self.plan_schedules = copy.deepcopy((payload or {}).get('plan_schedules', {}))
         self.plan_ranges = copy.deepcopy((payload or {}).get('plan_ranges', {}))
+        self.causal_diagrams = {key: normalize_causal_model_state(value)
+                               for key, value in (payload or {}).get('causal_diagrams', {}).items()}
         self._scope_tab = None
         self._view_selections.clear()
         self._undo.clear()
@@ -914,6 +930,70 @@ class MindMapController(QObject):
         self.reconcile()
         self.resetView.emit()
         self.planChanged.emit()
+
+    def migrate_causal_diagrams(self):
+        """Consume legacy tab graphs only after canonical tab roots exist."""
+        for tab in self._tabs.getAllTabs() if self._tabs is not None else []:
+            key = next((key for key, tab_id in self.links.items() if tab_id == tab.id), None)
+            state = normalize_causal_model_state(getattr(tab, 'causal_model', None))
+            if key is not None and key not in self.causal_diagrams and state != empty_causal_model_state():
+                self.causal_diagrams[key] = state
+            tab.causal_model = empty_causal_model_state()
+        self.sceneChanged.emit()
+        self.changed.emit()
+
+    @Slot(str, result=bool)
+    def hasCausalDiagram(self, node_id):
+        return self._has_causal_diagram(self.sourceNodeId(node_id))
+
+    def _has_causal_diagram(self, key):
+        state = self.causal_diagrams.get(key, {})
+        return bool(state.get('nodes') or state.get('description', '').strip())
+
+    @Slot(str, result='QVariantMap')
+    def causalDiagram(self, node_id):
+        return copy.deepcopy(self.causal_diagrams.get(self.sourceNodeId(node_id), empty_causal_model_state()))
+
+    @Slot(str, 'QVariantMap', result=bool)
+    def setCausalDiagram(self, node_id, value):
+        key = self.sourceNodeId(node_id)
+        if self.map.find(key) is None:
+            return False
+        state = normalize_causal_model_state(value)
+        if self.causal_diagrams.get(key) == state:
+            return True
+        # Retain import history even if the last graph node has been removed.
+        return self._commit(lambda: self.causal_diagrams.update({key: state}))
+
+    @Slot(str, result=bool)
+    def removeCausalDiagram(self, node_id):
+        key = self.sourceNodeId(node_id)
+        if key not in self.causal_diagrams:
+            return False
+        return self._commit(lambda: self.causal_diagrams.pop(key))
+
+    def import_causal_actions(self, node_id, action_ids=None):
+        key = self.sourceNodeId(node_id)
+        parent = self.map.find(key)
+        if parent is None:
+            return []
+        state = self.causalDiagram(key)
+        pending = set(state['action_order']) - set(state['imported_action_ids']['mindmap'])
+        keys = list(dict.fromkeys(k for k in (state['action_order'] if action_ids is None else action_ids)
+                                 if k in pending))
+        labels = {node['id']: node['label'] for node in state['nodes']}
+        if not keys:
+            return []
+        created = []
+
+        def mutate():
+            parent.folded = False
+            for action_id in keys:
+                created.append(parent.add_child(labels[action_id], side='right').id)
+            record_causal_imports(state, 'mindmap', keys)
+            self.causal_diagrams[key] = state
+
+        return created if self._commit(mutate) else []
 
     @Property(str, notify=changed)
     def selectedId(self):
@@ -983,6 +1063,7 @@ class MindMapController(QObject):
                 'isReference': _placement(node).id in self.references, 'text': node.text, 'note': node.note or '',
                 'isTab': self._tab_id(node) is not None, 'folded': node.folded,
                 'isViewRoot': node is self.view_root, 'completed': _content(node).id in self._completed,
+                'hasCausalDiagram': self._has_causal_diagram(_content(node).id),
                 'bookmarked': _content(node).id in self._bookmarks,
                 'measureProgress': _content(node).id in self._measure_progress,
                 **self.reminderData(node.id)}
@@ -1374,6 +1455,8 @@ class MindMapController(QObject):
                 padding += 22.0
             if node.note and node.note.strip():
                 padding += 20.0
+            if self._has_causal_diagram(_content(node).id):
+                padding += 20.0
             if _content(node).id in bookmarks:
                 padding += 20.0
             if (self._plan_placement(_content(node).id).get('status', 'unscheduled') != 'unscheduled'
@@ -1430,6 +1513,7 @@ class MindMapController(QObject):
                  'isReference': _placement(n).id in self.references, 'text': n.text, 'note': n.note or '', 'x': b.x, 'y': b.y,
                  'width': b.width, 'height': b.height, 'isTab': self._tab_id(n) is not None,
                  'hasNote': bool(n.note and n.note.strip()),
+                 'hasCausalDiagram': self._has_causal_diagram(_content(n).id),
                  'folded': n.folded and not self.calendarFilterActive, 'hasChildren': bool(n.children), 'bold': bool(n.style.bold),
                  'isViewRoot': n is root, 'completed': _content(n).id in self._completed,
                  'showCompletionCheckbox': self._show_completion_checkbox(n, root),
@@ -1821,6 +1905,7 @@ class MindMapController(QObject):
             self.plan_ranges = {key: value for key, value in self.plan_ranges.items() if key in live}
             self.reminders = {key: value for key, value in self.reminders.items() if key in live}
             self.deadlines = {key: value for key, value in self.deadlines.items() if key in live}
+            self.causal_diagrams = {key: value for key, value in self.causal_diagrams.items() if key in live}
             self._kanban = {key: value for key, value in self._kanban.items()
                             if key in live and key not in self.links}
         except (ValueError, IndexError) as exc:
@@ -1835,6 +1920,7 @@ class MindMapController(QObject):
             self._kanban = copy.deepcopy(before.get('kanban', {}))
             self.plan_schedules = copy.deepcopy(before.get('plan_schedules', {}))
             self.plan_ranges = copy.deepcopy(before.get('plan_ranges', {}))
+            self.causal_diagrams = copy.deepcopy(before.get('causal_diagrams', {}))
             self._restore_selection(selected)
             self.errorOccurred.emit(str(exc))
             self.changed.emit()
@@ -2323,6 +2409,7 @@ class MindMapController(QObject):
         self._kanban = copy.deepcopy(payload.get('kanban', {}))
         self.plan_schedules = copy.deepcopy(payload.get('plan_schedules', {}))
         self.plan_ranges = copy.deepcopy(payload.get('plan_ranges', {}))
+        self.causal_diagrams = copy.deepcopy(payload.get('causal_diagrams', {}))
         if tab_state is not None:
             live = {tab.id for tab in self._tabs.getAllTabs()}
             self._view_selections = {key: value for key, value in self._view_selections.items()
@@ -2330,6 +2417,7 @@ class MindMapController(QObject):
             if self._scope_tab is not None and self._scope_tab not in live:
                 self.set_scope()
         self.reconcile()
+        self.historyRestored.emit()
 
     @Slot()
     def undo(self):
