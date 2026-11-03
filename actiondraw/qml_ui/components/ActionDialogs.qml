@@ -2583,15 +2583,13 @@ Item {
         }
     }
 
-    FileDialog {
+    QtObject {
         id: loadDialog
-        title: "Load Project"
-        fileMode: FileDialog.OpenFile
-        nameFilters: ["Progress files (*.progress)", "All files (*)"]
-        onAccepted: {
-            if (projectManager) {
-                projectManager.loadProject(selectedFile)
-            }
+        readonly property var controller: typeof projectFileDialog !== "undefined" ? projectFileDialog : null
+        readonly property bool visible: controller ? controller.visible : false
+        function open() {
+            if (controller)
+                controller.open()
         }
     }
 

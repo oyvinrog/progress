@@ -17,6 +17,7 @@ from .qml import ACTIONDRAW_QML_PATH, QML_DIR
 from .theme import configure_actiondraw_theme
 from .actionpaint import ActionPaintModel
 from .causal_model import CausalModelModel
+from .project_file_dialog import ProjectFileDialog
 
 
 def create_actiondraw_window(
@@ -32,6 +33,9 @@ def create_actiondraw_window(
 
     configure_actiondraw_theme()
     engine = QQmlApplicationEngine()
+    project_file_dialog = ProjectFileDialog(project_manager, engine)
+    engine._project_file_dialog = project_file_dialog
+    engine.rootContext().setContextProperty("projectFileDialog", project_file_dialog)
     from .server import ActionDrawServer
     server = ActionDrawServer(project_manager, engine) if project_manager else None
     engine._actiondraw_server = server
@@ -67,6 +71,8 @@ def create_actiondraw_window(
     engine.rootContext().setContextProperty("causalModel", causal_model)
     engine.addImportPath(str(QML_DIR))
     engine.load(QUrl.fromLocalFile(str(ACTIONDRAW_QML_PATH)))
+    if engine.rootObjects():
+        project_file_dialog.set_window(engine.rootObjects()[0])
     return engine
 
 
