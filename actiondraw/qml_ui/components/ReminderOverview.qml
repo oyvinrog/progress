@@ -372,19 +372,34 @@ Item {
                         palette.buttonText: "#e0e9ef"
                         text: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][weekDay.index] + " " + Number(weekDay.key.slice(8))
                         font.pixelSize: overview.width < 500 ? 10 : 12
-                        Accessible.name: weekDay.key + ", " + weekDay.goalCount + " goals, " + weekDay.reminderCount + " reminders"
+                        objectName: "filterWeekDay_" + weekDay.key
+                        Accessible.name: "Filter map to " + weekDay.key
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Filter map to " + overview.shortDate(weekDay.key)
                         onClicked: overview.selectDate(weekDay.key)
-                        onDoubleClicked: { overview.selectDate(weekDay.key); goalDialog.show(null, weekDay.key) }
                     }
                     ToolButton { palette.buttonText: "#e0e9ef";
                         id: agendaButton
                         objectName: "weekAgenda_" + weekDay.key
-                        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                        anchors { left: parent.left; right: addDayActivity.left; bottom: parent.bottom }
                         height: 22; font.pixelSize: 10; padding: 0
                         text: weekDay.goalCount || weekDay.reminderCount ? weekDay.goalCount + " · " + weekDay.reminderCount : "—"
                         Accessible.name: "Agenda for " + weekDay.key + ": " + weekDay.goalCount + " goals, " + weekDay.reminderCount + " reminders"
                         ToolTip.visible: hovered; ToolTip.text: weekDay.goalCount + " goals · " + weekDay.reminderCount + " reminders"
                         onClicked: overview.showDayAgenda(weekDay.key, agendaButton)
+                    }
+                    ToolButton {
+                        id: addDayActivity
+                        objectName: "addWeekActivity_" + weekDay.key
+                        anchors { right: parent.right; bottom: parent.bottom }
+                        width: 24; height: 22; padding: 0
+                        text: "+"; font.pixelSize: 16
+                        palette.buttonText: "#a9d8fa"
+                        enabled: !!overview.goalModel
+                        Accessible.name: "Add activity on " + weekDay.key
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Add activity on " + overview.shortDate(weekDay.key)
+                        onClicked: goalDialog.show(null, weekDay.key)
                     }
                 }
             }
@@ -393,7 +408,7 @@ Item {
     Popup {
         id: calendarHelp; parent: Overlay.overlay; anchors.centerIn: parent
         width: Math.min(380, parent.width - 32); modal: true; focus: true
-        contentItem: Label { text: "Select a day to filter the map. Open its counts to see activities. Double-click a day to add a goal, or drop a goal or mindmap node onto a date. Drag the grip beside a daily-list item onto another day to move it. Open month to resize date ranges. Escape cancels a drag."; wrapMode: Text.WordWrap }
+        contentItem: Label { text: "Click a day heading to filter the map. Click + under a day to add an activity for that date. Open its counts to see activities. You can also drop a goal or mindmap node onto a date. Drag the grip beside a daily-list item onto another day to move it. Open month to resize date ranges. Escape cancels a drag."; wrapMode: Text.WordWrap }
     }
     Popup {
         id: dayAgenda; objectName: "weekAgendaPopup"; parent: Overlay.overlay

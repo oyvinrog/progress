@@ -108,23 +108,37 @@ def test_escape_cancels_drag_before_closing_month(calendar_ui, app):
     overview.setProperty('goalModel', None)
 
 
-def test_week_double_click_opens_bounded_goal_dialog(calendar_ui, app):
-    from task_model import TabModel
+def test_week_add_activity_does_not_filter_map(project, calendar_ui, app):
+    pm, tabs, _, _ = project
     root, _, overview, _, _, click = calendar_ui
-    tabs = TabModel()
-    tabs.addTab('Main')
     overview.setProperty('goalModel', tabs)
+    overview.setProperty('planController', pm.mindmap)
     click('closePlanningMonth')
-    day = find(root, 'weekDay_2032-02-29')
-    p = day.mapToScene(QPointF(day.width()/2, 10)).toPoint()
-    QTest.mouseDClick(root, Qt.LeftButton, Qt.NoModifier, p)
-    QTest.qWait(40)
+    overview.selectDate('2032-02-28')
+    reset = QSignalSpy(pm.mindmap.resetView)
+    click('addWeekActivity_2032-02-29')
     dialog = overview.findChild(QObject, 'goalRangeDialog')
     assert dialog.property('visible')
     assert dialog.property('sourceStart') == '2032-02-29'
+    assert dialog.property('sourceEnd') == '2032-02-29'
     assert dialog.property('y') >= 0
     assert dialog.property('y') + dialog.property('height') <= root.height()
+    assert overview.property('selectedDate') == '2032-02-28'
+    assert pm.mindmap.dateFilter == '2032-02-28'
+    assert reset.count() == 0
     dialog.close()
+    app.processEvents()
+    assert pm.mindmap.dateFilter == '2032-02-28'
+
+    click('filterWeekDay_2032-02-29')
+    assert pm.mindmap.dateFilter == '2032-02-29'
+    assert not dialog.property('visible')
+    day = find(root, 'filterWeekDay_2032-02-29')
+    QTest.mouseDClick(root, Qt.LeftButton, Qt.NoModifier,
+                     day.mapToScene(day.boundingRect().center()).toPoint())
+    QTest.qWait(40)
+    assert not dialog.property('visible')
+    overview.setProperty('planController', None)
     overview.setProperty('goalModel', None)
 
 
