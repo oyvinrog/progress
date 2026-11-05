@@ -20,6 +20,12 @@ Item {
     readonly property var filteredGoals: scheduledGoals.filter(function(g) {
         return !overview.agendaDate || (g.startDate <= overview.agendaDate && g.endDate >= overview.agendaDate)
     })
+    readonly property var singleDayGoals: filteredGoals.filter(function(g) {
+        return g.startDate === g.endDate
+    })
+    readonly property var multiDayGoals: filteredGoals.filter(function(g) {
+        return g.startDate !== g.endDate
+    })
     property var undoChange: null
     property bool savingCalendarRange: false
     property string calendarMessage: ""
@@ -499,10 +505,20 @@ Item {
                 text: overview.agendaDate ? "No goals or reminders for this day" : "No scheduled goals or waiting reminders"
                 color: "#9aafbd"
             }
-            Label { text: "Goals · " + overview.filteredGoals.length; color: "#9aafbd" }
+            Label {
+                objectName: "singleDayAgendaHeading"
+                visible: overview.singleDayGoals.length > 0 || overview.filteredReminders.length > 0
+                text: (overview.agendaDate ? "Within this day" : "Single-day activities") + " · "
+                    + (overview.singleDayGoals.length + overview.filteredReminders.length)
+                color: "#9aafbd"
+            }
             Repeater {
-                model: overview.filteredGoals
-                delegate: Rectangle {
+                model: overview.singleDayGoals
+                delegate: agendaGoalDelegate
+            }
+            Component {
+                id: agendaGoalDelegate
+                Rectangle {
                     id: goalRow
                     required property var modelData
                     width: agendaRows.width; height: 52
@@ -554,7 +570,10 @@ Item {
                     }
                 }
             }
-            Label { text: "Reminders · " + overview.filteredReminders.length; color: "#9aafbd" }
+            Label {
+                visible: overview.filteredReminders.length > 0
+                text: "Reminders · " + overview.filteredReminders.length; color: "#9aafbd"
+            }
             Repeater {
                 model: agendaReminders
                 delegate: Rectangle {
@@ -708,6 +727,23 @@ Item {
                         }
                     }
                 }
+            }
+            Rectangle {
+                objectName: "agendaDurationDivider"
+                visible: overview.multiDayGoals.length > 0
+                    && (overview.singleDayGoals.length > 0 || overview.filteredReminders.length > 0)
+                width: parent.width; height: 1
+                color: "#526b7b"
+            }
+            Label {
+                objectName: "multiDayAgendaHeading"
+                visible: overview.multiDayGoals.length > 0
+                text: "Across multiple days · " + overview.multiDayGoals.length
+                color: "#9aafbd"
+            }
+            Repeater {
+                model: overview.multiDayGoals
+                delegate: agendaGoalDelegate
             }
         }
     }

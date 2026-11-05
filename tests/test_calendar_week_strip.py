@@ -163,3 +163,32 @@ def test_dropdown_browses_day_without_refreshing_map(project, calendar_ui, app, 
     assert reset.count() == 1
     overview.setProperty('planController', None)
     overview.setProperty('goalModel', None)
+
+
+def test_day_agenda_separates_single_and_multi_day_activities(calendar_ui, app):
+    from task_model import TabModel
+    root, _, overview, _, refresh, click = calendar_ui
+    tabs = TabModel()
+    tabs.addTab('Main')
+    single = tabs.createScheduledGoal('Day activity', '2032-02-28', '2032-02-28')
+    multi = tabs.createScheduledGoal('Long activity', '2032-02-27', '2032-02-29')
+    overview.setProperty('goalModel', tabs)
+    refresh([reminder('2032-02-28T18:00:00')])
+    click('closePlanningMonth')
+    click('weekAgenda_2032-02-28')
+    assert [g['id'] for g in value(overview, 'singleDayGoals')] == [single]
+    assert [g['id'] for g in value(overview, 'multiDayGoals')] == [multi]
+    divider = find(root, 'agendaDurationDivider')
+    def scene_y(name):
+        return find(root, name).mapToScene(QPointF()).y()
+    assert divider.isVisible()
+    assert scene_y('openGoal_' + single) < scene_y('agendaDurationDivider')
+    assert scene_y('reminderRow_task') < scene_y('agendaDurationDivider')
+    assert scene_y('agendaDurationDivider') < scene_y('multiDayAgendaHeading') < scene_y('openGoal_' + multi)
+    tabs.setGoalRange(multi, '2032-02-28', '2032-02-28')
+    app.processEvents()
+    assert len(value(overview, 'singleDayGoals')) == 2
+    assert not value(overview, 'multiDayGoals')
+    assert not divider.isVisible()
+    assert not find(root, 'multiDayAgendaHeading').isVisible()
+    overview.setProperty('goalModel', None)
