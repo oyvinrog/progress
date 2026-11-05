@@ -23,7 +23,14 @@ def record_causal_imports(state, destination, action_ids):
             history.append(key)
 
 
-def _reachable(edges, start, target):
+def _adjacency(edges):
+    adjacency = {}
+    for edge in edges:
+        adjacency.setdefault(edge['source'], []).append(edge['target'])
+    return adjacency
+
+
+def _reachable(adjacency, start, target):
     pending, seen = [start], set()
     while pending:
         node = pending.pop()
@@ -31,7 +38,7 @@ def _reachable(edges, start, target):
             return True
         if node not in seen:
             seen.add(node)
-            pending.extend(e['target'] for e in edges if e['source'] == node)
+            pending.extend(adjacency.get(node, ()))
     return False
 
 
@@ -39,6 +46,7 @@ def normalize_causal_model_state(value):
     state = empty_causal_model_state()
     if not isinstance(value, dict):
         return state
+    ids = set()
     for raw in value.get('nodes', []) if isinstance(value.get('nodes'), list) else []:
         if not isinstance(raw, dict):
             continue
@@ -49,9 +57,10 @@ def normalize_causal_model_state(value):
             continue
         if (node['id'] and node['label'] and node['type'] in {'variable', 'action', 'outcome'}
                 and all(math.isfinite(node[k]) and node[k] >= 0 for k in ('x', 'y'))
-                and not any(n['id'] == node['id'] for n in state['nodes'])):
+                and node['id'] not in ids):
             state['nodes'].append(node)
-    ids = {n['id'] for n in state['nodes']}
+            ids.add(node['id'])
+    edge_ids, pairs, adjacency = set(), set(), {}
     for raw in value.get('edges', []) if isinstance(value.get('edges'), list) else []:
         if not isinstance(raw, dict):
             continue
@@ -65,10 +74,13 @@ def normalize_causal_model_state(value):
         if (not edge['id'] or edge['source'] not in ids or edge['target'] not in ids
                 or edge['source'] == edge['target']
                 or (weight is not None and (not math.isfinite(weight) or not 0 <= weight <= 100))
-                or any(e['id'] == edge['id'] or (e['source'], e['target']) == (edge['source'], edge['target']) for e in state['edges'])
-                or _reachable(state['edges'], edge['target'], edge['source'])):
+                or edge['id'] in edge_ids or (edge['source'], edge['target']) in pairs
+                or _reachable(adjacency, edge['target'], edge['source'])):
             continue
         state['edges'].append(edge)
+        edge_ids.add(edge['id'])
+        pairs.add((edge['source'], edge['target']))
+        adjacency.setdefault(edge['source'], []).append(edge['target'])
     actions = [n['id'] for n in state['nodes'] if n['type'] == 'action']
     order = value.get('action_order', [])
     for key in (order if isinstance(order, list) else []) + actions:
@@ -345,8 +357,11 @@ class CausalModelModel(QObject):
         node = next((n for n in self._state['nodes'] if n['id'] == key), None)
         if node is None or not all(math.isfinite(v) for v in (x, y)):
             return
-        before = self.to_dict()
-        node.update(x=max(0, x), y=max(0, y))
+        x, y = max(0, x), max(0, y)
+        if (node['x'], node['y']) == (x, y):
+            return
+        before = self.to_dict() if self._drag is None else None
+        node.update(x=x, y=y)
         if self._drag is None:
             self._commit(before)
         else:
@@ -378,7 +393,7 @@ class CausalModelModel(QObject):
         if any((e['source'], e['target']) == (source, target) for e in self._state['edges']):
             self._fail('This connection already exists.')
             return ''
-        if _reachable(self._state['edges'], target, source):
+        if _reachable(_adjacency(self._state['edges']), target, source):
             self._fail('This connection would create a cycle. Use separate nodes for successive times.')
             return ''
         try:

@@ -921,3 +921,163 @@ def test_qml_node_attachment_controls_and_badge_layout(app, actiondraw_window, t
     assert not warnings, '\n'.join(warnings)
     root.setProperty('suppressClosePrompt', True)
     root.close()
+
+
+def chain_state(count):
+    state = empty_causal_model_state()
+    state['nodes'] = [dict(id=str(i), type='variable', label=str(i), x=30+i*220,
+                           y=40, notes='') for i in range(count)]
+    state['edges'] = [dict(id=str(i), source=str(i), target=str(i+1),
+                           likelihood=None, notes='') for i in range(count-1)]
+    return state
+
+
+def test_drag_uses_only_initial_snapshot_and_skips_unchanged_positions(app):
+    from unittest.mock import patch
+    model = CausalModelModel()
+    model.from_dict(chain_state(300))
+    scenes = []
+    model.sceneChanged.connect(lambda: scenes.append(True))
+    with patch.object(model, 'to_dict', wraps=model.to_dict) as snapshot:
+        model.beginNodeDrag()
+        for i in range(60):
+            model.moveNode('0', 31+i, 40)
+        model.moveNode('0', 90, 40)
+        model.endNodeDrag()
+        assert snapshot.call_count == 1
+    assert len(scenes) == 61  # 60 moves and the completed transaction.
+    assert len(model._undo) == 1
+    model.undo()
+    assert model.nodes[0]['x'] == 30
+    model.redo()
+    assert model.nodes[0]['x'] == 90
+
+
+@pytest.mark.parametrize('reverse', [False, True])
+def test_normalization_preserves_edge_order_and_rejects_cycles(app, reverse):
+    state = chain_state(300)
+    if reverse:
+        state['edges'].reverse()
+    expected = copy.deepcopy(state['edges'])
+    state['nodes'].append(copy.deepcopy(state['nodes'][0]))
+    state['edges'] += [dict(id='cycle', source='299', target='0', likelihood=None, notes=''),
+                       dict(expected[0], id='duplicate-pair'),
+                       dict(expected[0], source='0', target='299')]
+    normalized = normalize_causal_model_state(state)
+    assert len(normalized['nodes']) == 300
+    assert normalized['edges'] == expected
+
+
+def test_causal_transactions_skip_topology_and_bound_history(app):
+    from unittest.mock import patch
+    tasks, diagram, tabs, manager, model = project()
+    m = manager.mindmap
+    scenes, changes = [], []
+    m.sceneChanged.connect(lambda: scenes.append(True))
+    m.changed.connect(lambda: changes.append(True))
+    with patch.object(m.map, 'validate', wraps=m.map.validate) as validate:
+        key = model.addNode('Node', 'variable', 10, 20)
+        for i in range(110):
+            model.moveNode(key, 11+i, 20)
+        assert validate.call_count == 0
+    assert len(scenes) == 1 and len(changes) == 111
+    assert len(m._undo) == 100
+    for _ in range(100):
+        m.undo()
+    assert model.nodes[0]['x'] == 20
+    assert not m._undo and len(m._redo) == 100
+    for _ in range(100):
+        m.redo()
+    assert model.nodes[0]['x'] == 120
+    assert len(m._undo) == 100
+    m.removeCausalDiagram(model.ownerId)
+    assert model.nodes == []
+    m.undo()
+    assert model.nodes[0]['x'] == 120
+    tasks._timer.stop()
+    manager._reminder_timer.stop()
+
+
+@pytest.mark.parametrize('count', [100, 300, 600])
+def test_causal_viewport_bounds_and_single_lookup(app, qml_cleanup, count):
+    from pathlib import Path
+    from PySide6.QtCore import Property, QUrl
+    from PySide6.QtQml import QQmlEngine, QQmlComponent
+
+    class CountingModel(CausalModelModel):
+        reads = 0
+
+        @Property('QVariantList', notify=CausalModelModel.changed)
+        def nodes(self):
+            self.reads += 1
+            return copy.deepcopy(self._state['nodes'])
+
+    model = CountingModel()
+    model.from_dict(chain_state(count))
+    engine = QQmlEngine()
+    component = QQmlComponent(engine, QUrl.fromLocalFile(str(
+        Path(__file__).resolve().parents[1] / 'actiondraw/qml_ui/CausalModelWindow.qml')))
+    window = component.createWithInitialProperties({'modelRef': model})
+    assert window is not None, [e.toString() for e in component.errors()]
+    qml_cleanup(engine, window, model, component)
+    errors = []
+    engine.warnings.connect(lambda warnings: errors.extend(w.toString() for w in warnings))
+    window.show()
+    QTest.qWait(30)
+    viewport = window.findChild(QObject, 'causalViewport')
+    canvas = window.findChild(QObject, 'causalEdgesCanvas')
+    board = window.findChild(QObject, 'causalBoard')
+    assert canvas.width() == viewport.width()
+    assert canvas.height() == viewport.height()
+    assert board.width() > count*200
+    # A repaint and a full hit-test each read nodes once, not per edge.
+    model.reads = 0
+    assert QMetaObject.invokeMethod(canvas, 'requestPaint', Qt.DirectConnection)
+    QTest.qWait(30)
+    assert model.reads == 1
+    model.reads = 0
+    assert window.edgeAt(0, 800) is None
+    assert model.reads == 1
+    viewport.setProperty('contentX', 200)
+    viewport.setProperty('contentY', 100)
+    QTest.qWait(30)
+    assert canvas.x() == 200 and canvas.y() == 100
+    assert canvas.width() == viewport.width()
+    # A scrolled background double-click retains board coordinates.
+    point = board.mapToScene(QPointF(700, 500)).toPoint()
+    QTest.mouseDClick(window, Qt.LeftButton, Qt.NoModifier, point)
+    QTest.qWait(20)
+    assert window.property('newNodePosition') == QPointF(620, 455)
+    QTest.keyClick(window, Qt.Key_Escape)
+    viewport.setProperty('contentY', 0)
+    QTest.qWait(20)
+    point = board.mapToScene(QPointF(440, 85)).toPoint()
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, point)
+    assert window.property('selectedEdge') == '1'
+    model.removeEdge('1')
+    QTest.qWait(20)
+    handle = window.connectionHandleById('1')
+    start = handle.mapToScene(QPointF(13, 13)).toPoint()
+    target = window.nodeItemById('2').mapToScene(QPointF(80, 45)).toPoint()
+    QTest.mousePress(window, Qt.LeftButton, Qt.NoModifier, start)
+    QTest.mouseMove(window, target, 20)
+    QTest.mouseRelease(window, Qt.LeftButton, Qt.NoModifier, target)
+    assert any(e['source'] == '1' and e['target'] == '2' for e in model.edges)
+    assert not errors
+    window.close()
+
+
+def test_regular_mindmap_transactions_also_bound_history(app):
+    from actiondraw.mindmap import MindMapController
+    m = MindMapController()
+    for i in range(105):
+        assert m._commit(lambda i=i: setattr(m.map.root, 'text', str(i)))
+    assert len(m._undo) == 100
+    for _ in range(100):
+        m.undo()
+    assert m.map.root.text == '4'
+    assert len(m._redo) == 100
+    for _ in range(100):
+        m.redo()
+    assert m.map.root.text == '104'
+    assert len(m._undo) == 100

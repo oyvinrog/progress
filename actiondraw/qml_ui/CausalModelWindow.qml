@@ -31,10 +31,16 @@ ApplicationWindow {
         for (var i = 0; i < edges.length; i++) if (edges[i].id === key) return edges[i]
         return null
     }
+    function nodeLookup() {
+        var lookup = Object.create(null), nodes = modelRef.nodes
+        for (var i = 0; i < nodes.length; i++) lookup[nodes[i].id] = nodes[i]
+        return lookup
+    }
     function edgeAt(x, y) {
+        var lookup = nodeLookup()
         var edges = modelRef.edges
         for (var i = edges.length - 1; i >= 0; i--) {
-            var g = edgeGeometry(edges[i])
+            var g = edgeGeometry(edges[i], lookup)
             if (!g) continue
             var dx = g.x2-g.x1, dy = g.y2-g.y1, den = dx*dx+dy*dy
             var t = den ? Math.max(0, Math.min(1, ((x-g.x1)*dx+(y-g.y1)*dy)/den)) : 0
@@ -130,8 +136,8 @@ ApplicationWindow {
     function saveEdge() {
         if (modelRef.editEdge(selectedEdge, edgeWeight.text, edgeNotes.text)) edgeDialog.close()
     }
-    function edgeGeometry(edge) {
-        var a = nodeById(edge.source), b = nodeById(edge.target)
+    function edgeGeometry(edge, lookup) {
+        var a = lookup[edge.source], b = lookup[edge.target]
         if (!a || !b) return null
         var dx = b.x-a.x, dy = b.y-a.y, d = Math.sqrt(dx*dx+dy*dy)
         if (d < 1) return null
@@ -199,6 +205,8 @@ ApplicationWindow {
                 Layout.minimumWidth: 200; Layout.preferredWidth: 900
                 clip: true
                 contentWidth: board.width; contentHeight: board.height
+                onContentXChanged: edgesCanvas.requestPaint()
+                onContentYChanged: edgesCanvas.requestPaint()
                 ScrollBar.horizontal: ScrollBar {}
                 ScrollBar.vertical: ScrollBar {}
                 Item {
@@ -208,19 +216,29 @@ ApplicationWindow {
                     height: { var extent = 1000; var ns = modelRef.nodes; for(var i=0;i<ns.length;i++) extent=Math.max(extent,ns[i].y+300); return extent }
                     Canvas {
                         id: edgesCanvas
-                        anchors.fill: parent
+                        objectName: "causalEdgesCanvas"
+                        // Only allocate pixels for the viewport, irrespective of graph extents.
+                        x: viewport.contentX; y: viewport.contentY
+                        width: viewport.width; height: viewport.height
                         onWidthChanged: requestPaint()
                         onHeightChanged: requestPaint()
                         onPaint: {
-                            var ctx = getContext("2d"); ctx.clearRect(0,0,width,height)
+                            var ctx = getContext("2d"); ctx.resetTransform(); ctx.clearRect(0,0,width,height)
                             ctx.fillStyle = "#fafbfc"; ctx.fillRect(0,0,width,height)
+                            var left = viewport.contentX, top = viewport.contentY
+                            var right = left + width, bottom = top + height
+                            ctx.translate(-left, -top)
+                            var lookup = root.nodeLookup()
                             ctx.strokeStyle = "#e8edf0"; ctx.lineWidth = 1; ctx.beginPath()
-                            for(var x=0;x<width;x+=25) {ctx.moveTo(x,0);ctx.lineTo(x,height)}
-                            for(var y=0;y<height;y+=25) {ctx.moveTo(0,y);ctx.lineTo(width,y)}
+                            for(var x=Math.floor(left/25)*25;x<right;x+=25) {ctx.moveTo(x,top);ctx.lineTo(x,bottom)}
+                            for(var y=Math.floor(top/25)*25;y<bottom;y+=25) {ctx.moveTo(left,y);ctx.lineTo(right,y)}
                             ctx.stroke()
                             var edges = modelRef.edges
                             for(var i=0;i<edges.length;i++) {
-                                var e = edges[i], g = root.edgeGeometry(e); if(!g) continue
+                                var e = edges[i], g = root.edgeGeometry(e, lookup); if(!g) continue
+                                // Include arrowheads and percentage labels in the culling margin.
+                                if (Math.max(g.x1,g.x2) < left-100 || Math.min(g.x1,g.x2) > right+100
+                                        || Math.max(g.y1,g.y2) < top-100 || Math.min(g.y1,g.y2) > bottom+100) continue
                                 ctx.strokeStyle = e.id === root.selectedEdge ? "#1976d2" : "#37474f"
                                 ctx.fillStyle = ctx.strokeStyle; ctx.lineWidth = 2
                                 ctx.beginPath(); ctx.moveTo(g.x1,g.y1); ctx.lineTo(g.x2,g.y2); ctx.stroke()
@@ -235,10 +253,10 @@ ApplicationWindow {
                                 }
                             }
                             if (root.connectSource) {
-                                var source = root.nodeById(root.connectSource)
+                                var source = lookup[root.connectSource]
                                 if (source) {
                                     var preview = root.connectTarget && root.connectTarget !== root.connectSource
-                                        ? root.edgeGeometry({source: root.connectSource, target: root.connectTarget}) : null
+                                        ? root.edgeGeometry({source: root.connectSource, target: root.connectTarget}, lookup) : null
                                     if (!preview) {
                                         var sx = source.x + 80, sy = source.y + 45
                                         preview = {x1: sx, y1: sy, x2: root.connectPoint.x, y2: root.connectPoint.y,
@@ -256,13 +274,13 @@ ApplicationWindow {
                         MouseArea {
                             anchors.fill: parent
                             onDoubleClicked: function(mouse) {
-                                var edge = root.edgeAt(mouse.x, mouse.y)
+                                var edge = root.edgeAt(mouse.x + viewport.contentX, mouse.y + viewport.contentY)
                                 if (edge) root.openEdge(edge)
-                                else root.openNewNode(mouse.x - 80, mouse.y - 45)
+                                else root.openNewNode(mouse.x + viewport.contentX - 80, mouse.y + viewport.contentY - 45)
                             }
                             onClicked: function(mouse) {
                                 board.forceActiveFocus()
-                                var edge = root.edgeAt(mouse.x, mouse.y)
+                                var edge = root.edgeAt(mouse.x + viewport.contentX, mouse.y + viewport.contentY)
                                 root.selectedNode = ""
                                 root.selectedEdge = edge ? edge.id : ""
                             }

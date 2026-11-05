@@ -963,14 +963,32 @@ class MindMapController(QObject):
         if self.causal_diagrams.get(key) == state:
             return True
         # Retain import history even if the last graph node has been removed.
-        return self._commit(lambda: self.causal_diagrams.update({key: state}))
+        return self._commit_causal(key, state)
 
     @Slot(str, result=bool)
     def removeCausalDiagram(self, node_id):
         key = self.sourceNodeId(node_id)
         if key not in self.causal_diagrams:
             return False
-        return self._commit(lambda: self.causal_diagrams.pop(key))
+        return self._commit_causal(key, None)
+
+    def _commit_causal(self, key, state):
+        """Record an attachment edit without rebuilding unchanged map topology."""
+        before = {'causal_owner': key,
+                  'causal_state': copy.deepcopy(self.causal_diagrams.get(key))}
+        badge = self._has_causal_diagram(key)
+        self._last_commit_error = ""
+        if state is None:
+            self.causal_diagrams.pop(key)
+        else:
+            self.causal_diagrams[key] = state
+        self._undo.append((before, self._selection_state(), None))
+        del self._undo[:-100]
+        self._redo.clear()
+        if badge != self._has_causal_diagram(key):
+            self.sceneChanged.emit()
+        self.changed.emit()
+        return True
 
     def import_causal_actions(self, node_id, action_ids=None):
         key = self.sourceNodeId(node_id)
@@ -1927,6 +1945,7 @@ class MindMapController(QObject):
             return False
         if self.to_dict() != before:
             self._undo.append((before, selected, tab_state))
+            del self._undo[:-100]
             self._redo.clear()
         valid_selection = [key for key in self._selected_ids if self._in_scope(self._find(key))]
         self._set_selection(valid_selection or [self.view_root.id])
@@ -2385,6 +2404,31 @@ class MindMapController(QObject):
         if not source:
             return
         payload, selection, tab_state = source[-1]
+        if 'causal_owner' in payload:
+            # Attachment-only entries share the global history ordering without
+            # serializing or restoring unrelated map topology and metadata.
+            key = payload['causal_owner']
+            destination.append(({'causal_owner': key,
+                                 'causal_state': copy.deepcopy(self.causal_diagrams.get(key))},
+                                self._selection_state(), None))
+            del destination[:-100]
+            source.pop()
+            badge = self._has_causal_diagram(key)
+            state = payload['causal_state']
+            if state is None:
+                self.causal_diagrams.pop(key, None)
+            else:
+                self.causal_diagrams[key] = copy.deepcopy(state)
+            self._restore_selection(selection)
+            valid = [node_id for node_id in self._selected_ids
+                     if self._in_scope(self._find(node_id))]
+            self._set_selection(valid or [self.view_root.id])
+            self._cut_ids = []
+            if badge != self._has_causal_diagram(key):
+                self.sceneChanged.emit()
+            self.changed.emit()
+            self.historyRestored.emit()
+            return
         inverse = None
         if tab_state is not None:
             self._changing_tabs = True
@@ -2396,6 +2440,7 @@ class MindMapController(QObject):
             finally:
                 self._changing_tabs = False
         destination.append((copy.deepcopy(self.to_dict()), self._selection_state(), inverse))
+        del destination[:-100]
         source.pop()
         self._restore_selection(selection)
         self._cut_ids = []
