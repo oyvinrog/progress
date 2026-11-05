@@ -1718,7 +1718,7 @@ class TabModel(QAbstractListModel):
                 continue
             if index < 0 or index >= len(self._tabs):
                 continue
-            if index == self._current_tab_index or index in normalized:
+            if index in normalized:
                 continue
             normalized.append(index)
             if len(normalized) >= 5:
@@ -1729,6 +1729,7 @@ class TabModel(QAbstractListModel):
         self._emitRecentTabsChanged()
 
     def _recordRecentTab(self, index: int) -> None:
+        """Record a node's owning tab, even if it is the active tab."""
         if index < 0 or index >= len(self._tabs):
             return
         merged = [index]
@@ -2346,7 +2347,11 @@ class TabModel(QAbstractListModel):
         self._current_tab_index = index
         self.currentTabIndexChanged.emit()
         self.currentTabChanged.emit()
-        self._recordRecentTab(previous_index)
+        # A direct tab switch keeps the destination out of quick access;
+        # node visits may add it back without switching the active tab.
+        self._setRecentTabIndices([previous_index] + [
+            recent for recent in self._recent_tab_indices if recent != index
+        ])
 
     def getCurrentTabData(self) -> Optional[Tab]:
         """Get the current goal, or None for an empty project."""

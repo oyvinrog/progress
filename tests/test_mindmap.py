@@ -34,6 +34,36 @@ def thought(controller, text='Secret thought', note='Secret note'):
     return controller.selectedId
 
 
+@pytest.mark.parametrize('route', ['select', 'activity', 'kanban', 'reminder'])
+def test_node_visits_record_parent_tab_without_switching(project, route):
+    pm, tabs, _, _ = project
+    m = pm.mindmap
+    tabs.addTab('Other')
+    owners = [m.map.find(next(key for key, value in m.links.items() if value == tab.id))
+              for tab in tabs.getAllTabs()]
+    children = [owner.add_child('Branch').add_child('Leaf') for owner in owners]
+    notifications = []
+    tabs.recentTabsChanged.connect(lambda: notifications.append(tabs.recentTabIndices))
+
+    for index in [0, 1, 0]:
+        node = children[index]
+        if route == 'select':
+            m.select(node.id)
+        elif route == 'activity':
+            m.setActivityFilter('plan:' + node.id)
+        elif route == 'kanban':
+            pm.openKanbanItem('node:' + node.id)
+        else:
+            m.reveal_reminder(node.id)
+        assert tabs.recentTabIndices[0] == index
+        assert tabs.currentTabIndex == 0
+
+    assert tabs.recentTabIndices == [0, 1]
+    assert notifications[-1] == [0, 1]
+    m.select('missing-node')
+    assert tabs.recentTabIndices == [0, 1]
+
+
 def test_tab_connections_keep_mindmap_metaobject_static(app):
     tabs = TabModel()
     tabs.addTab("Main")

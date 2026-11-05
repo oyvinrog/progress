@@ -246,6 +246,17 @@ class MindMapController(QObject):
     def _tab_id(self, node):
         return self.links.get(_content(node).id) if node is not None else None
 
+    def _record_node_visit(self, node):
+        """Keep the nearest owning tab handy when navigating its nodes."""
+        if self._tabs is None:
+            return
+        while node is not None:
+            tab_id = self._tab_id(node)
+            if tab_id is not None:
+                self._tabs._recordRecentTab(self._tabs.goalIndex(tab_id))
+                return
+            node = node.parent
+
     @Slot(str, result=str)
     def calendarActivityId(self, node_id):
         """Resolve placements to the existing goal or canonical node activity."""
@@ -1412,6 +1423,7 @@ class MindMapController(QObject):
         self._date_filter = ''
         self._activity_filter = activity_id
         self._set_selection([node.id])
+        self._record_node_visit(node)
         self.sceneChanged.emit()
         self.changed.emit()
         self.resetView.emit()
@@ -1755,6 +1767,8 @@ class MindMapController(QObject):
             self._selection_anchor = anchor
         else:
             self._set_selection([node_id])
+        if node_id in self._selected_ids:
+            self._record_node_visit(self._find(node_id))
         self.changed.emit()
 
     def _branch_roots(self, ids):
