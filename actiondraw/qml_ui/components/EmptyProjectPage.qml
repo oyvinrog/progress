@@ -18,15 +18,6 @@ Rectangle {
 
         Label {
             Layout.fillWidth: true
-            text: "What would you like to achieve?"
-            color: "#edf3f8"
-            font.pixelSize: page.width < 600 ? 28 : 36
-            font.bold: true
-            horizontalAlignment: Text.AlignHCenter
-            wrapMode: Text.WordWrap
-        }
-        Label {
-            Layout.fillWidth: true
             text: "Start by adding a goal. Then break it into smaller steps and organize your ideas in a mind map."
             color: "#a6b5c4"
             font.pixelSize: 16
