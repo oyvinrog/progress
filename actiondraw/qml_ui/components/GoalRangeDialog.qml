@@ -7,6 +7,10 @@ Dialog {
     objectName: "goalRangeDialog"
     property var goalModel
     property bool activityCard: false
+    property bool calendarCreation: false
+    readonly property bool addingCalendarActivity: calendarCreation && !goalId && !nodeId && !activityCard && !saveHandler
+    property string successMessage: ""
+    signal activityCreated(string id, string name)
     property real anchorX: 0
     property real anchorY: 0
     property var saveHandler: null
@@ -33,6 +37,7 @@ Dialog {
         endField.text = goal ? (goal.endDate || goal.goalEndDate || today) : today
         sourceStart = startField.text; sourceEnd = endField.text
         errorLabel.text = ""
+        successMessage = ""
         open()
     }
     function showForNode(id, name) {
@@ -43,9 +48,12 @@ Dialog {
         endField.text = startField.text
         sourceStart = startField.text; sourceEnd = endField.text
         errorLabel.text = ""
+        successMessage = ""
         open()
     }
-    function saveRange() {
+    function saveRange(addAnother) {
+        errorLabel.text = ""
+        successMessage = ""
         if (nodeId) {
             if (!nodeController || !nodeController.createScheduledGoalFromNode(nodeId, startField.text, endField.text)) {
                 errorLabel.text = "Choose a valid end date on or after the start date. The node must still exist and not already be a goal."
@@ -67,8 +75,18 @@ Dialog {
             errorLabel.text = "Enter a name and choose an end date on or after the start date."
             return
         }
-        if (!dialog.goalId && dialog.projectManager)
-            dialog.projectManager.switchTab(dialog.goalModel.goalIndex(id))
+        if (!dialog.goalId) {
+            var createdName = nameField.text.trim()
+            dialog.activityCreated(id, createdName)
+            if (!dialog.calendarCreation && dialog.projectManager)
+                dialog.projectManager.switchTab(dialog.goalModel.goalIndex(id))
+            if (addAnother && dialog.addingCalendarActivity) {
+                successMessage = "Added ‘" + createdName + "’"
+                nameField.text = ""
+                nameField.forceActiveFocus()
+                return
+            }
+        }
         dialog.close()
     }
     onOpened: {
@@ -78,6 +96,7 @@ Dialog {
     onClosed: datePicker.close()
     Shortcut { sequence: "Return"; enabled: dialog.visible && !datePicker.visible; onActivated: dialog.saveRange() }
     Shortcut { sequence: "Enter"; enabled: dialog.visible && !datePicker.visible; onActivated: dialog.saveRange() }
+    Shortcut { sequences: ["Ctrl+Return", "Ctrl+Enter"]; enabled: dialog.visible && dialog.addingCalendarActivity && !datePicker.visible; onActivated: dialog.saveRange(true) }
 
     Popup {
         id: datePicker
@@ -160,14 +179,23 @@ Dialog {
         Label { text: "End date (inclusive)" }
         Button { id: endField; objectName: "goalRangeEnd"; Layout.fillWidth: true; Accessible.name: "Choose end date: " + text; onClicked: datePicker.showFor(endField) }
         Label { id: errorLabel; objectName: "goalRangeError"; Layout.fillWidth: true; wrapMode: Text.WordWrap; color: "#ffaaa0"; visible: text.length > 0 }
+        Label { objectName: "goalRangeSuccess"; text: dialog.successMessage; Layout.fillWidth: true; wrapMode: Text.WordWrap; visible: text.length > 0 }
         Button {
             visible: dialog.activityCard; text: "Open activity"; objectName: "openCalendarActivity"
             onClicked: { dialog.activityOpened(dialog.goalId); dialog.close() }
         }
-        RowLayout {
+        GridLayout {
+            columns: dialog.addingCalendarActivity && dialog.availableWidth >= 300 ? 3 : 2
             Button {
-                text: "Save"; objectName: "saveGoalRange"
+                text: dialog.addingCalendarActivity ? "Add" : "Save"; objectName: "saveGoalRange"
                 onClicked: dialog.saveRange()
+            }
+            Button {
+                text: "Add another"; objectName: "addAnotherGoalRange"
+                visible: dialog.addingCalendarActivity
+                ToolTip.visible: hovered
+                ToolTip.text: "Add and keep these dates for the next activity (Ctrl+Enter)"
+                onClicked: dialog.saveRange(true)
             }
             Button { objectName: "cancelGoalRange"; text: "Cancel"; onClicked: dialog.close() }
         }

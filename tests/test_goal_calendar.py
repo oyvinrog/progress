@@ -189,7 +189,11 @@ def test_day_double_click_creates_goal(calendar_ui, app, date, save):
         assert len(tabs.scheduledGoals) == 1
         assert tabs.scheduledGoals[0]["startDate"] == date
         assert tabs.scheduledGoals[0]["endDate"] == "2032-03-02"
-        assert host.property("action") == "open-goal-1"
+        assert host.property("action") == ""
+        assert tabs.currentTabIndex == 0
+        assert overview.property("selectedDate") == date
+        assert overview.property("planningOpen")
+        assert overview.property("calendarMessage") == "Added ‘Calendar goal’"
     overview.setProperty("goalModel", None)
 
 
@@ -290,6 +294,98 @@ def test_date_picker_and_enter_save(calendar_ui, app, enter_key):
     assert not dialog.property("visible")
     assert tabs.tabCount == 2
     overview.setProperty("goalModel", None)
+
+
+@pytest.mark.parametrize('submit', ['button', Qt.Key_Return, Qt.Key_Enter])
+def test_calendar_bulk_entry(calendar_ui, app, submit):
+    root, host, overview, _, _, click = calendar_ui
+    tabs = TabModel()
+    tabs.addTab('Main')
+    overview.setProperty('goalModel', tabs)
+    dialog = overview.findChild(QObject, 'goalRangeDialog')
+    dialog.show(None, '2032-02-28')
+    QTest.qWait(30)
+    name = dialog.findChild(QObject, 'goalRangeName')
+    end = dialog.findChild(QObject, 'goalRangeEnd')
+    end.setProperty('text', '2032-03-02')
+    host.setProperty('action', 'unchanged')
+
+    def add_another():
+        if submit == 'button':
+            click('addAnotherGoalRange')
+        else:
+            QTest.keyClick(root, submit, Qt.ControlModifier)
+            app.processEvents()
+
+    for index in range(2):
+        name.setProperty('text', 'Batch %s' % index)
+        add_another()
+        assert tabs.tabCount == index + 2
+        assert dialog.property('visible')
+        assert name.property('text') == ''
+        assert name.property('activeFocus')
+        assert dialog.findChild(QObject, 'goalRangeStart').property('text') == '2032-02-28'
+        assert end.property('text') == '2032-03-02'
+        assert dialog.property('successMessage') == 'Added ‘Batch %s’' % index
+        assert host.property('action') == 'unchanged'
+
+    # Blank and invalid date submissions retain the draft and create nothing.
+    name.setProperty('text', '   ')
+    add_another()
+    assert tabs.tabCount == 3
+    assert name.property('text') == '   '
+    assert dialog.findChild(QObject, 'goalRangeError').property('visible')
+    name.setProperty('text', 'Invalid dates')
+    end.setProperty('text', '2032-02-27')
+    add_another()
+    assert tabs.tabCount == 3
+    assert name.property('text') == 'Invalid dates'
+    assert end.property('text') == '2032-02-27'
+    click('cancelGoalRange')
+    assert not dialog.property('visible')
+    assert len(tabs.scheduledGoals) == 2
+    dialog.show(None, '2032-02-29')
+    assert dialog.property('successMessage') == ''
+    assert not dialog.findChild(QObject, 'goalRangeError').property('visible')
+    dialog.close()
+    overview.setProperty('goalModel', None)
+
+
+@pytest.mark.parametrize('width', [280, 320, 1000])
+def test_calendar_creation_buttons_fit(calendar_ui, app, width):
+    root, _, overview, _, _, _ = calendar_ui
+    root.setWidth(width)
+    dialog = overview.findChild(QObject, 'goalRangeDialog')
+    dialog.show(None, '2032-02-28')
+    QTest.qWait(30)
+    rectangles = []
+    for name in ['saveGoalRange', 'addAnotherGoalRange', 'cancelGoalRange']:
+        button = find(root, name)
+        point = button.mapToScene(QPointF(0, 0))
+        assert button.isVisible()
+        assert point.x() >= 0
+        assert point.x() + button.width() <= width
+        assert point.y() + button.height() <= root.height()
+        rect = button.mapRectToScene(button.boundingRect())
+        assert all(not rect.intersects(other) for other in rectangles)
+        rectangles.append(rect)
+    dialog.close()
+
+
+@pytest.mark.parametrize('calendar_creation', [False, True])
+def test_first_goal_creation_navigation(calendar_ui, app, calendar_creation):
+    root, host, overview, _, _, click = calendar_ui
+    tabs = TabModel()
+    overview.setProperty('goalModel', tabs)
+    dialog = overview.findChild(QObject, 'goalRangeDialog')
+    dialog.setProperty('calendarCreation', calendar_creation)
+    dialog.show(None, '2032-02-28')
+    dialog.findChild(QObject, 'goalRangeName').setProperty('text', 'First goal')
+    assert dialog.findChild(QObject, 'addAnotherGoalRange').property('visible') == calendar_creation
+    click('saveGoalRange')
+    assert tabs.currentTabIndex == 0
+    assert host.property('action') == ('' if calendar_creation else 'open-goal-0')
+    overview.setProperty('goalModel', None)
 
 
 def test_mindmap_created_goal_appears_in_calendar(calendar_ui, app):

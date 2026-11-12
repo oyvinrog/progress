@@ -139,7 +139,14 @@ Item {
             if (index >= 0) projectManager.switchTab(index)
         }
     }
-    GoalRangeDialog { id: goalDialog; parent: Overlay.overlay; goalModel: overview.goalModel; projectManager: overview.projectManager }
+    GoalRangeDialog {
+        id: goalDialog
+        parent: Overlay.overlay
+        goalModel: overview.goalModel
+        projectManager: overview.projectManager
+        calendarCreation: true
+        onActivityCreated: function(id, name) { overview.calendarMessage = "Added ‘" + name + "’" }
+    }
     GoalRangeDialog { id: planDialog; parent: Overlay.overlay; objectName: "planRangeDialog"; goalModel: overview.planController; projectManager: overview.projectManager }
     property var planController
     property double nowTimestamp: Date.now() / 1000

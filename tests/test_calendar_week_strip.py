@@ -142,6 +142,39 @@ def test_week_add_activity_does_not_filter_map(project, calendar_ui, app):
     overview.setProperty('goalModel', None)
 
 
+def test_calendar_add_preserves_navigation(project, calendar_ui, app):
+    pm, tabs, tasks, diagram = project
+    root, host, overview, calendar, _, click = calendar_ui
+    overview.setProperty('goalModel', tabs)
+    overview.setProperty('planController', pm.mindmap)
+    overview.setProperty('projectManager', pm)
+    click('closePlanningMonth')
+    overview.selectDate('2032-02-28')
+    before = (tabs.currentTabIndex, overview.property('weekStart'),
+              calendar.property('displayedMonth'), calendar.property('displayedYear'),
+              list(pm.mindmap.selectedIds))
+    reset = QSignalSpy(pm.mindmap.resetView)
+    switched = QSignalSpy(tabs.currentTabIndexChanged)
+    click('addWeekActivity_2032-02-29')
+    dialog = overview.findChild(QObject, 'goalRangeDialog')
+    dialog.findChild(QObject, 'goalRangeName').setProperty('text', 'Stay here')
+    click('saveGoalRange')
+    assert not dialog.property('visible')
+    assert tabs.tabCount == 2
+    assert (tabs.currentTabIndex, overview.property('weekStart'),
+            calendar.property('displayedMonth'), calendar.property('displayedYear'),
+            list(pm.mindmap.selectedIds)) == before
+    assert overview.property('selectedDate') == '2032-02-28'
+    assert pm.mindmap.dateFilter == '2032-02-28'
+    assert not overview.property('planningOpen')
+    assert reset.count() == switched.count() == 0
+    assert find(root, 'weekDay_2032-02-29').property('goalCount') == 1
+    assert overview.property('calendarMessage') == 'Added ‘Stay here’'
+    overview.setProperty('goalModel', None)
+    overview.setProperty('planController', None)
+    overview.setProperty('projectManager', None)
+
+
 @pytest.mark.parametrize('dropdown_date', ['2032-02-28', '2032-02-29'])
 def test_dropdown_browses_day_without_refreshing_map(project, calendar_ui, app, dropdown_date):
     pm, tabs, _, _ = project
