@@ -4540,7 +4540,7 @@ def test_calendar_date_filter_keeps_matching_branches_and_ancestors(project):
     assert unrelated.id not in visible
     assert m.selectedId in visible
     m.setDateFilter('2026-10-20')
-    assert {n['id'] for n in m.nodes} == {m.map.root.id}
+    assert {n['id'] for n in m.nodes} == {'calendar-day:2026-10-20'}
     m.setDateFilter('')
     assert unrelated.id in {n['id'] for n in m.nodes}
 
@@ -4589,7 +4589,7 @@ def test_calendar_filtered_node_creation_edits_new_node(
     assert m.map.find(created).text == 'new idea'
     assert all(m.map.find(node_id).text == text for node_id, text in before.items())
     # Children of a matching activity already belong to the day view.
-    inside_day_branch = target in {'child', 'grandchild'} or (
+    inside_day_branch = target in {'root', 'child', 'grandchild'} or (
         target == 'planned' and key == Qt.Key_Tab)
     assert bool(m.dateFilter) == inside_day_branch
     if inside_day_branch:
@@ -4598,6 +4598,9 @@ def test_calendar_filtered_node_creation_edits_new_node(
         assert {planned.id, child.id, grandchild.id, created} <= visible
         assert unrelated.id not in visible
     assert created not in m.plan_ranges
+    if target == 'root':
+        assert m.links[created] in {g['id'] for g in tabs.scheduledGoals
+                                    if g['startDate'] == g['endDate'] == '2032-02-28'}
 
 
 def test_calendar_selection_filters_map_in_qml(project, actiondraw_window):
@@ -5008,3 +5011,137 @@ def test_qml_node_calendar_drop(project, app, actiondraw_window, kind, duration,
         assert m.to_dict()['plan_ranges'] == payload['plan_ranges']
     else:
         assert (model.plannedGoals if kind == 'node' else tabs.scheduledGoals) == before
+
+
+def test_virtual_day_root_projection_navigation_and_persistence(project):
+    m = project[0].mindmap
+    context = m.map.root.add_child('Context', side='right')
+    activity = context.add_child('Activity')
+    child = activity.add_child('Child')
+    other = context.add_child('Other')
+    m.setGoalRange('plan:' + activity.id, '2032-02-28', '2032-02-29')
+    before = copy.deepcopy(m.to_dict())
+    m.setDateFilter('2032-02-28')
+    root_id = 'calendar-day:2032-02-28'
+    root = next(n for n in m.nodes if n['isVirtualDateRoot'])
+    assert root['id'] == root_id and root['text'] == '2032-02-28'
+    assert root['isViewRoot'] and not root['isTab']
+    assert {n['id'] for n in m.nodes} == {root_id, context.id, activity.id, child.id}
+    assert len(m.edges) == 3
+    assert context.parent is m.map.root and other.parent is context
+    m.select(root_id)
+    assert m.selectedNode['isVirtualDateRoot']
+    m.navigate('right')
+    assert m.selectedId == context.id
+    m.navigate('left')
+    assert m.selectedId == root_id
+    m.setDateFilter('2032-03-01')
+    assert m.selectedId == 'calendar-day:2032-03-01'
+    assert len(m.nodes) == 1 and not m.nodes[0]['hasChildren']
+    assert m.to_dict() == before
+    m.clearCalendarFilter()
+    assert m.selectedId == m.map.root.id
+    assert not any(n['isVirtualDateRoot'] for n in m.nodes)
+    assert m.to_dict() == before
+
+
+@pytest.mark.parametrize('creation', ['child', 'sibling', 'named'])
+def test_virtual_day_root_creates_calendar_activity(project, creation):
+    m, tabs = project[0].mindmap, project[1]
+    m.setDateFilter('2032-02-29')
+    root_id = 'calendar-day:2032-02-29'
+    m.select(root_id)
+    current = tabs.currentTabIndex
+    count = tabs.tabCount
+    if creation == 'named':
+        assert not m.addChildNamed(root_id, ' ')
+        assert m.addChildNamed(root_id, 'Day activity')
+    else:
+        assert m.addThought(creation == 'sibling')
+        assert m.editNode(m.selectedId, 'Day activity', '')
+    assert tabs.tabCount == count + 1 and tabs.currentTabIndex == current
+    assert m.dateFilter == '2032-02-29'
+    node = m.map.find(m.selectedId)
+    assert node.parent is m.map.root and node.text == 'Day activity'
+    goal = next(g for g in tabs.scheduledGoals if g['id'] == m.links[node.id])
+    assert goal['name'] == 'Day activity'
+    assert goal['startDate'] == goal['endDate'] == '2032-02-29'
+    assert {n['id'] for n in m.nodes} == {root_id, node.id}
+    saved = m.to_dict()
+    assert 'calendar-day:' not in json.dumps(saved)
+    restored, links = m.decode(saved)
+    assert restored.find(node.id).parent is restored.root
+    assert links[node.id] == goal['id']
+
+
+def test_virtual_day_root_rejects_content_mutations(project):
+    m = project[0].mindmap
+    m.setDateFilter('2032-02-28')
+    root_id = 'calendar-day:2032-02-28'
+    m.select(root_id)
+    before = copy.deepcopy(m.to_dict())
+    assert not m.canCut and not m.canCreateTab
+    assert not m.editNode(root_id, 'Renamed', 'Notes')
+    assert not m.copySelected()
+    assert not m.copyBranchAsText(root_id)
+    assert not m.copyBranchAsOpml(root_id)
+    QGuiApplication.clipboard().setText('Pasted')
+    assert not m.pasteSelected()
+    assert not m.setGoalRange(root_id, '2032-02-28', '2032-02-28')
+    assert not m.createScheduledGoalFromNode(root_id, '2032-02-28', '2032-02-28')
+    assert not m.setDeadline(root_id, 5)
+    assert not m.deleteNode(root_id)
+    m.deleteSelected()
+    m.toggleBold()
+    m.toggleCompleted()
+    m.toggleBookmark(root_id)
+    m.toggleMeasureProgress(root_id)
+    m.cutSelected()
+    m.moveNode(root_id, next(iter(m.links)), 'child')
+    m.moveNode(next(iter(m.links)), root_id, 'child')
+    assert not m.cutNodeIds
+    assert m.to_dict() == before
+    assert m.selectedId == root_id
+
+
+
+@pytest.mark.parametrize('route', ['menu', 'button', 'context'])
+def test_virtual_day_root_qml_child_creation(project, actiondraw_window, route):
+    from test_reminder_calendar import find
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(100)
+    m.setDateFilter('2032-02-29')
+    m.select('calendar-day:2032-02-29')
+    pane = find(window, 'mindmapPane')
+    pane.forceActiveFocus()
+    QTest.qWait(30)
+    # Editing the date itself must never open the content editor.
+    QTest.keyClick(window, Qt.Key_F2)
+    editor = window.findChild(QObject, 'mindmapNodeEditor')
+    assert not editor.property('visible')
+    if route in ('menu', 'context'):
+        if route == 'menu':
+            assert QMetaObject.invokeMethod(find(window, 'mindmapActionsButton'), 'clicked')
+        else:
+            mouse = find(window, 'mindmapNodeMouse_calendar-day:2032-02-29')
+            QTest.mouseClick(window, Qt.RightButton, Qt.NoModifier,
+                             mouse.mapToScene(mouse.boundingRect().center()).toPoint())
+            QTest.qWait(30)
+        assert window.findChild(QObject, 'mindmapDateRootMenu').property('visible')
+        assert not window.findChild(QObject, 'mindmapActionsMenu').property('visible')
+        assert QMetaObject.invokeMethod(window.findChild(QObject, 'mindmapDateRootAddChild'), 'triggered')
+    else:
+        assert QMetaObject.invokeMethod(find(window, 'mindmapAddChild'), 'clicked')
+    assert editor.property('visible')
+    assert find(window, 'mindmapNodeTitle').property('selectedText') == 'New thought'
+    assert tabs.tabCount == 2 and tabs.currentTabIndex == 0
+    assert m.dateFilter == '2032-02-29'
+    assert m.selectedId in m.links
+    assert tabs.scheduledGoals[0]['startDate'] == tabs.scheduledGoals[0]['endDate'] == '2032-02-29'
+    QMetaObject.invokeMethod(editor, 'reject')
+    window.close()

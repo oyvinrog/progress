@@ -96,6 +96,7 @@ FocusScope {
     readonly property bool hasRunningDeadlines: sceneNodes.some(function(node) {
         return node.deadlineActive && node.deadlineStart + node.deadlineDuration > pane.deadlineNow
     })
+    readonly property bool dateRootSelected: !!controller && controller.selectedNode.isVirtualDateRoot === true
     readonly property var selectedNodeSet: new Set(controller ? controller.selectedIds : [])
     readonly property var cutNodeSet: new Set(controller ? controller.cutNodeIds : [])
     property real zoom: 1
@@ -129,7 +130,7 @@ FocusScope {
             pane.hoveredNodeId = ""
         }
     }
-    readonly property bool shortcutsEnabled: visible && activeFocus && !toolDialogOpen && !editor.visible && !quickChildDialog.visible && !nodeMenu.visible && !actionsButton.activeFocus && !prioritySlider.activeFocus && !actionsMenu.visible && !helpDialog.visible && !deadlineDialog.visible && !tabReferenceDialog.visible && !parentDialog.visible && !nodeGoalRangeDialog.visible && !reminderDialogOpen
+    readonly property bool shortcutsEnabled: visible && activeFocus && !toolDialogOpen && !editor.visible && !quickChildDialog.visible && !nodeMenu.visible && !actionsButton.activeFocus && !prioritySlider.activeFocus && !actionsMenu.visible && !dateRootMenu.visible && !helpDialog.visible && !deadlineDialog.visible && !tabReferenceDialog.visible && !parentDialog.visible && !nodeGoalRangeDialog.visible && !reminderDialogOpen
     readonly property bool searching: controller && controller.searchQuery.length > 0
     onSearchingChanged: if (searching) navigationHighlightId = ""
     onShortcutsEnabledChanged: if (!shortcutsEnabled && controller) controller.clearSearch()
@@ -241,7 +242,7 @@ FocusScope {
         }
     }
     function editNode() {
-        if (!controller) return
+        if (!controller || dateRootSelected) return
         var node = controller.selectedNode
         titleField.text = node.text || ""
         noteField.text = node.note || ""
@@ -334,10 +335,18 @@ FocusScope {
                 text: "Mindmap ▾"
                 Accessible.name: "Mindmap actions"
                 enabled: !!pane.controller
-                onClicked: actionsMenu.open()
-                Keys.onDownPressed: actionsMenu.open()
-                Keys.onReturnPressed: actionsMenu.open()
-                Keys.onEnterPressed: actionsMenu.open()
+                function openMenu() {
+                    if (pane.dateRootSelected) {
+                        var point = actionsButton.mapToItem(pane, 0, actionsButton.height)
+                        dateRootMenu.x = point.x
+                        dateRootMenu.y = point.y
+                        dateRootMenu.open()
+                    } else actionsMenu.open()
+                }
+                onClicked: openMenu()
+                Keys.onDownPressed: openMenu()
+                Keys.onReturnPressed: openMenu()
+                Keys.onEnterPressed: openMenu()
                 Menu {
                     id: actionsMenu
                     objectName: "mindmapActionsMenu"
@@ -454,6 +463,7 @@ FocusScope {
             }
             CompanionButton {
                 id: causalTool
+                enabled: !pane.dateRootSelected
                 objectName: "mindmapCausalDiagramButton"
                 label: "Causal Diagram"
                 iconKey: "causal"
@@ -934,7 +944,7 @@ FocusScope {
                                 onExited: insertionHoverExit.restart()
                                 onPressedChanged: { pane.nodePressed = pressed; nodeLoader.dragging = pressed }
                                 cursorShape: Qt.PointingHandCursor
-                                drag.target: !canceled && pressedButtons === Qt.LeftButton ? nodeItem : null
+                                drag.target: !nodeItem.modelData.isVirtualDateRoot && !canceled && pressedButtons === Qt.LeftButton ? nodeItem : null
                                 drag.axis: reorderDrag ? Drag.YAxis : Drag.XAndYAxis
                                 property bool wasDragged: false
                                 property bool reorderDrag: false
@@ -1009,7 +1019,8 @@ FocusScope {
                                     if (mouse.button === Qt.RightButton) {
                                         if (!nodeItem.selected) pane.controller.select(nodeId)
                                         nodeMenu.targetNodeId = nodeId
-                                        nodeMenu.popup()
+                                        if (nodeItem.modelData.isVirtualDateRoot) dateRootMenu.popup()
+                                        else nodeMenu.popup()
                                     } else if (mouse.modifiers & Qt.ControlModifier) {
                                         pane.controller.select(nodeId, "toggle")
                                     } else if (mouse.modifiers & Qt.ShiftModifier) {
@@ -1136,7 +1147,8 @@ FocusScope {
                                     onClicked: {
                                         pane.controller.select(nodeItem.modelData.id)
                                         nodeMenu.targetNodeId = nodeItem.modelData.id
-                                        nodeMenu.popup()
+                                        if (nodeItem.modelData.isVirtualDateRoot) dateRootMenu.popup()
+                                        else nodeMenu.popup()
                                     }
                                 }
                             }
@@ -1157,7 +1169,7 @@ FocusScope {
                     return null
                 }
                 visible: !!targetNode && !pane.nodePressed && !canvasMouse.pressed
-                         && !editor.visible && !quickChildDialog.visible && !nodeMenu.visible && !actionsMenu.visible
+                         && !editor.visible && !quickChildDialog.visible && !nodeMenu.visible && !actionsMenu.visible && !dateRootMenu.visible
                          && !helpDialog.visible && !deadlineDialog.visible && !nodeGoalRangeDialog.visible && !pane.reminderDialogOpen
                 Repeater {
                     model: 4
@@ -1234,6 +1246,8 @@ FocusScope {
                                 // This local action deletes only the node it belongs to.
                                 pane.controller.select(nodeId)
                                 pane.controller.deleteSelected()
+                            } else if (child && insertionControls.targetNode.isVirtualDateRoot) {
+                                pane.addThought(false)
                             } else if (child) {
                                 quickChildDialog.targetNodeId = nodeId
                                 quickChildTitle.text = ""
@@ -1328,6 +1342,15 @@ FocusScope {
                 Keys.onReturnPressed: if (acceptableInput) deadlineDialog.accept()
                 Keys.onEnterPressed: if (acceptableInput) deadlineDialog.accept()
             }
+        }
+    }
+    Menu {
+        id: dateRootMenu
+        objectName: "mindmapDateRootMenu"
+        MenuItem {
+            objectName: "mindmapDateRootAddChild"
+            text: "Add child"
+            onTriggered: pane.addThought(false)
         }
     }
     Menu {

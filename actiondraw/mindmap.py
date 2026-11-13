@@ -238,6 +238,42 @@ class MindMapController(QObject):
                 return self._projection_nodes[node_id]
         return self.map.find(node_id)
 
+    @property
+    def _date_root_id(self):
+        return 'calendar-day:' + self._date_filter if self._date_filter else ''
+
+    def _is_date_root(self, node_id):
+        return bool(self._date_filter and node_id == self._date_root_id)
+
+    def _display_id(self, node):
+        return self._date_root_id if self._date_filter and node is self.view_root else node.id
+
+    def _date_root_data(self):
+        # Only the scene and selection expose this identity. _find deliberately
+        # resolves stored nodes only, so content mutations reject the day root.
+        return {'id': self._date_root_id, 'sourceId': '', 'text': self._date_filter,
+                'note': '', 'isVirtualDateRoot': True, 'isViewRoot': True,
+                'isTab': False, 'isReference': False, 'folded': False,
+                'bold': False, 'completed': False, 'bookmarked': False,
+                'hasNote': False, 'hasCausalDiagram': False,
+                'measureProgress': False, 'showCompletionCheckbox': False,
+                'progressPercent': 0, 'priorityScore': None, 'priorityLevel': 0, 'priorityRank': 0,
+                **self._plan_data(self._date_root_id),
+                **self._reminder_data(self._date_root_id),
+                **self._deadline_data(self._date_root_id)}
+
+    def _create_day_activity(self, title):
+        title = title.strip()
+        if not self._date_filter or self._tabs is None or not title:
+            return False
+        goal_id = self._tabs.createScheduledGoal(title, self._date_filter, self._date_filter)
+        if not goal_id:
+            return False
+        node_id = next(key for key, tab in self.links.items() if tab == goal_id)
+        self.select(node_id)
+        self.revealNode.emit(node_id)
+        return True
+
     @Slot(str, result=str)
     def sourceNodeId(self, node_id):
         node = self._find(node_id)
@@ -1085,10 +1121,12 @@ class MindMapController(QObject):
 
     @Property('QVariantMap', notify=changed)
     def selectedNode(self):
+        if self._is_date_root(self._selected):
+            return self._date_root_data()
         node = self._find(self._selected)
         if node is None:
             return {}
-        return {'id': node.id, 'sourceId': _content(node).id,
+        return {'id': node.id, 'sourceId': _content(node).id, 'isVirtualDateRoot': False,
                 'isReference': _placement(node).id in self.references, 'text': node.text, 'note': node.note or '',
                 'isTab': self._tab_id(node) is not None, 'folded': node.folded,
                 'isViewRoot': node is self.view_root, 'completed': _content(node).id in self._completed,
@@ -1300,6 +1338,12 @@ class MindMapController(QObject):
         if self._activity_filter and self._activity_node() is None:
             self._activity_filter = ''
         if self._priority_filter == 1 and not self.calendarFilterActive:
+            if self._selected.startswith('calendar-day:'):
+                self._set_selection([self.view_root.id])
+            return
+        if self._date_filter and self._selected == self.view_root.id:
+            self._set_selection(self._selected_ids, self._selected)
+        if self._is_date_root(self._selected):
             return
         if not self.priorityFilterEnabled:
             self._priority_filter = 1.0
@@ -1384,6 +1428,7 @@ class MindMapController(QObject):
             return
         self._date_filter = ''
         self._activity_filter = ''
+        self._sync_filter_selection()
         self.sceneChanged.emit()
         self.changed.emit()
 
@@ -1503,6 +1548,8 @@ class MindMapController(QObject):
             sizes[node] = (width, 40.0 + (24.0 if _content(node).id in self.reminders else 0.0)
                            + (24.0 if _content(node).id in self._measure_progress else 0.0)
                            + (28.0 if _content(node).id in self.deadlines else 0.0))
+        if self._date_filter:
+            sizes[root] = (max(110.0, metrics.horizontalAdvance(self._date_filter) + 61.0), 40.0)
         if root.folded and not self.calendarFilterActive:
             width, height = sizes[root]
             return {root: Box(-width / 2, -height / 2, width, height)}
@@ -1539,7 +1586,7 @@ class MindMapController(QObject):
     def _scene_nodes(self, boxes, priorities):
         root = self.view_root
         bookmarks = set(self._bookmarks)
-        return [{'id': n.id, 'sourceId': _content(n).id,
+        return [{'id': n.id, 'sourceId': _content(n).id, 'isVirtualDateRoot': False,
                  'isReference': _placement(n).id in self.references, 'text': n.text, 'note': n.note or '', 'x': b.x, 'y': b.y,
                  'width': b.width, 'height': b.height, 'isTab': self._tab_id(n) is not None,
                  'hasNote': bool(n.note and n.note.strip()),
@@ -1555,7 +1602,9 @@ class MindMapController(QObject):
                  **self._reminder_data(_content(n).id),
                  **self._deadline_data(_content(n).id),
                  **priorities.get(self._tab_id(n), {'priorityScore': None, 'priorityLevel': 0,
-                                                       'priorityRank': 0})}
+                                                       'priorityRank': 0}),
+                 **({**self._date_root_data(), 'hasChildren': len(boxes) > 1}
+                    if self._date_filter and n is root else {})}
                 for n, b in boxes.items()]
 
     @Property('QVariantList', notify=sceneChanged)
@@ -1591,11 +1640,12 @@ class MindMapController(QObject):
 
     @Property(bool, notify=changed)
     def canCut(self):
-        return bool(self._selected_ids) and self.view_root.id not in self._selected_ids
+        return (bool(self._selected_ids) and not self._is_date_root(self._selected)
+                and self.view_root.id not in self._selected_ids)
 
     @Property(bool, notify=changed)
     def canPaste(self):
-        return bool(self._cut_ids)
+        return bool(self._cut_ids) and not self._is_date_root(self._selected)
 
     def _clipboard_text(self):
         clipboard = QGuiApplication.clipboard()
@@ -1727,6 +1777,12 @@ class MindMapController(QObject):
         return tab.id
 
     def _set_selection(self, ids, primary=None):
+        if self._date_filter:
+            ids = [self._date_root_id if key == self.view_root.id else key for key in ids]
+            if primary == self.view_root.id:
+                primary = self._date_root_id
+            if len(ids) > 1:
+                ids = [key for key in ids if key != self._date_root_id]
         self._selected_ids = list(dict.fromkeys(ids))
         # The initial root selection must not prevent Ctrl+clicking movable branches.
         if len(self._selected_ids) > 1 and self.view_root.id in self._selected_ids:
@@ -1743,6 +1799,10 @@ class MindMapController(QObject):
     @Slot(str)
     @Slot(str, str)
     def select(self, node_id, mode='replace'):
+        if self._date_filter and node_id in (self._date_root_id, self.view_root.id):
+            self._set_selection([self._date_root_id])
+            self.changed.emit()
+            return
         if not self._in_scope(self._find(node_id)):
             return
         anchor = self._selection_anchor
@@ -1878,9 +1938,9 @@ class MindMapController(QObject):
         while current is not None and current not in boxes:
             current = current.parent
         current = current or self.view_root
-        if current.id != self._selected:
+        if self._display_id(current) != self._selected:
             self.select(current.id, 'add' if extend else 'replace')
-            self.revealNode.emit(current.id)
+            self.revealNode.emit(self._display_id(current))
             return
         origin = boxes[current]
         if direction in ('left', 'right'):
@@ -2101,6 +2161,8 @@ class MindMapController(QObject):
 
     @Slot(bool, result=bool)
     def addThought(self, sibling=False):
+        if self._is_date_root(self._selected):
+            return self._create_day_activity('New thought')
         parent = self._find(self._selected) or self.view_root
         if sibling and parent is not self.view_root and parent.parent:
             parent = parent.parent
@@ -2114,6 +2176,8 @@ class MindMapController(QObject):
 
     @Slot(str, str, result=bool)
     def addChildNamed(self, node_id, title):
+        if self._is_date_root(node_id):
+            return self._create_day_activity(title)
         parent = self._find(node_id)
         title = title.strip()
         if parent is None or not title:
@@ -2167,6 +2231,9 @@ class MindMapController(QObject):
             following = next((n for n in siblings if boxes[n].center_y > y), None)
             index = (parent.children.index(following) if following else
                      parent.children.index(siblings[-1]) + 1 if siblings else len(parent.children))
+
+        if self._date_filter and parent is self.view_root:
+            return self._create_day_activity('New thought')
 
         def mutate():
             # Inserting a branch must not rebalance existing automatic sides.
