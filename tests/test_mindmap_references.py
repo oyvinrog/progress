@@ -523,3 +523,16 @@ def test_calendar_identity_resolves_projected_children(project):
     assert m.calendarActivityId(ref) == project[5]
     assert m.calendarActivityId(projected_child) == 'plan:' + project[7]
     assert m.calendarActivityId('missing') == ''
+
+
+def test_drop_preview_rejects_reference_cycle(project):
+    m = project[0].mindmap
+    ref = reference(project)
+    source = m._find(ref)
+    child = m._find(occurrence(m, project[-1], ref))
+    box = m._layout()[child]
+    before = m.to_dict()
+    assert m.resolveDropTarget(source.id, box.x + box.width / 2, box.center_y,
+                               1, False, '', '') == {}
+    m.moveNode(source.id, child.id, 'child')
+    assert m.to_dict() == before

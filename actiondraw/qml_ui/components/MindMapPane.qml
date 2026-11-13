@@ -46,7 +46,7 @@ FocusScope {
         implicitHeight: 32
         enabled: !!pane.tabModel && pane.tabModel.currentTabIndex >= 0
         Accessible.name: label
-        ToolTip.visible: hovered
+        ToolTip.visible: hovered && pane.activeNodeDrag === null
         readonly property string toolTipText: label + " — " + (pane.tabModel ? pane.tabModel.currentTabName : "")
         ToolTip.text: toolTipText
         contentItem: Row {
@@ -82,6 +82,11 @@ FocusScope {
     signal nodeDragCleared()
     property var nodeDropHandler: null
     property var activeNodeDrag: null
+    property var dropPreview: ({})
+    function cancelActiveDrag() {
+        if (activeNodeDrag) activeNodeDrag.cancelDrag()
+        dropPreview = ({})
+    }
     Shortcut {
         sequence: "Escape"
         enabled: pane.activeNodeDrag !== null
@@ -251,10 +256,13 @@ FocusScope {
     function addThought(sibling) {
         if (controller.addThought(sibling)) editNode()
     }
-    onVisibleChanged: if (visible) {
-        deadlineNow = Date.now() / 1000
-        forceActiveFocus()
-        if (!initialized) Qt.callLater(function() { if (pane.visible && !pane.initialized) pane.fitMap() })
+    onVisibleChanged: {
+        cancelActiveDrag()
+        if (visible) {
+            deadlineNow = Date.now() / 1000
+            forceActiveFocus()
+            if (!initialized) Qt.callLater(function() { if (pane.visible && !pane.initialized) pane.fitMap() })
+        }
     }
     Timer {
         id: navigationHold
@@ -274,9 +282,10 @@ FocusScope {
             if (pane.navigationHighlightId !== pane.controller.selectedId)
                 pane.navigationHighlightId = ""
         }
-        function onSceneChanged() { edges.requestPaint() }
+        function onSceneChanged() { pane.cancelActiveDrag(); edges.requestPaint() }
         function onRevealNode(nodeId) { pane.revealNode(nodeId) }
         function onScopeChanging(oldScope, newScope) {
+            pane.cancelActiveDrag()
             pane.hoveredNodeId = ""
             pane.controller.clearSearch()
             pane.navigationHighlightId = ""
@@ -290,6 +299,7 @@ FocusScope {
             if (!pane.initialized) Qt.callLater(function() { if (pane.visible && !pane.initialized) pane.fitMap() })
         }
         function onResetView() {
+            pane.cancelActiveDrag()
             pane.hoveredNodeId = ""
             pane.controller.clearSearch()
             pane.navigationHighlightId = ""
@@ -318,7 +328,7 @@ FocusScope {
                 Accessible.name: "Show parent context"
                 text: "↑ Parent"
                 visible: pane.controller && pane.controller.canNavigateToParent
-                ToolTip.visible: hovered
+                ToolTip.visible: hovered && pane.activeNodeDrag === null
                 ToolTip.text: "Show parent context"
                 onClicked: pane.controller.navigateToParent(pane.controller.openedNodeId)
             }
@@ -476,7 +486,7 @@ FocusScope {
                 implicitHeight: 32
                 enabled: !!pane.tabModel && pane.tabModel.tabCount > 1
                 Accessible.name: "Thought wandering"
-                ToolTip.visible: hovered
+                ToolTip.visible: hovered && pane.activeNodeDrag === null
                 ToolTip.text: "Thought wandering"
                 icon.source: "../icons/dice.svg"
                 icon.width: 16
@@ -557,8 +567,8 @@ FocusScope {
                 Layout.minimumWidth: 0
                 elide: Text.ElideRight
             }
-            ToolButton { text: "−"; Accessible.name: "Zoom out"; ToolTip.visible: hovered; ToolTip.text: "Zoom out"; onClicked: { pane.zoomBy(1 / 1.2); pane.focusMap() } }
-            ToolButton { text: "+"; Accessible.name: "Zoom in"; ToolTip.visible: hovered; ToolTip.text: "Zoom in"; onClicked: { pane.zoomBy(1.2); pane.focusMap() } }
+            ToolButton { text: "−"; Accessible.name: "Zoom out"; ToolTip.visible: hovered && pane.activeNodeDrag === null; ToolTip.text: "Zoom out"; onClicked: { pane.zoomBy(1 / 1.2); pane.focusMap() } }
+            ToolButton { text: "+"; Accessible.name: "Zoom in"; ToolTip.visible: hovered && pane.activeNodeDrag === null; ToolTip.text: "Zoom in"; onClicked: { pane.zoomBy(1.2); pane.focusMap() } }
             ToolButton { text: "Fit"; Accessible.name: "Fit mindmap"; onClicked: { pane.fitMap(); pane.focusMap() } }
         }
         ScrollView {
@@ -590,7 +600,7 @@ FocusScope {
                             verticalAlignment: Text.AlignVCenter
                             horizontalAlignment: Text.AlignHCenter
                         }
-                        ToolTip.visible: hovered
+                        ToolTip.visible: hovered && pane.activeNodeDrag === null
                         ToolTip.delay: 600
                         ToolTip.text: modelData.path
                         onClicked: pane.jumpBookmark(modelData.id)
@@ -687,6 +697,7 @@ FocusScope {
                     delegate: Loader {
                         id: nodeLoader
                         property bool dragging: false
+                        z: dragging && pane.activeNodeDrag !== null ? 10 : 0
                         required property var modelData
                         width: modelData.width; height: modelData.height
                         // Keep a margin for smooth panning and retain selected nodes
@@ -711,7 +722,7 @@ FocusScope {
                             readonly property bool selected: pane.selectedNodeSet.has(modelData.id)
                             readonly property bool currentSearchHit: pane.searching && selected
                                                                           && pane.controller.searchMatchPosition > 0
-                            opacity: pane.cutNodeSet.has(modelData.id) ? 0.45 : 1
+                            opacity: nodeLoader.dragging && pane.activeNodeDrag !== null ? 0.7 : pane.cutNodeSet.has(modelData.id) ? 0.45 : 1
                             border.width: selected ? 2 : 1
                             border.color: selected ? "#a5d9ff" : "#557b98"
                             Rectangle {
@@ -764,7 +775,7 @@ FocusScope {
                                 z: 2
                                 Accessible.role: Accessible.Button
                                 Accessible.name: "Edit causal diagram"
-                                ToolTip.visible: causalHover.containsMouse
+                                ToolTip.visible: causalHover.containsMouse && pane.activeNodeDrag === null
                                 ToolTip.delay: 300
                                 ToolTip.text: "Edit causal diagram"
                                 MouseArea {
@@ -819,7 +830,7 @@ FocusScope {
                                 }
                                 Accessible.role: Accessible.StaticText
                                 Accessible.name: nodeItem.modelData.planTooltip
-                                ToolTip.visible: planHover.containsMouse
+                                ToolTip.visible: planHover.containsMouse && pane.activeNodeDrag === null
                                 ToolTip.delay: 300
                                 ToolTip.text: nodeItem.modelData.planTooltip
                                 MouseArea {
@@ -888,7 +899,7 @@ FocusScope {
                                 font.pixelSize: 24
                                 palette.buttonText: nodeItem.modelData.completed ? "#91d6b6" : "#a9bfd1"
                                 Accessible.name: (nodeItem.modelData.completed ? "Mark incomplete: " : "Complete: ") + nodeItem.modelData.text
-                                ToolTip.visible: hovered
+                                ToolTip.visible: hovered && pane.activeNodeDrag === null
                                 ToolTip.text: nodeItem.modelData.completed ? "Mark incomplete" : "Mark complete"
                                 onClicked: {
                                     pane.controller.select(nodeItem.modelData.id)
@@ -927,7 +938,7 @@ FocusScope {
                                     border.color: foldButton.activeFocus ? "#e5f0fa" : "#6288a5"
                                 }
                                 Accessible.name: (nodeItem.modelData.folded ? "Unfold " : "Fold ") + nodeItem.modelData.text
-                                ToolTip.visible: hovered
+                                ToolTip.visible: hovered && pane.activeNodeDrag === null
                                 ToolTip.text: nodeItem.modelData.folded ? "Unfold branch" : "Fold branch"
                                 onClicked: {
                                     pane.controller.toggleNodeFold(nodeItem.modelData.id)
@@ -943,7 +954,7 @@ FocusScope {
                                 onEntered: { insertionHoverExit.stop(); pane.hoveredNodeId = nodeItem.modelData.id }
                                 onExited: insertionHoverExit.restart()
                                 onPressedChanged: { pane.nodePressed = pressed; nodeLoader.dragging = pressed }
-                                cursorShape: Qt.PointingHandCursor
+                                cursorShape: drag.active ? Qt.ClosedHandCursor : Qt.PointingHandCursor
                                 drag.target: !nodeItem.modelData.isVirtualDateRoot && !canceled && pressedButtons === Qt.LeftButton ? nodeItem : null
                                 drag.axis: reorderDrag ? Drag.YAxis : Drag.XAndYAxis
                                 property bool wasDragged: false
@@ -951,6 +962,8 @@ FocusScope {
                                 property bool canceled: false
                                 function clearDrag() {
                                     pane.activeNodeDrag = null
+                                    pane.dropPreview = ({})
+                                    pane.controller.clearDropTargets()
                                     pane.nodeDragCleared()
                                 }
                                 function cancelDrag() {
@@ -967,12 +980,27 @@ FocusScope {
                                     pane.focusMap()
                                     wasDragged = false
                                     canceled = false
+                                    pane.controller.clearDropTargets()
                                     reorderDrag = mouse.button === Qt.LeftButton && !!(mouse.modifiers & Qt.ControlModifier)
+                                }
+                                function updateDropPreview(mouse) {
+                                    var local = nodeMouse.mapToItem(viewport, mouse.x, mouse.y)
+                                    if (local.x < 0 || local.y < 0 || local.x > viewport.width || local.y > viewport.height) {
+                                        pane.dropPreview = ({})
+                                        return
+                                    }
+                                    var point = nodeMouse.mapToItem(world, mouse.x, mouse.y)
+                                    var previous = pane.dropPreview
+                                    pane.dropPreview = pane.controller.resolveDropTarget(
+                                        nodeItem.modelData.id, point.x,
+                                        reorderDrag ? nodeItem.y + nodeItem.height / 2 : point.y,
+                                        pane.zoom, reorderDrag, previous.targetId || "", previous.placement || "")
                                 }
                                 onPositionChanged: function(mouse) {
                                     if (!drag.active || canceled) return
                                     wasDragged = true
                                     pane.activeNodeDrag = nodeMouse
+                                    updateDropPreview(mouse)
                                     if (!reorderDrag) {
                                         var scenePoint = nodeMouse.mapToItem(null, mouse.x, mouse.y)
                                         pane.nodeDragMoved(nodeItem.modelData.id, scenePoint.x, scenePoint.y)
@@ -980,38 +1008,21 @@ FocusScope {
                                 }
                                 onCanceled: cancelDrag()
                                 onReleased: function(mouse) {
-                                    clearDrag()
-                                    if (canceled) { restorePosition(); return }
-                                    if (!wasDragged) return
-                                    var point = nodeItem.mapToItem(world, mouse.x, mouse.y)
-                                    if (!reorderDrag && pane.nodeDropHandler) {
-                                        var scenePoint = nodeMouse.mapToItem(null, mouse.x, mouse.y)
-                                        var draggedId = nodeItem.modelData.id
+                                    if (canceled || !wasDragged) {
                                         restorePosition()
-                                        if (pane.nodeDropHandler(draggedId, scenePoint.x, scenePoint.y)) return
-                                    }
-                                    if (reorderDrag) {
-                                        var reorderId = nodeItem.modelData.id
-                                        var centerY = nodeItem.y + nodeItem.height / 2
-                                        restorePosition()
-                                        Qt.callLater(pane.controller.reorderNodeAt, reorderId, centerY)
+                                        clearDrag()
                                         return
                                     }
-                                    var nodes = pane.sceneNodes
-                                    var targetId = "", placement = "child"
-                                    for (var i = 0; i < nodes.length; ++i) {
-                                        var n = nodes[i]
-                                        if (n.id === nodeItem.modelData.id) continue
-                                        if (point.x >= n.x && point.x <= n.x + n.width && point.y >= n.y && point.y <= n.y + n.height) {
-                                            targetId = n.id
-                                            var relativeY = (point.y - n.y) / n.height
-                                            placement = relativeY < 0.25 ? "before" : relativeY > 0.75 ? "after" : "child"
-                                            break
-                                        }
-                                    }
+                                    updateDropPreview(mouse)
+                                    var preview = pane.dropPreview
                                     var sourceId = nodeItem.modelData.id
+                                    var scenePoint = nodeMouse.mapToItem(null, mouse.x, mouse.y)
                                     restorePosition()
-                                    if (targetId) Qt.callLater(pane.controller.moveNode, sourceId, targetId, placement)
+                                    clearDrag()
+                                    if (!reorderDrag && pane.nodeDropHandler
+                                            && pane.nodeDropHandler(sourceId, scenePoint.x, scenePoint.y)) return
+                                    if (preview.targetId)
+                                        Qt.callLater(pane.controller.moveNode, sourceId, preview.targetId, preview.placement)
                                 }
                                 onClicked: function(mouse) {
                                     if (wasDragged) return
@@ -1044,7 +1055,7 @@ FocusScope {
                                     objectName: "mindmapTooltip_" + nodeItem.modelData.id
                                     y: nodeItem.height + 8
                                     delay: 800
-                                    visible: nodeMouse.containsMouse && !nodeMouse.pressed
+                                    visible: nodeMouse.containsMouse && !nodeMouse.pressed && pane.activeNodeDrag === null
                                     text: nodeItem.modelData.text
                                           + (nodeItem.modelData.priorityRank > 0
                                              ? "\nPriority rank: " + nodeItem.modelData.priorityRank : "")
@@ -1157,6 +1168,46 @@ FocusScope {
                 }
             }
             Item {
+                id: dropIndicator
+                objectName: "mindmapDropIndicator"
+                visible: !!pane.dropPreview.targetId
+                z: 30
+                readonly property bool childDrop: pane.dropPreview.placement === "child"
+                x: world.x + (pane.dropPreview.x || 0) * pane.zoom
+                y: world.y + (pane.dropPreview.y || 0) * pane.zoom
+                width: (pane.dropPreview.width || 0) * pane.zoom
+                height: childDrop ? (pane.dropPreview.height || 0) * pane.zoom : 0
+                Rectangle {
+                    anchors.fill: parent
+                    anchors.margins: dropIndicator.childDrop ? -3 : 0
+                    color: dropIndicator.childDrop ? "#4056b8e9" : "#91dbff"
+                    border.color: "#91dbff"
+                    border.width: dropIndicator.childDrop ? 3 : 0
+                    radius: dropIndicator.childDrop ? 10 : 0
+                    visible: dropIndicator.childDrop
+                }
+                Rectangle {
+                    visible: !dropIndicator.childDrop
+                    width: parent.width; height: 3; y: -1.5
+                    color: "#91dbff"
+                    Rectangle { width: 8; height: 8; radius: 4; x: -4; y: -2.5; color: parent.color }
+                }
+                Rectangle {
+                    x: Math.max(-dropIndicator.x + 4, Math.min(0, viewport.width - dropIndicator.x - width - 4))
+                    y: dropIndicator.y >= height + 8 ? -height - 8 : dropIndicator.height + 8
+                    width: Math.min(dropLabel.implicitWidth + 16, viewport.width - 8)
+                    height: dropLabel.implicitHeight + 10
+                    color: "#183c54"; border.color: "#91dbff"; radius: 5
+                    Text {
+                        id: dropLabel
+                        anchors.fill: parent; anchors.margins: 5
+                        text: pane.dropPreview.label || ""
+                        color: "#eefaff"; font.pixelSize: 12
+                        elide: Text.ElideRight
+                    }
+                }
+            }
+            Item {
                 id: insertionControls
                 anchors.fill: parent
                 readonly property var targetNode: {
@@ -1211,7 +1262,7 @@ FocusScope {
                         hoverEnabled: true
                         Accessible.name: removal ? (insertionControls.targetNode && insertionControls.targetNode.isReference ? "Remove goal reference" : "Delete branch") : child ? "Add child" : before ? "Add sibling above" : "Add sibling below"
                         ToolTip.text: removal ? Accessible.name + " (including children) · Ctrl+Z to undo" : Accessible.name
-                        ToolTip.visible: hovered
+                        ToolTip.visible: hovered && pane.activeNodeDrag === null
                         ToolTip.delay: 500
                         onHoveredChanged: {
                             if (hovered) insertionHoverExit.stop()
@@ -1276,7 +1327,7 @@ FocusScope {
             spacing: 16
             Label {
                 Layout.fillWidth: true
-                text: "Drag the priority slider left for highest scores, right to include more; All restores every branch · Children of progress-measuring nodes have completion checkboxes · Select a node and click + beside it to add a child, or above/below to add a sibling · Type to find node titles, including folded branches · Enter / Shift+Enter cycles matches · Backspace edits search · Escape clears search · Double-click a goal node to open it · Double-click empty space to add a thought · Ctrl+B toggles bold · Drag a node onto a calendar day to schedule it · Escape cancels a drag · Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+C / Ctrl+V copies branches · Ctrl+X / Ctrl+V moves branches · F4 or the Complete menu action toggles completion on any node · Arrows navigate · Tab adds a child · Ctrl+Enter opens a goal"
+                text: "Drag the priority slider left for highest scores, right to include more; All restores every branch · Children of progress-measuring nodes have completion checkboxes · Select a node and click + beside it to add a child, or above/below to add a sibling · Type to find node titles, including folded branches · Enter / Shift+Enter cycles matches · Backspace edits search · Escape clears search · Double-click a goal node to open it · Double-click empty space to add a thought · Ctrl+B toggles bold · Drag a node onto a calendar day to schedule it · Drag between nodes to insert siblings; drop on a highlighted center to add a child · Escape cancels a drag · Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+C / Ctrl+V copies branches · Ctrl+X / Ctrl+V moves branches · F4 or the Complete menu action toggles completion on any node · Arrows navigate · Tab adds a child · Ctrl+Enter opens a goal"
                 wrapMode: Text.WordWrap
                 color: "#a9bfd1"
             }

@@ -161,6 +161,9 @@ class MindMapController(QObject):
         self._cut_ids = []
         self._search_query = ''
         self._priority_filter = 1.0
+        self._drop_cache = None
+        self.sceneChanged.connect(self.clearDropTargets)
+        self.changed.connect(self.clearDropTargets)
         self._undo = []
         self._redo = []
         self._creating_tab = False
@@ -2388,24 +2391,148 @@ class MindMapController(QObject):
             return True
         return False
 
+    def _move_destination(self, node, target, placement, forbidden=None):
+        """Validate both previews and commits without mutating the tree."""
+        if (placement not in ('before', 'after', 'child')
+                or not self._in_scope(node) or not self._in_scope(target)
+                or node is self.view_root or _placement(node) is _placement(target)):
+            return None
+        if placement != 'child' and target is self.view_root:
+            return None
+        parent = target if placement == 'child' else target.parent
+        forbidden = self._parent_forbidden(_placement(node)) if forbidden is None else forbidden
+        if parent is None or _content(parent).id in forbidden:
+            return None
+        children = _content(parent).children
+        same_parent = _placement(node).parent is _content(parent)
+        index = len(children) if placement == 'child' else children.index(_placement(target)) + (placement == 'after')
+        old_index = children.index(_placement(node)) if same_parent else -1
+        if same_parent and old_index < index:
+            index -= 1
+        if same_parent and old_index == index:
+            sides = assigned_sides(SimpleNamespace(root=self.view_root))
+            if placement == 'child' or sides.get(node) == sides.get(target):
+                return None
+        return parent, index
+
     @Slot(str, str, str)
     def moveNode(self, node_id, target_id, placement):
         node, target = self._find(node_id), self._find(target_id)
-        if (not self._in_scope(node) or not self._in_scope(target)
-                or node is target or node is self.view_root):
+        destination = self._move_destination(node, target, placement)
+        if destination is None:
+            parent = target if placement == 'child' else target.parent if target else None
+            if (node is not None and target is not None and node is not target
+                    and parent is not None and _content(parent).id in self._parent_forbidden(_placement(node))):
+                self.errorOccurred.emit('Moving the node there would create a cycle.')
             return
+        parent, index = destination
+        sides = assigned_sides(SimpleNamespace(root=self.view_root))
         def mutate():
-            parent = (target.parent if placement in ('before', 'after')
-                      and target.parent and target is not self.view_root else target)
-            index = None
-            if parent is not target:
-                index = parent.children.index(target) + (placement == 'after')
-                if _content(node.parent) is _content(parent) and _content(parent).children.index(_placement(node)) < index:
-                    index -= 1
+            for branch in self.view_root.children:
+                branch.side = sides[branch]
+            node.side = sides.get(target, sides.get(node))
             node.move_to(parent, index)
             parent.folded = False
             self._set_selection([node.id])
-        self._commit(mutate)
+        if self._commit(mutate):
+            self.revealNode.emit(node.id)
+
+    @Slot()
+    def clearDropTargets(self):
+        self._drop_cache = None
+
+    def _drop_regions(self, node_id, zoom, reorder):
+        # World-space regions, cached until the scene or drag session changes.
+        key = (node_id, zoom, reorder)
+        if self._drop_cache is not None and self._drop_cache[0] == key:
+            return self._drop_cache[1]
+        source = self._find(node_id)
+        boxes = self._layout()
+        regions = []
+        if source not in boxes or source is self.view_root:
+            self._drop_cache = (key, regions)
+            return regions
+        sides = assigned_sides(SimpleNamespace(root=self.view_root))
+        forbidden = self._parent_forbidden(_placement(source))
+        padding = 16 / zoom
+        groups = {}
+        for node in boxes:
+            if node is not self.view_root and _placement(node).id not in forbidden:
+                groups.setdefault((node.parent, sides.get(node)), []).append(node)
+
+        def add(target, placement, bounds, line_y=None, priority=1, block_invalid=False):
+            valid = self._move_destination(source, target, placement, forbidden) is not None
+            if not valid and not block_invalid:
+                return
+            box = boxes[target]
+            regions.append(dict(targetId=target.id, placement=placement,
+                                x=box.x, y=box.y if line_y is None else line_y,
+                                width=box.width, height=box.height if placement == 'child' else 0,
+                                label=('Add child to ' if placement == 'child' else
+                                       'Insert before ' if placement == 'before' else 'Insert after ') + target.text,
+                                bounds=bounds, priority=priority, valid=valid))
+
+        if reorder:
+            siblings = groups.get((source.parent, sides.get(source)), [])
+            for i in range(len(siblings) + 1):
+                if not siblings:
+                    break
+                target = siblings[i] if i < len(siblings) else siblings[-1]
+                placement = 'before' if i < len(siblings) else 'after'
+                top = boxes[siblings[i-1]].center_y if i else -1e12
+                bottom = boxes[siblings[i]].center_y if i < len(siblings) else 1e12
+                line = ((boxes[siblings[i-1]].y + boxes[siblings[i-1]].height + boxes[siblings[i]].y) / 2
+                        if 0 < i < len(siblings) else
+                        boxes[target].y - padding / 2 if i == 0 else boxes[target].y + boxes[target].height + padding / 2)
+                add(target, placement, [-1e12, top, 1e12, bottom], line)
+        else:
+            for node, box in boxes.items():
+                if node is source:
+                    continue
+                if _placement(node).id in forbidden:
+                    # A descendant must not expose an ancestor's gap behind it.
+                    regions.append(dict(bounds=[box.x, box.y, box.x+box.width, box.y+box.height],
+                                        priority=-1, y=box.y, valid=False))
+                    continue
+                add(node, 'child', [box.x, box.y + box.height * .25,
+                                    box.x + box.width, box.y + box.height * .75], priority=0, block_invalid=True)
+            for siblings in groups.values():
+                for i, node in enumerate(siblings):
+                    box = boxes[node]
+                    prev = boxes[siblings[i-1]] if i else None
+                    following = boxes[siblings[i+1]] if i + 1 < len(siblings) else None
+                    top = (prev.y + prev.height + box.y) / 2 if prev else box.y - padding / 2
+                    bottom = (box.y + box.height + following.y) / 2 if following else box.y + box.height + padding / 2
+                    add(node, 'before', [box.x-padding, box.y-padding if prev is None else box.y,
+                                        box.x+box.width+padding, box.y+box.height*.25], top, block_invalid=True)
+                    add(node, 'after', [box.x-padding, box.y+box.height*.75,
+                                       box.x+box.width+padding, box.y+box.height+(padding if following is None else 0)], bottom, block_invalid=True)
+                    if prev and prev.y + prev.height < box.y:
+                        add(node, 'before', [min(prev.x, box.x)-padding, prev.y+prev.height,
+                                            max(prev.x+prev.width, box.x+box.width)+padding, box.y], top, 2)
+        self._drop_cache = (key, regions)
+        return regions
+
+    @Slot(str, float, float, float, bool, str, str, result='QVariantMap')
+    def resolveDropTarget(self, node_id, x, y, zoom, reorder, previous_id, previous_placement):
+        if not all(math.isfinite(v) for v in (x, y, zoom)) or zoom <= 0:
+            return {}
+        regions = self._drop_regions(node_id, zoom, reorder)
+        def contains(region, margin=0):
+            left, top, right, bottom = region['bounds']
+            return left-margin <= x <= right+margin and top-margin <= y <= bottom+margin
+        hits = [r for r in regions if contains(r)]
+        if not hits:
+            return {}
+        hit = min(hits, key=lambda r: (r['priority'], abs(y-r['y'])))
+        if not hit['valid']:
+            return {}
+        if hit['placement'] != 'child':
+            previous = next((r for r in regions if r['valid'] and r['targetId'] == previous_id
+                             and r['placement'] == previous_placement and contains(r, 6 / zoom)), None)
+            if previous is not None:
+                hit = previous
+        return {k: v for k, v in hit.items() if k not in ('bounds', 'priority', 'valid')}
 
     @Slot(str)
     def setSide(self, side):

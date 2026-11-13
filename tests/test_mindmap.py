@@ -985,6 +985,8 @@ def test_qml_ctrl_drag_reorder_and_context_target(project, app, zoom, pan, actio
     QTest.mousePress(window, Qt.LeftButton, Qt.ControlModifier, start)
     QTest.mouseMove(window, start - QPoint(0, 15), 30)
     QTest.mouseMove(window, destination, 30)
+    preview = pane.property('dropPreview')
+    assert preview['targetId'] == a.id and preview['placement'] == 'before'
     QTest.mouseRelease(window, Qt.LeftButton, Qt.ControlModifier, destination)
     QTest.qWait(50)
     assert parent.children == [c, a, b]
@@ -5145,3 +5147,159 @@ def test_virtual_day_root_qml_child_creation(project, actiondraw_window, route):
     assert tabs.scheduledGoals[0]['startDate'] == tabs.scheduledGoals[0]['endDate'] == '2032-02-29'
     QMetaObject.invokeMethod(editor, 'reject')
     window.close()
+
+
+@pytest.mark.parametrize('side', ['left', 'right'])
+@pytest.mark.parametrize('zoom', [0.55, 1.0, 1.8])
+def test_drop_gap_preview_commit_and_history(project, side, zoom):
+    m = project[0].mindmap
+    parent = m.map.root.add_child('Destination', side=side)
+    a, b, c = [parent.add_child(t) for t in ('A', 'B', 'C')]
+    leaf = c.add_child('Subtree')
+    boxes = m._layout()
+    x = boxes[a].x + boxes[a].width / 2
+    y = (boxes[a].y + boxes[a].height + boxes[b].y) / 2
+    before = m.to_dict()
+    preview = m.resolveDropTarget(c.id, x, y, zoom, False, '', '')
+    assert preview['targetId'] == b.id and preview['placement'] == 'before'
+    assert preview['y'] == y
+    assert m.to_dict() == before
+    history = len(m._undo)
+    m.moveNode(c.id, preview['targetId'], preview['placement'])
+    assert parent.children == [a, c, b]
+    assert c.children == [leaf] and c.side == side
+    assert len(m._undo) == history + 1
+    after = m.to_dict()
+    m.undo()
+    assert m.to_dict() == before
+    m.redo()
+    assert m.to_dict() == after
+
+
+def test_drop_targets_boundaries_validation_and_cache(project, monkeypatch):
+    m = project[0].mindmap
+    parent = m.map.root.add_child('Parent', side='right')
+    a, b, c = [parent.add_child(t) for t in ('A', 'B', 'C')]
+    child = c.add_child('Child')
+    boxes = m._layout()
+    original = m._layout
+    calls = []
+    def layout(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(m, '_layout', layout)
+    box = boxes[a]
+    x = box.x + box.width / 2
+    before = m.to_dict()
+    assert m.resolveDropTarget(c.id, x, box.y - 12, 1, False, '', '')['placement'] == 'before'
+    preview = m.resolveDropTarget(c.id, x, box.y + box.height * .5, 1, False, '', '')
+    assert preview['placement'] == 'child'
+    # Six screen pixels of hysteresis across the child/edge boundary.
+    preview = m.resolveDropTarget(c.id, x, box.y + box.height * .75 + 3, 1, False, a.id, 'child')
+    assert preview['placement'] == 'child'
+    preview = m.resolveDropTarget(c.id, x, box.y + box.height * .75 + 7, 1, False, a.id, 'child')
+    assert preview['placement'] == 'after'
+    assert m.resolveDropTarget(c.id, x + 10000, box.y, 1, False, a.id, 'child') == {}
+    assert len(calls) == 1
+    m.sceneChanged.emit()
+    m.resolveDropTarget(c.id, x, box.center_y, 1, False, '', '')
+    assert len(calls) == 2
+    for target, placement in [(child, 'child'), (c, 'child'), (m.view_root, 'before'), (b, 'after')]:
+        m.moveNode(c.id, target.id, placement)
+        assert m.to_dict() == before
+    assert not m._undo
+    a.folded = True
+    m.moveNode(c.id, a.id, 'child')
+    assert c.parent is a and not a.folded
+
+
+@pytest.mark.parametrize('zoom,offset,placement', [(1.0, QPoint(0, 0), 'before'),
+                                                  (0.55, QPoint(12, 3), 'before'),
+                                                  (1.0, QPoint(15, 4), 'child')])
+@pytest.mark.parametrize('outcome', ['drop', 'escape', 'lost-grab', 'outside'])
+def test_qml_live_drop_preview(project, app, actiondraw_window, zoom, offset, placement, outcome):
+    pm, tabs, tasks, diagram = project
+    m = pm.mindmap
+    parent = m.map.find(next(iter(m.links)))
+    a, b, c = [parent.add_child(t) for t in ('Drop A', 'Drop B', 'Drop C')]
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.show()
+    pm.showMindmap()
+    QTest.qWait(150)
+    pane = window.findChild(QObject, 'mindmapPane')
+    pane.setProperty('zoom', zoom)
+    pane.setProperty('panX', -m._layout()[a].x * zoom)
+    pane.setProperty('panY', 0)
+    QTest.qWait(30)
+    def find(item, name):
+        if item.objectName() == name:
+            return item
+        for child in item.childItems():
+            found = find(child, name)
+            if found is not None:
+                return found
+    def center(node):
+        item = find(window.contentItem(), 'mindmapNode_' + node.id)
+        return item.mapToScene(item.boundingRect().center()).toPoint()
+    start = center(c) + offset
+    destination = (center(a) + center(b)) / 2 if placement == 'before' else center(a)
+    destination = QPoint(destination)
+    before = m.to_dict()
+    QTest.mousePress(window, Qt.LeftButton, Qt.NoModifier, start)
+    QTest.mouseMove(window, start + QPoint(0, 15), 30)
+    QTest.mouseMove(window, destination, 30)
+    preview = pane.property('dropPreview')
+    assert preview['placement'] == placement
+    assert preview['targetId'] == (b.id if placement == 'before' else a.id)
+    assert window.findChild(QObject, 'mindmapDropIndicator').property('visible')
+    assert m.to_dict() == before
+    if outcome == 'escape':
+        QTest.keyClick(window, Qt.Key_Escape)
+    elif outcome == 'lost-grab':
+        find(window.contentItem(), 'mindmapNodeMouse_' + c.id).ungrabMouse()
+    elif outcome == 'outside':
+        destination = QPoint(1, 1)
+        QTest.mouseMove(window, destination, 30)
+        assert not window.findChild(QObject, 'mindmapDropIndicator').property('visible')
+    QTest.mouseRelease(window, Qt.LeftButton, Qt.NoModifier, destination)
+    QTest.qWait(50)
+    cleared = pane.property('dropPreview')
+    assert (cleared.toVariant() if hasattr(cleared, 'toVariant') else cleared) == {}
+    if outcome != 'drop':
+        assert m.to_dict() == before
+    elif placement == 'before':
+        assert parent.children == [a, c, b]
+    else:
+        assert c.parent is a
+    window.close()
+
+
+def test_drop_filtered_siblings_and_root_sides(project, monkeypatch):
+    m = project[0].mindmap
+    a, hidden, b, source = [m.map.root.add_child(t, side='right') for t in ('A', 'Hidden', 'B', 'Source')]
+    source.side = 'left'
+    boxes = m._layout()
+    visible = {n: box for n, box in boxes.items() if n is not hidden}
+    monkeypatch.setattr(m, '_layout', lambda *args, **kwargs: visible)
+    x = boxes[b].x + boxes[b].width / 2
+    y = (boxes[a].y + boxes[a].height + boxes[b].y) / 2
+    preview = m.resolveDropTarget(source.id, x, y, 1, False, '', '')
+    assert preview['targetId'] == b.id and preview['placement'] == 'before'
+    m.moveNode(source.id, b.id, 'before')
+    assert [n for n in m.map.root.children if n in (a, hidden, source, b)] == [a, hidden, source, b]
+    assert all(n.side == 'right' for n in (a, hidden, source, b))
+
+
+def test_drop_after_last_and_immediate_child_switch(project):
+    m = project[0].mindmap
+    parent = m.map.root.add_child('Parent')
+    a, b, c = [parent.add_child(t) for t in ('A', 'B', 'C')]
+    boxes = m._layout()
+    box = boxes[c]
+    preview = m.resolveDropTarget(a.id, box.x + box.width / 2, box.y + box.height + 12,
+                                  1, False, '', '')
+    assert preview['placement'] == 'after' and preview['targetId'] == c.id
+    preview = m.resolveDropTarget(a.id, box.x + box.width / 2, box.y + box.height * .74,
+                                  1, False, c.id, 'after')
+    assert preview['placement'] == 'child'
