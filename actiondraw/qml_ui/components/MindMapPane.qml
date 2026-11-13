@@ -135,7 +135,7 @@ FocusScope {
             pane.hoveredNodeId = ""
         }
     }
-    readonly property bool shortcutsEnabled: visible && activeFocus && !toolDialogOpen && !editor.visible && !quickChildDialog.visible && !nodeMenu.visible && !actionsButton.activeFocus && !prioritySlider.activeFocus && !actionsMenu.visible && !dateRootMenu.visible && !helpDialog.visible && !deadlineDialog.visible && !tabReferenceDialog.visible && !parentDialog.visible && !nodeGoalRangeDialog.visible && !reminderDialogOpen
+    readonly property bool shortcutsEnabled: visible && activeFocus && !toolDialogOpen && !pane.controller.editorVisible && !quickChildDialog.visible && !nodeMenu.visible && !actionsButton.activeFocus && !prioritySlider.activeFocus && !actionsMenu.visible && !dateRootMenu.visible && !helpDialog.visible && !deadlineDialog.visible && !tabReferenceDialog.visible && !parentDialog.visible && !nodeGoalRangeDialog.visible && !reminderDialogOpen
     readonly property bool searching: controller && controller.searchQuery.length > 0
     onSearchingChanged: if (searching) navigationHighlightId = ""
     onShortcutsEnabledChanged: if (!shortcutsEnabled && controller) controller.clearSearch()
@@ -248,14 +248,12 @@ FocusScope {
     }
     function editNode() {
         if (!controller || dateRootSelected) return
-        var node = controller.selectedNode
-        titleField.text = node.text || ""
-        noteField.text = node.note || ""
-        editor.open()
+        controller.openNodeEditor()
     }
     function addThought(sibling) {
         if (controller.addThought(sibling)) editNode()
     }
+    Component.onDestruction: if (controller) controller.closeNodeEditor()
     onVisibleChanged: {
         cancelActiveDrag()
         if (visible) {
@@ -283,6 +281,7 @@ FocusScope {
                 pane.navigationHighlightId = ""
         }
         function onSceneChanged() { pane.cancelActiveDrag(); edges.requestPaint() }
+        function onEditorVisibleChanged() { if (!pane.controller.editorVisible) { pane.focusMap() } }
         function onRevealNode(nodeId) { pane.revealNode(nodeId) }
         function onScopeChanging(oldScope, newScope) {
             pane.cancelActiveDrag()
@@ -295,7 +294,7 @@ FocusScope {
             pane.panX = saved ? saved.x : 0
             pane.panY = saved ? saved.y : 0
             pane.initialized = saved ? saved.initialized : false
-            editor.close()
+            pane.controller.closeNodeEditor()
             if (!pane.initialized) Qt.callLater(function() { if (pane.visible && !pane.initialized) pane.fitMap() })
         }
         function onResetView() {
@@ -306,8 +305,7 @@ FocusScope {
             pane.viewPositions = ({})
             pane.initialized = false
             pane.zoom = 1; pane.panX = 0; pane.panY = 0
-            editor.close()
-            titleField.text = ""; noteField.text = ""
+            pane.controller.closeNodeEditor()
             if (pane.visible) Qt.callLater(pane.fitMap)
         }
     }
@@ -453,7 +451,7 @@ FocusScope {
                     MenuSeparator {}
                     MenuItem { objectName: "mindmapHelpAction"; text: "Shortcuts and legend…"; onTriggered: helpDialog.open() }
                     onClosed: Qt.callLater(function() {
-                        if (!editor.visible && !helpDialog.visible && !deadlineDialog.visible && !nodeGoalRangeDialog.visible && !pane.reminderDialogOpen) pane.focusMap()
+                        if (!pane.controller.editorVisible && !helpDialog.visible && !deadlineDialog.visible && !nodeGoalRangeDialog.visible && !pane.reminderDialogOpen) pane.focusMap()
                     })
                 }
             }
@@ -855,6 +853,8 @@ FocusScope {
                                                      + (nodeItem.modelData.priorityRank > 0 ? 30 : 0)
                                 verticalAlignment: Text.AlignVCenter
                                 text: (nodeItem.modelData.isReference ? "↗ " : nodeItem.modelData.isTab ? "▣ " : "") + nodeItem.modelData.text
+                                textFormat: Text.PlainText
+                                Accessible.name: nodeItem.modelData.text
                                 font.pixelSize: 14
                                 font.bold: nodeItem.modelData.bold
                                 color: "#e5f0fa"; elide: Text.ElideRight
@@ -1220,7 +1220,7 @@ FocusScope {
                     return null
                 }
                 visible: !!targetNode && !pane.nodePressed && !canvasMouse.pressed
-                         && !editor.visible && !quickChildDialog.visible && !nodeMenu.visible && !actionsMenu.visible && !dateRootMenu.visible
+                         && !pane.controller.editorVisible && !quickChildDialog.visible && !nodeMenu.visible && !actionsMenu.visible && !dateRootMenu.visible
                          && !helpDialog.visible && !deadlineDialog.visible && !nodeGoalRangeDialog.visible && !pane.reminderDialogOpen
                 Repeater {
                     model: 4
@@ -1886,44 +1886,6 @@ FocusScope {
         }
         onAccepted: pane.controller.addChildNamed(targetNodeId, quickChildTitle.text)
         onClosed: pane.focusMap()
-    }
-    Dialog {
-        id: editor
-        objectName: "mindmapNodeEditor"
-        title: "Thought and notes"
-        modal: true
-        anchors.centerIn: parent
-        width: Math.min(520, pane.width - 20)
-        standardButtons: Dialog.Ok | Dialog.Cancel
-        ColumnLayout {
-            anchors.fill: parent
-            TextField {
-                id: titleField
-                objectName: "mindmapNodeTitle"
-                Layout.fillWidth: true
-                placeholderText: "Thought"
-                onAccepted: editor.accept()
-            }
-            ScrollView {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 220
-                TextArea { id: noteField; placeholderText: "Notes"; wrapMode: TextEdit.Wrap }
-            }
-        }
-        onOpened: {
-            if (titleField.readOnly) {
-                noteField.forceActiveFocus()
-            } else {
-                titleField.forceActiveFocus()
-                titleField.selectAll()
-            }
-        }
-        onAccepted: {
-            pane.controller.editSelected(titleField.text, noteField.text)
-            titleField.text = ""; noteField.text = ""
-            pane.focusMap()
-        }
-        onRejected: { titleField.text = ""; noteField.text = ""; pane.focusMap() }
     }
     Shortcut { sequence: "Ctrl+B"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.toggleBold() }
     Shortcut { sequence: "Ctrl+C"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.copySelected() }

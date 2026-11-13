@@ -147,6 +147,22 @@ Select a node and choose **Edit / Notes** (or press **F2**) to capture decisions
 questions, and what it will take to finish. In this example, the design review
 has an agenda and a clear completion condition.
 
+**Thought** is a plain-text name, shown directly on the node. **Notes** supports
+Markdown. The notes editor opens in
+**Rich text** mode, with **Source** and **Split preview** modes available. Its
+formatting toolbar includes headings, lists, code, images (including clipboard
+paste and resizing), and editable tables. **OK**, **Ctrl+Enter**, or **Ctrl+S**
+saves both fields together; **Cancel** discards the draft. Source text is kept
+exactly until a rich edit normalizes it. Markdown formatting applies only to
+the notes, keeping node names simple.
+
+In Notes, type `[[` or choose **Insert node link** to search all nodes in the project.
+Choose a result with Enter or a click; tree paths distinguish duplicate names.
+The source shows `[[name]]`, while the saved link remembers the chosen node even
+if it is renamed. Clicking a link reveals its destination, unfolding its branch
+and leaving a filtered view when necessary. Unresolved links appear in amber;
+click one to choose its destination. Node links remain within their project.
+
 <img src="https://github.com/oyvinrog/progress/blob/master/assets/mindmap-notes.png?raw=1" alt="Thought and notes dialog with a design review agenda and completion condition" width="1000">
 
 Choose **Reminder** for a selected node to set a date and time, with optional

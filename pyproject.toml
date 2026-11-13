@@ -58,4 +58,5 @@ py-modules = ["task_model", "markdown_note_editor", "progress_crypto", "eff_dice
 
 [tool.setuptools.package-data]
 actiondraw = ["qml_ui/**/*.qml", "qml_ui/icons/*.svg", "web/*"]
+"actiondraw._vendor" = ["MARK_UPSTREAM.md"]
 "actiondraw._vendor.pyplane" = ["LICENSE", "UPSTREAM.md"]

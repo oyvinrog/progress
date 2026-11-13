@@ -1,5 +1,7 @@
 """Project-owned mindmap with stable tab references and a QML-facing editor API."""
 import copy
+import json
+import uuid
 from contextlib import contextmanager
 import math
 import time
@@ -8,9 +10,10 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
-from PySide6.QtCore import QObject, Property, QUrl, Signal, Slot
+from PySide6.QtCore import QObject, Property, QUrl, Signal, Slot, QMimeData
 from PySide6.QtGui import QFont, QFontMetricsF, QGuiApplication
 
+from . import mindmap_markdown as markdown
 from ._vendor.pyplane.model import MindMap, Node
 from ._vendor.pyplane.layout import Box, assigned_sides, layout
 from ._vendor.pyplane.mm import dumps, loads
@@ -133,6 +136,7 @@ class MindMapController(QObject):
     planChanged = Signal()
     loading = Signal()
     historyRestored = Signal()
+    editorVisibleChanged = Signal()
 
     def __init__(self, tab_model=None, parent=None):
         super().__init__(parent)
@@ -140,6 +144,9 @@ class MindMapController(QObject):
         self.map = MindMap('Project')
         self.links = {}
         self.references = {}
+        self.text_links = {}
+        self._node_editor = None
+        self._clipboard_project = uuid.uuid4().hex
         self._projection_key = None
         self._projection_nodes = {}
         self._completed = set()
@@ -798,6 +805,7 @@ class MindMapController(QObject):
                 self.links[self.map.root.add_child(tab.name).id] = tab.id
         self._prune_references()
         nodes = {node.id: node for node in self.map.walk()}
+        self.text_links = {key: value for key, value in self.text_links.items() if key in nodes}
         self._completed.intersection_update(nodes)
         self._measure_progress.intersection_update(nodes)
         self._bookmarks = [key for key in self._bookmarks if key in nodes]
@@ -819,6 +827,7 @@ class MindMapController(QObject):
 
     def to_dict(self):
         return {'version': 1, 'xml': dumps(self.map).decode('utf-8'),
+                'text_links': copy.deepcopy(self.text_links),
                 'tab_links': dict(self.links), 'tab_references': dict(self.references), 'completed': sorted(self._completed),
                 'reminders': copy.deepcopy(self.reminders), 'bookmarks': list(self._bookmarks),
                 'measure_progress': sorted(self._measure_progress),
@@ -847,6 +856,7 @@ class MindMapController(QObject):
                 or any(not isinstance(key, str) or mindmap.find(key) is None
                        or not isinstance(value, dict) for key, value in diagrams.items())):
             raise ValueError('Malformed mindmap causal diagrams')
+        markdown.validate_bindings(payload.get('text_links', {}), mindmap)
         links = payload['tab_links']
         if any(not isinstance(k, str) or not isinstance(v, str) or mindmap.find(k) is None
                for k, v in links.items()):
@@ -955,8 +965,10 @@ class MindMapController(QObject):
 
     def load(self, payload=None):
         self.loading.emit()
+        self._clipboard_project = uuid.uuid4().hex
         self.map, self.links = self.decode(payload) if payload is not None else (MindMap('Project'), {})
         self.references = dict((payload or {}).get('tab_references', {}))
+        self.text_links = markdown.note_bindings((payload or {}).get('text_links', {}))
         self._search_query = ''
         self._date_filter = ''
         self._activity_filter = ''
@@ -1590,7 +1602,8 @@ class MindMapController(QObject):
         root = self.view_root
         bookmarks = set(self._bookmarks)
         return [{'id': n.id, 'sourceId': _content(n).id, 'isVirtualDateRoot': False,
-                 'isReference': _placement(n).id in self.references, 'text': n.text, 'note': n.note or '', 'x': b.x, 'y': b.y,
+                 'isReference': _placement(n).id in self.references, 'text': n.text,
+                 'note': n.note or '', 'x': b.x, 'y': b.y,
                  'width': b.width, 'height': b.height, 'isTab': self._tab_id(n) is not None,
                  'hasNote': bool(n.note and n.note.strip()),
                  'hasCausalDiagram': self._has_causal_diagram(_content(n).id),
@@ -1772,7 +1785,8 @@ class MindMapController(QObject):
 
         def mutate():
             self.links[_content(node).id] = tab.id
-            node.text = tab.name
+            if node.text != tab.name:
+                node.text = tab.name
 
         self._commit(mutate)
         self.reconcile()
@@ -1863,7 +1877,20 @@ class MindMapController(QObject):
         clipboard = QGuiApplication.clipboard()
         if not roots or clipboard is None:
             return False
-        clipboard.setText('\n'.join(outline_to_indented_text(node) for node in roots))
+        mime = QMimeData()
+        mime.setText('\n'.join(outline_to_indented_text(node) for node in roots))
+        records = []
+        def record(node, depth):
+            records.append({'level': depth, 'id': _content(node).id, 'text': node.text,
+                            'note': node.note or '',
+                            'bindings': copy.deepcopy(self.text_links.get(_content(node).id, {}))})
+            for child in node.children:
+                record(child, depth + 1)
+        for root in roots:
+            record(root, 0)
+        mime.setData('application/x-actiondraw-mindmap-branches',
+                     json.dumps({'project': self._clipboard_project, 'nodes': records}).encode())
+        clipboard.setMimeData(mime)
         if self._cut_ids:
             self._cut_ids = []
             self.changed.emit()
@@ -1899,6 +1926,14 @@ class MindMapController(QObject):
 
         if not self._in_scope(target):
             return False
+        mime = QGuiApplication.clipboard().mimeData()
+        if mime and mime.hasFormat('application/x-actiondraw-mindmap-branches'):
+            try:
+                data = json.loads(bytes(mime.data('application/x-actiondraw-mindmap-branches')))
+                if data.get('project') == self._clipboard_project:
+                    return self._paste_markdown_branches(target, data['nodes'])
+            except (ValueError, KeyError, TypeError, AttributeError):
+                pass
         text = self._clipboard_text()
         entries = parse_opml_text(text)
         if entries is None:
@@ -1928,6 +1963,35 @@ class MindMapController(QObject):
         if not self._commit(import_outline):
             return False
         self.revealNode.emit(created_roots[0].id)
+        return True
+
+    def _paste_markdown_branches(self, target, records):
+        created = []
+        def mutate():
+            parents, mapping, pending = [], {}, []
+            target.folded = False
+            for record in records:
+                level = min(max(0, int(record['level'])), len(parents))
+                del parents[level:]
+                parent = target if level == 0 else parents[level - 1]
+                node = parent.add_child(record['text'], note=record['note'] or None,
+                                        side='right' if parent is self.view_root else None)
+                parents.append(node)
+                mapping.setdefault(record['id'], _content(node).id)
+                pending.append((node, copy.deepcopy(record['bindings'])))
+                if level == 0:
+                    created.append(node.id)
+            for node, fields in pending:
+                for bindings in fields.values():
+                    for binding in bindings:
+                        binding['target'] = mapping.get(binding['target'], binding['target'])
+                if fields:
+                    self.text_links[_content(node).id] = fields
+            if created:
+                self._set_selection(created, created[0])
+        if not records or not self._commit(mutate):
+            return False
+        self.revealNode.emit(self._selected)
         return True
 
     @Slot(str)
@@ -1993,6 +2057,8 @@ class MindMapController(QObject):
             self._prune_references()
             self._validate_references(self.map, self.links, self.references)
             live = {n.id for n in self.map.walk()}
+            self.text_links = {key: value for key, value in self.text_links.items() if key in live}
+            markdown.validate_bindings(self.text_links, self.map)
             self._completed.intersection_update(live)
             self._measure_progress.intersection_update(live)
             self._bookmarks = [key for key in self._bookmarks if key in live]
@@ -2007,6 +2073,7 @@ class MindMapController(QObject):
             self._last_commit_error = str(exc)
             self.map, self.links = self.decode(before)
             self.references = dict(before.get('tab_references', {}))
+            self.text_links = markdown.note_bindings(before.get('text_links', {}))
             self._completed = set(before.get('completed', []))
             self._measure_progress = set(before.get('measure_progress', []))
             self.reminders = copy.deepcopy(before.get('reminders', {}))
@@ -2111,7 +2178,7 @@ class MindMapController(QObject):
                 self._set_selection(valid or [self.view_root.id])
             self.blockSignals(was_blocked)
 
-    def editNode(self, node_id, text, note):
+    def editNode(self, node_id, text, note, bindings=None):
         node = self._find(node_id)
         if node is None:
             return False
@@ -2130,8 +2197,16 @@ class MindMapController(QObject):
         def mutate():
             if tab_state:
                 self._tabs.renameTab(index, text)
+            old_note = node.note or ""
             node.text = text
             node.note = note or None
+            if bindings is None:
+                self._update_text_bindings(_content(node), old_note)
+            else:
+                if any(bindings.values()):
+                    self.text_links[_content(node).id] = copy.deepcopy(bindings)
+                else:
+                    self.text_links.pop(_content(node).id, None)
 
         self._changing_tabs = True
         try:
@@ -2289,6 +2364,68 @@ class MindMapController(QObject):
                 node.touch()
 
         self._commit(mutate)
+
+    def _resolve_text_name(self, name):
+        matches = [n.id for n in self.map.walk()
+                   if n.id not in self.references and n.text == name]
+        return matches[0] if len(matches) == 1 else None
+
+    def _update_text_bindings(self, node, old_note):
+        previous = self.text_links.get(node.id, {}).get('note', [])
+        bindings = markdown.reconcile(old_note, node.note or '', previous, self._resolve_text_name)
+        if bindings:
+            self.text_links[node.id] = {'note': bindings}
+        else:
+            self.text_links.pop(node.id, None)
+
+    @Slot(str, result='QVariantList')
+    def searchNodeLinks(self, query):
+        query = query.strip().casefold()
+        results = []
+        for node in self.map.walk():
+            if node.id in self.references:
+                continue
+            name = node.text
+            path = ' / '.join(n.text for n in reversed(list(node.ancestors())))
+            if query and query not in name.casefold() and query not in path.casefold():
+                continue
+            rank = 0 if name.casefold() == query else 1 if name.casefold().startswith(query) else 2
+            results.append((rank, name.casefold(), path, node.id, name))
+        return [{'id': key, 'name': name, 'path': path}
+                for _, _, path, key, name in sorted(results)]
+
+    @Slot(str, result=bool)
+    def revealTextLink(self, target):
+        if self.map.find(target) is None:
+            self.errorOccurred.emit('This linked node no longer exists.')
+            return False
+        return self.reveal_reminder(target)
+
+    @Property(bool, notify=editorVisibleChanged)
+    def editorVisible(self):
+        return self._node_editor is not None and self._node_editor.isVisible()
+
+    @Slot()
+    def closeNodeEditor(self):
+        if self._node_editor is not None:
+            self._node_editor.reject()
+
+    def node_editor(self):
+        from .mindmap_node_editor import MindMapNodeEditor
+        if self._node_editor is None:
+            self._node_editor = MindMapNodeEditor(self)
+            self._node_editor.finished.connect(lambda _: self.editorVisibleChanged.emit())
+            self.destroyed.connect(self._node_editor.deleteLater)
+        return self._node_editor
+
+    @Slot()
+    def openNodeEditor(self):
+        node = self._find(self._selected)
+        if node is None or self._is_date_root(self._selected):
+            return
+        self.node_editor()
+        self._node_editor.open_node(_content(node))
+        self.editorVisibleChanged.emit()
 
     @Slot(str, str)
     def editSelected(self, text, note):
@@ -2654,6 +2791,7 @@ class MindMapController(QObject):
         self._cut_ids = []
         self.map, self.links = self.decode(payload)
         self.references = dict(payload.get('tab_references', {}))
+        self.text_links = markdown.note_bindings(payload.get('text_links', {}))
         self._completed = set(payload.get('completed', []))
         self._measure_progress = set(payload.get('measure_progress', []))
         self.reminders = copy.deepcopy(payload.get('reminders', {}))

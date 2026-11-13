@@ -18,6 +18,24 @@ from progress_crypto import EncryptionCredentials, decrypt_project_data
 from task_model import ProjectManager, TabModel, TaskModel
 
 
+def native_editor(window):
+    """Find the project-owned native dialog outside the QML object tree."""
+    pane = window.findChild(QObject, 'mindmapPane')
+    return pane.property('controller').node_editor()
+
+
+def key_target(window):
+    """QTest targets are explicit: send typing to the native dialog when open."""
+    from PySide6.QtCore import QCoreApplication
+    QCoreApplication.processEvents()
+    pane = window.findChild(QObject, 'mindmapPane')
+    controller = pane.property('controller') if pane else None
+    if controller and controller.editorVisible:
+        editor = controller.node_editor()
+        return editor.focusWidget() or editor
+    return window
+
+
 @pytest.fixture
 def project(app):
     tasks = TaskModel()
@@ -276,7 +294,7 @@ def test_qml_type_search_keyboard_and_focus(project, app, actiondraw_window):
 
     def type_text(text):
         for character in text:
-            QTest.keyClick(window, character)
+            QTest.keyClick(key_target(window), character)
 
     def find(item, name):
         if item.objectName() == name:
@@ -307,15 +325,15 @@ def test_qml_type_search_keyboard_and_focus(project, app, actiondraw_window):
     assert 0 <= left <= viewport.width() - box.width * 1.2
     assert 0 <= top <= viewport.height() - box.height * 1.2
     assert not branch.folded
-    QTest.keyClick(window, Qt.Key_Return)
+    QTest.keyClick(key_target(window), Qt.Key_Return)
     assert m.selectedId == second.id
     assert not first_highlight.isVisible() and second_highlight.isVisible()
-    QTest.keyClick(window, Qt.Key_Return, Qt.ShiftModifier)
+    QTest.keyClick(key_target(window), Qt.Key_Return, Qt.ShiftModifier)
     assert m.selectedId == first.id
     assert first_highlight.isVisible() and not second_highlight.isVisible()
-    QTest.keyClick(window, Qt.Key_Space)
+    QTest.keyClick(key_target(window), Qt.Key_Space)
     assert m.searchQuery == 'guest '
-    QTest.keyClick(window, Qt.Key_Backspace)
+    QTest.keyClick(key_target(window), Qt.Key_Backspace)
     assert m.searchQuery == 'guest'
     pan = (pane.property('panX'), pane.property('panY'))
     type_text('zzz')
@@ -323,24 +341,24 @@ def test_qml_type_search_keyboard_and_focus(project, app, actiondraw_window):
     assert m.selectedId == first.id
     assert not first_highlight.isVisible() and not second_highlight.isVisible()
     assert (pane.property('panX'), pane.property('panY')) == pan
-    QTest.keyClick(window, Qt.Key_Escape)
+    QTest.keyClick(key_target(window), Qt.Key_Escape)
     assert not m.searchQuery and not indicator.property('visible')
     assert not first_highlight.isVisible() and not second_highlight.isVisible()
     m.cutSelected()
     type_text('guest')
-    QTest.keyClick(window, Qt.Key_Escape)
+    QTest.keyClick(key_target(window), Qt.Key_Escape)
     assert m.canPaste
-    QTest.keyClick(window, Qt.Key_Escape)
+    QTest.keyClick(key_target(window), Qt.Key_Escape)
     assert not m.canPaste
     type_text('guest')
-    QTest.keyClick(window, Qt.Key_B, Qt.ControlModifier)
+    QTest.keyClick(key_target(window), Qt.Key_B, Qt.ControlModifier)
     assert m.map.find(m.selectedId).style.bold and m.searchQuery == 'guest'
-    QTest.keyClick(window, Qt.Key_F2)
+    QTest.keyClick(key_target(window), Qt.Key_F2)
     QTest.qWait(30)
     assert not m.searchQuery
     type_text('editing')
     assert not m.searchQuery
-    QTest.keyClick(window, Qt.Key_Escape)
+    QTest.keyClick(key_target(window), Qt.Key_Escape)
     QTest.qWait(30)
     type_text('guest')
     window.findChild(QObject, 'mindmapActionsButton').forceActiveFocus()
@@ -349,17 +367,17 @@ def test_qml_type_search_keyboard_and_focus(project, app, actiondraw_window):
     pane.forceActiveFocus()
     assert pane.property('shortcutsEnabled')
     type_text('x')
-    QTest.keyClick(window, Qt.Key_Backspace)
+    QTest.keyClick(key_target(window), Qt.Key_Backspace)
     assert not m.searchQuery
     m.select(branch.id)
-    QTest.keyClick(window, Qt.Key_Space)
+    QTest.keyClick(key_target(window), Qt.Key_Space)
     assert branch.folded
     before = len(list(m.map.walk()))
-    QTest.keyClick(window, Qt.Key_Return)
+    QTest.keyClick(key_target(window), Qt.Key_Return)
     QTest.qWait(30)
     assert len(list(m.map.walk())) == before + 1
-    assert window.findChild(QObject, 'mindmapNodeEditor').property('visible')
-    QTest.keyClick(window, Qt.Key_Escape)
+    assert native_editor(window).property('visible')
+    QTest.keyClick(key_target(window), Qt.Key_Escape)
     QTest.qWait(30)
     type_text('guest')
     m.set_scope(next(iter(m.links.values())))
@@ -1060,30 +1078,30 @@ def test_qml_ctrl_arrows_reorder_and_editor_isolation(project, app, actiondraw_w
     def order():
         return [n.id for n in m.map.find(parent_id).children]
 
-    QTest.keyClick(window, Qt.Key_Up, Qt.ControlModifier)
+    QTest.keyClick(key_target(window), Qt.Key_Up, Qt.ControlModifier)
     assert order() == [b.id, a.id, c.id] and m.selectedId == b.id
     before = m.to_dict()
-    QTest.keyClick(window, Qt.Key_Up, Qt.ControlModifier)
+    QTest.keyClick(key_target(window), Qt.Key_Up, Qt.ControlModifier)
     assert m.to_dict() == before  # Already first: no change.
-    QTest.keyClick(window, Qt.Key_Down, Qt.ControlModifier)
+    QTest.keyClick(key_target(window), Qt.Key_Down, Qt.ControlModifier)
     assert order() == [a.id, b.id, c.id] and m.selectedId == b.id
-    QTest.keyClick(window, Qt.Key_Z, Qt.ControlModifier)
+    QTest.keyClick(key_target(window), Qt.Key_Z, Qt.ControlModifier)
     assert order() == [b.id, a.id, c.id]
-    QTest.keyClick(window, Qt.Key_Y, Qt.ControlModifier)
+    QTest.keyClick(key_target(window), Qt.Key_Y, Qt.ControlModifier)
     assert order() == [a.id, b.id, c.id]
-    QTest.keyClick(window, Qt.Key_Down)
+    QTest.keyClick(key_target(window), Qt.Key_Down)
     assert order() == [a.id, b.id, c.id] and m.selectedId == c.id
-    QTest.keyClick(window, Qt.Key_Up)
+    QTest.keyClick(key_target(window), Qt.Key_Up)
     assert order() == [a.id, b.id, c.id] and m.selectedId == b.id
-    QTest.keyClick(window, Qt.Key_F2)
+    QTest.keyClick(key_target(window), Qt.Key_F2)
     QTest.qWait(30)
-    editor = window.findChild(QObject, 'mindmapNodeEditor')
+    editor = native_editor(window)
     assert editor.property('visible')
     before = m.to_dict()
-    QTest.keyClick(window, Qt.Key_Up, Qt.ControlModifier)
-    QTest.keyClick(window, Qt.Key_Down, Qt.ControlModifier)
+    QTest.keyClick(key_target(window), Qt.Key_Up, Qt.ControlModifier)
+    QTest.keyClick(key_target(window), Qt.Key_Down, Qt.ControlModifier)
     assert m.to_dict() == before
-    QTest.keyClick(window, Qt.Key_Escape)
+    QTest.keyClick(key_target(window), Qt.Key_Escape)
     window.close()
 
 
@@ -1111,7 +1129,7 @@ def test_qml_ctrl_left_right_moves_branch(project, app, tab_scoped, actiondraw_w
     try:
         for key, side in ((Qt.Key_Left, 'left'), (Qt.Key_Right, 'right')):
             before = m.to_dict()
-            QTest.keyClick(window, key, Qt.ControlModifier)
+            QTest.keyClick(key_target(window), key, Qt.ControlModifier)
             branch = m.map.find(branch_id)
             child = m.map.find(child_id)
             assert branch.side == side
@@ -1123,32 +1141,32 @@ def test_qml_ctrl_left_right_moves_branch(project, app, tab_scoped, actiondraw_w
             after = m.to_dict()
             decoded, _ = m.decode(after)
             assert decoded.find(branch_id).side == side
-            QTest.keyClick(window, Qt.Key_Z, Qt.ControlModifier)
+            QTest.keyClick(key_target(window), Qt.Key_Z, Qt.ControlModifier)
             assert m.to_dict() == before and m.selectedId == branch_id
-            QTest.keyClick(window, Qt.Key_Y, Qt.ControlModifier)
+            QTest.keyClick(key_target(window), Qt.Key_Y, Qt.ControlModifier)
             assert m.to_dict() == after and m.selectedId == branch_id
 
         before = m.to_dict()
-        QTest.keyClick(window, Qt.Key_Right)
+        QTest.keyClick(key_target(window), Qt.Key_Right)
         assert m.selectedId == child_id
-        QTest.keyClick(window, Qt.Key_Left)
+        QTest.keyClick(key_target(window), Qt.Key_Left)
         assert m.selectedId == branch_id and m.to_dict() == before
 
         for node_id in (m.view_root.id, child_id):
             m.select(node_id)
             history_size = len(m._undo)
             for key in (Qt.Key_Left, Qt.Key_Right):
-                QTest.keyClick(window, key, Qt.ControlModifier)
+                QTest.keyClick(key_target(window), key, Qt.ControlModifier)
                 assert m.to_dict() == before and len(m._undo) == history_size
 
         m.select(branch_id)
-        QTest.keyClick(window, Qt.Key_F2)
+        QTest.keyClick(key_target(window), Qt.Key_F2)
         QTest.qWait(30)
-        assert window.findChild(QObject, 'mindmapNodeEditor').property('visible')
+        assert native_editor(window).property('visible')
         for key in (Qt.Key_Left, Qt.Key_Right):
-            QTest.keyClick(window, key, Qt.ControlModifier)
+            QTest.keyClick(key_target(window), key, Qt.ControlModifier)
             assert m.to_dict() == before
-        QTest.keyClick(window, Qt.Key_Escape)
+        QTest.keyClick(key_target(window), Qt.Key_Escape)
     finally:
         window.close()
 
@@ -1450,47 +1468,47 @@ def test_qml_click_drag_back_and_shortcut_isolation(project, app, actiondraw_win
     assert pane.property('zoom') == 0.55 and pane.property('panX') == 35.0
     assert m.selectedId == node_id
     # Keyboard selection does not drill; Tab adds a thought beneath a tab.
-    QTest.keyClick(window, Qt.Key_Left)
+    QTest.keyClick(key_target(window), Qt.Key_Left)
     assert m.selectedId == first_node and pm.mindmapVisible
-    QTest.keyClick(window, Qt.Key_Tab)
+    QTest.keyClick(key_target(window), Qt.Key_Tab)
     created = m.selectedId
     assert m.map.find(created).parent.id == first_node
     assert created not in m.links
-    editor = window.findChild(QObject, 'mindmapNodeEditor')
+    editor = native_editor(window)
     assert editor.property('visible')
-    title = window.findChild(QObject, 'mindmapNodeTitle')
-    assert title.property('selectedText') == 'New thought'
+    title = native_editor(window).title
+    assert title.selectedText() == 'New thought'
     node_count = len(list(m.map.walk()))
     for character in 'first idea':
-        QTest.keyClick(window, Qt.Key(ord(character.upper())))
-    QTest.keyClick(window, Qt.Key_Return)
+        QTest.keyClick(key_target(window), Qt.Key(ord(character.upper())))
+    QTest.keyClick(key_target(window), Qt.Key_Return, Qt.ControlModifier)
     assert not editor.property('visible')
     assert m.map.find(created).text == 'first idea'
     assert len(list(m.map.walk())) == node_count
     # Focus returns to the map for immediately creating and naming the next sibling.
-    QTest.keyClick(window, Qt.Key_Return)
+    QTest.keyClick(key_target(window), Qt.Key_Return)
     created = m.selectedId
     assert editor.property('visible')
     assert m.map.find(created).parent.id == first_node
-    assert title.property('selectedText') == 'New thought'
+    assert title.selectedText() == 'New thought'
     for character in 'second idea':
-        QTest.keyClick(window, Qt.Key(ord(character.upper())))
-    QTest.keyClick(window, Qt.Key_Enter)
+        QTest.keyClick(key_target(window), Qt.Key(ord(character.upper())))
+    QTest.keyClick(key_target(window), Qt.Key_Return, Qt.ControlModifier)
     assert not editor.property('visible')
     assert m.map.find(created).text == 'second idea'
     assert len(list(m.map.walk())) == node_count + 1
-    QTest.keyClick(window, Qt.Key_F2)
-    QTest.keyClick(window, Qt.Key_Left)
-    QTest.keyClick(window, Qt.Key_Return, Qt.ControlModifier)
+    QTest.keyClick(key_target(window), Qt.Key_F2)
+    QTest.keyClick(key_target(window), Qt.Key_Left)
+    QTest.keyClick(key_target(window), Qt.Key_Return, Qt.ControlModifier)
     assert m.selectedId == created and pm.mindmapVisible
-    QTest.keyClick(window, Qt.Key_Escape)
+    QTest.keyClick(key_target(window), Qt.Key_Escape)
     QTest.qWait(50)
     assert not editor.property('visible')
     # Navigation pans the selected node back into view without changing zoom.
     m.select(m.map.root.id)
     pane.setProperty('panX', -2000.0)
     pane.setProperty('panY', -2000.0)
-    QTest.keyClick(window, Qt.Key_Right)
+    QTest.keyClick(key_target(window), Qt.Key_Right)
     assert m.selectedId == first_node
     viewport = window.findChild(QObject, 'mindmapViewport')
     selected_item = find_item(window.contentItem(), 'mindmapNode_' + first_node)
@@ -1498,7 +1516,7 @@ def test_qml_click_drag_back_and_shortcut_isolation(project, app, actiondraw_win
     assert 0 < selected_center.x() < viewport.width()
     assert 0 < selected_center.y() < viewport.height()
     assert pane.property('zoom') == 0.55
-    QTest.keyClick(window, Qt.Key_Return, Qt.ControlModifier)
+    QTest.keyClick(key_target(window), Qt.Key_Return, Qt.ControlModifier)
     assert pm.mindmapVisible and m.tabScoped and tabs.getCurrentTabData().id == m.links[first_node]
     pm.goBack()
     QTest.qWait(30)
@@ -1511,7 +1529,7 @@ def test_qml_click_drag_back_and_shortcut_isolation(project, app, actiondraw_win
     window.setProperty('selectedItemId', item_id)
     count = diagram.rowCount()
     deletable = thought(m, "Delete me")
-    QTest.keyClick(window, Qt.Key_Delete)
+    QTest.keyClick(key_target(window), Qt.Key_Delete)
     assert m.map.find(deletable) is None
     assert diagram.rowCount() == count
     # Convert the selected thought with the actual toolbar control, staying in
@@ -1938,19 +1956,19 @@ def test_qml_multi_selection_cut_and_paste(project, app, actiondraw_window):
         assert set(m.selectedIds) == {b.id, c.id}
         click(a.id, Qt.ControlModifier)
         assert all(item_for(node.id).property('selected') for node in (a, b, c))
-        QTest.keyClick(window, Qt.Key_X, Qt.ControlModifier)
+        QTest.keyClick(key_target(window), Qt.Key_X, Qt.ControlModifier)
         assert m.canPaste and item_for(a.id).opacity() < 1
         click(tab_id)
         assert pm.mindmapVisible and m.selectedId == tab_id
-        QTest.keyClick(window, Qt.Key_V, Qt.ControlModifier)
+        QTest.keyClick(key_target(window), Qt.Key_V, Qt.ControlModifier)
         assert not m.canPaste
         assert [node.id for node in m.map.find(tab_id).children] == [a.id, b.id, c.id]
-        QTest.keyClick(window, Qt.Key_Z, Qt.ControlModifier)
+        QTest.keyClick(key_target(window), Qt.Key_Z, Qt.ControlModifier)
         assert all(m.map.find(node.id).parent is m.map.root for node in (a, b, c))
-        QTest.keyClick(window, Qt.Key_Y, Qt.ControlModifier)
+        QTest.keyClick(key_target(window), Qt.Key_Y, Qt.ControlModifier)
         assert all(m.map.find(node.id).parent.id == tab_id for node in (a, b, c))
-        QTest.keyClick(window, Qt.Key_X, Qt.ControlModifier)
-        QTest.keyClick(window, Qt.Key_Escape)
+        QTest.keyClick(key_target(window), Qt.Key_X, Qt.ControlModifier)
+        QTest.keyClick(key_target(window), Qt.Key_Escape)
         assert not m.canPaste
         assert not warnings, warnings
     finally:
@@ -1977,14 +1995,14 @@ def test_qml_ctrl_c_then_ctrl_v_copies_selected_branch(project, app, actiondraw_
         assert pane is not None
         pane.forceActiveFocus()
 
-        QTest.keyClick(window, Qt.Key_C, Qt.ControlModifier)
+        QTest.keyClick(key_target(window), Qt.Key_C, Qt.ControlModifier)
         QTest.qWait(30)
         assert QGuiApplication.clipboard().text() == (
             'Copied branch\n  Copied child'
         )
 
         m.select(destination.id)
-        QTest.keyClick(window, Qt.Key_V, Qt.ControlModifier)
+        QTest.keyClick(key_target(window), Qt.Key_V, Qt.ControlModifier)
         QTest.qWait(30)
         pasted = destination.children[-1]
         assert pasted.text == 'Copied branch'
@@ -2019,7 +2037,7 @@ def test_qml_ctrl_v_imports_clipboard_text_and_updates_paste_actions(project, ap
         assert toolbar_paste.property('enabled') and context_paste.property('enabled')
 
         pane.forceActiveFocus()
-        QTest.keyClick(window, Qt.Key_V, Qt.ControlModifier)
+        QTest.keyClick(key_target(window), Qt.Key_V, Qt.ControlModifier)
         QTest.qWait(30)
         parent = next(node for node in m.map.root.children if node.text == 'Clipboard parent')
         assert [node.text for node in parent.children] == ['Clipboard child']
@@ -2309,10 +2327,10 @@ def test_qml_measure_progress_menu_and_badge(project, app, actiondraw_window):
         note_icon = find_item(window.contentItem(), 'mindmapNoteIcon_' + tab)
         assert note_icon.isVisible()
         click(note_icon)
-        editor = window.findChild(QObject, 'mindmapNodeEditor')
+        editor = native_editor(window)
         assert editor.property('visible') and m.selectedId == tab
-        assert window.findChild(QObject, 'mindmapNodeTitle').property('text') == m.map.find(tab).text
-        QTest.keyClick(window, Qt.Key_Escape)
+        assert native_editor(window).title.text() == m.map.find(tab).text
+        QTest.keyClick(key_target(window), Qt.Key_Escape)
         assert not warnings, warnings
     finally:
         window.close()
@@ -2334,7 +2352,7 @@ def test_qml_tab_switch_completion_and_editor_focus(project, app, actiondraw_win
     pane = window.findChild(QObject, 'mindmapPane')
     m.select(child)
     pane.forceActiveFocus()
-    QTest.keyClick(window, Qt.Key_F4)
+    QTest.keyClick(key_target(window), Qt.Key_F4)
     assert m.selectedNode['completed']
     QMetaObject.invokeMethod(window.findChild(QObject, 'mindmapActionsMenu'), 'open')
     QTest.qWait(30)
@@ -2342,10 +2360,10 @@ def test_qml_tab_switch_completion_and_editor_focus(project, app, actiondraw_win
     QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
                      button.mapToScene(button.boundingRect().center()).toPoint())
     assert not m.selectedNode['completed']
-    QTest.keyClick(window, Qt.Key_F2)
-    QTest.keyClick(window, Qt.Key_F4)
+    QTest.keyClick(key_target(window), Qt.Key_F2)
+    QTest.keyClick(key_target(window), Qt.Key_F4)
     assert not m.selectedNode['completed']
-    QTest.keyClick(window, Qt.Key_Escape)
+    QTest.keyClick(key_target(window), Qt.Key_Escape)
     canvas = window.findChild(QObject, 'tabMindmapCanvas')
     QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
                      canvas.mapToScene(canvas.boundingRect().center()).toPoint())
@@ -2815,7 +2833,7 @@ def test_qml_double_click_empty_canvas(project, app, zoom, pan, actiondraw_windo
     QTest.qWait(150)
     pane = window.findChild(QObject, 'mindmapPane')
     viewport = window.findChild(QObject, 'mindmapViewport')
-    editor = window.findChild(QObject, 'mindmapNodeEditor')
+    editor = native_editor(window)
     box = m._layout()[a]
     pane.setProperty('zoom', zoom)
     pane.setProperty('panX', pan - (box.x + box.width / 2) * zoom)
@@ -2835,7 +2853,7 @@ def test_qml_double_click_empty_canvas(project, app, zoom, pan, actiondraw_windo
     assert len(list(m.map.walk())) == count + 1
     assert parent.children == [a, created, b]
     assert editor.property('visible')
-    assert window.findChild(QObject, 'mindmapNodeTitle').property('text') == 'New thought'
+    assert native_editor(window).title.text() == 'New thought'
     QMetaObject.invokeMethod(editor, 'reject')
     QTest.qWait(50)
     assert len(list(m.map.walk())) == count + 1
@@ -2906,21 +2924,21 @@ def test_qml_ctrl_b_toggles_node_font_and_respects_editor(project, app, actiondr
                 return found
         return None
 
-    QTest.keyClick(window, Qt.Key_B, Qt.ControlModifier)
+    QTest.keyClick(key_target(window), Qt.Key_B, Qt.ControlModifier)
     QTest.qWait(30)
     assert node.style.bold
     assert label(window.contentItem()).property('font').bold()
     assert m._layout()[node].width > normal_width
-    QTest.keyClick(window, Qt.Key_B, Qt.ControlModifier)
+    QTest.keyClick(key_target(window), Qt.Key_B, Qt.ControlModifier)
     QTest.qWait(30)
     assert not node.style.bold
     assert not label(window.contentItem()).property('font').bold()
-    QTest.keyClick(window, Qt.Key_F2)
+    QTest.keyClick(key_target(window), Qt.Key_F2)
     QTest.qWait(30)
     before = m.to_dict()
-    QTest.keyClick(window, Qt.Key_B, Qt.ControlModifier)
+    QTest.keyClick(key_target(window), Qt.Key_B, Qt.ControlModifier)
     assert m.to_dict() == before
-    QTest.keyClick(window, Qt.Key_Escape)
+    QTest.keyClick(key_target(window), Qt.Key_Escape)
     window.close()
 
 
@@ -2941,13 +2959,13 @@ def test_mindmap_compact_menu_keyboard_and_help(project, app, actiondraw_window)
     view_toolbar = window.findChild(QObject, 'mindmapViewToolbar')
     assert viewport.height() > pane.height() - 90 - view_toolbar.height() - 8
     button.forceActiveFocus()
-    QTest.keyClick(window, Qt.Key_Space)
+    QTest.keyClick(key_target(window), Qt.Key_Space)
     QTest.qWait(40)
     assert menu.property('visible')
     assert not pane.property('shortcutsEnabled')
-    QTest.keyClick(window, Qt.Key_Down)
+    QTest.keyClick(key_target(window), Qt.Key_Down)
     assert menu.property('currentIndex') >= 0
-    QTest.keyClick(window, Qt.Key_Escape)
+    QTest.keyClick(key_target(window), Qt.Key_Escape)
     QTest.qWait(40)
     assert not menu.property('visible') and pane.hasActiveFocus()
     QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
@@ -2959,7 +2977,7 @@ def test_mindmap_compact_menu_keyboard_and_help(project, app, actiondraw_window)
     QTest.qWait(40)
     assert help_dialog.property('visible') and not menu.property('visible')
     assert not pane.property('shortcutsEnabled')
-    QTest.keyClick(window, Qt.Key_Escape)
+    QTest.keyClick(key_target(window), Qt.Key_Escape)
     QTest.qWait(40)
     assert not help_dialog.property('visible') and pane.hasActiveFocus()
     window.close()
@@ -3073,7 +3091,7 @@ def test_qml_sibling_insertion_controls(project, app, zoom, before, actiondraw_w
     expected.insert(original_ids.index(a.id) + (0 if before else 1), new.id)
     assert [n.id for n in m.map.root.children] == expected
     assert new.text == 'New thought'
-    editor = window.findChild(QObject, 'mindmapNodeEditor')
+    editor = native_editor(window)
     assert editor.property('visible') and not above.property('visible')
     assert pane.property('panX') == -140 and pane.property('panY') == 50
     QMetaObject.invokeMethod(editor, 'reject')
@@ -3226,10 +3244,10 @@ def test_qml_priority_filter_slider_and_creation(project, app, actiondraw_window
     slider.forceActiveFocus()
     assert not pane.property('shortcutsEnabled')
     selection = m.selectedId
-    QTest.keyClick(window, Qt.Key_Right)
+    QTest.keyClick(key_target(window), Qt.Key_Right)
     assert m.priorityFilter > 0 and m.selectedId == selection
     count = len(list(m.map.walk()))
-    QTest.keyClick(window, Qt.Key_Return)
+    QTest.keyClick(key_target(window), Qt.Key_Return)
     assert len(list(m.map.walk())) == count
     QTest.mousePress(window, Qt.LeftButton, Qt.NoModifier, end)
     QTest.mouseMove(window, start, 30)
@@ -3242,11 +3260,11 @@ def test_qml_priority_filter_slider_and_creation(project, app, actiondraw_window
     QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, point)
     assert pane.property('shortcutsEnabled')
     m.select(high.id)
-    QTest.keyClick(window, Qt.Key_Return)
+    QTest.keyClick(key_target(window), Qt.Key_Return)
     QTest.qWait(30)
     assert m.priorityFilter == 1 and slider.property('value') == 1
-    assert window.findChild(QObject, 'mindmapNodeEditor').property('visible')
-    QTest.keyClick(window, Qt.Key_Escape)
+    assert native_editor(window).property('visible')
+    QTest.keyClick(key_target(window), Qt.Key_Escape)
     window.close()
 
 
@@ -3287,12 +3305,12 @@ def test_qml_double_click_tab_safeguards(project, app, actiondraw_window):
     QTest.qWait(50)
     QTest.mouseDClick(window, Qt.LeftButton, Qt.NoModifier, center(node_id))
     assert not activated and pm.mindmapVisible
-    assert not window.findChild(QObject, 'mindmapNodeEditor').property('visible')
+    assert not native_editor(window).property('visible')
     QTest.mouseDClick(window, Qt.LeftButton, Qt.NoModifier, center(ordinary.id))
     QTest.qWait(30)
-    assert window.findChild(QObject, 'mindmapNodeEditor').property('visible')
+    assert native_editor(window).property('visible')
     assert m.selectedId == ordinary.id and not activated
-    QTest.keyClick(window, Qt.Key_Escape)
+    QTest.keyClick(key_target(window), Qt.Key_Escape)
     window.close()
 
 
@@ -4308,7 +4326,7 @@ def test_qml_create_scheduled_node_goal(project, app, actiondraw_window, action_
 
     invoke(find_visual(window.contentItem(), 'goalDateDay_2'), 'clicked')
     assert end.property('text') == '2032-03-02'
-    QTest.keyClick(window, Qt.Key_Return)
+    QTest.keyClick(key_target(window), Qt.Key_Return)
     QTest.qWait(30)
     assert not dialog.property('visible') and pane.property('activeFocus')
     assert tabs.tabCount == count + 1 and pm.mindmapVisible
@@ -4439,7 +4457,7 @@ def test_qml_conditional_completion_clicks(project, app, actiondraw_window):
         m.select(parent)
         click(item('mindmapNodeText_'))
         assert m.selectedId == child and not m.selectedNode['completed']
-        QTest.keyClick(window, Qt.Key_F4)
+        QTest.keyClick(key_target(window), Qt.Key_F4)
         QTest.qWait(30)
         assert item('mindmapCompletedMark_').isVisible()
         assert not item('mindmapComplete_').isVisible()
@@ -4573,20 +4591,20 @@ def test_calendar_filtered_node_creation_edits_new_node(
     pane.forceActiveFocus()
     before = {node.id: node.text for node in m.map.walk()}
 
-    QTest.keyClick(window, key)
+    QTest.keyClick(key_target(window), key)
 
     created_ids = {node.id for node in m.map.walk()} - before.keys()
     assert len(created_ids) == 1
     created = created_ids.pop()
     assert m.selectedId == created
     assert created in {node['id'] for node in m.nodes}
-    editor = window.findChild(QObject, 'mindmapNodeEditor')
-    title = window.findChild(QObject, 'mindmapNodeTitle')
+    editor = native_editor(window)
+    title = native_editor(window).title
     assert editor.property('visible')
-    assert title.property('selectedText') == 'New thought'
+    assert title.selectedText() == 'New thought'
     for character in 'new idea':
-        QTest.keyClick(window, Qt.Key(ord(character.upper())))
-    QTest.keyClick(window, Qt.Key_Return)
+        QTest.keyClick(key_target(window), Qt.Key(ord(character.upper())))
+    QTest.keyClick(key_target(window), Qt.Key_Return, Qt.ControlModifier)
     assert not editor.property('visible')
     assert m.map.find(created).text == 'new idea'
     assert all(m.map.find(node_id).text == text for node_id, text in before.items())
@@ -4879,14 +4897,14 @@ def test_qml_calendar_linked_title_editor(project, app, actiondraw_window, via_r
     QTest.qWait(50)
     pane = window.findChild(QObject, 'mindmapPane')
     assert QMetaObject.invokeMethod(pane, 'editNode')
-    title = window.findChild(QObject, 'mindmapNodeTitle')
+    title = native_editor(window).title
     assert not title.property('readOnly')
-    title.setProperty('text', 'Edited in mindmap')
-    QTest.keyClick(window, Qt.Key_Return)
+    title.setText('Edited in mindmap')
+    QTest.keyClick(key_target(window), Qt.Key_Return, Qt.ControlModifier)
     assert tabs.scheduledGoals[0]['name'] == 'Edited in mindmap'
     m.undo()
     assert tabs.scheduledGoals[0]['name'] == 'Activity'
-    QTest.keyClick(window, Qt.Key_Delete)
+    QTest.keyClick(key_target(window), Qt.Key_Delete)
     if via_reference:
         assert tabs.scheduledGoals[0]['id'] == goal
         assert not m.references
@@ -4991,7 +5009,7 @@ def test_qml_node_calendar_drop(project, app, actiondraw_window, kind, duration,
     QTest.mouseMove(window, end, 30)
     assert (model.plannedGoals if kind == 'node' else tabs.scheduledGoals) == before
     if outcome == 'escape':
-        QTest.keyClick(window, Qt.Key_Escape)
+        QTest.keyClick(key_target(window), Qt.Key_Escape)
     elif outcome == 'outside':
         end = QPoint(1, 1)
         QTest.mouseMove(window, end, 30)
@@ -5123,8 +5141,8 @@ def test_virtual_day_root_qml_child_creation(project, actiondraw_window, route):
     pane.forceActiveFocus()
     QTest.qWait(30)
     # Editing the date itself must never open the content editor.
-    QTest.keyClick(window, Qt.Key_F2)
-    editor = window.findChild(QObject, 'mindmapNodeEditor')
+    QTest.keyClick(key_target(window), Qt.Key_F2)
+    editor = native_editor(window)
     assert not editor.property('visible')
     if route in ('menu', 'context'):
         if route == 'menu':
@@ -5140,7 +5158,7 @@ def test_virtual_day_root_qml_child_creation(project, actiondraw_window, route):
     else:
         assert QMetaObject.invokeMethod(find(window, 'mindmapAddChild'), 'clicked')
     assert editor.property('visible')
-    assert find(window, 'mindmapNodeTitle').property('selectedText') == 'New thought'
+    assert native_editor(window).title.selectedText() == 'New thought'
     assert tabs.tabCount == 2 and tabs.currentTabIndex == 0
     assert m.dateFilter == '2032-02-29'
     assert m.selectedId in m.links
@@ -5255,7 +5273,7 @@ def test_qml_live_drop_preview(project, app, actiondraw_window, zoom, offset, pl
     assert window.findChild(QObject, 'mindmapDropIndicator').property('visible')
     assert m.to_dict() == before
     if outcome == 'escape':
-        QTest.keyClick(window, Qt.Key_Escape)
+        QTest.keyClick(key_target(window), Qt.Key_Escape)
     elif outcome == 'lost-grab':
         find(window.contentItem(), 'mindmapNodeMouse_' + c.id).ungrabMouse()
     elif outcome == 'outside':
