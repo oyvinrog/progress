@@ -365,6 +365,8 @@ ApplicationWindow {
         yubiKeyTouchDialog.close()
     }
 
+    property bool pendingReminderRepeats: false
+
     function showNextReminderAlert() {
         if (root.reminderPopupBusy || dialogs.reminderDialog.visible)
             return
@@ -372,6 +374,7 @@ ApplicationWindow {
             return
         root.reminderPopupBusy = true
         var nextReminder = root.reminderQueue.shift()
+        root.pendingReminderRepeats = !!(nextReminder.repeat && nextReminder.repeat.interval)
         root.pendingReminderConversionId = nextReminder.conversionId || ""
         root.pendingReminderKind = nextReminder.kind || "task"
         root.pendingReminderNodeId = nextReminder.nodeId || ""
@@ -1404,6 +1407,9 @@ ApplicationWindow {
             }
             onQuickReminderRequested: function(nodeId, minutesFromNow) {
                 projectManager.setMindmapReminderIn(nodeId, minutesFromNow)
+            }
+            onRecurringReminderRequested: function(nodeId, interval, unit) {
+                projectManager.setMindmapRecurringReminder(nodeId, interval, unit)
             }
             onClearReminderRequested: function(nodeId) { projectManager.clearMindmapReminder(nodeId) }
         }
@@ -4582,6 +4588,7 @@ ApplicationWindow {
 
                 Button {
                     objectName: "renewDueReminder"
+                    visible: !root.pendingReminderRepeats
                     text: "Renew"
                     onClicked: {
                         root.openReminderRenewDialog()

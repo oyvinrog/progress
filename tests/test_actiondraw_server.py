@@ -368,3 +368,19 @@ def test_standalone_reminders_invalidate_idle_cache(project):
     state = api.state()
     project._checkStandaloneReminders()
     assert api.state(state['revision'])['revision'] > state['revision']
+
+
+def test_recurring_reminder_api(project):
+    api = ProjectApi(project)
+    node = next(n for n in api.state()['nodes'] if not n['reference'])
+    edit(api, 'reminder', node=node['id'], at='2099-01-01T09:30',
+         repeat={'interval': 20, 'unit': 'minutes'})
+    reminder, = api.state()['reminders']
+    assert reminder['repeatText'] == 'Every 20 minutes'
+    assert reminder['repeat']['interval'] == 20
+    with pytest.raises(ApiError):
+        edit(api, 'reminder', node=node['id'], at='2099-01-01T09:30',
+             repeat={'interval': 0, 'unit': 'minutes'})
+    assert api.state()['reminders'][0]['repeat']['interval'] == 20
+    edit(api, 'reminder', node=node['id'], at='2099-01-01T09:30')
+    assert api.state()['reminders'][0]['repeat'] == {}

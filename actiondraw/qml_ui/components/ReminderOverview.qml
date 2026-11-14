@@ -129,6 +129,26 @@ Item {
         return true
     }
     function rangeModel(id) { return id.indexOf("plan:") === 0 ? planController : goalModel }
+    function openReminder(entry) {
+        if (!projectManager || entry.kind === "standalone") return
+        // Copy the destination before closing popups changes the agenda delegates.
+        var kind = entry.kind, nodeId = entry.nodeId
+        var tabIndex = Number(entry.tabIndex), taskIndex = Number(entry.taskIndex)
+        dayAgenda.close()
+        planning.close()
+        selectedDate = ""
+        Qt.callLater(function() {
+            if (kind === "mindmap" || kind === "kanban_schedule") {
+                overview.projectManager.openMindmapReminder(nodeId)
+                if (overview.planController && overview.planController.calendarActivityId) {
+                    var activityId = overview.planController.calendarActivityId(nodeId)
+                    if (activityId) overview.selectActivity(activityId)
+                }
+            } else {
+                overview.projectManager.openTabTask(tabIndex, taskIndex)
+            }
+        })
+    }
     function openGoal(id) {
         if (id.indexOf("plan:") === 0) {
             projectManager.openMindmapReminder(id.slice(5))
@@ -174,7 +194,18 @@ Item {
         var entries = windowRoot ? windowRoot.activeReminders : []
         return entries.filter(function(entry) { return Number(entry.reminderAt) > overview.nowTimestamp })
     }
+    readonly property var projectedCalendar: {
+        var days = calendar.calendarDays.map(function(day) { return day.key })
+        if (weekStart) {
+            for (var i = 0; i < 7; ++i)
+                days.push(calendar.dayKey(calendar.dayNumber(weekStart) + i))
+        }
+        if (projectManager && projectManager.projectCalendarReminders)
+            return projectManager.projectCalendarReminders(futureReminders, days, agendaDate)
+        return null
+    }
     readonly property var dayCounts: {
+        if (projectedCalendar) return projectedCalendar.dayCounts
         var counts = {}
         futureReminders.forEach(function(entry) {
             var key = calendar.dateKey(new Date(Number(entry.reminderAt) * 1000))
@@ -182,7 +213,7 @@ Item {
         })
         return counts
     }
-    readonly property var filteredReminders: futureReminders.filter(function(entry) {
+    readonly property var filteredReminders: projectedCalendar ? projectedCalendar.reminders : futureReminders.filter(function(entry) {
         return !overview.agendaDate || calendar.dateKey(new Date(Number(entry.reminderAt) * 1000)) === overview.agendaDate
     }).sort(function(a, b) { return Number(a.reminderAt) - Number(b.reminderAt) })
     // Update reminder roles in place so countdown ticks do not destroy open menus.
@@ -193,6 +224,7 @@ Item {
             var entry = filteredReminders[i]
             var key = entry.kind + ":" + (entry.nodeId ||
                 (entry.kind === "standalone" ? entry.standaloneIndex : entry.tabIndex + ":" + entry.taskIndex))
+                + ":" + (entry.occurrenceAt || entry.reminderAt)
             var found = -1
             for (var j = i; j < agendaReminders.count; ++j) {
                 if (agendaReminders.get(j).key === key) { found = j; break }
@@ -652,14 +684,21 @@ Item {
                             Layout.fillWidth: true
                             Layout.minimumWidth: 0
                             spacing: 1
-                            HoverHandler { id: reminderTextHover }
+                            HoverHandler {
+                                id: reminderTextHover
+                                cursorShape: reminderRow.entry.kind !== "standalone" ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            }
+                            TapHandler {
+                                enabled: reminderRow.entry.kind !== "standalone"
+                                onTapped: overview.openReminder(reminderRow.entry)
+                            }
                             ToolTip {
                                 id: reminderTextTooltip
                                 objectName: "reminderTextTooltip_" + (reminderRow.entry.nodeId || reminderRow.entry.kind)
                                 visible: reminderTextHover.hovered && !overview.agendaDrag
                                 delay: 500
                                 text: "[" + reminderRow.entry.tabName + "] " + (reminderRow.entry.title || reminderRow.entry.taskTitle)
-                                    + "\n" + (reminderRow.isPlan ? "Add and notify at " : "Remind at ") + reminderRow.entry.reminderText
+                                    + "\n" + (reminderRow.isPlan ? "Add and notify at " : "Remind at ") + (reminderRow.entry.occurrenceText || reminderRow.entry.reminderText) + (reminderRow.entry.repeatText ? " · " + reminderRow.entry.repeatText : "")
                                 width: Math.min(implicitWidth, Math.max(160, overview.width - 32), 420)
                                 contentItem: Label {
                                     text: reminderTextTooltip.text
@@ -670,8 +709,10 @@ Item {
                             }
                             Text {
                                 width: parent.width
+                                objectName: "reminderTitle_" + (reminderRow.entry.nodeId || reminderRow.entry.kind)
                                 text: "[" + reminderRow.entry.tabName + "] " + (reminderRow.entry.title || reminderRow.entry.taskTitle)
-                                color: "#fff7ef"
+                                color: reminderRow.entry.kind !== "standalone" ? "#a9d8fa" : "#fff7ef"
+                                font.underline: reminderRow.entry.kind !== "standalone"
                                 font.pixelSize: 11
                                 font.bold: true
                                 elide: Text.ElideRight
@@ -686,7 +727,7 @@ Item {
                             }
                             Text {
                                 width: parent.width
-                                text: (reminderRow.isPlan ? "Add and notify at " : "Remind at ") + reminderRow.entry.reminderText
+                                text: (reminderRow.isPlan ? "Add and notify at " : "Remind at ") + (reminderRow.entry.occurrenceText || reminderRow.entry.reminderText) + (reminderRow.entry.repeatText ? " · " + reminderRow.entry.repeatText : "")
                                 color: "#f1c892"
                                 font.pixelSize: 10
                                 elide: Text.ElideRight
@@ -706,11 +747,7 @@ Item {
                                 text: reminderRow.isPlan || reminderRow.entry.kind === "mindmap" ? "Open Node" : "Open Task"
                                 visible: reminderRow.entry.kind !== "standalone"
                                 onTriggered: {
-                                    var data = reminderRow.entry
-                                    if (reminderRow.isPlan || data.kind === "mindmap")
-                                        overview.projectManager.openMindmapReminder(data.nodeId)
-                                    else
-                                        overview.projectManager.openTabTask(Number(data.tabIndex), Number(data.taskIndex))
+                                    overview.openReminder(reminderRow.entry)
                                 }
                             }
                             MenuItem {

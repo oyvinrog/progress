@@ -1574,6 +1574,10 @@ Item {
         property string dateValue: ""
         property string timeValue: ""
         property bool sendNotification: false
+        property var repeatRule: ({})
+        function selectedRepeat() {
+            return repeatMode.currentIndex === 0 ? {} : {interval: repeatInterval.value, unit: repeatUnit.currentText}
+        }
 
         function parseReminderParts(value) {
             var trimmed = value ? value.trim() : ""
@@ -1614,6 +1618,21 @@ Item {
         }
 
         onOpened: {
+            repeatRule = ({})
+            var entries = projectManager ? projectManager.getActiveReminders() : []
+            for (var i = 0; i < entries.length; ++i) {
+                var entry = entries[i]
+                if ((nodeId.length && entry.kind === "mindmap" && entry.nodeId === nodeId)
+                    || (standaloneMode && editStandaloneIndex >= 0 && entry.kind === "standalone" && entry.standaloneIndex === editStandaloneIndex)
+                    || (!standaloneMode && !nodeId.length && taskIndex >= 0 && entry.kind === "task" && entry.taskIndex === taskIndex
+                        && entry.tabIndex === (targetTabIndex >= 0 ? targetTabIndex : (tabModel ? tabModel.currentTabIndex : 0)))) {
+                    repeatRule = entry.repeat || ({})
+                    break
+                }
+            }
+            repeatMode.currentIndex = repeatRule.interval ? 1 : 0
+            repeatInterval.value = repeatRule.interval || 1
+            repeatUnit.currentIndex = Math.max(0, ["minutes", "hours", "days", "weeks"].indexOf(repeatRule.unit || "days"))
             if (reminderDialog.dateValue.trim().length === 0 || reminderDialog.timeValue.trim().length === 0) {
                 setToOffsetMinutes(60)
             }
@@ -1793,6 +1812,18 @@ Item {
                 }
             }
 
+            RowLayout {
+                Layout.fillWidth: true
+                Label { text: "Repeat"; color: "#f5f6f8" }
+                ComboBox { id: repeatMode; objectName: "reminderRepeatMode"; model: ["Never", "Every…"] }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                visible: repeatMode.currentIndex === 1
+                SpinBox { id: repeatInterval; objectName: "reminderRepeatInterval"; from: 1; to: 1000000; value: 1; editable: true; visible: repeatMode.currentIndex === 1 }
+                ComboBox { id: repeatUnit; objectName: "reminderRepeatUnit"; model: ["minutes", "hours", "days", "weeks"]; visible: repeatMode.currentIndex === 1 }
+            }
+
             CheckBox {
                 Layout.fillWidth: true
                 text: "Send notification"
@@ -1816,7 +1847,7 @@ Item {
             var reminderValue = reminderDialog.dateValue.trim() + " " + reminderDialog.timeValue.trim()
             if (reminderDialog.dateValue.trim().length > 0 && reminderDialog.timeValue.trim().length > 0) {
                 if (reminderDialog.nodeId.length > 0) {
-                    if (!projectManager.setMindmapReminder(reminderDialog.nodeId, reminderValue, reminderDialog.sendNotification)) {
+                    if (!projectManager.setMindmapReminder(reminderDialog.nodeId, reminderValue, reminderDialog.sendNotification, reminderDialog.selectedRepeat())) {
                         if (root && root.showSaveNotification)
                             root.showSaveNotification("Unable to save reminder. Check the date and that the node still exists.")
                         return
@@ -1844,13 +1875,15 @@ Item {
                             reminderDialog.editStandaloneIndex,
                             reminderDialog.standaloneTitle,
                             reminderValue,
-                            reminderDialog.sendNotification
+                            reminderDialog.sendNotification,
+                            reminderDialog.selectedRepeat()
                         )
                     } else {
                         standaloneSaved = projectManager.addStandaloneReminder(
                             reminderDialog.standaloneTitle,
                             reminderValue,
-                            reminderDialog.sendNotification
+                            reminderDialog.sendNotification,
+                            reminderDialog.selectedRepeat()
                         )
                     }
                     if (!standaloneSaved) {
@@ -1867,13 +1900,15 @@ Item {
                             reminderDialog.targetTabIndex,
                             reminderDialog.taskIndex,
                             reminderValue,
-                            reminderDialog.sendNotification
+                            reminderDialog.sendNotification,
+                            reminderDialog.selectedRepeat()
                         )
                     } else if (diagramModel && diagramModel.setTaskReminderAt) {
                         saved = diagramModel.setTaskReminderAt(
                             reminderDialog.taskIndex,
                             reminderValue,
-                            reminderDialog.sendNotification
+                            reminderDialog.sendNotification,
+                            reminderDialog.selectedRepeat()
                         )
                     }
                     if (!saved) {

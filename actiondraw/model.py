@@ -1191,10 +1191,11 @@ class DiagramModel(
 
     @Slot(int, str, result=bool)
     @Slot(int, str, bool, result=bool)
-    def setTaskReminderAt(self, task_index: int, reminder_at_str: str, send_notification: bool = False) -> bool:
+    @Slot(int, str, bool, "QVariantMap", result=bool)
+    def setTaskReminderAt(self, task_index: int, reminder_at_str: str, send_notification: bool = False, repeat=None) -> bool:
         """Set a reminder datetime for a task from QML."""
         if self._task_model is not None:
-            return bool(self._task_model.setReminderAt(task_index, reminder_at_str, send_notification))
+            return bool(self._task_model.setReminderAt(task_index, reminder_at_str, send_notification, repeat))
         return False
 
     @Slot(int, result=bool)

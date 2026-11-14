@@ -1,4 +1,5 @@
 """Project-owned mindmap with stable tab references and a QML-facing editor API."""
+from actiondraw.recurrence import load_repeat, repeat_text, next_occurrence
 import copy
 import json
 import uuid
@@ -895,6 +896,8 @@ class MindMapController(QObject):
                 datetime.fromtimestamp(reminder['at'])
             except (ValueError, OverflowError, OSError) as exc:
                 raise ValueError('Malformed mindmap reminder date') from exc
+            if reminder.get('repeat') is not None:
+                reminder['repeat'] = load_repeat(reminder['repeat'], reminder['at'])
         deadlines = payload.get('deadlines', {})
         if not isinstance(deadlines, dict):
             raise ValueError('Malformed mindmap deadlines')
@@ -1201,7 +1204,9 @@ class MindMapController(QObject):
 
     def _reminder_data(self, node_id):
         reminder = self.reminders.get(node_id)
-        return {'reminderActive': reminder is not None,
+        return {'repeat': reminder.get('repeat') or {} if reminder else {},
+                'repeatText': repeat_text(reminder.get('repeat')) if reminder else '',
+                'reminderActive': reminder is not None,
                 'reminderAt': datetime.fromtimestamp(reminder['at']).strftime('%Y-%m-%d %H:%M') if reminder else '',
                 'reminderSendNotification': reminder['send_notification'] if reminder else False}
 
@@ -1230,12 +1235,14 @@ class MindMapController(QObject):
         if node_id in self.deadlines:
             self._commit(lambda: self.deadlines.pop(node_id, None))
 
-    def set_reminder(self, node_id, timestamp, send_notification=False):
+    def set_reminder(self, node_id, timestamp, send_notification=False, repeat=None):
         node_id = self.sourceNodeId(node_id)
         if self._find(node_id) is None:
             return False
-        return self._commit(lambda: self.reminders.update({
-            node_id: {'at': timestamp, 'send_notification': bool(send_notification)}}))
+        reminder = {'at': timestamp, 'send_notification': bool(send_notification)}
+        if repeat:
+            reminder['repeat'] = repeat.copy()
+        return self._commit(lambda: self.reminders.update({node_id: reminder}))
 
     @Slot(str)
     def clearReminder(self, node_id):
@@ -1243,15 +1250,22 @@ class MindMapController(QObject):
         if node_id in self.reminders:
             self._commit(lambda: self.reminders.pop(node_id, None))
 
-    def consume_reminder(self, node_id):
+    def consume_reminder(self, node_id, now=None):
         """Delivery is not undoable; scrub this schedule from both history stacks."""
         reminder = self.reminders.pop(node_id, None)
         if reminder is None:
             return
+        advanced = None
+        if reminder.get('repeat'):
+            advanced = dict(reminder, at=next_occurrence(reminder['repeat'], time.time() if now is None else now))
+            self.reminders[node_id] = advanced
         for payload, _, _ in self._undo + self._redo:
             saved = payload.get('reminders', {})
             if saved.get(node_id) == reminder:
-                saved.pop(node_id)
+                if advanced:
+                    saved[node_id] = copy.deepcopy(advanced)
+                else:
+                    saved.pop(node_id)
         self.sceneChanged.emit()
         self.changed.emit()
 

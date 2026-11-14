@@ -77,6 +77,7 @@ FocusScope {
     signal branchOpmlExportRequested(string nodeId)
     signal reminderRequested(string nodeId)
     signal quickReminderRequested(string nodeId, int minutesFromNow)
+    signal recurringReminderRequested(string nodeId, int interval, string unit)
     signal clearReminderRequested(string nodeId)
     signal nodeDragMoved(string nodeId, real sceneX, real sceneY)
     signal nodeDragCleared()
@@ -1551,6 +1552,86 @@ FocusScope {
                     objectName: "mindmapQuickReminder7Days"
                     text: "7 days"
                     onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 7 * 24 * 60)
+                }
+            }
+            Menu {
+                objectName: "mindmapRecurringReminderMenu"
+                title: "Recurring reminder"
+                icon.source: Qt.resolvedUrl("../icons/bell.svg")
+                icon.width: 16
+                icon.height: 16
+                icon.color: palette.text
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapRecurringReminder10Minutes"
+                    text: "Every 10 minutes"
+                    onTriggered: pane.recurringReminderRequested(nodeMenu.targetNodeId, 10, "minutes")
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapRecurringReminder20Minutes"
+                    text: "Every 20 minutes"
+                    onTriggered: pane.recurringReminderRequested(nodeMenu.targetNodeId, 20, "minutes")
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapRecurringReminder30Minutes"
+                    text: "Every 30 minutes"
+                    onTriggered: pane.recurringReminderRequested(nodeMenu.targetNodeId, 30, "minutes")
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapRecurringReminder1Hours"
+                    text: "Every hour"
+                    onTriggered: pane.recurringReminderRequested(nodeMenu.targetNodeId, 1, "hours")
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapRecurringReminder2Hours"
+                    text: "Every 2 hours"
+                    onTriggered: pane.recurringReminderRequested(nodeMenu.targetNodeId, 2, "hours")
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapRecurringReminder4Hours"
+                    text: "Every 4 hours"
+                    onTriggered: pane.recurringReminderRequested(nodeMenu.targetNodeId, 4, "hours")
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapRecurringReminder8Hours"
+                    text: "Every 8 hours"
+                    onTriggered: pane.recurringReminderRequested(nodeMenu.targetNodeId, 8, "hours")
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapRecurringReminder12Hours"
+                    text: "Every 12 hours"
+                    onTriggered: pane.recurringReminderRequested(nodeMenu.targetNodeId, 12, "hours")
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapRecurringReminder20Hours"
+                    text: "Every 20 hours"
+                    onTriggered: pane.recurringReminderRequested(nodeMenu.targetNodeId, 20, "hours")
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapRecurringReminder1Days"
+                    text: "Every day"
+                    onTriggered: pane.recurringReminderRequested(nodeMenu.targetNodeId, 1, "days")
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapRecurringReminder2Days"
+                    text: "Every 2 days"
+                    onTriggered: pane.recurringReminderRequested(nodeMenu.targetNodeId, 2, "days")
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapRecurringReminder1Weeks"
+                    text: "Every week"
+                    onTriggered: pane.recurringReminderRequested(nodeMenu.targetNodeId, 1, "weeks")
                 }
             }
             IconMenuItem {

@@ -216,7 +216,7 @@ class ProjectApi:
                 return dict(revision=self.revision, text=text, saved=not pm.hasUnsavedChanges())
             elif action == 'reminder':
                 at = self.string(data, 'at', '')
-                result = pm.setMindmapReminder(source, at, data.get('notify') is True) if at else m.clearReminder(source)
+                result = pm.setMindmapReminder(source, at, data.get('notify') is True, data.get('repeat')) if at else m.clearReminder(source)
             elif action == 'deadline':
                 minutes = self.integer(data, 'minutes', low=0, high=525600)
                 result = m.setDeadline(source, minutes) if minutes else m.clearDeadline(source)
@@ -263,15 +263,15 @@ class ProjectApi:
                 if index >= 0 and not at:
                     pm.clearStandaloneReminder(index)
                 elif index >= 0:
-                    result = pm.updateStandaloneReminder(index, self.string(data, 'title'), at, data.get('notify') is True)
+                    result = pm.updateStandaloneReminder(index, self.string(data, 'title'), at, data.get('notify') is True, data.get('repeat'))
                 else:
-                    result = pm.addStandaloneReminder(self.string(data, 'title'), at, data.get('notify') is True)
+                    result = pm.addStandaloneReminder(self.string(data, 'title'), at, data.get('notify') is True, data.get('repeat'))
             elif action == 'task_reminder':
                 if goal is None:
                     raise ApiError(400, 'Goal no longer exists.')
                 index = self.integer(data, 'index', low=0)
                 at = self.string(data, 'at', '')
-                result = pm.setReminder(goal_index, index, at, data.get('notify') is True) if at else pm.clearReminder(goal_index, index)
+                result = pm.setReminder(goal_index, index, at, data.get('notify') is True, data.get('repeat')) if at else pm.clearReminder(goal_index, index)
             elif action != 'save':
                 raise ApiError(400, 'Unknown action.')
             if result is False or m._last_commit_error:

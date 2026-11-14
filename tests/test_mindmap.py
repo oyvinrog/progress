@@ -2585,6 +2585,7 @@ def test_qml_node_reminder_controls_and_overview(project, app, tmp_path, actiond
         click(find(window.contentItem(), 'reminderActions_' + node_id))
         click(find(window.contentItem(), 'openReminder_' + node_id))
         assert pm.mindmapVisible and m.selectedId == node_id
+        click(find(window.contentItem(), 'openPlanningMonth'))
         click(find(window.contentItem(), 'reminderActions_' + node_id))
         click(find(window.contentItem(), 'editReminder_' + node_id))
         assert dialog.property('nodeId') == node_id

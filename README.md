@@ -169,6 +169,29 @@ Choose **Reminder** for a selected node to set a date and time, with optional
 notifications. An orange bell and date appear beneath its title. Every node
 supports a reminder, including goal nodes and the project root.
 
+For a quick repeating reminder, right-click a node and choose
+**Reminders & deadline → Recurring reminder**. Presets range from every
+10 minutes to every week, including **Every 20 minutes**, **Every 20 hours**,
+and **Every day**. The first alert is one interval from now; daily and weekly
+presets use the current local clock time. Choosing a preset replaces that
+node's reminder and preserves its notification setting.
+
+In the reminder dialog, choose **Repeat → Every…** and an interval in minutes,
+hours, days, or weeks: **1 day**, **1 hour**, or **20 minutes**, for example.
+The selected date and time starts the schedule. Daily and weekly reminders keep
+their local clock time across daylight-saving changes; minutes and hours use
+elapsed time. The weekly and monthly calendars show every upcoming occurrence on their
+visible dates, including multiple occurrences per day. Select a day to see its
+occurrence times. **All days** shows the next occurrence of each reminder.
+Editing, moving, clearing, or deleting a projected entry affects the whole
+recurring reminder, not just that occurrence. Clearing the reminder or completing/deleting its source
+stops the schedule. **Never** keeps the existing one-time behavior.
+
+Reminders run while the app and project are open. If several occurrences were
+missed, reopening produces one overdue alert and resumes at the next future
+occurrence. Dismissing an alert does not stop repetition. Moving a recurring
+reminder in the calendar starts its interval from the new date.
+
 **Waiting Reminders** stays visible above both the canvas and mindmap. Choose
 **Open Node** to reveal the relevant node, even inside a folded branch. The
 right-click menu lets you update or clear its reminder. A month calendar shows
@@ -184,8 +207,8 @@ not complete its descendants or canvas tasks. Completion marks, notes, and the
 map are saved with the project.
 
 Completing or deleting a node cancels its reminder; undo restores it. Reminders
-that have already fired stay cleared through undo/redo. Use **Renew** in the
-due alert to schedule another one.
+that have already fired are not replayed by undo/redo. Use **Renew** in a
+one-time due alert to schedule another one; recurring reminders advance automatically.
 
 **Add to plan** offers Ready, hourly slots, and Monday–Sunday with dates and
 pending task counts. Choosing a weekday schedules a one-time move to Kanban
