@@ -2528,6 +2528,7 @@ class ProjectManager(QObject):
     saveCompleted = Signal(str)  # Emitted with file path after successful save
     loadCompleted = Signal(str)  # Emitted with file path after successful load
     errorOccurred = Signal(str)  # Emitted with error message on failure
+    frequentProjectsChanged = Signal()
     recentProjectsChanged = Signal()  # Emitted when recent projects list changes
     currentFilePathChanged = Signal()  # Emitted when current file path changes
     workspaceMarkdownTabsChanged = Signal()
@@ -2581,6 +2582,7 @@ class ProjectManager(QObject):
         self._settings = QSettings("ProgressTracker", "ProgressTracker")
         self._sidebar_expanded = self._load_sidebar_expanded_setting()
         self._recent_projects: List[str] = self._load_recent_projects()
+        self._project_open_counts = self._load_project_open_counts()
         self._standalone_reminders: List[StandaloneReminder] = []
         self._due_reminders: Dict[str, Dict[str, Any]] = {}
         self.projectAccessEnding.connect(self._due_reminders.clear)
@@ -3892,6 +3894,36 @@ class ProjectManager(QObject):
             return [p for p in stored if p and os.path.exists(p)][:self.MAX_RECENT_PROJECTS]
         return []
 
+    def _load_project_open_counts(self) -> Dict[str, int]:
+        """Read counts independently of the bounded recent-project history."""
+        try:
+            stored = json.loads(self._settings.value("projectOpenCounts", "{}"))
+        except (TypeError, ValueError):
+            return {}
+        if not isinstance(stored, dict):
+            return {}
+        return {path: count for path, count in stored.items()
+                if isinstance(path, str) and type(count) is int and count > 0}
+
+    def _record_project_open(self, file_path: str) -> None:
+        self._project_open_counts[file_path] = self._project_open_counts.get(file_path, 0) + 1
+        self._settings.setValue("projectOpenCounts", json.dumps(self._project_open_counts))
+        self._settings.sync()
+        self.frequentProjectsChanged.emit()
+
+    @Property("QVariantList", notify=frequentProjectsChanged)
+    def frequentProjects(self) -> List[dict]:
+        """Most opened existing projects, with recent opens breaking ties."""
+        recency = {path: index for index, path in enumerate(self._recent_projects)}
+        paths = sorted(
+            (path for path in self._project_open_counts if os.path.isfile(path)),
+            key=lambda path: (-self._project_open_counts[path],
+                              recency.get(path, self.MAX_RECENT_PROJECTS), path),
+        )
+        return [{"path": path, "name": os.path.splitext(os.path.basename(path))[0],
+                 "openCount": self._project_open_counts[path]}
+                for path in paths[:self.MAX_RECENT_PROJECTS]]
+
     def _load_sidebar_expanded_setting(self) -> bool:
         """Load persisted sidebar expansion preference."""
         stored = self._settings.value("ui/sidebar_expanded", True)
@@ -4743,6 +4775,7 @@ class ProjectManager(QObject):
             self._add_to_recent(file_path)
             self._clearNavigationHistory()
             self._last_saved_snapshot = self._serialize_project_payload(self._build_project_data())
+            self._record_project_open(file_path)
             self.loadCompleted.emit(file_path)
             print(f"Project loaded from: {file_path}")
 

@@ -1,6 +1,6 @@
 """Empty projects are persisted state, not a temporary onboarding overlay."""
 import pytest
-from PySide6.QtCore import QObject, QMetaObject, Qt
+from PySide6.QtCore import QObject, QMetaObject, QSettings, Qt
 from PySide6.QtTest import QTest
 
 from actiondraw.model import DiagramModel
@@ -9,7 +9,9 @@ from progress_crypto import EncryptionCredentials
 
 
 @pytest.fixture
-def empty_project(app):
+def empty_project(app, tmp_path, monkeypatch):
+    settings = QSettings(str(tmp_path / "settings.ini"), QSettings.IniFormat)
+    monkeypatch.setattr("task_model.QSettings", lambda *args: settings)
     tasks, tabs = TaskModel(), TabModel()
     diagram = DiagramModel(tasks)
     return ProjectManager(tasks, diagram, tabs), tabs, tasks, diagram
@@ -229,3 +231,48 @@ def test_empty_page_recent_load_failure(empty_project, actiondraw_window, tmp_pa
     assert tabs.tabCount == 0
     assert window.findChild(QObject, 'emptyProjectPage').property('visible')
     assert bool(errors) == (failure != 'cancelled')
+
+
+@pytest.mark.parametrize('size', [(1100, 800), (640, 480)])
+def test_frequent_projects_rank_persist_and_open(empty_project, actiondraw_window, tmp_path, size):
+    import json
+    from PySide6.QtCore import QPointF
+
+    pm, tabs, tasks, diagram = empty_project
+    tabs.addTab('Frequent goal')
+    paths = [tmp_path / name for name in ('popular.progress', 'other.progress')]
+    for path in paths:
+        path.write_text(json.dumps(pm._build_project_data()))
+    for path in (paths[0], paths[0], paths[1]):
+        pm.loadProject(str(path))
+    assert [entry['path'] for entry in pm.frequentProjects] == [str(p) for p in paths]
+    assert [entry['openCount'] for entry in pm.frequentProjects] == [2, 1]
+    assert pm._load_project_open_counts() == {str(paths[0]): 2, str(paths[1]): 1}
+    # Failed opens and saves must not increase frequency.
+    broken = tmp_path / 'broken.progress'
+    broken.write_text('invalid json')
+    pm.loadProject(str(broken))
+    pm.loadProject(str(tmp_path / 'missing.progress'))
+    assert str(broken) not in pm._project_open_counts
+    pm._add_to_recent(str(paths[1]))
+    assert pm.frequentProjects[0]['openCount'] == 2
+    pm.scrubProjectData()
+    engine = actiondraw_window(diagram, tasks, pm, tab_model=tabs)
+    window = engine.rootObjects()[0]
+    window.resize(*size)
+    QTest.qWait(100)
+    page = window.findChild(QObject, 'emptyProjectPage')
+    listing = window.findChild(QObject, 'emptyProjectFrequentList')
+    button = listing.property('currentItem')
+    assert listing.property('count') == 2
+    assert button.property('text') == 'popular'
+    position = listing.mapToScene(QPointF(0, 0))
+    assert position.y() >= 0
+    assert position.y() + listing.height() <= window.height()
+    QMetaObject.invokeMethod(button, 'clicked')
+    QTest.qWait(50)
+    assert pm.currentFilePath == str(paths[0])
+    assert not page.property('visible')
+    assert pm.frequentProjects[0]['openCount'] == 3
+    paths[0].unlink()
+    assert [entry['path'] for entry in pm.frequentProjects] == [str(paths[1])]

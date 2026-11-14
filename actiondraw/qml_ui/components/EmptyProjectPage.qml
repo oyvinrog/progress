@@ -7,9 +7,11 @@ Rectangle {
     objectName: "emptyProjectPage"
     color: "#090f15"
     signal addGoalRequested()
+    property var frequentProjects: []
     property string recentProjectPath: ""
     signal openRecentProjectRequested(string filePath)
     readonly property bool actionFocused: addGoalButton.activeFocus || openRecentButton.activeFocus
+        || (frequentList.currentItem !== null && frequentList.currentItem.activeFocus)
 
     ColumnLayout {
         anchors.centerIn: parent
@@ -88,6 +90,68 @@ Rectangle {
             font.pixelSize: 13
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WordWrap
+        }
+        Label {
+            Layout.fillWidth: true
+            visible: frequentList.count > 0
+            text: "Most frequent"
+            color: "#edf3f8"
+            font.pixelSize: 16
+            font.bold: true
+        }
+        ListView {
+            id: frequentList
+            objectName: "emptyProjectFrequentList"
+            Layout.fillWidth: true
+            Layout.preferredHeight: Math.min(contentHeight, 180, Math.max(60, page.height - 300))
+            visible: count > 0
+            clip: true
+            spacing: 6
+            model: page.frequentProjects
+            ScrollBar.vertical: ScrollBar { }
+            delegate: Button {
+                id: projectButton
+                required property var modelData
+                required property int index
+                objectName: "emptyProjectFrequentProject" + index
+                width: frequentList.width
+                height: 56
+                text: modelData.name
+                focusPolicy: Qt.StrongFocus
+                onActiveFocusChanged: {
+                    if (activeFocus) {
+                        frequentList.currentIndex = index
+                        frequentList.positionViewAtIndex(index, ListView.Contain)
+                    }
+                }
+                onClicked: page.openRecentProjectRequested(modelData.path)
+                ToolTip.visible: hovered || activeFocus
+                ToolTip.text: modelData.path
+                ToolTip.delay: 500
+                contentItem: Column {
+                    spacing: 3
+                    Text {
+                        width: parent.width
+                        text: projectButton.text
+                        color: "#edf3f8"
+                        font.pixelSize: 15
+                        elide: Text.ElideRight
+                    }
+                    Text {
+                        width: parent.width
+                        text: projectButton.modelData.path
+                        color: "#a6b5c4"
+                        font.pixelSize: 11
+                        elide: Text.ElideMiddle
+                    }
+                }
+                background: Rectangle {
+                    radius: 7
+                    color: projectButton.down ? "#29465d" : projectButton.hovered ? "#243c50" : "#182b3b"
+                    border.width: projectButton.activeFocus ? 2 : 1
+                    border.color: projectButton.activeFocus ? "#ffffff" : "#49647b"
+                }
+            }
         }
     }
     onVisibleChanged: { if (visible) addGoalButton.forceActiveFocus() }

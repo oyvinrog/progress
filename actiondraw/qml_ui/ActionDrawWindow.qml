@@ -1342,6 +1342,7 @@ ApplicationWindow {
         visible: root.emptyProject
         recentProjectPath: root.projectManagerRef && root.projectManagerRef.recentProjects.length > 0
             ? root.projectManagerRef.recentProjects[0] : ""
+        frequentProjects: root.projectManagerRef ? root.projectManagerRef.frequentProjects : []
         onAddGoalRequested: sidebarTabs.addNewTab()
         onOpenRecentProjectRequested: function(filePath) {
             root.projectManagerRef.loadProject(filePath)
