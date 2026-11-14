@@ -13,7 +13,7 @@ import uuid
 from PySide6.QtCore import QEvent, QObject, QPoint, Qt, QTimer, QUrl
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QGuiApplication, QTextCharFormat, QTextCursor
 from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QFrame, QLineEdit,
-    QListWidget, QListWidgetItem, QMessageBox, QLabel, QToolBar, QVBoxLayout)
+    QListWidget, QListWidgetItem, QMessageBox, QLabel, QToolBar, QToolButton, QVBoxLayout)
 
 from ._vendor.mark import Note
 from . import mindmap_markdown as md
@@ -378,7 +378,6 @@ class MindMapNodeEditor(QDialog):
         self.setWindowTitle('Thought and notes')
         self.setPalette(build_actiondraw_palette())
         self.setModal(True)
-        self.resize(1050, 760)
         self.title = QLineEdit()
         self.title.setObjectName('mindmapNodeTitle')
         self.title.setPlaceholderText('Thought')
@@ -386,7 +385,13 @@ class MindMapNodeEditor(QDialog):
         self.title.returnPressed.connect(self.accept)
         self.notes = NodeNote(controller, self)
         self.notes.editor.setObjectName('mindmapNodeNotes')
-        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        self.notes_toggle = QToolButton()
+        self.notes_toggle.setObjectName('mindmapNotesToggle')
+        self.notes_toggle.setCheckable(True)
+        self.notes_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.notes_toggle.toggled.connect(self.set_notes_expanded)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
+        buttons.button(QDialogButtonBox.StandardButton.Save).setDefault(True)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout = QVBoxLayout(self)
@@ -394,8 +399,8 @@ class MindMapNodeEditor(QDialog):
         title_label.setBuddy(self.title)
         layout.addWidget(title_label)
         layout.addWidget(self.title)
-        layout.addWidget(QLabel('Notes'))
-        layout.addWidget(self.notes.window)
+        layout.addWidget(self.notes_toggle, 0, Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(self.notes.window, 1)
         layout.addWidget(buttons)
         self._return_window = None
         self.node_id = ''
@@ -409,6 +414,29 @@ class MindMapNodeEditor(QDialog):
         accept.setShortcut('Ctrl+Return')
         accept.triggered.connect(self.accept)
         self.addAction(accept)
+        self.set_notes_expanded(False)
+
+    def set_notes_expanded(self, expanded):
+        self.notes_toggle.blockSignals(True)
+        self.notes_toggle.setChecked(expanded)
+        self.notes_toggle.blockSignals(False)
+        self.notes_toggle.setText('Hide notes' if expanded else 'Add notes')
+        self.notes_toggle.setArrowType(Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow)
+        self.notes.window.setVisible(expanded)
+        if not expanded:
+            self.notes.picker.hide()
+        self.layout().invalidate()
+        self.layout().activate()
+        available = self.screen().availableGeometry()
+        # Leave room for the native window frame as well as the client area.
+        width = min(1050 if expanded else 520, available.width() - 40)
+        height = min(760 if expanded else self.sizeHint().height(), available.height() - 80)
+        self.resize(width, height)
+        if self.isVisible():
+            frame = self.frameGeometry()
+            self.move(max(available.left(), min(frame.left(), available.right() - frame.width() + 1)),
+                      max(available.top(), min(frame.top(), available.bottom() - frame.height() + 1)))
+            (self.notes.active_surface() if expanded else self.title).setFocus()
 
     def clear_project(self):
         self.reject()
@@ -427,6 +455,7 @@ class MindMapNodeEditor(QDialog):
         self.title.setText(node.text)
         self.notes.load_draft(node.note or '', fields.get('note', []))
         self.original = self.draft()
+        self.set_notes_expanded(bool((node.note or '').strip()))
         self.show()
         self.raise_()
         self.activateWindow()

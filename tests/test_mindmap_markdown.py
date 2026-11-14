@@ -162,6 +162,7 @@ def test_cancel_and_atomic_commit(editor):
 
 @pytest.mark.parametrize('mode', ['source', 'wysiwyg'])
 def test_popup_keyboard_selection_and_binding(editor, mode):
+    editor.notes_toggle.click()
     target = add(editor.controller, 'Destination')
     note = editor.notes
     note.load_draft('', [])
@@ -377,6 +378,7 @@ def test_dirty_navigation_choices(editor, monkeypatch, choice):
 
 
 def test_formatting_shortcuts_apply_only_inside_notes(editor):
+    editor.notes_toggle.click()
     note = editor.notes
     note.load_draft('Notes text', [])
     editor.title.setText('Plain name')
@@ -390,6 +392,49 @@ def test_formatting_shortcuts_apply_only_inside_notes(editor):
     note.editor.selectAll()
     QTest.keyClick(note.editor, Qt.Key_B, Qt.ControlModifier)
     assert '**Notes text**' in note.markdown
+
+
+def test_notes_disclosure_preserves_draft_and_resets_between_nodes(editor):
+    QTest.qWait(20)
+    assert not editor.notes.window.isVisible()
+    assert editor.width() == 520
+    compact_height = editor.height()
+    assert editor.title.hasFocus()
+    target = add(editor.controller, 'Destination')
+    owner = add(editor.controller, 'Owner', 'Visit [[Destination]]')
+    bind(editor.controller, owner, target)
+    editor.open_node(owner)
+    assert editor.notes.window.isVisible()
+    assert editor.title.selectedText() == 'Owner'
+    editor.title.setText('Draft title')
+    draft = editor.draft()
+    editor.notes_toggle.click()
+    assert not editor.notes.window.isVisible()
+    assert editor.height() == compact_height
+    assert editor.draft() == draft
+    editor.notes_toggle.click()
+    assert editor.notes.window.isVisible()
+    assert editor.notes.active_surface().hasFocus()
+    assert editor.draft() == draft
+    assert editor.screen().availableGeometry().contains(editor.frameGeometry())
+    editor.open_node(target)
+    assert not editor.notes.window.isVisible()
+    assert editor.title.hasFocus()
+
+
+@pytest.mark.parametrize('key,modifiers', [
+    (Qt.Key_Return, Qt.NoModifier),
+    (Qt.Key_Return, Qt.ControlModifier),
+    (Qt.Key_S, Qt.ControlModifier),
+    (Qt.Key_Escape, Qt.NoModifier),
+])
+def test_compact_editor_keyboard_save_and_cancel(editor, key, modifiers):
+    original = editor.controller.map.root.text
+    editor.title.setText('Quick title')
+    QTest.qWait(20)
+    QTest.keyClick(editor.title, key, modifiers)
+    assert not editor.isVisible()
+    assert editor.controller.map.root.text == (original if key == Qt.Key_Escape else 'Quick title')
 
 
 def test_previous_thought_link_metadata_is_retired_without_rewriting_names(model):
