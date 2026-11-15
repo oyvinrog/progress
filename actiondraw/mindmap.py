@@ -1,5 +1,8 @@
 """Project-owned mindmap with stable tab references and a QML-facing editor API."""
+from actiondraw.recurrence import load_repeat, repeat_text, next_occurrence
 import copy
+import json
+import uuid
 from contextlib import contextmanager
 import math
 import time
@@ -8,12 +11,16 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
-from PySide6.QtCore import QObject, Property, QUrl, Signal, Slot
+from PySide6.QtCore import QObject, Property, QUrl, Signal, Slot, QMimeData
 from PySide6.QtGui import QFont, QFontMetricsF, QGuiApplication
 
+from . import mindmap_markdown as markdown
 from ._vendor.pyplane.model import MindMap, Node
 from ._vendor.pyplane.layout import Box, assigned_sides, layout
 from ._vendor.pyplane.mm import dumps, loads
+from .causal_model import (
+    empty_causal_model_state, normalize_causal_model_state, record_causal_imports,
+)
 from .outline_clipboard import (
     looks_like_opml,
     outline_to_indented_text,
@@ -128,6 +135,9 @@ class MindMapController(QObject):
     errorOccurred = Signal(str)
     clipboardChanged = Signal()
     planChanged = Signal()
+    loading = Signal()
+    historyRestored = Signal()
+    editorVisibleChanged = Signal()
 
     def __init__(self, tab_model=None, parent=None):
         super().__init__(parent)
@@ -135,6 +145,9 @@ class MindMapController(QObject):
         self.map = MindMap('Project')
         self.links = {}
         self.references = {}
+        self.text_links = {}
+        self._node_editor = None
+        self._clipboard_project = uuid.uuid4().hex
         self._projection_key = None
         self._projection_nodes = {}
         self._completed = set()
@@ -145,6 +158,7 @@ class MindMapController(QObject):
         self._kanban = {}
         self.plan_schedules = {}
         self.plan_ranges = {}
+        self.causal_diagrams = {}
         self._date_filter = ""
         self._activity_filter = ""
         self._scope_tab = None
@@ -155,6 +169,9 @@ class MindMapController(QObject):
         self._cut_ids = []
         self._search_query = ''
         self._priority_filter = 1.0
+        self._drop_cache = None
+        self.sceneChanged.connect(self.clearDropTargets)
+        self.changed.connect(self.clearDropTargets)
         self._undo = []
         self._redo = []
         self._creating_tab = False
@@ -232,6 +249,42 @@ class MindMapController(QObject):
                 return self._projection_nodes[node_id]
         return self.map.find(node_id)
 
+    @property
+    def _date_root_id(self):
+        return 'calendar-day:' + self._date_filter if self._date_filter else ''
+
+    def _is_date_root(self, node_id):
+        return bool(self._date_filter and node_id == self._date_root_id)
+
+    def _display_id(self, node):
+        return self._date_root_id if self._date_filter and node is self.view_root else node.id
+
+    def _date_root_data(self):
+        # Only the scene and selection expose this identity. _find deliberately
+        # resolves stored nodes only, so content mutations reject the day root.
+        return {'id': self._date_root_id, 'sourceId': '', 'text': self._date_filter,
+                'note': '', 'isVirtualDateRoot': True, 'isViewRoot': True,
+                'isTab': False, 'isReference': False, 'folded': False,
+                'bold': False, 'completed': False, 'bookmarked': False,
+                'hasNote': False, 'hasCausalDiagram': False,
+                'measureProgress': False, 'showCompletionCheckbox': False,
+                'progressPercent': 0, 'priorityScore': None, 'priorityLevel': 0, 'priorityRank': 0,
+                **self._plan_data(self._date_root_id),
+                **self._reminder_data(self._date_root_id),
+                **self._deadline_data(self._date_root_id)}
+
+    def _create_day_activity(self, title):
+        title = title.strip()
+        if not self._date_filter or self._tabs is None or not title:
+            return False
+        goal_id = self._tabs.createScheduledGoal(title, self._date_filter, self._date_filter)
+        if not goal_id:
+            return False
+        node_id = next(key for key, tab in self.links.items() if tab == goal_id)
+        self.select(node_id)
+        self.revealNode.emit(node_id)
+        return True
+
     @Slot(str, result=str)
     def sourceNodeId(self, node_id):
         node = self._find(node_id)
@@ -239,6 +292,17 @@ class MindMapController(QObject):
 
     def _tab_id(self, node):
         return self.links.get(_content(node).id) if node is not None else None
+
+    def _record_node_visit(self, node):
+        """Keep the nearest owning tab handy when navigating its nodes."""
+        if self._tabs is None:
+            return
+        while node is not None:
+            tab_id = self._tab_id(node)
+            if tab_id is not None:
+                self._tabs._recordRecentTab(self._tabs.goalIndex(tab_id))
+                return
+            node = node.parent
 
     @Slot(str, result=str)
     def calendarActivityId(self, node_id):
@@ -742,6 +806,7 @@ class MindMapController(QObject):
                 self.links[self.map.root.add_child(tab.name).id] = tab.id
         self._prune_references()
         nodes = {node.id: node for node in self.map.walk()}
+        self.text_links = {key: value for key, value in self.text_links.items() if key in nodes}
         self._completed.intersection_update(nodes)
         self._measure_progress.intersection_update(nodes)
         self._bookmarks = [key for key in self._bookmarks if key in nodes]
@@ -749,6 +814,7 @@ class MindMapController(QObject):
         self.deadlines = {key: value for key, value in self.deadlines.items() if key in nodes}
         self.plan_schedules = {key: value for key, value in self.plan_schedules.items() if key in nodes}
         self.plan_ranges = {key: value for key, value in self.plan_ranges.items() if key in nodes}
+        self.causal_diagrams = {key: value for key, value in self.causal_diagrams.items() if key in nodes}
         self._kanban = {key: value for key, value in self._kanban.items()
                         if key in nodes and key not in self.links}
         self._selected_ids = [key for key in self._selected_ids if self._in_scope(self._find(key))]
@@ -762,13 +828,15 @@ class MindMapController(QObject):
 
     def to_dict(self):
         return {'version': 1, 'xml': dumps(self.map).decode('utf-8'),
+                'text_links': copy.deepcopy(self.text_links),
                 'tab_links': dict(self.links), 'tab_references': dict(self.references), 'completed': sorted(self._completed),
                 'reminders': copy.deepcopy(self.reminders), 'bookmarks': list(self._bookmarks),
                 'measure_progress': sorted(self._measure_progress),
                 'deadlines': copy.deepcopy(self.deadlines),
                 'kanban': copy.deepcopy(self._kanban),
                 'plan_schedules': copy.deepcopy(self.plan_schedules),
-                'plan_ranges': copy.deepcopy(self.plan_ranges)}
+                'plan_ranges': copy.deepcopy(self.plan_ranges),
+                'causal_diagrams': copy.deepcopy(self.causal_diagrams)}
 
     @staticmethod
     def decode(payload):
@@ -784,6 +852,12 @@ class MindMapController(QObject):
             if paragraph is not None and not len(paragraph):
                 node.note = paragraph.text or ''
                 node._original_note = node.note
+        diagrams = payload.get('causal_diagrams', {})
+        if (not isinstance(diagrams, dict)
+                or any(not isinstance(key, str) or mindmap.find(key) is None
+                       or not isinstance(value, dict) for key, value in diagrams.items())):
+            raise ValueError('Malformed mindmap causal diagrams')
+        markdown.validate_bindings(payload.get('text_links', {}), mindmap)
         links = payload['tab_links']
         if any(not isinstance(k, str) or not isinstance(v, str) or mindmap.find(k) is None
                for k, v in links.items()):
@@ -822,6 +896,8 @@ class MindMapController(QObject):
                 datetime.fromtimestamp(reminder['at'])
             except (ValueError, OverflowError, OSError) as exc:
                 raise ValueError('Malformed mindmap reminder date') from exc
+            if reminder.get('repeat') is not None:
+                reminder['repeat'] = load_repeat(reminder['repeat'], reminder['at'])
         deadlines = payload.get('deadlines', {})
         if not isinstance(deadlines, dict):
             raise ValueError('Malformed mindmap deadlines')
@@ -891,8 +967,11 @@ class MindMapController(QObject):
             raise ValueError('Invalid plan timestamp') from exc
 
     def load(self, payload=None):
+        self.loading.emit()
+        self._clipboard_project = uuid.uuid4().hex
         self.map, self.links = self.decode(payload) if payload is not None else (MindMap('Project'), {})
         self.references = dict((payload or {}).get('tab_references', {}))
+        self.text_links = markdown.note_bindings((payload or {}).get('text_links', {}))
         self._search_query = ''
         self._date_filter = ''
         self._activity_filter = ''
@@ -905,6 +984,8 @@ class MindMapController(QObject):
         self._kanban = copy.deepcopy((payload or {}).get('kanban', {}))
         self.plan_schedules = copy.deepcopy((payload or {}).get('plan_schedules', {}))
         self.plan_ranges = copy.deepcopy((payload or {}).get('plan_ranges', {}))
+        self.causal_diagrams = {key: normalize_causal_model_state(value)
+                               for key, value in (payload or {}).get('causal_diagrams', {}).items()}
         self._scope_tab = None
         self._view_selections.clear()
         self._undo.clear()
@@ -914,6 +995,88 @@ class MindMapController(QObject):
         self.reconcile()
         self.resetView.emit()
         self.planChanged.emit()
+
+    def migrate_causal_diagrams(self):
+        """Consume legacy tab graphs only after canonical tab roots exist."""
+        for tab in self._tabs.getAllTabs() if self._tabs is not None else []:
+            key = next((key for key, tab_id in self.links.items() if tab_id == tab.id), None)
+            state = normalize_causal_model_state(getattr(tab, 'causal_model', None))
+            if key is not None and key not in self.causal_diagrams and state != empty_causal_model_state():
+                self.causal_diagrams[key] = state
+            tab.causal_model = empty_causal_model_state()
+        self.sceneChanged.emit()
+        self.changed.emit()
+
+    @Slot(str, result=bool)
+    def hasCausalDiagram(self, node_id):
+        return self._has_causal_diagram(self.sourceNodeId(node_id))
+
+    def _has_causal_diagram(self, key):
+        state = self.causal_diagrams.get(key, {})
+        return bool(state.get('nodes') or state.get('description', '').strip())
+
+    @Slot(str, result='QVariantMap')
+    def causalDiagram(self, node_id):
+        return copy.deepcopy(self.causal_diagrams.get(self.sourceNodeId(node_id), empty_causal_model_state()))
+
+    @Slot(str, 'QVariantMap', result=bool)
+    def setCausalDiagram(self, node_id, value):
+        key = self.sourceNodeId(node_id)
+        if self.map.find(key) is None:
+            return False
+        state = normalize_causal_model_state(value)
+        if self.causal_diagrams.get(key) == state:
+            return True
+        # Retain import history even if the last graph node has been removed.
+        return self._commit_causal(key, state)
+
+    @Slot(str, result=bool)
+    def removeCausalDiagram(self, node_id):
+        key = self.sourceNodeId(node_id)
+        if key not in self.causal_diagrams:
+            return False
+        return self._commit_causal(key, None)
+
+    def _commit_causal(self, key, state):
+        """Record an attachment edit without rebuilding unchanged map topology."""
+        before = {'causal_owner': key,
+                  'causal_state': copy.deepcopy(self.causal_diagrams.get(key))}
+        badge = self._has_causal_diagram(key)
+        self._last_commit_error = ""
+        if state is None:
+            self.causal_diagrams.pop(key)
+        else:
+            self.causal_diagrams[key] = state
+        self._undo.append((before, self._selection_state(), None))
+        del self._undo[:-100]
+        self._redo.clear()
+        if badge != self._has_causal_diagram(key):
+            self.sceneChanged.emit()
+        self.changed.emit()
+        return True
+
+    def import_causal_actions(self, node_id, action_ids=None):
+        key = self.sourceNodeId(node_id)
+        parent = self.map.find(key)
+        if parent is None:
+            return []
+        state = self.causalDiagram(key)
+        pending = set(state['action_order']) - set(state['imported_action_ids']['mindmap'])
+        keys = list(dict.fromkeys(k for k in (state['action_order'] if action_ids is None else action_ids)
+                                 if k in pending))
+        labels = {node['id']: node['label'] for node in state['nodes']}
+        if not keys:
+            return []
+        created = []
+
+        def mutate():
+            parent.folded = False
+            for action_id in keys:
+                created.append(parent.add_child(labels[action_id], side='right').id)
+            record_causal_imports(state, 'mindmap', keys)
+            self.causal_diagrams[key] = state
+
+        return created if self._commit(mutate) else []
 
     @Property(str, notify=changed)
     def selectedId(self):
@@ -976,13 +1139,16 @@ class MindMapController(QObject):
 
     @Property('QVariantMap', notify=changed)
     def selectedNode(self):
+        if self._is_date_root(self._selected):
+            return self._date_root_data()
         node = self._find(self._selected)
         if node is None:
             return {}
-        return {'id': node.id, 'sourceId': _content(node).id,
+        return {'id': node.id, 'sourceId': _content(node).id, 'isVirtualDateRoot': False,
                 'isReference': _placement(node).id in self.references, 'text': node.text, 'note': node.note or '',
                 'isTab': self._tab_id(node) is not None, 'folded': node.folded,
                 'isViewRoot': node is self.view_root, 'completed': _content(node).id in self._completed,
+                'hasCausalDiagram': self._has_causal_diagram(_content(node).id),
                 'bookmarked': _content(node).id in self._bookmarks,
                 'measureProgress': _content(node).id in self._measure_progress,
                 **self.reminderData(node.id)}
@@ -1038,7 +1204,9 @@ class MindMapController(QObject):
 
     def _reminder_data(self, node_id):
         reminder = self.reminders.get(node_id)
-        return {'reminderActive': reminder is not None,
+        return {'repeat': reminder.get('repeat') or {} if reminder else {},
+                'repeatText': repeat_text(reminder.get('repeat')) if reminder else '',
+                'reminderActive': reminder is not None,
                 'reminderAt': datetime.fromtimestamp(reminder['at']).strftime('%Y-%m-%d %H:%M') if reminder else '',
                 'reminderSendNotification': reminder['send_notification'] if reminder else False}
 
@@ -1067,12 +1235,14 @@ class MindMapController(QObject):
         if node_id in self.deadlines:
             self._commit(lambda: self.deadlines.pop(node_id, None))
 
-    def set_reminder(self, node_id, timestamp, send_notification=False):
+    def set_reminder(self, node_id, timestamp, send_notification=False, repeat=None):
         node_id = self.sourceNodeId(node_id)
         if self._find(node_id) is None:
             return False
-        return self._commit(lambda: self.reminders.update({
-            node_id: {'at': timestamp, 'send_notification': bool(send_notification)}}))
+        reminder = {'at': timestamp, 'send_notification': bool(send_notification)}
+        if repeat:
+            reminder['repeat'] = repeat.copy()
+        return self._commit(lambda: self.reminders.update({node_id: reminder}))
 
     @Slot(str)
     def clearReminder(self, node_id):
@@ -1080,15 +1250,22 @@ class MindMapController(QObject):
         if node_id in self.reminders:
             self._commit(lambda: self.reminders.pop(node_id, None))
 
-    def consume_reminder(self, node_id):
+    def consume_reminder(self, node_id, now=None):
         """Delivery is not undoable; scrub this schedule from both history stacks."""
         reminder = self.reminders.pop(node_id, None)
         if reminder is None:
             return
+        advanced = None
+        if reminder.get('repeat'):
+            advanced = dict(reminder, at=next_occurrence(reminder['repeat'], time.time() if now is None else now))
+            self.reminders[node_id] = advanced
         for payload, _, _ in self._undo + self._redo:
             saved = payload.get('reminders', {})
             if saved.get(node_id) == reminder:
-                saved.pop(node_id)
+                if advanced:
+                    saved[node_id] = copy.deepcopy(advanced)
+                else:
+                    saved.pop(node_id)
         self.sceneChanged.emit()
         self.changed.emit()
 
@@ -1190,6 +1367,12 @@ class MindMapController(QObject):
         if self._activity_filter and self._activity_node() is None:
             self._activity_filter = ''
         if self._priority_filter == 1 and not self.calendarFilterActive:
+            if self._selected.startswith('calendar-day:'):
+                self._set_selection([self.view_root.id])
+            return
+        if self._date_filter and self._selected == self.view_root.id:
+            self._set_selection(self._selected_ids, self._selected)
+        if self._is_date_root(self._selected):
             return
         if not self.priorityFilterEnabled:
             self._priority_filter = 1.0
@@ -1274,6 +1457,7 @@ class MindMapController(QObject):
             return
         self._date_filter = ''
         self._activity_filter = ''
+        self._sync_filter_selection()
         self.sceneChanged.emit()
         self.changed.emit()
 
@@ -1313,6 +1497,7 @@ class MindMapController(QObject):
         self._date_filter = ''
         self._activity_filter = activity_id
         self._set_selection([node.id])
+        self._record_node_visit(node)
         self.sceneChanged.emit()
         self.changed.emit()
         self.resetView.emit()
@@ -1374,6 +1559,8 @@ class MindMapController(QObject):
                 padding += 22.0
             if node.note and node.note.strip():
                 padding += 20.0
+            if self._has_causal_diagram(_content(node).id):
+                padding += 20.0
             if _content(node).id in bookmarks:
                 padding += 20.0
             if (self._plan_placement(_content(node).id).get('status', 'unscheduled') != 'unscheduled'
@@ -1390,6 +1577,8 @@ class MindMapController(QObject):
             sizes[node] = (width, 40.0 + (24.0 if _content(node).id in self.reminders else 0.0)
                            + (24.0 if _content(node).id in self._measure_progress else 0.0)
                            + (28.0 if _content(node).id in self.deadlines else 0.0))
+        if self._date_filter:
+            sizes[root] = (max(110.0, metrics.horizontalAdvance(self._date_filter) + 61.0), 40.0)
         if root.folded and not self.calendarFilterActive:
             width, height = sizes[root]
             return {root: Box(-width / 2, -height / 2, width, height)}
@@ -1426,10 +1615,12 @@ class MindMapController(QObject):
     def _scene_nodes(self, boxes, priorities):
         root = self.view_root
         bookmarks = set(self._bookmarks)
-        return [{'id': n.id, 'sourceId': _content(n).id,
-                 'isReference': _placement(n).id in self.references, 'text': n.text, 'note': n.note or '', 'x': b.x, 'y': b.y,
+        return [{'id': n.id, 'sourceId': _content(n).id, 'isVirtualDateRoot': False,
+                 'isReference': _placement(n).id in self.references, 'text': n.text,
+                 'note': n.note or '', 'x': b.x, 'y': b.y,
                  'width': b.width, 'height': b.height, 'isTab': self._tab_id(n) is not None,
                  'hasNote': bool(n.note and n.note.strip()),
+                 'hasCausalDiagram': self._has_causal_diagram(_content(n).id),
                  'folded': n.folded and not self.calendarFilterActive, 'hasChildren': bool(n.children), 'bold': bool(n.style.bold),
                  'isViewRoot': n is root, 'completed': _content(n).id in self._completed,
                  'showCompletionCheckbox': self._show_completion_checkbox(n, root),
@@ -1441,7 +1632,9 @@ class MindMapController(QObject):
                  **self._reminder_data(_content(n).id),
                  **self._deadline_data(_content(n).id),
                  **priorities.get(self._tab_id(n), {'priorityScore': None, 'priorityLevel': 0,
-                                                       'priorityRank': 0})}
+                                                       'priorityRank': 0}),
+                 **({**self._date_root_data(), 'hasChildren': len(boxes) > 1}
+                    if self._date_filter and n is root else {})}
                 for n, b in boxes.items()]
 
     @Property('QVariantList', notify=sceneChanged)
@@ -1477,11 +1670,12 @@ class MindMapController(QObject):
 
     @Property(bool, notify=changed)
     def canCut(self):
-        return bool(self._selected_ids) and self.view_root.id not in self._selected_ids
+        return (bool(self._selected_ids) and not self._is_date_root(self._selected)
+                and self.view_root.id not in self._selected_ids)
 
     @Property(bool, notify=changed)
     def canPaste(self):
-        return bool(self._cut_ids)
+        return bool(self._cut_ids) and not self._is_date_root(self._selected)
 
     def _clipboard_text(self):
         clipboard = QGuiApplication.clipboard()
@@ -1605,7 +1799,8 @@ class MindMapController(QObject):
 
         def mutate():
             self.links[_content(node).id] = tab.id
-            node.text = tab.name
+            if node.text != tab.name:
+                node.text = tab.name
 
         self._commit(mutate)
         self.reconcile()
@@ -1613,6 +1808,12 @@ class MindMapController(QObject):
         return tab.id
 
     def _set_selection(self, ids, primary=None):
+        if self._date_filter:
+            ids = [self._date_root_id if key == self.view_root.id else key for key in ids]
+            if primary == self.view_root.id:
+                primary = self._date_root_id
+            if len(ids) > 1:
+                ids = [key for key in ids if key != self._date_root_id]
         self._selected_ids = list(dict.fromkeys(ids))
         # The initial root selection must not prevent Ctrl+clicking movable branches.
         if len(self._selected_ids) > 1 and self.view_root.id in self._selected_ids:
@@ -1629,6 +1830,10 @@ class MindMapController(QObject):
     @Slot(str)
     @Slot(str, str)
     def select(self, node_id, mode='replace'):
+        if self._date_filter and node_id in (self._date_root_id, self.view_root.id):
+            self._set_selection([self._date_root_id])
+            self.changed.emit()
+            return
         if not self._in_scope(self._find(node_id)):
             return
         anchor = self._selection_anchor
@@ -1653,6 +1858,8 @@ class MindMapController(QObject):
             self._selection_anchor = anchor
         else:
             self._set_selection([node_id])
+        if node_id in self._selected_ids:
+            self._record_node_visit(self._find(node_id))
         self.changed.emit()
 
     def _branch_roots(self, ids):
@@ -1684,7 +1891,20 @@ class MindMapController(QObject):
         clipboard = QGuiApplication.clipboard()
         if not roots or clipboard is None:
             return False
-        clipboard.setText('\n'.join(outline_to_indented_text(node) for node in roots))
+        mime = QMimeData()
+        mime.setText('\n'.join(outline_to_indented_text(node) for node in roots))
+        records = []
+        def record(node, depth):
+            records.append({'level': depth, 'id': _content(node).id, 'text': node.text,
+                            'note': node.note or '',
+                            'bindings': copy.deepcopy(self.text_links.get(_content(node).id, {}))})
+            for child in node.children:
+                record(child, depth + 1)
+        for root in roots:
+            record(root, 0)
+        mime.setData('application/x-actiondraw-mindmap-branches',
+                     json.dumps({'project': self._clipboard_project, 'nodes': records}).encode())
+        clipboard.setMimeData(mime)
         if self._cut_ids:
             self._cut_ids = []
             self.changed.emit()
@@ -1720,6 +1940,14 @@ class MindMapController(QObject):
 
         if not self._in_scope(target):
             return False
+        mime = QGuiApplication.clipboard().mimeData()
+        if mime and mime.hasFormat('application/x-actiondraw-mindmap-branches'):
+            try:
+                data = json.loads(bytes(mime.data('application/x-actiondraw-mindmap-branches')))
+                if data.get('project') == self._clipboard_project:
+                    return self._paste_markdown_branches(target, data['nodes'])
+            except (ValueError, KeyError, TypeError, AttributeError):
+                pass
         text = self._clipboard_text()
         entries = parse_opml_text(text)
         if entries is None:
@@ -1751,6 +1979,35 @@ class MindMapController(QObject):
         self.revealNode.emit(created_roots[0].id)
         return True
 
+    def _paste_markdown_branches(self, target, records):
+        created = []
+        def mutate():
+            parents, mapping, pending = [], {}, []
+            target.folded = False
+            for record in records:
+                level = min(max(0, int(record['level'])), len(parents))
+                del parents[level:]
+                parent = target if level == 0 else parents[level - 1]
+                node = parent.add_child(record['text'], note=record['note'] or None,
+                                        side='right' if parent is self.view_root else None)
+                parents.append(node)
+                mapping.setdefault(record['id'], _content(node).id)
+                pending.append((node, copy.deepcopy(record['bindings'])))
+                if level == 0:
+                    created.append(node.id)
+            for node, fields in pending:
+                for bindings in fields.values():
+                    for binding in bindings:
+                        binding['target'] = mapping.get(binding['target'], binding['target'])
+                if fields:
+                    self.text_links[_content(node).id] = fields
+            if created:
+                self._set_selection(created, created[0])
+        if not records or not self._commit(mutate):
+            return False
+        self.revealNode.emit(self._selected)
+        return True
+
     @Slot(str)
     @Slot(str, bool)
     def navigate(self, direction, extend=False):
@@ -1762,9 +2019,9 @@ class MindMapController(QObject):
         while current is not None and current not in boxes:
             current = current.parent
         current = current or self.view_root
-        if current.id != self._selected:
+        if self._display_id(current) != self._selected:
             self.select(current.id, 'add' if extend else 'replace')
-            self.revealNode.emit(current.id)
+            self.revealNode.emit(self._display_id(current))
             return
         origin = boxes[current]
         if direction in ('left', 'right'):
@@ -1814,6 +2071,8 @@ class MindMapController(QObject):
             self._prune_references()
             self._validate_references(self.map, self.links, self.references)
             live = {n.id for n in self.map.walk()}
+            self.text_links = {key: value for key, value in self.text_links.items() if key in live}
+            markdown.validate_bindings(self.text_links, self.map)
             self._completed.intersection_update(live)
             self._measure_progress.intersection_update(live)
             self._bookmarks = [key for key in self._bookmarks if key in live]
@@ -1821,12 +2080,14 @@ class MindMapController(QObject):
             self.plan_ranges = {key: value for key, value in self.plan_ranges.items() if key in live}
             self.reminders = {key: value for key, value in self.reminders.items() if key in live}
             self.deadlines = {key: value for key, value in self.deadlines.items() if key in live}
+            self.causal_diagrams = {key: value for key, value in self.causal_diagrams.items() if key in live}
             self._kanban = {key: value for key, value in self._kanban.items()
                             if key in live and key not in self.links}
         except (ValueError, IndexError) as exc:
             self._last_commit_error = str(exc)
             self.map, self.links = self.decode(before)
             self.references = dict(before.get('tab_references', {}))
+            self.text_links = markdown.note_bindings(before.get('text_links', {}))
             self._completed = set(before.get('completed', []))
             self._measure_progress = set(before.get('measure_progress', []))
             self.reminders = copy.deepcopy(before.get('reminders', {}))
@@ -1835,12 +2096,14 @@ class MindMapController(QObject):
             self._kanban = copy.deepcopy(before.get('kanban', {}))
             self.plan_schedules = copy.deepcopy(before.get('plan_schedules', {}))
             self.plan_ranges = copy.deepcopy(before.get('plan_ranges', {}))
+            self.causal_diagrams = copy.deepcopy(before.get('causal_diagrams', {}))
             self._restore_selection(selected)
             self.errorOccurred.emit(str(exc))
             self.changed.emit()
             return False
         if self.to_dict() != before:
             self._undo.append((before, selected, tab_state))
+            del self._undo[:-100]
             self._redo.clear()
         valid_selection = [key for key in self._selected_ids if self._in_scope(self._find(key))]
         self._set_selection(valid_selection or [self.view_root.id])
@@ -1929,7 +2192,7 @@ class MindMapController(QObject):
                 self._set_selection(valid or [self.view_root.id])
             self.blockSignals(was_blocked)
 
-    def editNode(self, node_id, text, note):
+    def editNode(self, node_id, text, note, bindings=None):
         node = self._find(node_id)
         if node is None:
             return False
@@ -1948,8 +2211,16 @@ class MindMapController(QObject):
         def mutate():
             if tab_state:
                 self._tabs.renameTab(index, text)
+            old_note = node.note or ""
             node.text = text
             node.note = note or None
+            if bindings is None:
+                self._update_text_bindings(_content(node), old_note)
+            else:
+                if any(bindings.values()):
+                    self.text_links[_content(node).id] = copy.deepcopy(bindings)
+                else:
+                    self.text_links.pop(_content(node).id, None)
 
         self._changing_tabs = True
         try:
@@ -1982,6 +2253,8 @@ class MindMapController(QObject):
 
     @Slot(bool, result=bool)
     def addThought(self, sibling=False):
+        if self._is_date_root(self._selected):
+            return self._create_day_activity('New thought')
         parent = self._find(self._selected) or self.view_root
         if sibling and parent is not self.view_root and parent.parent:
             parent = parent.parent
@@ -1995,6 +2268,8 @@ class MindMapController(QObject):
 
     @Slot(str, str, result=bool)
     def addChildNamed(self, node_id, title):
+        if self._is_date_root(node_id):
+            return self._create_day_activity(title)
         parent = self._find(node_id)
         title = title.strip()
         if parent is None or not title:
@@ -2049,6 +2324,9 @@ class MindMapController(QObject):
             index = (parent.children.index(following) if following else
                      parent.children.index(siblings[-1]) + 1 if siblings else len(parent.children))
 
+        if self._date_filter and parent is self.view_root:
+            return self._create_day_activity('New thought')
+
         def mutate():
             # Inserting a branch must not rebalance existing automatic sides.
             for branch in self.view_root.children:
@@ -2100,6 +2378,69 @@ class MindMapController(QObject):
                 node.touch()
 
         self._commit(mutate)
+
+    def _resolve_text_name(self, name):
+        matches = [n.id for n in self.map.walk()
+                   if n.id not in self.references and n.text == name]
+        return matches[0] if len(matches) == 1 else None
+
+    def _update_text_bindings(self, node, old_note):
+        previous = self.text_links.get(node.id, {}).get('note', [])
+        bindings = markdown.reconcile(old_note, node.note or '', previous, self._resolve_text_name)
+        if bindings:
+            self.text_links[node.id] = {'note': bindings}
+        else:
+            self.text_links.pop(node.id, None)
+
+    @Slot(str, result='QVariantList')
+    def searchNodeLinks(self, query):
+        query = query.strip().casefold()
+        results = []
+        for node in self.map.walk():
+            if node.id in self.references:
+                continue
+            name = node.text
+            path = ' / '.join(n.text for n in reversed(list(node.ancestors())))
+            if query and query not in name.casefold() and query not in path.casefold():
+                continue
+            rank = 0 if name.casefold() == query else 1 if name.casefold().startswith(query) else 2
+            results.append((rank, name.casefold(), path, node.id, name))
+        return [{'id': key, 'name': name, 'path': path}
+                for _, _, path, key, name in sorted(results)]
+
+    @Slot(str, result=bool)
+    def revealTextLink(self, target):
+        if self.map.find(target) is None:
+            self.errorOccurred.emit('This linked node no longer exists.')
+            return False
+        return self.reveal_reminder(target)
+
+    @Property(bool, notify=editorVisibleChanged)
+    def editorVisible(self):
+        return self._node_editor is not None and self._node_editor.isVisible()
+
+    @Slot()
+    def closeNodeEditor(self):
+        if self._node_editor is not None:
+            self._node_editor.reject()
+
+    def node_editor(self):
+        from .mindmap_node_editor import MindMapNodeEditor
+        if self._node_editor is None:
+            self._node_editor = MindMapNodeEditor(self)
+            self._node_editor.finished.connect(lambda _: self.editorVisibleChanged.emit())
+            self.destroyed.connect(self._node_editor.deleteLater)
+        return self._node_editor
+
+    @Slot()
+    @Slot(bool)
+    def openNodeEditor(self, new_node=False):
+        node = self._find(self._selected)
+        if node is None or self._is_date_root(self._selected):
+            return
+        self.node_editor()
+        self._node_editor.open_node(_content(node), new_node=new_node)
+        self.editorVisibleChanged.emit()
 
     @Slot(str, str)
     def editSelected(self, text, note):
@@ -2202,24 +2543,150 @@ class MindMapController(QObject):
             return True
         return False
 
-    @Slot(str, str, str)
+    def _move_destination(self, node, target, placement, forbidden=None):
+        """Validate both previews and commits without mutating the tree."""
+        if (placement not in ('before', 'after', 'child')
+                or not self._in_scope(node) or not self._in_scope(target)
+                or node is self.view_root or _placement(node) is _placement(target)):
+            return None
+        if placement != 'child' and target is self.view_root:
+            return None
+        parent = target if placement == 'child' else target.parent
+        forbidden = self._parent_forbidden(_placement(node)) if forbidden is None else forbidden
+        if parent is None or _content(parent).id in forbidden:
+            return None
+        children = _content(parent).children
+        same_parent = _placement(node).parent is _content(parent)
+        index = len(children) if placement == 'child' else children.index(_placement(target)) + (placement == 'after')
+        old_index = children.index(_placement(node)) if same_parent else -1
+        if same_parent and old_index < index:
+            index -= 1
+        if same_parent and old_index == index:
+            sides = assigned_sides(SimpleNamespace(root=self.view_root))
+            if placement == 'child' or sides.get(node) == sides.get(target):
+                return None
+        return parent, index
+
+    @Slot(str, str, str, result=bool)
     def moveNode(self, node_id, target_id, placement):
         node, target = self._find(node_id), self._find(target_id)
-        if (not self._in_scope(node) or not self._in_scope(target)
-                or node is target or node is self.view_root):
-            return
+        destination = self._move_destination(node, target, placement)
+        if destination is None:
+            parent = target if placement == 'child' else target.parent if target else None
+            if (node is not None and target is not None and node is not target
+                    and parent is not None and _content(parent).id in self._parent_forbidden(_placement(node))):
+                self.errorOccurred.emit('Moving the node there would create a cycle.')
+            return False
+        parent, index = destination
+        sides = assigned_sides(SimpleNamespace(root=self.view_root))
         def mutate():
-            parent = (target.parent if placement in ('before', 'after')
-                      and target.parent and target is not self.view_root else target)
-            index = None
-            if parent is not target:
-                index = parent.children.index(target) + (placement == 'after')
-                if _content(node.parent) is _content(parent) and _content(parent).children.index(_placement(node)) < index:
-                    index -= 1
+            for branch in self.view_root.children:
+                branch.side = sides[branch]
+            node.side = sides.get(target, sides.get(node))
             node.move_to(parent, index)
             parent.folded = False
             self._set_selection([node.id])
-        self._commit(mutate)
+        if self._commit(mutate):
+            self.revealNode.emit(node.id)
+            return True
+        return False
+
+    @Slot()
+    def clearDropTargets(self):
+        self._drop_cache = None
+
+    def _drop_regions(self, node_id, zoom, reorder):
+        # World-space regions, cached until the scene or drag session changes.
+        key = (node_id, zoom, reorder)
+        if self._drop_cache is not None and self._drop_cache[0] == key:
+            return self._drop_cache[1]
+        source = self._find(node_id)
+        boxes = self._layout()
+        regions = []
+        if source not in boxes or source is self.view_root:
+            self._drop_cache = (key, regions)
+            return regions
+        sides = assigned_sides(SimpleNamespace(root=self.view_root))
+        forbidden = self._parent_forbidden(_placement(source))
+        padding = 16 / zoom
+        groups = {}
+        for node in boxes:
+            if node is not self.view_root and _placement(node).id not in forbidden:
+                groups.setdefault((node.parent, sides.get(node)), []).append(node)
+
+        def add(target, placement, bounds, line_y=None, priority=1, block_invalid=False):
+            valid = self._move_destination(source, target, placement, forbidden) is not None
+            if not valid and not block_invalid:
+                return
+            box = boxes[target]
+            regions.append(dict(targetId=target.id, placement=placement,
+                                x=box.x, y=box.y if line_y is None else line_y,
+                                width=box.width, height=box.height if placement == 'child' else 0,
+                                label=('Add child to ' if placement == 'child' else
+                                       'Insert before ' if placement == 'before' else 'Insert after ') + target.text,
+                                bounds=bounds, priority=priority, valid=valid))
+
+        if reorder:
+            siblings = groups.get((source.parent, sides.get(source)), [])
+            for i in range(len(siblings) + 1):
+                if not siblings:
+                    break
+                target = siblings[i] if i < len(siblings) else siblings[-1]
+                placement = 'before' if i < len(siblings) else 'after'
+                top = boxes[siblings[i-1]].center_y if i else -1e12
+                bottom = boxes[siblings[i]].center_y if i < len(siblings) else 1e12
+                line = ((boxes[siblings[i-1]].y + boxes[siblings[i-1]].height + boxes[siblings[i]].y) / 2
+                        if 0 < i < len(siblings) else
+                        boxes[target].y - padding / 2 if i == 0 else boxes[target].y + boxes[target].height + padding / 2)
+                add(target, placement, [-1e12, top, 1e12, bottom], line)
+        else:
+            for node, box in boxes.items():
+                if node is source:
+                    continue
+                if _placement(node).id in forbidden:
+                    # A descendant must not expose an ancestor's gap behind it.
+                    regions.append(dict(bounds=[box.x, box.y, box.x+box.width, box.y+box.height],
+                                        priority=-1, y=box.y, valid=False))
+                    continue
+                add(node, 'child', [box.x, box.y + box.height * .25,
+                                    box.x + box.width, box.y + box.height * .75], priority=0, block_invalid=True)
+            for siblings in groups.values():
+                for i, node in enumerate(siblings):
+                    box = boxes[node]
+                    prev = boxes[siblings[i-1]] if i else None
+                    following = boxes[siblings[i+1]] if i + 1 < len(siblings) else None
+                    top = (prev.y + prev.height + box.y) / 2 if prev else box.y - padding / 2
+                    bottom = (box.y + box.height + following.y) / 2 if following else box.y + box.height + padding / 2
+                    add(node, 'before', [box.x-padding, box.y-padding if prev is None else box.y,
+                                        box.x+box.width+padding, box.y+box.height*.25], top, block_invalid=True)
+                    add(node, 'after', [box.x-padding, box.y+box.height*.75,
+                                       box.x+box.width+padding, box.y+box.height+(padding if following is None else 0)], bottom, block_invalid=True)
+                    if prev and prev.y + prev.height < box.y:
+                        add(node, 'before', [min(prev.x, box.x)-padding, prev.y+prev.height,
+                                            max(prev.x+prev.width, box.x+box.width)+padding, box.y], top, 2)
+        self._drop_cache = (key, regions)
+        return regions
+
+    @Slot(str, float, float, float, bool, str, str, result='QVariantMap')
+    def resolveDropTarget(self, node_id, x, y, zoom, reorder, previous_id, previous_placement):
+        if not all(math.isfinite(v) for v in (x, y, zoom)) or zoom <= 0:
+            return {}
+        regions = self._drop_regions(node_id, zoom, reorder)
+        def contains(region, margin=0):
+            left, top, right, bottom = region['bounds']
+            return left-margin <= x <= right+margin and top-margin <= y <= bottom+margin
+        hits = [r for r in regions if contains(r)]
+        if not hits:
+            return {}
+        hit = min(hits, key=lambda r: (r['priority'], abs(y-r['y'])))
+        if not hit['valid']:
+            return {}
+        if hit['placement'] != 'child':
+            previous = next((r for r in regions if r['valid'] and r['targetId'] == previous_id
+                             and r['placement'] == previous_placement and contains(r, 6 / zoom)), None)
+            if previous is not None:
+                hit = previous
+        return {k: v for k, v in hit.items() if k not in ('bounds', 'priority', 'valid')}
 
     @Slot(str)
     def setSide(self, side):
@@ -2299,6 +2766,31 @@ class MindMapController(QObject):
         if not source:
             return
         payload, selection, tab_state = source[-1]
+        if 'causal_owner' in payload:
+            # Attachment-only entries share the global history ordering without
+            # serializing or restoring unrelated map topology and metadata.
+            key = payload['causal_owner']
+            destination.append(({'causal_owner': key,
+                                 'causal_state': copy.deepcopy(self.causal_diagrams.get(key))},
+                                self._selection_state(), None))
+            del destination[:-100]
+            source.pop()
+            badge = self._has_causal_diagram(key)
+            state = payload['causal_state']
+            if state is None:
+                self.causal_diagrams.pop(key, None)
+            else:
+                self.causal_diagrams[key] = copy.deepcopy(state)
+            self._restore_selection(selection)
+            valid = [node_id for node_id in self._selected_ids
+                     if self._in_scope(self._find(node_id))]
+            self._set_selection(valid or [self.view_root.id])
+            self._cut_ids = []
+            if badge != self._has_causal_diagram(key):
+                self.sceneChanged.emit()
+            self.changed.emit()
+            self.historyRestored.emit()
+            return
         inverse = None
         if tab_state is not None:
             self._changing_tabs = True
@@ -2310,11 +2802,13 @@ class MindMapController(QObject):
             finally:
                 self._changing_tabs = False
         destination.append((copy.deepcopy(self.to_dict()), self._selection_state(), inverse))
+        del destination[:-100]
         source.pop()
         self._restore_selection(selection)
         self._cut_ids = []
         self.map, self.links = self.decode(payload)
         self.references = dict(payload.get('tab_references', {}))
+        self.text_links = markdown.note_bindings(payload.get('text_links', {}))
         self._completed = set(payload.get('completed', []))
         self._measure_progress = set(payload.get('measure_progress', []))
         self.reminders = copy.deepcopy(payload.get('reminders', {}))
@@ -2323,6 +2817,7 @@ class MindMapController(QObject):
         self._kanban = copy.deepcopy(payload.get('kanban', {}))
         self.plan_schedules = copy.deepcopy(payload.get('plan_schedules', {}))
         self.plan_ranges = copy.deepcopy(payload.get('plan_ranges', {}))
+        self.causal_diagrams = copy.deepcopy(payload.get('causal_diagrams', {}))
         if tab_state is not None:
             live = {tab.id for tab in self._tabs.getAllTabs()}
             self._view_selections = {key: value for key, value in self._view_selections.items()
@@ -2330,6 +2825,7 @@ class MindMapController(QObject):
             if self._scope_tab is not None and self._scope_tab not in live:
                 self.set_scope()
         self.reconcile()
+        self.historyRestored.emit()
 
     @Slot()
     def undo(self):

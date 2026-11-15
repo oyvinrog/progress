@@ -10,6 +10,24 @@ from actiondraw.model import DiagramModel
 from task_model import ProjectManager, TabModel, TaskModel
 
 
+def native_editor(window):
+    """Find the project-owned native dialog outside the QML object tree."""
+    pane = window.findChild(QObject, 'mindmapPane')
+    return pane.property('controller').node_editor()
+
+
+def key_target(window):
+    """QTest targets are explicit: send typing to the native dialog when open."""
+    from PySide6.QtCore import QCoreApplication
+    QCoreApplication.processEvents()
+    pane = window.findChild(QObject, 'mindmapPane')
+    controller = pane.property('controller') if pane else None
+    if controller and controller.editorVisible:
+        editor = controller.node_editor()
+        return editor.focusWidget() or editor
+    return window
+
+
 @pytest.fixture
 def project(app):
     tasks, tabs = TaskModel(), TabModel()
@@ -232,12 +250,12 @@ def test_qml_add_tab_search_and_edit(project, app, actiondraw_window):
         assert m.selectedNode['isReference']
         # QML receives distinct occurrence ids and opens the normal editor.
         m.select(projected)
-        QTest.keyClick(window, Qt.Key_F2)
+        QTest.keyClick(key_target(window), Qt.Key_F2)
         QTest.qWait(30)
-        editor = window.findChild(QObject, 'mindmapNodeEditor')
+        editor = native_editor(window)
         assert editor.property('visible')
-        title = window.findChild(QObject, 'mindmapNodeTitle')
-        title.setProperty('text', 'Pakk eple')
+        title = native_editor(window).title
+        title.setText('Pakk eple')
         from PySide6.QtCore import QMetaObject
         QMetaObject.invokeMethod(editor, 'accept')
         QTest.qWait(30)
@@ -523,3 +541,16 @@ def test_calendar_identity_resolves_projected_children(project):
     assert m.calendarActivityId(ref) == project[5]
     assert m.calendarActivityId(projected_child) == 'plan:' + project[7]
     assert m.calendarActivityId('missing') == ''
+
+
+def test_drop_preview_rejects_reference_cycle(project):
+    m = project[0].mindmap
+    ref = reference(project)
+    source = m._find(ref)
+    child = m._find(occurrence(m, project[-1], ref))
+    box = m._layout()[child]
+    before = m.to_dict()
+    assert m.resolveDropTarget(source.id, box.x + box.width / 2, box.center_y,
+                               1, False, '', '') == {}
+    m.moveNode(source.id, child.id, 'child')
+    assert m.to_dict() == before

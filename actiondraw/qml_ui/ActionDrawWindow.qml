@@ -229,7 +229,21 @@ ApplicationWindow {
     }
 
     function openCausalModelWindow() {
-        if (root.emptyProject) return
+        if (causalModel.openCurrentTab()) root.showCausalModelWindow()
+    }
+
+    function openNodeCausalModelWindow(nodeId) {
+        if (causalModel.openAttachment(nodeId)) root.showCausalModelWindow()
+    }
+
+    Connections {
+        target: causalModel
+        function onAttachmentClosed() {
+            if (root.causalModelWindowRef) root.causalModelWindowRef.close()
+        }
+    }
+
+    function showCausalModelWindow() {
         if (causalModelWindowRef) {
             causalModelWindowRef.show()
             causalModelWindowRef.raise()
@@ -244,7 +258,11 @@ ApplicationWindow {
         var win = component.createObject(root, { "modelRef": causalModel, "hostRoot": root })
         if (!win) return
         causalModelWindowRef = win
-        win.closing.connect(function() { causalModelWindowRef = null })
+        win.closing.connect(function() {
+            causalModelWindowRef = null
+            causalModel.closeAttachment()
+            Qt.callLater(function() { win.destroy() })
+        })
         win.show()
         win.raise()
         win.requestActivate()
@@ -347,6 +365,8 @@ ApplicationWindow {
         yubiKeyTouchDialog.close()
     }
 
+    property bool pendingReminderRepeats: false
+
     function showNextReminderAlert() {
         if (root.reminderPopupBusy || dialogs.reminderDialog.visible)
             return
@@ -354,6 +374,7 @@ ApplicationWindow {
             return
         root.reminderPopupBusy = true
         var nextReminder = root.reminderQueue.shift()
+        root.pendingReminderRepeats = !!(nextReminder.repeat && nextReminder.repeat.interval)
         root.pendingReminderConversionId = nextReminder.conversionId || ""
         root.pendingReminderKind = nextReminder.kind || "task"
         root.pendingReminderNodeId = nextReminder.nodeId || ""
@@ -1321,6 +1342,7 @@ ApplicationWindow {
         visible: root.emptyProject
         recentProjectPath: root.projectManagerRef && root.projectManagerRef.recentProjects.length > 0
             ? root.projectManagerRef.recentProjects[0] : ""
+        frequentProjects: root.projectManagerRef ? root.projectManagerRef.frequentProjects : []
         onAddGoalRequested: sidebarTabs.addNewTab()
         onOpenRecentProjectRequested: function(filePath) {
             root.projectManagerRef.loadProject(filePath)
@@ -1368,7 +1390,7 @@ ApplicationWindow {
             onNodeDragCleared: planningOverview.clearGoalDrop()
             onAssessmentRequested: dialogs.assessmentDialog.open()
             onActionPaintRequested: root.openActionPaintWindow()
-            onCausalDiagramRequested: root.openCausalModelWindow()
+            onCausalDiagramRequested: function(nodeId) { root.openNodeCausalModelWindow(nodeId) }
             onThoughtWanderingRequested: root.projectManagerRef.openRandomTab()
             onCanvasRequested: root.projectManagerRef.showTabCanvas()
             Layout.fillWidth: true
@@ -1386,6 +1408,9 @@ ApplicationWindow {
             }
             onQuickReminderRequested: function(nodeId, minutesFromNow) {
                 projectManager.setMindmapReminderIn(nodeId, minutesFromNow)
+            }
+            onRecurringReminderRequested: function(nodeId, interval, unit) {
+                projectManager.setMindmapRecurringReminder(nodeId, interval, unit)
             }
             onClearReminderRequested: function(nodeId) { projectManager.clearMindmapReminder(nodeId) }
         }
@@ -4564,6 +4589,7 @@ ApplicationWindow {
 
                 Button {
                     objectName: "renewDueReminder"
+                    visible: !root.pendingReminderRepeats
                     text: "Renew"
                     onClicked: {
                         root.openReminderRenewDialog()

@@ -20,6 +20,12 @@ Item {
     readonly property var filteredGoals: scheduledGoals.filter(function(g) {
         return !overview.agendaDate || (g.startDate <= overview.agendaDate && g.endDate >= overview.agendaDate)
     })
+    readonly property var singleDayGoals: filteredGoals.filter(function(g) {
+        return g.startDate === g.endDate
+    })
+    readonly property var multiDayGoals: filteredGoals.filter(function(g) {
+        return g.startDate !== g.endDate
+    })
     property var undoChange: null
     property bool savingCalendarRange: false
     property string calendarMessage: ""
@@ -123,6 +129,26 @@ Item {
         return true
     }
     function rangeModel(id) { return id.indexOf("plan:") === 0 ? planController : goalModel }
+    function openReminder(entry) {
+        if (!projectManager || entry.kind === "standalone") return
+        // Copy the destination before closing popups changes the agenda delegates.
+        var kind = entry.kind, nodeId = entry.nodeId
+        var tabIndex = Number(entry.tabIndex), taskIndex = Number(entry.taskIndex)
+        dayAgenda.close()
+        planning.close()
+        selectedDate = ""
+        Qt.callLater(function() {
+            if (kind === "mindmap" || kind === "kanban_schedule") {
+                overview.projectManager.openMindmapReminder(nodeId)
+                if (overview.planController && overview.planController.calendarActivityId) {
+                    var activityId = overview.planController.calendarActivityId(nodeId)
+                    if (activityId) overview.selectActivity(activityId)
+                }
+            } else {
+                overview.projectManager.openTabTask(tabIndex, taskIndex)
+            }
+        })
+    }
     function openGoal(id) {
         if (id.indexOf("plan:") === 0) {
             projectManager.openMindmapReminder(id.slice(5))
@@ -133,7 +159,14 @@ Item {
             if (index >= 0) projectManager.switchTab(index)
         }
     }
-    GoalRangeDialog { id: goalDialog; parent: Overlay.overlay; goalModel: overview.goalModel; projectManager: overview.projectManager }
+    GoalRangeDialog {
+        id: goalDialog
+        parent: Overlay.overlay
+        goalModel: overview.goalModel
+        projectManager: overview.projectManager
+        calendarCreation: true
+        onActivityCreated: function(id, name) { overview.calendarMessage = "Added ‘" + name + "’" }
+    }
     GoalRangeDialog { id: planDialog; parent: Overlay.overlay; objectName: "planRangeDialog"; goalModel: overview.planController; projectManager: overview.projectManager }
     property var planController
     property double nowTimestamp: Date.now() / 1000
@@ -161,7 +194,18 @@ Item {
         var entries = windowRoot ? windowRoot.activeReminders : []
         return entries.filter(function(entry) { return Number(entry.reminderAt) > overview.nowTimestamp })
     }
+    readonly property var projectedCalendar: {
+        var days = calendar.calendarDays.map(function(day) { return day.key })
+        if (weekStart) {
+            for (var i = 0; i < 7; ++i)
+                days.push(calendar.dayKey(calendar.dayNumber(weekStart) + i))
+        }
+        if (projectManager && projectManager.projectCalendarReminders)
+            return projectManager.projectCalendarReminders(futureReminders, days, agendaDate)
+        return null
+    }
     readonly property var dayCounts: {
+        if (projectedCalendar) return projectedCalendar.dayCounts
         var counts = {}
         futureReminders.forEach(function(entry) {
             var key = calendar.dateKey(new Date(Number(entry.reminderAt) * 1000))
@@ -169,7 +213,7 @@ Item {
         })
         return counts
     }
-    readonly property var filteredReminders: futureReminders.filter(function(entry) {
+    readonly property var filteredReminders: projectedCalendar ? projectedCalendar.reminders : futureReminders.filter(function(entry) {
         return !overview.agendaDate || calendar.dateKey(new Date(Number(entry.reminderAt) * 1000)) === overview.agendaDate
     }).sort(function(a, b) { return Number(a.reminderAt) - Number(b.reminderAt) })
     // Update reminder roles in place so countdown ticks do not destroy open menus.
@@ -180,6 +224,7 @@ Item {
             var entry = filteredReminders[i]
             var key = entry.kind + ":" + (entry.nodeId ||
                 (entry.kind === "standalone" ? entry.standaloneIndex : entry.tabIndex + ":" + entry.taskIndex))
+                + ":" + (entry.occurrenceAt || entry.reminderAt)
             var found = -1
             for (var j = i; j < agendaReminders.count; ++j) {
                 if (agendaReminders.get(j).key === key) { found = j; break }
@@ -366,19 +411,34 @@ Item {
                         palette.buttonText: "#e0e9ef"
                         text: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][weekDay.index] + " " + Number(weekDay.key.slice(8))
                         font.pixelSize: overview.width < 500 ? 10 : 12
-                        Accessible.name: weekDay.key + ", " + weekDay.goalCount + " goals, " + weekDay.reminderCount + " reminders"
+                        objectName: "filterWeekDay_" + weekDay.key
+                        Accessible.name: "Filter map to " + weekDay.key
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Filter map to " + overview.shortDate(weekDay.key)
                         onClicked: overview.selectDate(weekDay.key)
-                        onDoubleClicked: { overview.selectDate(weekDay.key); goalDialog.show(null, weekDay.key) }
                     }
                     ToolButton { palette.buttonText: "#e0e9ef";
                         id: agendaButton
                         objectName: "weekAgenda_" + weekDay.key
-                        anchors { left: parent.left; right: parent.right; bottom: parent.bottom }
+                        anchors { left: parent.left; right: addDayActivity.left; bottom: parent.bottom }
                         height: 22; font.pixelSize: 10; padding: 0
                         text: weekDay.goalCount || weekDay.reminderCount ? weekDay.goalCount + " · " + weekDay.reminderCount : "—"
                         Accessible.name: "Agenda for " + weekDay.key + ": " + weekDay.goalCount + " goals, " + weekDay.reminderCount + " reminders"
                         ToolTip.visible: hovered; ToolTip.text: weekDay.goalCount + " goals · " + weekDay.reminderCount + " reminders"
                         onClicked: overview.showDayAgenda(weekDay.key, agendaButton)
+                    }
+                    ToolButton {
+                        id: addDayActivity
+                        objectName: "addWeekActivity_" + weekDay.key
+                        anchors { right: parent.right; bottom: parent.bottom }
+                        width: 24; height: 22; padding: 0
+                        text: "+"; font.pixelSize: 16
+                        palette.buttonText: "#a9d8fa"
+                        enabled: !!overview.goalModel
+                        Accessible.name: "Add activity on " + weekDay.key
+                        ToolTip.visible: hovered
+                        ToolTip.text: "Add activity on " + overview.shortDate(weekDay.key)
+                        onClicked: goalDialog.show(null, weekDay.key)
                     }
                 }
             }
@@ -387,7 +447,7 @@ Item {
     Popup {
         id: calendarHelp; parent: Overlay.overlay; anchors.centerIn: parent
         width: Math.min(380, parent.width - 32); modal: true; focus: true
-        contentItem: Label { text: "Select a day to filter the map. Open its counts to see activities. Double-click a day to add a goal, or drop a goal or mindmap node onto a date. Drag the grip beside a daily-list item onto another day to move it. Open month to resize date ranges. Escape cancels a drag."; wrapMode: Text.WordWrap }
+        contentItem: Label { text: "Click a day heading to filter the map. Click + under a day to add an activity for that date. Open its counts to see activities. You can also drop a goal or mindmap node onto a date. Drag the grip beside a daily-list item onto another day to move it. Open month to resize date ranges. Escape cancels a drag."; wrapMode: Text.WordWrap }
     }
     Popup {
         id: dayAgenda; objectName: "weekAgendaPopup"; parent: Overlay.overlay
@@ -499,10 +559,20 @@ Item {
                 text: overview.agendaDate ? "No goals or reminders for this day" : "No scheduled goals or waiting reminders"
                 color: "#9aafbd"
             }
-            Label { text: "Goals · " + overview.filteredGoals.length; color: "#9aafbd" }
+            Label {
+                objectName: "singleDayAgendaHeading"
+                visible: overview.singleDayGoals.length > 0 || overview.filteredReminders.length > 0
+                text: (overview.agendaDate ? "Within this day" : "Single-day activities") + " · "
+                    + (overview.singleDayGoals.length + overview.filteredReminders.length)
+                color: "#9aafbd"
+            }
             Repeater {
-                model: overview.filteredGoals
-                delegate: Rectangle {
+                model: overview.singleDayGoals
+                delegate: agendaGoalDelegate
+            }
+            Component {
+                id: agendaGoalDelegate
+                Rectangle {
                     id: goalRow
                     required property var modelData
                     width: agendaRows.width; height: 52
@@ -554,7 +624,10 @@ Item {
                     }
                 }
             }
-            Label { text: "Reminders · " + overview.filteredReminders.length; color: "#9aafbd" }
+            Label {
+                visible: overview.filteredReminders.length > 0
+                text: "Reminders · " + overview.filteredReminders.length; color: "#9aafbd"
+            }
             Repeater {
                 model: agendaReminders
                 delegate: Rectangle {
@@ -611,14 +684,21 @@ Item {
                             Layout.fillWidth: true
                             Layout.minimumWidth: 0
                             spacing: 1
-                            HoverHandler { id: reminderTextHover }
+                            HoverHandler {
+                                id: reminderTextHover
+                                cursorShape: reminderRow.entry.kind !== "standalone" ? Qt.PointingHandCursor : Qt.ArrowCursor
+                            }
+                            TapHandler {
+                                enabled: reminderRow.entry.kind !== "standalone"
+                                onTapped: overview.openReminder(reminderRow.entry)
+                            }
                             ToolTip {
                                 id: reminderTextTooltip
                                 objectName: "reminderTextTooltip_" + (reminderRow.entry.nodeId || reminderRow.entry.kind)
                                 visible: reminderTextHover.hovered && !overview.agendaDrag
                                 delay: 500
                                 text: "[" + reminderRow.entry.tabName + "] " + (reminderRow.entry.title || reminderRow.entry.taskTitle)
-                                    + "\n" + (reminderRow.isPlan ? "Add and notify at " : "Remind at ") + reminderRow.entry.reminderText
+                                    + "\n" + (reminderRow.isPlan ? "Add and notify at " : "Remind at ") + (reminderRow.entry.occurrenceText || reminderRow.entry.reminderText) + (reminderRow.entry.repeatText ? " · " + reminderRow.entry.repeatText : "")
                                 width: Math.min(implicitWidth, Math.max(160, overview.width - 32), 420)
                                 contentItem: Label {
                                     text: reminderTextTooltip.text
@@ -629,8 +709,10 @@ Item {
                             }
                             Text {
                                 width: parent.width
+                                objectName: "reminderTitle_" + (reminderRow.entry.nodeId || reminderRow.entry.kind)
                                 text: "[" + reminderRow.entry.tabName + "] " + (reminderRow.entry.title || reminderRow.entry.taskTitle)
-                                color: "#fff7ef"
+                                color: reminderRow.entry.kind !== "standalone" ? "#a9d8fa" : "#fff7ef"
+                                font.underline: reminderRow.entry.kind !== "standalone"
                                 font.pixelSize: 11
                                 font.bold: true
                                 elide: Text.ElideRight
@@ -645,7 +727,7 @@ Item {
                             }
                             Text {
                                 width: parent.width
-                                text: (reminderRow.isPlan ? "Add and notify at " : "Remind at ") + reminderRow.entry.reminderText
+                                text: (reminderRow.isPlan ? "Add and notify at " : "Remind at ") + (reminderRow.entry.occurrenceText || reminderRow.entry.reminderText) + (reminderRow.entry.repeatText ? " · " + reminderRow.entry.repeatText : "")
                                 color: "#f1c892"
                                 font.pixelSize: 10
                                 elide: Text.ElideRight
@@ -665,11 +747,7 @@ Item {
                                 text: reminderRow.isPlan || reminderRow.entry.kind === "mindmap" ? "Open Node" : "Open Task"
                                 visible: reminderRow.entry.kind !== "standalone"
                                 onTriggered: {
-                                    var data = reminderRow.entry
-                                    if (reminderRow.isPlan || data.kind === "mindmap")
-                                        overview.projectManager.openMindmapReminder(data.nodeId)
-                                    else
-                                        overview.projectManager.openTabTask(Number(data.tabIndex), Number(data.taskIndex))
+                                    overview.openReminder(reminderRow.entry)
                                 }
                             }
                             MenuItem {
@@ -708,6 +786,23 @@ Item {
                         }
                     }
                 }
+            }
+            Rectangle {
+                objectName: "agendaDurationDivider"
+                visible: overview.multiDayGoals.length > 0
+                    && (overview.singleDayGoals.length > 0 || overview.filteredReminders.length > 0)
+                width: parent.width; height: 1
+                color: "#526b7b"
+            }
+            Label {
+                objectName: "multiDayAgendaHeading"
+                visible: overview.multiDayGoals.length > 0
+                text: "Across multiple days · " + overview.multiDayGoals.length
+                color: "#9aafbd"
+            }
+            Repeater {
+                model: overview.multiDayGoals
+                delegate: agendaGoalDelegate
             }
         }
     }

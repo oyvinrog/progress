@@ -186,6 +186,7 @@ def test_responsive_layout_collapse_and_row_actions(calendar_ui, app):
     click("reminderActions_task")
     click("openReminder_task")
     assert host.property("action") == "open-task"
+    click("openPlanningMonth")
     click("reminderActions_task")
     click("editReminder_task")
     assert host.property("action") == "edit-task"
@@ -215,6 +216,7 @@ def test_other_reminder_actions_preserved(calendar_ui, kind, node, open_action, 
         click("reminderActions_" + suffix)
         click("openReminder_" + suffix)
         assert host.property("action") == open_action
+        click("openPlanningMonth")
     if edit_action:
         click("reminderActions_" + suffix)
         click("editReminder_" + suffix)

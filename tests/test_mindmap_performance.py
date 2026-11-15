@@ -384,3 +384,23 @@ def test_map_direct_completion_and_child_button(app, actiondraw_window):
     assert len(list(m.map.walk())) == before
     tasks._timer.stop()
     project._reminder_timer.stop()
+
+
+def test_drop_motion_reuses_layout_and_eligibility(app):
+    m = MindMapController()
+    parent = m.map.root.add_child('Dense branch')
+    siblings = [parent.add_child(f'Node {i}') for i in range(300)]
+    boxes = m._layout()
+    source = siblings[-1]
+    before = m.to_dict()
+    with patch.object(m, '_layout', wraps=m._layout) as layout, \
+            patch.object(m, '_parent_forbidden', wraps=m._parent_forbidden) as forbidden:
+        previous = {}
+        for node in siblings[:-1]:
+            box = boxes[node]
+            previous = m.resolveDropTarget(source.id, box.x + box.width / 2, box.center_y,
+                                           1, False, previous.get('targetId', ''), previous.get('placement', ''))
+            assert previous['targetId'] == node.id and previous['placement'] == 'child'
+        assert layout.call_count == 1
+        assert forbidden.call_count == 1
+    assert m.to_dict() == before

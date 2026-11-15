@@ -7,7 +7,7 @@ FocusScope {
     id: pane
     signal assessmentRequested()
     signal actionPaintRequested()
-    signal causalDiagramRequested()
+    signal causalDiagramRequested(string nodeId)
     signal thoughtWanderingRequested()
     property var tabModel: null
     property int assessmentLevel: 0
@@ -46,7 +46,7 @@ FocusScope {
         implicitHeight: 32
         enabled: !!pane.tabModel && pane.tabModel.currentTabIndex >= 0
         Accessible.name: label
-        ToolTip.visible: hovered
+        ToolTip.visible: hovered && pane.activeNodeDrag === null
         readonly property string toolTipText: label + " — " + (pane.tabModel ? pane.tabModel.currentTabName : "")
         ToolTip.text: toolTipText
         contentItem: Row {
@@ -77,11 +77,17 @@ FocusScope {
     signal branchOpmlExportRequested(string nodeId)
     signal reminderRequested(string nodeId)
     signal quickReminderRequested(string nodeId, int minutesFromNow)
+    signal recurringReminderRequested(string nodeId, int interval, string unit)
     signal clearReminderRequested(string nodeId)
     signal nodeDragMoved(string nodeId, real sceneX, real sceneY)
     signal nodeDragCleared()
     property var nodeDropHandler: null
     property var activeNodeDrag: null
+    property var dropPreview: ({})
+    function cancelActiveDrag() {
+        if (activeNodeDrag) activeNodeDrag.cancelDrag()
+        dropPreview = ({})
+    }
     Shortcut {
         sequence: "Escape"
         enabled: pane.activeNodeDrag !== null
@@ -96,6 +102,7 @@ FocusScope {
     readonly property bool hasRunningDeadlines: sceneNodes.some(function(node) {
         return node.deadlineActive && node.deadlineStart + node.deadlineDuration > pane.deadlineNow
     })
+    readonly property bool dateRootSelected: !!controller && controller.selectedNode.isVirtualDateRoot === true
     readonly property var selectedNodeSet: new Set(controller ? controller.selectedIds : [])
     readonly property var cutNodeSet: new Set(controller ? controller.cutNodeIds : [])
     property real zoom: 1
@@ -129,7 +136,7 @@ FocusScope {
             pane.hoveredNodeId = ""
         }
     }
-    readonly property bool shortcutsEnabled: visible && activeFocus && !toolDialogOpen && !editor.visible && !quickChildDialog.visible && !nodeMenu.visible && !actionsButton.activeFocus && !prioritySlider.activeFocus && !actionsMenu.visible && !helpDialog.visible && !deadlineDialog.visible && !tabReferenceDialog.visible && !parentDialog.visible && !nodeGoalRangeDialog.visible && !reminderDialogOpen
+    readonly property bool shortcutsEnabled: visible && activeFocus && !toolDialogOpen && !pane.controller.editorVisible && !quickChildDialog.visible && !nodeMenu.visible && !actionsButton.activeFocus && !prioritySlider.activeFocus && !actionsMenu.visible && !dateRootMenu.visible && !helpDialog.visible && !deadlineDialog.visible && !tabReferenceDialog.visible && !parentDialog.visible && !nodeGoalRangeDialog.visible && !reminderDialogOpen
     readonly property bool searching: controller && controller.searchQuery.length > 0
     onSearchingChanged: if (searching) navigationHighlightId = ""
     onShortcutsEnabledChanged: if (!shortcutsEnabled && controller) controller.clearSearch()
@@ -240,20 +247,21 @@ FocusScope {
             return
         }
     }
-    function editNode() {
-        if (!controller) return
-        var node = controller.selectedNode
-        titleField.text = node.text || ""
-        noteField.text = node.note || ""
-        editor.open()
+    function editNode(newNode) {
+        if (!controller || dateRootSelected) return
+        controller.openNodeEditor(newNode === true)
     }
     function addThought(sibling) {
-        if (controller.addThought(sibling)) editNode()
+        if (controller.addThought(sibling)) editNode(true)
     }
-    onVisibleChanged: if (visible) {
-        deadlineNow = Date.now() / 1000
-        forceActiveFocus()
-        if (!initialized) Qt.callLater(function() { if (pane.visible && !pane.initialized) pane.fitMap() })
+    Component.onDestruction: if (controller) controller.closeNodeEditor()
+    onVisibleChanged: {
+        cancelActiveDrag()
+        if (visible) {
+            deadlineNow = Date.now() / 1000
+            forceActiveFocus()
+            if (!initialized) Qt.callLater(function() { if (pane.visible && !pane.initialized) pane.fitMap() })
+        }
     }
     Timer {
         id: navigationHold
@@ -273,9 +281,11 @@ FocusScope {
             if (pane.navigationHighlightId !== pane.controller.selectedId)
                 pane.navigationHighlightId = ""
         }
-        function onSceneChanged() { edges.requestPaint() }
+        function onSceneChanged() { pane.cancelActiveDrag(); edges.requestPaint() }
+        function onEditorVisibleChanged() { if (!pane.controller.editorVisible) { pane.focusMap() } }
         function onRevealNode(nodeId) { pane.revealNode(nodeId) }
         function onScopeChanging(oldScope, newScope) {
+            pane.cancelActiveDrag()
             pane.hoveredNodeId = ""
             pane.controller.clearSearch()
             pane.navigationHighlightId = ""
@@ -285,18 +295,18 @@ FocusScope {
             pane.panX = saved ? saved.x : 0
             pane.panY = saved ? saved.y : 0
             pane.initialized = saved ? saved.initialized : false
-            editor.close()
+            pane.controller.closeNodeEditor()
             if (!pane.initialized) Qt.callLater(function() { if (pane.visible && !pane.initialized) pane.fitMap() })
         }
         function onResetView() {
+            pane.cancelActiveDrag()
             pane.hoveredNodeId = ""
             pane.controller.clearSearch()
             pane.navigationHighlightId = ""
             pane.viewPositions = ({})
             pane.initialized = false
             pane.zoom = 1; pane.panX = 0; pane.panY = 0
-            editor.close()
-            titleField.text = ""; noteField.text = ""
+            pane.controller.closeNodeEditor()
             if (pane.visible) Qt.callLater(pane.fitMap)
         }
     }
@@ -317,7 +327,7 @@ FocusScope {
                 Accessible.name: "Show parent context"
                 text: "↑ Parent"
                 visible: pane.controller && pane.controller.canNavigateToParent
-                ToolTip.visible: hovered
+                ToolTip.visible: hovered && pane.activeNodeDrag === null
                 ToolTip.text: "Show parent context"
                 onClicked: pane.controller.navigateToParent(pane.controller.openedNodeId)
             }
@@ -334,10 +344,18 @@ FocusScope {
                 text: "Mindmap ▾"
                 Accessible.name: "Mindmap actions"
                 enabled: !!pane.controller
-                onClicked: actionsMenu.open()
-                Keys.onDownPressed: actionsMenu.open()
-                Keys.onReturnPressed: actionsMenu.open()
-                Keys.onEnterPressed: actionsMenu.open()
+                function openMenu() {
+                    if (pane.dateRootSelected) {
+                        var point = actionsButton.mapToItem(pane, 0, actionsButton.height)
+                        dateRootMenu.x = point.x
+                        dateRootMenu.y = point.y
+                        dateRootMenu.open()
+                    } else actionsMenu.open()
+                }
+                onClicked: openMenu()
+                Keys.onDownPressed: openMenu()
+                Keys.onReturnPressed: openMenu()
+                Keys.onEnterPressed: openMenu()
                 Menu {
                     id: actionsMenu
                     objectName: "mindmapActionsMenu"
@@ -434,7 +452,7 @@ FocusScope {
                     MenuSeparator {}
                     MenuItem { objectName: "mindmapHelpAction"; text: "Shortcuts and legend…"; onTriggered: helpDialog.open() }
                     onClosed: Qt.callLater(function() {
-                        if (!editor.visible && !helpDialog.visible && !deadlineDialog.visible && !nodeGoalRangeDialog.visible && !pane.reminderDialogOpen) pane.focusMap()
+                        if (!pane.controller.editorVisible && !helpDialog.visible && !deadlineDialog.visible && !nodeGoalRangeDialog.visible && !pane.reminderDialogOpen) pane.focusMap()
                     })
                 }
             }
@@ -454,10 +472,11 @@ FocusScope {
             }
             CompanionButton {
                 id: causalTool
+                enabled: !pane.dateRootSelected
                 objectName: "mindmapCausalDiagramButton"
                 label: "Causal Diagram"
                 iconKey: "causal"
-                onClicked: { pane.focusMap(); pane.causalDiagramRequested() }
+                onClicked: { pane.focusMap(); pane.causalDiagramRequested(pane.controller.selectedId) }
             }
             ToolButton {
                 id: wanderingTool
@@ -466,7 +485,7 @@ FocusScope {
                 implicitHeight: 32
                 enabled: !!pane.tabModel && pane.tabModel.tabCount > 1
                 Accessible.name: "Thought wandering"
-                ToolTip.visible: hovered
+                ToolTip.visible: hovered && pane.activeNodeDrag === null
                 ToolTip.text: "Thought wandering"
                 icon.source: "../icons/dice.svg"
                 icon.width: 16
@@ -547,8 +566,8 @@ FocusScope {
                 Layout.minimumWidth: 0
                 elide: Text.ElideRight
             }
-            ToolButton { text: "−"; Accessible.name: "Zoom out"; ToolTip.visible: hovered; ToolTip.text: "Zoom out"; onClicked: { pane.zoomBy(1 / 1.2); pane.focusMap() } }
-            ToolButton { text: "+"; Accessible.name: "Zoom in"; ToolTip.visible: hovered; ToolTip.text: "Zoom in"; onClicked: { pane.zoomBy(1.2); pane.focusMap() } }
+            ToolButton { text: "−"; Accessible.name: "Zoom out"; ToolTip.visible: hovered && pane.activeNodeDrag === null; ToolTip.text: "Zoom out"; onClicked: { pane.zoomBy(1 / 1.2); pane.focusMap() } }
+            ToolButton { text: "+"; Accessible.name: "Zoom in"; ToolTip.visible: hovered && pane.activeNodeDrag === null; ToolTip.text: "Zoom in"; onClicked: { pane.zoomBy(1.2); pane.focusMap() } }
             ToolButton { text: "Fit"; Accessible.name: "Fit mindmap"; onClicked: { pane.fitMap(); pane.focusMap() } }
         }
         ScrollView {
@@ -580,7 +599,7 @@ FocusScope {
                             verticalAlignment: Text.AlignVCenter
                             horizontalAlignment: Text.AlignHCenter
                         }
-                        ToolTip.visible: hovered
+                        ToolTip.visible: hovered && pane.activeNodeDrag === null
                         ToolTip.delay: 600
                         ToolTip.text: modelData.path
                         onClicked: pane.jumpBookmark(modelData.id)
@@ -621,7 +640,7 @@ FocusScope {
                 onDoubleClicked: function(mouse) {
                     if (!pane.controller || mouse.button !== Qt.LeftButton || mouse.modifiers !== Qt.NoModifier) return
                     var point = mapToItem(world, mouse.x, mouse.y)
-                    if (pane.controller.addThoughtAt(point.x, point.y)) pane.editNode()
+                    if (pane.controller.addThoughtAt(point.x, point.y)) pane.editNode(true)
                 }
                 onPressed: function(mouse) {
                     pane.focusMap()
@@ -677,6 +696,7 @@ FocusScope {
                     delegate: Loader {
                         id: nodeLoader
                         property bool dragging: false
+                        z: dragging && pane.activeNodeDrag !== null ? 10 : 0
                         required property var modelData
                         width: modelData.width; height: modelData.height
                         // Keep a margin for smooth panning and retain selected nodes
@@ -701,7 +721,7 @@ FocusScope {
                             readonly property bool selected: pane.selectedNodeSet.has(modelData.id)
                             readonly property bool currentSearchHit: pane.searching && selected
                                                                           && pane.controller.searchMatchPosition > 0
-                            opacity: pane.cutNodeSet.has(modelData.id) ? 0.45 : 1
+                            opacity: nodeLoader.dragging && pane.activeNodeDrag !== null ? 0.7 : pane.cutNodeSet.has(modelData.id) ? 0.45 : 1
                             border.width: selected ? 2 : 1
                             border.color: selected ? "#a5d9ff" : "#557b98"
                             Rectangle {
@@ -740,11 +760,40 @@ FocusScope {
                                     }
                                 }
                             }
+                            Image {
+                                objectName: "mindmapCausalIcon_" + nodeItem.modelData.id
+                                visible: nodeItem.modelData.hasCausalDiagram
+                                source: Qt.resolvedUrl("../icons/causal.svg")
+                                width: 16; height: 16
+                                anchors.left: parent.left
+                                anchors.leftMargin: nodeItem.leadingInset + (nodeItem.modelData.hasNote ? 20 : 0)
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
+                                                              - (nodeItem.modelData.measureProgress ? 12 : 0)
+                                                              - (nodeItem.modelData.deadlineActive ? 14 : 0)
+                                z: 2
+                                Accessible.role: Accessible.Button
+                                Accessible.name: "Edit causal diagram"
+                                ToolTip.visible: causalHover.containsMouse && pane.activeNodeDrag === null
+                                ToolTip.delay: 300
+                                ToolTip.text: "Edit causal diagram"
+                                MouseArea {
+                                    id: causalHover
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        pane.controller.select(nodeItem.modelData.id)
+                                        pane.causalDiagramRequested(nodeItem.modelData.id)
+                                    }
+                                }
+                            }
                             Text {
                                 objectName: "mindmapBookmarkIcon_" + nodeItem.modelData.id
                                 visible: nodeItem.modelData.bookmarked
                                 anchors.left: parent.left
                                 anchors.leftMargin: nodeItem.leadingInset + (nodeItem.modelData.hasNote ? 20 : 0)
+                                                       + (nodeItem.modelData.hasCausalDiagram ? 20 : 0)
                                 anchors.verticalCenter: parent.verticalCenter
                                 anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
                                                               - (nodeItem.modelData.measureProgress ? 12 : 0)
@@ -760,6 +809,7 @@ FocusScope {
                                 width: 16; height: 18; radius: 3
                                 anchors.left: parent.left
                                 anchors.leftMargin: nodeItem.leadingInset + (nodeItem.modelData.hasNote ? 20 : 0)
+                                                       + (nodeItem.modelData.hasCausalDiagram ? 20 : 0)
                                                        + (nodeItem.modelData.bookmarked ? 20 : 0)
                                 anchors.verticalCenter: parent.verticalCenter
                                 anchors.verticalCenterOffset: (nodeItem.modelData.reminderActive ? -12 : 0)
@@ -779,7 +829,7 @@ FocusScope {
                                 }
                                 Accessible.role: Accessible.StaticText
                                 Accessible.name: nodeItem.modelData.planTooltip
-                                ToolTip.visible: planHover.containsMouse
+                                ToolTip.visible: planHover.containsMouse && pane.activeNodeDrag === null
                                 ToolTip.delay: 300
                                 ToolTip.text: nodeItem.modelData.planTooltip
                                 MouseArea {
@@ -796,6 +846,7 @@ FocusScope {
                                                       + (nodeItem.modelData.measureProgress ? 24 : 0)
                                                       + (nodeItem.modelData.deadlineActive ? 28 : 0)
                                 anchors.leftMargin: nodeItem.leadingInset + (nodeItem.modelData.hasNote ? 20 : 0)
+                                                       + (nodeItem.modelData.hasCausalDiagram ? 20 : 0)
                                                        + (nodeItem.modelData.bookmarked ? 20 : 0)
                                                        + (nodeItem.modelData.planVisible ? 20 : 0)
                                 anchors.rightMargin: (nodeItem.modelData.priorityLevel > 0 ? 48 : 18)
@@ -803,6 +854,8 @@ FocusScope {
                                                      + (nodeItem.modelData.priorityRank > 0 ? 30 : 0)
                                 verticalAlignment: Text.AlignVCenter
                                 text: (nodeItem.modelData.isReference ? "↗ " : nodeItem.modelData.isTab ? "▣ " : "") + nodeItem.modelData.text
+                                textFormat: Text.PlainText
+                                Accessible.name: nodeItem.modelData.text
                                 font.pixelSize: 14
                                 font.bold: nodeItem.modelData.bold
                                 color: "#e5f0fa"; elide: Text.ElideRight
@@ -847,7 +900,7 @@ FocusScope {
                                 font.pixelSize: 24
                                 palette.buttonText: nodeItem.modelData.completed ? "#91d6b6" : "#a9bfd1"
                                 Accessible.name: (nodeItem.modelData.completed ? "Mark incomplete: " : "Complete: ") + nodeItem.modelData.text
-                                ToolTip.visible: hovered
+                                ToolTip.visible: hovered && pane.activeNodeDrag === null
                                 ToolTip.text: nodeItem.modelData.completed ? "Mark incomplete" : "Mark complete"
                                 onClicked: {
                                     pane.controller.select(nodeItem.modelData.id)
@@ -886,7 +939,7 @@ FocusScope {
                                     border.color: foldButton.activeFocus ? "#e5f0fa" : "#6288a5"
                                 }
                                 Accessible.name: (nodeItem.modelData.folded ? "Unfold " : "Fold ") + nodeItem.modelData.text
-                                ToolTip.visible: hovered
+                                ToolTip.visible: hovered && pane.activeNodeDrag === null
                                 ToolTip.text: nodeItem.modelData.folded ? "Unfold branch" : "Fold branch"
                                 onClicked: {
                                     pane.controller.toggleNodeFold(nodeItem.modelData.id)
@@ -902,14 +955,16 @@ FocusScope {
                                 onEntered: { insertionHoverExit.stop(); pane.hoveredNodeId = nodeItem.modelData.id }
                                 onExited: insertionHoverExit.restart()
                                 onPressedChanged: { pane.nodePressed = pressed; nodeLoader.dragging = pressed }
-                                cursorShape: Qt.PointingHandCursor
-                                drag.target: !canceled && pressedButtons === Qt.LeftButton ? nodeItem : null
+                                cursorShape: drag.active ? Qt.ClosedHandCursor : Qt.PointingHandCursor
+                                drag.target: !nodeItem.modelData.isVirtualDateRoot && !canceled && pressedButtons === Qt.LeftButton ? nodeItem : null
                                 drag.axis: reorderDrag ? Drag.YAxis : Drag.XAndYAxis
                                 property bool wasDragged: false
                                 property bool reorderDrag: false
                                 property bool canceled: false
                                 function clearDrag() {
                                     pane.activeNodeDrag = null
+                                    pane.dropPreview = ({})
+                                    pane.controller.clearDropTargets()
                                     pane.nodeDragCleared()
                                 }
                                 function cancelDrag() {
@@ -926,12 +981,27 @@ FocusScope {
                                     pane.focusMap()
                                     wasDragged = false
                                     canceled = false
+                                    pane.controller.clearDropTargets()
                                     reorderDrag = mouse.button === Qt.LeftButton && !!(mouse.modifiers & Qt.ControlModifier)
+                                }
+                                function updateDropPreview(mouse) {
+                                    var local = nodeMouse.mapToItem(viewport, mouse.x, mouse.y)
+                                    if (local.x < 0 || local.y < 0 || local.x > viewport.width || local.y > viewport.height) {
+                                        pane.dropPreview = ({})
+                                        return
+                                    }
+                                    var point = nodeMouse.mapToItem(world, mouse.x, mouse.y)
+                                    var previous = pane.dropPreview
+                                    pane.dropPreview = pane.controller.resolveDropTarget(
+                                        nodeItem.modelData.id, point.x,
+                                        reorderDrag ? nodeItem.y + nodeItem.height / 2 : point.y,
+                                        pane.zoom, reorderDrag, previous.targetId || "", previous.placement || "")
                                 }
                                 onPositionChanged: function(mouse) {
                                     if (!drag.active || canceled) return
                                     wasDragged = true
                                     pane.activeNodeDrag = nodeMouse
+                                    updateDropPreview(mouse)
                                     if (!reorderDrag) {
                                         var scenePoint = nodeMouse.mapToItem(null, mouse.x, mouse.y)
                                         pane.nodeDragMoved(nodeItem.modelData.id, scenePoint.x, scenePoint.y)
@@ -939,38 +1009,21 @@ FocusScope {
                                 }
                                 onCanceled: cancelDrag()
                                 onReleased: function(mouse) {
-                                    clearDrag()
-                                    if (canceled) { restorePosition(); return }
-                                    if (!wasDragged) return
-                                    var point = nodeItem.mapToItem(world, mouse.x, mouse.y)
-                                    if (!reorderDrag && pane.nodeDropHandler) {
-                                        var scenePoint = nodeMouse.mapToItem(null, mouse.x, mouse.y)
-                                        var draggedId = nodeItem.modelData.id
+                                    if (canceled || !wasDragged) {
                                         restorePosition()
-                                        if (pane.nodeDropHandler(draggedId, scenePoint.x, scenePoint.y)) return
-                                    }
-                                    if (reorderDrag) {
-                                        var reorderId = nodeItem.modelData.id
-                                        var centerY = nodeItem.y + nodeItem.height / 2
-                                        restorePosition()
-                                        Qt.callLater(pane.controller.reorderNodeAt, reorderId, centerY)
+                                        clearDrag()
                                         return
                                     }
-                                    var nodes = pane.sceneNodes
-                                    var targetId = "", placement = "child"
-                                    for (var i = 0; i < nodes.length; ++i) {
-                                        var n = nodes[i]
-                                        if (n.id === nodeItem.modelData.id) continue
-                                        if (point.x >= n.x && point.x <= n.x + n.width && point.y >= n.y && point.y <= n.y + n.height) {
-                                            targetId = n.id
-                                            var relativeY = (point.y - n.y) / n.height
-                                            placement = relativeY < 0.25 ? "before" : relativeY > 0.75 ? "after" : "child"
-                                            break
-                                        }
-                                    }
+                                    updateDropPreview(mouse)
+                                    var preview = pane.dropPreview
                                     var sourceId = nodeItem.modelData.id
+                                    var scenePoint = nodeMouse.mapToItem(null, mouse.x, mouse.y)
                                     restorePosition()
-                                    if (targetId) Qt.callLater(pane.controller.moveNode, sourceId, targetId, placement)
+                                    clearDrag()
+                                    if (!reorderDrag && pane.nodeDropHandler
+                                            && pane.nodeDropHandler(sourceId, scenePoint.x, scenePoint.y)) return
+                                    if (preview.targetId)
+                                        Qt.callLater(pane.controller.moveNode, sourceId, preview.targetId, preview.placement)
                                 }
                                 onClicked: function(mouse) {
                                     if (wasDragged) return
@@ -978,7 +1031,8 @@ FocusScope {
                                     if (mouse.button === Qt.RightButton) {
                                         if (!nodeItem.selected) pane.controller.select(nodeId)
                                         nodeMenu.targetNodeId = nodeId
-                                        nodeMenu.popup()
+                                        if (nodeItem.modelData.isVirtualDateRoot) dateRootMenu.popup()
+                                        else nodeMenu.popup()
                                     } else if (mouse.modifiers & Qt.ControlModifier) {
                                         pane.controller.select(nodeId, "toggle")
                                     } else if (mouse.modifiers & Qt.ShiftModifier) {
@@ -1002,7 +1056,7 @@ FocusScope {
                                     objectName: "mindmapTooltip_" + nodeItem.modelData.id
                                     y: nodeItem.height + 8
                                     delay: 800
-                                    visible: nodeMouse.containsMouse && !nodeMouse.pressed
+                                    visible: nodeMouse.containsMouse && !nodeMouse.pressed && pane.activeNodeDrag === null
                                     text: nodeItem.modelData.text
                                           + (nodeItem.modelData.priorityRank > 0
                                              ? "\nPriority rank: " + nodeItem.modelData.priorityRank : "")
@@ -1105,11 +1159,52 @@ FocusScope {
                                     onClicked: {
                                         pane.controller.select(nodeItem.modelData.id)
                                         nodeMenu.targetNodeId = nodeItem.modelData.id
-                                        nodeMenu.popup()
+                                        if (nodeItem.modelData.isVirtualDateRoot) dateRootMenu.popup()
+                                        else nodeMenu.popup()
                                     }
                                 }
                             }
                         }
+                    }
+                }
+            }
+            Item {
+                id: dropIndicator
+                objectName: "mindmapDropIndicator"
+                visible: !!pane.dropPreview.targetId
+                z: 30
+                readonly property bool childDrop: pane.dropPreview.placement === "child"
+                x: world.x + (pane.dropPreview.x || 0) * pane.zoom
+                y: world.y + (pane.dropPreview.y || 0) * pane.zoom
+                width: (pane.dropPreview.width || 0) * pane.zoom
+                height: childDrop ? (pane.dropPreview.height || 0) * pane.zoom : 0
+                Rectangle {
+                    anchors.fill: parent
+                    anchors.margins: dropIndicator.childDrop ? -3 : 0
+                    color: dropIndicator.childDrop ? "#4056b8e9" : "#91dbff"
+                    border.color: "#91dbff"
+                    border.width: dropIndicator.childDrop ? 3 : 0
+                    radius: dropIndicator.childDrop ? 10 : 0
+                    visible: dropIndicator.childDrop
+                }
+                Rectangle {
+                    visible: !dropIndicator.childDrop
+                    width: parent.width; height: 3; y: -1.5
+                    color: "#91dbff"
+                    Rectangle { width: 8; height: 8; radius: 4; x: -4; y: -2.5; color: parent.color }
+                }
+                Rectangle {
+                    x: Math.max(-dropIndicator.x + 4, Math.min(0, viewport.width - dropIndicator.x - width - 4))
+                    y: dropIndicator.y >= height + 8 ? -height - 8 : dropIndicator.height + 8
+                    width: Math.min(dropLabel.implicitWidth + 16, viewport.width - 8)
+                    height: dropLabel.implicitHeight + 10
+                    color: "#183c54"; border.color: "#91dbff"; radius: 5
+                    Text {
+                        id: dropLabel
+                        anchors.fill: parent; anchors.margins: 5
+                        text: pane.dropPreview.label || ""
+                        color: "#eefaff"; font.pixelSize: 12
+                        elide: Text.ElideRight
                     }
                 }
             }
@@ -1126,7 +1221,7 @@ FocusScope {
                     return null
                 }
                 visible: !!targetNode && !pane.nodePressed && !canvasMouse.pressed
-                         && !editor.visible && !quickChildDialog.visible && !nodeMenu.visible && !actionsMenu.visible
+                         && !pane.controller.editorVisible && !quickChildDialog.visible && !nodeMenu.visible && !actionsMenu.visible && !dateRootMenu.visible
                          && !helpDialog.visible && !deadlineDialog.visible && !nodeGoalRangeDialog.visible && !pane.reminderDialogOpen
                 Repeater {
                     model: 4
@@ -1168,7 +1263,7 @@ FocusScope {
                         hoverEnabled: true
                         Accessible.name: removal ? (insertionControls.targetNode && insertionControls.targetNode.isReference ? "Remove goal reference" : "Delete branch") : child ? "Add child" : before ? "Add sibling above" : "Add sibling below"
                         ToolTip.text: removal ? Accessible.name + " (including children) · Ctrl+Z to undo" : Accessible.name
-                        ToolTip.visible: hovered
+                        ToolTip.visible: hovered && pane.activeNodeDrag === null
                         ToolTip.delay: 500
                         onHoveredChanged: {
                             if (hovered) insertionHoverExit.stop()
@@ -1203,11 +1298,13 @@ FocusScope {
                                 // This local action deletes only the node it belongs to.
                                 pane.controller.select(nodeId)
                                 pane.controller.deleteSelected()
+                            } else if (child && insertionControls.targetNode.isVirtualDateRoot) {
+                                pane.addThought(false)
                             } else if (child) {
                                 quickChildDialog.targetNodeId = nodeId
                                 quickChildTitle.text = ""
                                 quickChildDialog.open()
-                            } else if (pane.controller.addSiblingRelative(nodeId, before)) pane.editNode()
+                            } else if (pane.controller.addSiblingRelative(nodeId, before)) pane.editNode(true)
                         }
                     }
                 }
@@ -1231,7 +1328,7 @@ FocusScope {
             spacing: 16
             Label {
                 Layout.fillWidth: true
-                text: "Drag the priority slider left for highest scores, right to include more; All restores every branch · Children of progress-measuring nodes have completion checkboxes · Select a node and click + beside it to add a child, or above/below to add a sibling · Type to find node titles, including folded branches · Enter / Shift+Enter cycles matches · Backspace edits search · Escape clears search · Double-click a goal node to open it · Double-click empty space to add a thought · Ctrl+B toggles bold · Drag a node onto a calendar day to schedule it · Escape cancels a drag · Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+C / Ctrl+V copies branches · Ctrl+X / Ctrl+V moves branches · F4 or the Complete menu action toggles completion on any node · Arrows navigate · Tab adds a child · Ctrl+Enter opens a goal"
+                text: "Drag the priority slider left for highest scores, right to include more; All restores every branch · Children of progress-measuring nodes have completion checkboxes · Select a node and click + beside it to add a child, or above/below to add a sibling · Type to find node titles, including folded branches · Enter / Shift+Enter cycles matches · Backspace edits search · Escape clears search · Double-click a goal node to open it · Double-click empty space to add a thought · Ctrl+B toggles bold · Drag a node onto a calendar day to schedule it · Drag between nodes to insert siblings; drop on a highlighted center to add a child · Escape cancels a drag · Ctrl+drag or Ctrl+Up/Down reorders · Ctrl+Left/Right moves branches to either side · Ctrl+click toggles selection · Shift+click selects a range · Ctrl+C / Ctrl+V copies branches · Ctrl+X / Ctrl+V moves branches · F4 or the Complete menu action toggles completion on any node · Arrows navigate · Tab adds a child · Ctrl+Enter opens a goal"
                 wrapMode: Text.WordWrap
                 color: "#a9bfd1"
             }
@@ -1300,6 +1397,15 @@ FocusScope {
         }
     }
     Menu {
+        id: dateRootMenu
+        objectName: "mindmapDateRootMenu"
+        MenuItem {
+            objectName: "mindmapDateRootAddChild"
+            text: "Add child"
+            onTriggered: pane.addThought(false)
+        }
+    }
+    Menu {
         id: nodeMenu
         objectName: "mindmapNodeMenu"
         width: 280
@@ -1309,9 +1415,11 @@ FocusScope {
         property bool canMoveUp: false
         property bool canMoveDown: false
         property bool measuringProgress: false
+        property bool causalDiagramPresent: false
         onTargetNodeIdChanged: measuringProgress = pane.controller
                                ? pane.controller.measuresProgress(targetNodeId) : false
         onAboutToShow: {
+            causalDiagramPresent = pane.controller.hasCausalDiagram(targetNodeId)
             reminderData = pane.controller.reminderData(targetNodeId)
             deadlineData = pane.controller.deadlineData(targetNodeId)
             canMoveUp = pane.controller.canReorderNode(targetNodeId, -1)
@@ -1319,6 +1427,17 @@ FocusScope {
             measuringProgress = pane.controller.measuresProgress(targetNodeId)
         }
         IconMenuItem { iconKey: "notes"; text: "Edit / Notes"; onTriggered: pane.editNode() }
+        IconMenuItem {
+            objectName: "mindmapEditCausalDiagram"
+            iconKey: "causal"; text: "Edit causal diagram"
+            onTriggered: pane.causalDiagramRequested(nodeMenu.targetNodeId)
+        }
+        IconMenuItem {
+            objectName: "mindmapRemoveCausalDiagram"
+            iconKey: "trash"; text: "Remove causal diagram"
+            visible: nodeMenu.causalDiagramPresent
+            onTriggered: pane.controller.removeCausalDiagram(nodeMenu.targetNodeId)
+        }
         IconMenuItem { iconKey: "child"; text: "Add child"; onTriggered: pane.addThought(false) }
         IconMenuItem { iconKey: "sibling"; text: "Add sibling"; onTriggered: pane.addThought(true) }
         IconMenuItem {
@@ -1433,6 +1552,86 @@ FocusScope {
                     objectName: "mindmapQuickReminder7Days"
                     text: "7 days"
                     onTriggered: pane.quickReminderRequested(nodeMenu.targetNodeId, 7 * 24 * 60)
+                }
+            }
+            Menu {
+                objectName: "mindmapRecurringReminderMenu"
+                title: "Recurring reminder"
+                icon.source: Qt.resolvedUrl("../icons/bell.svg")
+                icon.width: 16
+                icon.height: 16
+                icon.color: palette.text
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapRecurringReminder10Minutes"
+                    text: "Every 10 minutes"
+                    onTriggered: pane.recurringReminderRequested(nodeMenu.targetNodeId, 10, "minutes")
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapRecurringReminder20Minutes"
+                    text: "Every 20 minutes"
+                    onTriggered: pane.recurringReminderRequested(nodeMenu.targetNodeId, 20, "minutes")
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapRecurringReminder30Minutes"
+                    text: "Every 30 minutes"
+                    onTriggered: pane.recurringReminderRequested(nodeMenu.targetNodeId, 30, "minutes")
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapRecurringReminder1Hours"
+                    text: "Every hour"
+                    onTriggered: pane.recurringReminderRequested(nodeMenu.targetNodeId, 1, "hours")
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapRecurringReminder2Hours"
+                    text: "Every 2 hours"
+                    onTriggered: pane.recurringReminderRequested(nodeMenu.targetNodeId, 2, "hours")
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapRecurringReminder4Hours"
+                    text: "Every 4 hours"
+                    onTriggered: pane.recurringReminderRequested(nodeMenu.targetNodeId, 4, "hours")
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapRecurringReminder8Hours"
+                    text: "Every 8 hours"
+                    onTriggered: pane.recurringReminderRequested(nodeMenu.targetNodeId, 8, "hours")
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapRecurringReminder12Hours"
+                    text: "Every 12 hours"
+                    onTriggered: pane.recurringReminderRequested(nodeMenu.targetNodeId, 12, "hours")
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapRecurringReminder20Hours"
+                    text: "Every 20 hours"
+                    onTriggered: pane.recurringReminderRequested(nodeMenu.targetNodeId, 20, "hours")
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapRecurringReminder1Days"
+                    text: "Every day"
+                    onTriggered: pane.recurringReminderRequested(nodeMenu.targetNodeId, 1, "days")
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapRecurringReminder2Days"
+                    text: "Every 2 days"
+                    onTriggered: pane.recurringReminderRequested(nodeMenu.targetNodeId, 2, "days")
+                }
+                IconMenuItem {
+                    iconKey: "bell"
+                    objectName: "mindmapRecurringReminder1Weeks"
+                    text: "Every week"
+                    onTriggered: pane.recurringReminderRequested(nodeMenu.targetNodeId, 1, "weeks")
                 }
             }
             IconMenuItem {
@@ -1768,44 +1967,6 @@ FocusScope {
         }
         onAccepted: pane.controller.addChildNamed(targetNodeId, quickChildTitle.text)
         onClosed: pane.focusMap()
-    }
-    Dialog {
-        id: editor
-        objectName: "mindmapNodeEditor"
-        title: "Thought and notes"
-        modal: true
-        anchors.centerIn: parent
-        width: Math.min(520, pane.width - 20)
-        standardButtons: Dialog.Ok | Dialog.Cancel
-        ColumnLayout {
-            anchors.fill: parent
-            TextField {
-                id: titleField
-                objectName: "mindmapNodeTitle"
-                Layout.fillWidth: true
-                placeholderText: "Thought"
-                onAccepted: editor.accept()
-            }
-            ScrollView {
-                Layout.fillWidth: true
-                Layout.preferredHeight: 220
-                TextArea { id: noteField; placeholderText: "Notes"; wrapMode: TextEdit.Wrap }
-            }
-        }
-        onOpened: {
-            if (titleField.readOnly) {
-                noteField.forceActiveFocus()
-            } else {
-                titleField.forceActiveFocus()
-                titleField.selectAll()
-            }
-        }
-        onAccepted: {
-            pane.controller.editSelected(titleField.text, noteField.text)
-            titleField.text = ""; noteField.text = ""
-            pane.focusMap()
-        }
-        onRejected: { titleField.text = ""; noteField.text = ""; pane.focusMap() }
     }
     Shortcut { sequence: "Ctrl+B"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.toggleBold() }
     Shortcut { sequence: "Ctrl+C"; enabled: pane.shortcutsEnabled; onActivated: pane.controller.copySelected() }

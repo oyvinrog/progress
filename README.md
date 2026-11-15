@@ -147,11 +147,50 @@ Select a node and choose **Edit / Notes** (or press **F2**) to capture decisions
 questions, and what it will take to finish. In this example, the design review
 has an agenda and a clear completion condition.
 
+**Thought** is a plain-text name, shown directly on the node. **Notes** supports
+Markdown. The notes editor opens in
+**Rich text** mode, with **Source** and **Split preview** modes available. Its
+formatting toolbar includes headings, lists, code, images (including clipboard
+paste and resizing), and editable tables. **OK**, **Ctrl+Enter**, or **Ctrl+S**
+saves both fields together; **Cancel** discards the draft. Source text is kept
+exactly until a rich edit normalizes it. Markdown formatting applies only to
+the notes, keeping node names simple.
+
+In Notes, type `[[` or choose **Insert node link** to search all nodes in the project.
+Choose a result with Enter or a click; tree paths distinguish duplicate names.
+The source shows `[[name]]`, while the saved link remembers the chosen node even
+if it is renamed. Clicking a link reveals its destination, unfolding its branch
+and leaving a filtered view when necessary. Unresolved links appear in amber;
+click one to choose its destination. Node links remain within their project.
+
 <img src="https://github.com/oyvinrog/progress/blob/master/assets/mindmap-notes.png?raw=1" alt="Thought and notes dialog with a design review agenda and completion condition" width="1000">
 
 Choose **Reminder** for a selected node to set a date and time, with optional
 notifications. An orange bell and date appear beneath its title. Every node
 supports a reminder, including goal nodes and the project root.
+
+For a quick repeating reminder, right-click a node and choose
+**Reminders & deadline → Recurring reminder**. Presets range from every
+10 minutes to every week, including **Every 20 minutes**, **Every 20 hours**,
+and **Every day**. The first alert is one interval from now; daily and weekly
+presets use the current local clock time. Choosing a preset replaces that
+node's reminder and preserves its notification setting.
+
+In the reminder dialog, choose **Repeat → Every…** and an interval in minutes,
+hours, days, or weeks: **1 day**, **1 hour**, or **20 minutes**, for example.
+The selected date and time starts the schedule. Daily and weekly reminders keep
+their local clock time across daylight-saving changes; minutes and hours use
+elapsed time. The weekly and monthly calendars show every upcoming occurrence on their
+visible dates, including multiple occurrences per day. Select a day to see its
+occurrence times. **All days** shows the next occurrence of each reminder.
+Editing, moving, clearing, or deleting a projected entry affects the whole
+recurring reminder, not just that occurrence. Clearing the reminder or completing/deleting its source
+stops the schedule. **Never** keeps the existing one-time behavior.
+
+Reminders run while the app and project are open. If several occurrences were
+missed, reopening produces one overdue alert and resumes at the next future
+occurrence. Dismissing an alert does not stop repetition. Moving a recurring
+reminder in the calendar starts its interval from the new date.
 
 **Waiting Reminders** stays visible above both the canvas and mindmap. Choose
 **Open Node** to reveal the relevant node, even inside a folded branch. The
@@ -168,8 +207,8 @@ not complete its descendants or canvas tasks. Completion marks, notes, and the
 map are saved with the project.
 
 Completing or deleting a node cancels its reminder; undo restores it. Reminders
-that have already fired stay cleared through undo/redo. Use **Renew** in the
-due alert to schedule another one.
+that have already fired are not replayed by undo/redo. Use **Renew** in a
+one-time due alert to schedule another one; recurring reminders advance automatically.
 
 **Add to plan** offers Ready, hourly slots, and Monday–Sunday with dates and
 pending task counts. Choosing a weekday schedules a one-time move to Kanban
@@ -298,15 +337,26 @@ These shortcuts apply while the mindmap has focus, outside dialogs and menus.
 
 ### Causal models
 
-Open **Causal Model** beside Action Paint to build a causal diagram for the
-current goal. Double-click empty canvas space to add a variable, action, or
-outcome node there. Drag a node's **→** handle onto another node to connect the
+Select a mind-map node and choose **Causal Diagram** beside Action Paint, or
+right-click the node and choose **Edit causal diagram**. Each node can have its
+own diagram, alongside its notes. A causal icon appears when the diagram has
+nodes or assumptions; click it to reopen the editor. References to a node share
+its diagram. Use **Remove causal diagram** in the node menu to remove it; Undo
+restores it.
+
+Edits save immediately to the project in memory. Changing the selected node
+does not redirect an open editor; its title identifies the owner. Changing tabs
+or deleting the owner closes the editor. The ActionDraw toolbar opens the current
+goal's root-node diagram. Older projects migrate each goal's diagram onto that
+root automatically.
+
+Double-click empty canvas space to add a variable, action, or outcome node there. Drag a node's **→** handle onto another node to connect the
 cause to its effect; a preview arrow follows the pointer. Drop on empty space
 or press Escape to cancel. Connections must form a directed
 acyclic graph; represent feedback with separate nodes for successive times.
 
 Drag nodes to arrange the canvas. Double-click a node to edit its label, type,
-or notes; double-click an arrow to edit its optional likelihood (0–100%) and explanation.
+or notes; double-click an arrow to edit its optional connection weight (−100–100%) and explanation.
 Click a node or arrow to select it, then press **Delete** (or use the toolbar's
 **Delete** button) to remove it. Deleting a node also removes its connections;
 Undo restores them together.
@@ -318,7 +368,9 @@ and choose **Make action**. Action nodes are yellow and numbered, and appear in
 the **Action order** list. Drag its **≡** handles (or use the up/down arrows) to
 choose execution order, then **Add to ActionDraw** or **Add to mindmap** to copy their titles in
 that order. These copies are independent of the model, and the causal edges
-stay in the causal editor. Each goal's model is saved with the project.
+stay in the causal editor. Mind-map actions become children of the node owning
+the diagram; ActionDraw actions go to the active tab. Each node's diagram is
+saved with the project.
 
 The action list also has **+ Add action** and a **Remove action** button on each
 row. Removing an action changes its node to a variable and preserves its label,
@@ -333,7 +385,7 @@ existing copies. Import history is saved with the project and survives graph
 Undo/Redo. For older projects, ActionDraw history is recovered from the last
 import signature; mindmap history starts empty because it was not recorded.
 
-Edge percentages record your estimated likelihoods. They need not sum to 100%,
+Edge percentages record estimated influence; negative values indicate a reducing effect. They need not sum to 100%,
 and they do not calculate outcome probabilities. Numerical causal question
 answering is reserved for a later version with explicit probability rules.
 

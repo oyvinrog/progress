@@ -1,4 +1,4 @@
-"""Editable causal DAGs. Likelihoods are annotations, not an inference engine."""
+"""Editable causal DAGs. Connection weights are annotations, not an inference engine."""
 from __future__ import annotations
 
 import copy
@@ -23,7 +23,14 @@ def record_causal_imports(state, destination, action_ids):
             history.append(key)
 
 
-def _reachable(edges, start, target):
+def _adjacency(edges):
+    adjacency = {}
+    for edge in edges:
+        adjacency.setdefault(edge['source'], []).append(edge['target'])
+    return adjacency
+
+
+def _reachable(adjacency, start, target):
     pending, seen = [start], set()
     while pending:
         node = pending.pop()
@@ -31,7 +38,7 @@ def _reachable(edges, start, target):
             return True
         if node not in seen:
             seen.add(node)
-            pending.extend(e['target'] for e in edges if e['source'] == node)
+            pending.extend(adjacency.get(node, ()))
     return False
 
 
@@ -39,6 +46,7 @@ def normalize_causal_model_state(value):
     state = empty_causal_model_state()
     if not isinstance(value, dict):
         return state
+    ids = set()
     for raw in value.get('nodes', []) if isinstance(value.get('nodes'), list) else []:
         if not isinstance(raw, dict):
             continue
@@ -49,9 +57,10 @@ def normalize_causal_model_state(value):
             continue
         if (node['id'] and node['label'] and node['type'] in {'variable', 'action', 'outcome'}
                 and all(math.isfinite(node[k]) and node[k] >= 0 for k in ('x', 'y'))
-                and not any(n['id'] == node['id'] for n in state['nodes'])):
+                and node['id'] not in ids):
             state['nodes'].append(node)
-    ids = {n['id'] for n in state['nodes']}
+            ids.add(node['id'])
+    edge_ids, pairs, adjacency = set(), set(), {}
     for raw in value.get('edges', []) if isinstance(value.get('edges'), list) else []:
         if not isinstance(raw, dict):
             continue
@@ -64,11 +73,14 @@ def normalize_causal_model_state(value):
         weight = edge['likelihood']
         if (not edge['id'] or edge['source'] not in ids or edge['target'] not in ids
                 or edge['source'] == edge['target']
-                or (weight is not None and (not math.isfinite(weight) or not 0 <= weight <= 100))
-                or any(e['id'] == edge['id'] or (e['source'], e['target']) == (edge['source'], edge['target']) for e in state['edges'])
-                or _reachable(state['edges'], edge['target'], edge['source'])):
+                or (weight is not None and (not math.isfinite(weight) or not -100 <= weight <= 100))
+                or edge['id'] in edge_ids or (edge['source'], edge['target']) in pairs
+                or _reachable(adjacency, edge['target'], edge['source'])):
             continue
         state['edges'].append(edge)
+        edge_ids.add(edge['id'])
+        pairs.add((edge['source'], edge['target']))
+        adjacency.setdefault(edge['source'], []).append(edge['target'])
     actions = [n['id'] for n in state['nodes'] if n['type'] == 'action']
     order = value.get('action_order', [])
     for key in (order if isinstance(order, list) else []) + actions:
@@ -102,19 +114,99 @@ class CausalModelModel(QObject):
     sceneChanged = Signal()
     resetView = Signal()
     errorChanged = Signal()
+    ownerChanged = Signal()
+    attachmentClosed = Signal()
 
-    def __init__(self, tab_model=None):
+    def __init__(self, tab_model=None, mindmap=None):
         super().__init__()
         self._tabs = weakref.proxy(tab_model) if tab_model is not None else None
+        self._mindmap = weakref.proxy(mindmap) if mindmap is not None else None
+        self._owner_id = ''
+        self._publishing = False
         self._state = empty_causal_model_state()
         self._undo, self._redo = [], []
         self._drag = None
         self._error = ''
         if tab_model is not None:
-            tab_model.currentTabChanged.connect(self.loadCurrentTab)
-            tab_model.modelReset.connect(self.loadCurrentTab)
-            tab_model.causalActionsImported.connect(self._on_actions_imported)
-            self.loadCurrentTab()
+            tab_model.currentTabChanged.connect(self.closeAttachment)
+            tab_model.modelReset.connect(self.closeAttachment)
+        if mindmap is not None:
+            mindmap.changed.connect(self._on_mindmap_changed)
+            mindmap.loading.connect(self.closeAttachment)
+            mindmap.historyRestored.connect(self._on_history_restored)
+
+    @Property(str, notify=ownerChanged)
+    def ownerId(self):
+        return self._owner_id
+
+    @Property(str, notify=ownerChanged)
+    def ownerTitle(self):
+        node = self._mindmap.map.find(self._owner_id) if self._mindmap is not None else None
+        return node.text if node is not None else ''
+
+    @Property(bool, notify=ownerChanged)
+    def canImportActionDraw(self):
+        return bool(self._owner_id and self._current_tab() is not None)
+
+    @Slot(result=bool)
+    def openCurrentTab(self):
+        tab = self._current_tab()
+        if tab is None or self._mindmap is None:
+            return False
+        key = next((key for key, tab_id in self._mindmap.links.items() if tab_id == tab.id), '')
+        return self.openAttachment(key)
+
+    @Slot(str, result=bool)
+    def openAttachment(self, node_id):
+        if self._mindmap is None:
+            return False
+        key = self._mindmap.sourceNodeId(node_id)
+        if self._mindmap.map.find(key) is None:
+            return False
+        if key == self._owner_id:
+            return True
+        self.endNodeDrag()
+        self._owner_id = key
+        self.from_dict(self._mindmap.causalDiagram(key))
+        self.ownerChanged.emit()
+        return True
+
+    @Slot()
+    def closeAttachment(self):
+        if not self._owner_id:
+            return
+        self.endNodeDrag()
+        self._owner_id = ''
+        self.from_dict(None)
+        self.ownerChanged.emit()
+        self.attachmentClosed.emit()
+
+    def _on_mindmap_changed(self):
+        if self._publishing or not self._owner_id:
+            return
+        if self._mindmap.map.find(self._owner_id) is None:
+            # Never publish an in-progress drag after its owner was deleted.
+            self._drag = None
+            self.closeAttachment()
+            return
+        state = self._mindmap.causalDiagram(self._owner_id)
+        if state != (self._drag if self._drag is not None else self._state):
+            # Import bookkeeping must survive graph undo without discarding it.
+            def graph_state(value):
+                return {k: v for k, v in value.items() if k != 'imported_action_ids'}
+            if graph_state(state) == graph_state(self._state):
+                for snapshot in [self._state] + self._undo + self._redo:
+                    snapshot['imported_action_ids'] = copy.deepcopy(state['imported_action_ids'])
+                if self._drag is not None:
+                    self._drag['imported_action_ids'] = copy.deepcopy(state['imported_action_ids'])
+                self.changed.emit()
+            else:
+                self.from_dict(state)
+        self.ownerChanged.emit()
+
+    def _on_history_restored(self):
+        if self._owner_id:
+            self.from_dict(self._mindmap.causalDiagram(self._owner_id))
 
     def _fail(self, message):
         self._error = message
@@ -133,15 +225,23 @@ class CausalModelModel(QObject):
             return None
 
     def _publish(self):
-        tab = self._current_tab()
-        if tab is not None:
-            tab.causal_model = self.to_dict()
+        # During dragging only the scene changes. Persist the completed drag as
+        # one mind-map transaction, sharing the causal editor's undo boundary.
+        if self._mindmap is not None and self._owner_id and self._drag is None:
+            self._publishing = True
+            try:
+                self._mindmap.setCausalDiagram(self._owner_id, self.to_dict())
+            finally:
+                self._publishing = False
         if self._drag is None:
             self.changed.emit()
         self.sceneChanged.emit()
         self.stateChanged.emit()
 
     def _commit(self, before):
+        if self._mindmap is not None and not self._owner_id:
+            self._state = before
+            return
         if before == self._state:
             return
         self._undo.append(before)
@@ -257,8 +357,11 @@ class CausalModelModel(QObject):
         node = next((n for n in self._state['nodes'] if n['id'] == key), None)
         if node is None or not all(math.isfinite(v) for v in (x, y)):
             return
-        before = self.to_dict()
-        node.update(x=max(0, x), y=max(0, y))
+        x, y = max(0, x), max(0, y)
+        if (node['x'], node['y']) == (x, y):
+            return
+        before = self.to_dict() if self._drag is None else None
+        node.update(x=x, y=y)
         if self._drag is None:
             self._commit(before)
         else:
@@ -274,7 +377,7 @@ class CausalModelModel(QObject):
         if not str(text).strip():
             return None
         weight = float(text)
-        if not math.isfinite(weight) or not 0 <= weight <= 100:
+        if not math.isfinite(weight) or not -100 <= weight <= 100:
             raise ValueError()
         return weight
 
@@ -290,13 +393,13 @@ class CausalModelModel(QObject):
         if any((e['source'], e['target']) == (source, target) for e in self._state['edges']):
             self._fail('This connection already exists.')
             return ''
-        if _reachable(self._state['edges'], target, source):
+        if _reachable(_adjacency(self._state['edges']), target, source):
             self._fail('This connection would create a cycle. Use separate nodes for successive times.')
             return ''
         try:
             weight = self._weight(likelihood)
         except (TypeError, ValueError):
-            self._fail('Likelihood must be blank or a number from 0 to 100.')
+            self._fail('Connection weight must be blank or a number from -100 to 100.')
             return ''
         before = self.to_dict()
         key = str(uuid.uuid4())
@@ -312,7 +415,7 @@ class CausalModelModel(QObject):
         try:
             weight = self._weight(likelihood)
         except (TypeError, ValueError):
-            return self._fail('Likelihood must be blank or a number from 0 to 100.')
+            return self._fail('Connection weight must be blank or a number from -100 to 100.')
         before = self.to_dict()
         edge.update(likelihood=weight, notes=notes)
         self._commit(before)
@@ -359,11 +462,6 @@ class CausalModelModel(QObject):
             record_causal_imports(snapshot, destination, keys)
         self._publish()
 
-    def _on_actions_imported(self, tab_id, destination, action_ids):
-        tab = self._current_tab()
-        if tab is not None and tab.id == tab_id:
-            self.markActionsImported(destination, action_ids)
-
     @Slot()
     def undo(self):
         self.endNodeDrag()
@@ -391,7 +489,3 @@ class CausalModelModel(QObject):
         self.errorChanged.emit()
         self.resetView.emit()
         self.changed.emit()
-
-    @Slot()
-    def loadCurrentTab(self):
-        self.from_dict(getattr(self._current_tab(), 'causal_model', None))

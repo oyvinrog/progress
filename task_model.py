@@ -5,6 +5,8 @@ previously embedded in progress_list.py, making them available for
 independent use by actiondraw.
 """
 
+from actiondraw.recurrence import repeat_rule, load_repeat, repeat_text, next_occurrence, occurrence_window
+
 import copy
 import hashlib
 import uuid
@@ -422,6 +424,7 @@ class Task:
     countdown_start: Optional[float] = None  # timestamp when countdown started
     reminder_at: Optional[float] = None  # local timestamp when reminder should fire
     reminder_send_notification: bool = False  # whether to publish to ntfy when due
+    reminder_repeat: Optional[dict] = None
     contract_deadline_at: Optional[float] = None  # local timestamp when contract deadline is due
     contract_punishment: str = ""  # user-defined punishment text
     contract_breached: bool = False  # whether deadline has passed before completion
@@ -435,6 +438,7 @@ class StandaloneReminder:
     title: str
     reminder_at: float
     reminder_send_notification: bool = False
+    reminder_repeat: Optional[dict] = None
 
 
 @dataclass
@@ -468,6 +472,7 @@ class Tab:
         "elements": [], "actions": [], "last_imported_signature": ""
     })
 
+    # Read-only legacy input; ProjectManager migrates this onto the mind-map root.
     causal_model: Dict[str, Any] = field(default_factory=lambda: {
         "version": 2, "nodes": [], "edges": [], "description": "",
         "action_order": [], "last_imported_signature": "",
@@ -873,7 +878,8 @@ class TaskModel(QAbstractListModel):
 
     @Slot(int, str, result=bool)
     @Slot(int, str, bool, result=bool)
-    def setReminderAt(self, row: int, reminder_at_str: str, send_notification: bool = False) -> bool:
+    @Slot(int, str, bool, "QVariantMap", result=bool)
+    def setReminderAt(self, row: int, reminder_at_str: str, send_notification: bool = False, repeat=None) -> bool:
         """Set a local date/time reminder for a task.
 
         Accepted formats include:
@@ -888,8 +894,13 @@ class TaskModel(QAbstractListModel):
         reminder_at = self._parseReminderDateTime(reminder_at_str)
         if reminder_at is None:
             return False
+        try:
+            rule = repeat_rule(repeat, reminder_at)
+        except (ValueError, TypeError):
+            return False
 
         task = self._tasks[row]
+        task.reminder_repeat = rule
         task.reminder_at = reminder_at
         task.reminder_send_notification = bool(send_notification)
 
@@ -945,6 +956,7 @@ class TaskModel(QAbstractListModel):
         if task.reminder_at is None and not task.reminder_send_notification:
             return
         task.reminder_at = None
+        task.reminder_repeat = None
         task.reminder_send_notification = False
 
         idx = self.index(row, 0)
@@ -1107,12 +1119,13 @@ class TaskModel(QAbstractListModel):
 
         for i, task_title, send_notification, reminder_at in due_reminders:
             task = self._tasks[i]
-            task.reminder_at = None
+            task.reminder_at = next_occurrence(task.reminder_repeat, current_time) if task.reminder_repeat else None
             idx = self.index(i, 0)
             self.dataChanged.emit(idx, idx, [self.ReminderActiveRole, self.ReminderAtRole])
             self.taskReminderChanged.emit(i)
             self.taskReminderDue.emit(i, task_title, send_notification)
-            task.reminder_send_notification = False
+            if not task.reminder_repeat:
+                task.reminder_send_notification = False
             self.taskReminderTriggered.emit(i, task_title, send_notification, reminder_at)
 
         for i, task_title, punishment, deadline_text in due_contracts:
@@ -1203,6 +1216,7 @@ class TaskModel(QAbstractListModel):
             task.countdown_duration = None
             task.countdown_start = None
             task.reminder_at = None
+            task.reminder_repeat = None
             task.contract_deadline_at = None
             task.contract_punishment = ""
             task.contract_breached = False
@@ -1368,6 +1382,8 @@ class TaskModel(QAbstractListModel):
             task_dict["countdown_start"] = task.countdown_start
         if task.reminder_at is not None:
             task_dict["reminder_at"] = task.reminder_at
+            if task.reminder_repeat:
+                task_dict["reminder_repeat"] = task.reminder_repeat.copy()
             if task.reminder_send_notification:
                 task_dict["reminder_send_notification"] = True
         if task.contract_deadline_at is not None:
@@ -1472,6 +1488,7 @@ class TaskModel(QAbstractListModel):
                         countdown_duration=task_data.get("countdown_duration"),
                         countdown_start=task_data.get("countdown_start"),
                         reminder_at=task_data.get("reminder_at"),
+                        reminder_repeat=load_repeat(task_data.get("reminder_repeat"), task_data.get("reminder_at")),
                         reminder_send_notification=task_data.get("reminder_send_notification", False),
                         contract_deadline_at=task_data.get("contract_deadline_at"),
                         contract_punishment=task_data.get("contract_punishment", ""),
@@ -1527,7 +1544,6 @@ class TabModel(QAbstractListModel):
     kanbanChanged = Signal()
     priorityRanksChanged = Signal()
     priorityWeightsChanged = Signal()
-    causalActionsImported = Signal(str, str, 'QStringList')
 
     def __init__(self):
         super().__init__()
@@ -1718,7 +1734,7 @@ class TabModel(QAbstractListModel):
                 continue
             if index < 0 or index >= len(self._tabs):
                 continue
-            if index == self._current_tab_index or index in normalized:
+            if index in normalized:
                 continue
             normalized.append(index)
             if len(normalized) >= 5:
@@ -1729,6 +1745,7 @@ class TabModel(QAbstractListModel):
         self._emitRecentTabsChanged()
 
     def _recordRecentTab(self, index: int) -> None:
+        """Record a node's owning tab, even if it is the active tab."""
         if index < 0 or index >= len(self._tabs):
             return
         merged = [index]
@@ -2346,7 +2363,11 @@ class TabModel(QAbstractListModel):
         self._current_tab_index = index
         self.currentTabIndexChanged.emit()
         self.currentTabChanged.emit()
-        self._recordRecentTab(previous_index)
+        # A direct tab switch keeps the destination out of quick access;
+        # node visits may add it back without switching the active tab.
+        self._setRecentTabIndices([previous_index] + [
+            recent for recent in self._recent_tab_indices if recent != index
+        ])
 
     def getCurrentTabData(self) -> Optional[Tab]:
         """Get the current goal, or None for an empty project."""
@@ -2507,6 +2528,7 @@ class ProjectManager(QObject):
     saveCompleted = Signal(str)  # Emitted with file path after successful save
     loadCompleted = Signal(str)  # Emitted with file path after successful load
     errorOccurred = Signal(str)  # Emitted with error message on failure
+    frequentProjectsChanged = Signal()
     recentProjectsChanged = Signal()  # Emitted when recent projects list changes
     currentFilePathChanged = Signal()  # Emitted when current file path changes
     workspaceMarkdownTabsChanged = Signal()
@@ -2560,6 +2582,7 @@ class ProjectManager(QObject):
         self._settings = QSettings("ProgressTracker", "ProgressTracker")
         self._sidebar_expanded = self._load_sidebar_expanded_setting()
         self._recent_projects: List[str] = self._load_recent_projects()
+        self._project_open_counts = self._load_project_open_counts()
         self._standalone_reminders: List[StandaloneReminder] = []
         self._due_reminders: Dict[str, Dict[str, Any]] = {}
         self.projectAccessEnding.connect(self._due_reminders.clear)
@@ -2589,6 +2612,7 @@ class ProjectManager(QObject):
         self._workspace_markdown_tabs = normalize_editor_tabs([], fallback_text="")
         self._mindmap_visible = True
         self.mindmap = MindMapController(self._tab_model, self)
+        self.mindmap.migrate_causal_diagrams()
         self.mindmap.exchange_tabs = self._exchangeMindmapTabs
         self.mindmap.tabActivated.connect(self.openMindmapTab)
         self.mindmap.parentContextRequested.connect(self.openNodeParent)
@@ -2684,32 +2708,13 @@ class ProjectManager(QObject):
         self.showTabMindmap()
         return self.mindmap.add_siblings(parent_id, titles)
 
-    @Slot(result='QStringList')
-    @Slot('QStringList', result='QStringList')
-    def addCausalModelToMindmap(self, action_ids=None):
-        """Copy pending causal actions; optionally restrict their order by node ID."""
-        if self._tab_model is None or self._tab_model.currentTabIndex < 0:
-            return []
-        from actiondraw.causal_model import normalize_causal_model_state, record_causal_imports
-        tab = self._tab_model.getCurrentTabData()
-        state = normalize_causal_model_state(tab.causal_model)
-        labels = {node['id']: node['label'] for node in state['nodes']}
-        pending = set(state['action_order']) - set(state['imported_action_ids']['mindmap'])
-        keys = []
-        for key in state['action_order'] if action_ids is None else action_ids:
-            if key in pending and key not in keys:
-                keys.append(key)
-        titles = [labels[key] for key in keys]
-        parent_id = next((key for key, value in self.mindmap.links.items() if value == tab.id), None)
-        if not titles or parent_id is None:
-            return []
-        self.showTabMindmap()
-        created = self.mindmap.add_siblings(parent_id, titles)
+    @Slot(str, result='QStringList')
+    @Slot(str, 'QStringList', result='QStringList')
+    def addCausalModelToMindmap(self, owner_id, action_ids=None):
+        """Copy pending actions beneath the diagram's canonical owner."""
+        created = self.mindmap.import_causal_actions(owner_id, action_ids)
         if created:
-            imported = keys[:len(created)]
-            record_causal_imports(state, 'mindmap', imported)
-            tab.causal_model = state
-            self._tab_model.causalActionsImported.emit(tab.id, 'mindmap', imported)
+            self._setMindmapVisible(True)
         return created
 
     def _defaultTabView(self) -> None:
@@ -2868,6 +2873,8 @@ class ProjectManager(QObject):
             "title": reminder.title,
             "reminder_at": reminder.reminder_at,
         }
+        if reminder.reminder_repeat:
+            payload["reminder_repeat"] = reminder.reminder_repeat.copy()
         if reminder.reminder_send_notification:
             payload["reminder_send_notification"] = True
         if reminder_index is not None:
@@ -2896,6 +2903,7 @@ class ProjectManager(QObject):
                 StandaloneReminder(
                     title=title,
                     reminder_at=reminder_ts,
+                    reminder_repeat=load_repeat(entry.get("reminder_repeat"), reminder_ts),
                     reminder_send_notification=bool(entry.get("reminder_send_notification", False)),
                 )
             )
@@ -2916,7 +2924,8 @@ class ProjectManager(QObject):
     def _onCurrentTaskReminderTriggered(self, task_index, title, notify, reminder_at):
         tab_index = self._tab_model.currentTabIndex if self._tab_model is not None else 0
         self._emitDueReminder('task', title, notify, reminder_at,
-                              tabIndex=tab_index, taskIndex=task_index)
+                              tabIndex=tab_index, taskIndex=task_index, repeat=self._task_model._tasks[task_index].reminder_repeat or {})
+        self._save_after_reminder()
 
     def _emitDueReminder(self, kind, title, notify, reminder_at=None, **source):
         """Capture conversion context before the consumed reminder is lost."""
@@ -3016,7 +3025,7 @@ class ProjectManager(QObject):
 
         now = time.time()
         active_tab = self._tab_model.currentTabIndex
-        sent_notification = False
+        needs_save = False
 
         for tab_index, tab in enumerate(self._tab_model.getAllTabs()):
             if tab_index == active_tab:
@@ -3043,16 +3052,22 @@ class ProjectManager(QObject):
                         reminder_ts = None
 
                 if reminder_ts is not None and reminder_ts <= now:
-                    task.pop("reminder_at", None)
-                    send_notification = bool(task.pop("reminder_send_notification", False))
+                    rule = load_repeat(task.get("reminder_repeat"), reminder_ts)
+                    send_notification = bool(task.get("reminder_send_notification", False))
+                    if rule:
+                        task["reminder_at"] = next_occurrence(rule, now)
+                    else:
+                        task.pop("reminder_at", None)
+                        task.pop("reminder_send_notification", None)
                     tab_changed = True
                     title = str(task.get("title", "")).strip() or "Task"
                     if send_notification:
                         self._publishReminderNotification(tab_index, title)
-                        sent_notification = True
+                        needs_save = True
                     self.taskReminderDue.emit(tab_index, task_index, title, send_notification)
                     self._emitDueReminder('task', title, send_notification, reminder_ts,
-                                          tabIndex=tab_index, taskIndex=task_index)
+                                          tabIndex=tab_index, taskIndex=task_index, repeat=rule or {})
+                    needs_save = True
 
                 deadline_at = task.get("contract_deadline_at")
                 punishment = str(task.get("contract_punishment", "")).strip()
@@ -3089,16 +3104,21 @@ class ProjectManager(QObject):
                     [self._tab_model.CompletionRole, self._tab_model.ActiveTaskTitleRole],
                 )
 
-        if sent_notification:
+        if needs_save:
             self._save_after_reminder()
 
     @Slot(str, str, result=bool)
     @Slot(str, str, bool, result=bool)
-    def setMindmapReminder(self, node_id: str, reminder_at_str: str, send_notification: bool = False) -> bool:
+    @Slot(str, str, bool, "QVariantMap", result=bool)
+    def setMindmapReminder(self, node_id: str, reminder_at_str: str, send_notification: bool = False, repeat=None) -> bool:
         timestamp = _parse_local_datetime(reminder_at_str)
         if timestamp is None:
             return False
-        return self.mindmap.set_reminder(node_id, timestamp, send_notification)
+        try:
+            rule = repeat_rule(repeat, timestamp)
+        except (ValueError, TypeError):
+            return False
+        return self.mindmap.set_reminder(node_id, timestamp, send_notification, rule)
 
     @Slot(str, int, result=bool)
     def setMindmapReminderIn(self, node_id: str, minutes: int) -> bool:
@@ -3108,6 +3128,19 @@ class ProjectManager(QObject):
         # Relative reminders measure elapsed time, including across DST changes.
         return self.mindmap.set_reminder(
             node_id, time.time() + minutes * 60, data['reminderSendNotification'])
+
+    @Slot(str, int, str, result=bool)
+    def setMindmapRecurringReminder(self, node_id: str, interval: int, unit: str) -> bool:
+        """Start a repeating reminder one interval from now, keeping notification settings."""
+        anchor = int(time.time())
+        try:
+            rule = repeat_rule({'interval': interval, 'unit': unit}, anchor)
+            timestamp = next_occurrence(rule, anchor)
+        except (ValueError, TypeError, OverflowError, OSError):
+            return False
+        data = self.mindmap.reminderData(node_id)
+        return self.mindmap.set_reminder(
+            node_id, timestamp, data['reminderSendNotification'], rule)
 
     @Slot(str)
     def clearMindmapReminder(self, node_id: str) -> None:
@@ -3152,48 +3185,51 @@ class ProjectManager(QObject):
                if reminder['at'] <= now]
         for node_id, reminder in due:
             node = self.mindmap.map.find(node_id)
-            self.mindmap.consume_reminder(node_id)
+            self.mindmap.consume_reminder(node_id, now)
             if node is None:
                 continue
             if reminder['send_notification']:
                 self._publishReminderNotification(0, node.text, scope_label="Mindmap")
             self.mindmapReminderDue.emit(node_id, node.text, reminder['send_notification'])
             self._emitDueReminder('mindmap', node.text, reminder['send_notification'],
-                                  reminder['at'], nodeId=node_id)
+                                  reminder['at'], nodeId=node_id, repeat=reminder.get('repeat') or {})
         if due:
             self._save_after_reminder()
 
     def _checkStandaloneReminders(self) -> None:
-        """Emit due project-wide reminders and clear them once handled."""
+        """Emit due project-wide reminders and advance or clear them once handled."""
         if not self._standalone_reminders:
             return
 
         now = time.time()
         remaining: List[StandaloneReminder] = []
-        sent_notification = False
+        changed = False
 
         for reminder in self._standalone_reminders:
             if float(reminder.reminder_at) > now:
                 remaining.append(reminder)
                 continue
 
+            changed = True
+            fired_at = reminder.reminder_at
+            if reminder.reminder_repeat:
+                reminder.reminder_at = next_occurrence(reminder.reminder_repeat, now)
+                remaining.append(reminder)
             if reminder.reminder_send_notification:
                 self._publishReminderNotification(0, reminder.title, scope_label="Project")
-                sent_notification = True
             self.standaloneReminderDue.emit(reminder.title, bool(reminder.reminder_send_notification))
             self._emitDueReminder('standalone', reminder.title, reminder.reminder_send_notification,
-                                  reminder.reminder_at)
+                                  fired_at, repeat=reminder.reminder_repeat or {})
 
-        if len(remaining) == len(self._standalone_reminders):
+        if not changed:
             return
 
-        self._standalone_reminders = remaining
+        self._standalone_reminders = sorted(remaining, key=lambda r: r.reminder_at)
         self.standaloneRemindersChanged.emit()
-        if sent_notification:
-            self._save_after_reminder()
+        self._save_after_reminder()
 
     def _save_after_reminder(self) -> None:
-        """Persist the project so the cleared notification flag survives a crash."""
+        """Persist delivered occurrences and their next scheduled times."""
         if self._current_file_path:
             self.saveCurrentProject()
 
@@ -3210,10 +3246,13 @@ class ProjectManager(QObject):
         send_notification: bool,
         is_current_tab: bool,
         now: float,
+        repeat=None,
     ) -> Dict[str, Any]:
         seconds_remaining = max(0, int(math.floor(reminder_ts - now)))
         return {
             "kind": kind,
+            "repeat": repeat or {},
+            "repeatText": repeat_text(repeat),
             "title": title,
             "taskTitle": title,
             "tabIndex": tab_index,
@@ -3300,11 +3339,11 @@ class ProjectManager(QObject):
         text = moved.strftime("%Y-%m-%d %H:%M:%S")
         notify = current["sendNotification"]
         if kind == "task":
-            return self.setReminder(current["tabIndex"], current["taskIndex"], text, notify)
+            return self.setReminder(current["tabIndex"], current["taskIndex"], text, notify, current.get("repeat", {}))
         if kind == "standalone":
-            return self.updateStandaloneReminder(current["standaloneIndex"], current["title"], text, notify)
+            return self.updateStandaloneReminder(current["standaloneIndex"], current["title"], text, notify, current.get("repeat", {}))
         if kind == "mindmap":
-            return self.setMindmapReminder(current["nodeId"], text, notify)
+            return self.setMindmapReminder(current["nodeId"], text, notify, current.get("repeat", {}))
         node_id = current["nodeId"]
         def mutate():
             self.mindmap.plan_schedules[node_id] = {'at': moved.timestamp()}
@@ -3398,6 +3437,7 @@ class ProjectManager(QObject):
                 continue
             reminders.append(
                 self._build_active_reminder_payload(
+                    repeat=reminder.reminder_repeat,
                     kind="standalone",
                     title=reminder.title,
                     tab_index=-1,
@@ -3416,6 +3456,44 @@ class ProjectManager(QObject):
 
         reminders.sort(key=lambda entry: float(entry.get("reminderAt", 0.0)))
         return reminders
+
+    @Slot("QVariantList", "QVariantList", str, result="QVariantMap")
+    def projectCalendarReminders(self, entries, days, agenda_day):
+        """Project visible dates without changing the live reminder or its action tokens."""
+        counts, agenda = {}, []
+        for day in set(days) | ({agenda_day} if agenda_day else set()):
+            try:
+                civil = date.fromisoformat(day)
+                start = datetime.combine(civil, datetime.min.time()).timestamp()
+                end = datetime.combine(civil + timedelta(days=1), datetime.min.time()).timestamp()
+            except (TypeError, ValueError, OverflowError, OSError):
+                continue
+            count = 0
+            for entry in entries:
+                scheduled = entry['reminderAt']
+                rule = entry.get('repeat')
+                if rule:
+                    first, total, step = occurrence_window(rule, scheduled, start, end)
+                else:
+                    first, total, step = scheduled, int(start <= scheduled < end), None
+                count += total
+                if day != agenda_day:
+                    continue
+                stamp = first
+                for _ in range(total):
+                    row = dict(entry)
+                    # Source time remains intact for editing, dragging and stale-entry checks.
+                    row['occurrenceAt'] = stamp
+                    row['occurrenceText'] = datetime.fromtimestamp(stamp).strftime('%Y-%m-%d %H:%M')
+                    row['countdownText'] = _format_short_countdown(max(0, int(stamp - time.time())))
+                    agenda.append(row)
+                    if step:
+                        stamp += step
+                    elif rule:
+                        stamp = next_occurrence(rule, stamp)
+            counts[day] = count
+        agenda.sort(key=lambda entry: entry['occurrenceAt'])
+        return {'dayCounts': counts, 'reminders': agenda if agenda_day else entries}
 
     @Slot(result="QVariantList")
     def getActiveReminders(self) -> List[Dict[str, Any]]:
@@ -3457,6 +3535,7 @@ class ProjectManager(QObject):
                 title = str(task.get("title", "")).strip() or "Task"
                 reminders.append(
                     self._build_active_reminder_payload(
+                        repeat=task.get("reminder_repeat"),
                         kind="task",
                         title=title,
                         tab_index=tab_index,
@@ -3483,6 +3562,7 @@ class ProjectManager(QObject):
             if node is None or reminder['at'] <= now:
                 continue
             entry = self._build_active_reminder_payload(
+                repeat=reminder.get("repeat"),
                 kind="mindmap", title=node.text, tab_index=-1, tab_name="Mindmap",
                 task_index=-1, standalone_index=-1, reminder_ts=reminder['at'],
                 send_notification=reminder['send_notification'], is_current_tab=False, now=now)
@@ -3595,16 +3675,19 @@ class ProjectManager(QObject):
 
         task.pop("reminder_at", None)
         task.pop("reminder_send_notification", None)
+        task.pop("reminder_repeat", None)
         self._emit_tab_summary_changed(tab_index)
 
     @Slot(int, int, str, result=bool)
     @Slot(int, int, str, bool, result=bool)
+    @Slot(int, int, str, bool, "QVariantMap", result=bool)
     def setReminder(
         self,
         tab_index: int,
         task_index: int,
         reminder_at_str: str,
         send_notification: bool = False,
+        repeat=None,
     ) -> bool:
         """Set a reminder in the current tab or a background tab."""
         tasks = self._get_cross_tab_tasks(tab_index)
@@ -3617,12 +3700,17 @@ class ProjectManager(QObject):
             return False
 
         if self._tab_model is None or tab_index == self._tab_model.currentTabIndex:
-            return bool(self._task_model.setReminderAt(task_index, reminder_at_str, send_notification))
+            return bool(self._task_model.setReminderAt(task_index, reminder_at_str, send_notification, repeat))
 
         reminder_at = _parse_local_datetime(reminder_at_str)
         if reminder_at is None:
             return False
+        try:
+            rule = repeat_rule(repeat, reminder_at)
+        except (ValueError, TypeError):
+            return False
 
+        task["reminder_repeat"] = rule
         task["reminder_at"] = reminder_at
         if send_notification:
             task["reminder_send_notification"] = True
@@ -3633,11 +3721,13 @@ class ProjectManager(QObject):
 
     @Slot(str, str, result=bool)
     @Slot(str, str, bool, result=bool)
+    @Slot(str, str, bool, "QVariantMap", result=bool)
     def addStandaloneReminder(
         self,
         title: str,
         reminder_at_str: str,
         send_notification: bool = False,
+        repeat=None,
     ) -> bool:
         """Create a project-wide standalone reminder."""
         normalized_title = str(title or "").strip()
@@ -3647,11 +3737,16 @@ class ProjectManager(QObject):
         reminder_at = _parse_local_datetime(reminder_at_str)
         if reminder_at is None:
             return False
+        try:
+            rule = repeat_rule(repeat, reminder_at)
+        except (ValueError, TypeError):
+            return False
 
         self._standalone_reminders.append(
             StandaloneReminder(
                 title=normalized_title,
                 reminder_at=reminder_at,
+                reminder_repeat=rule,
                 reminder_send_notification=bool(send_notification),
             )
         )
@@ -3661,12 +3756,14 @@ class ProjectManager(QObject):
 
     @Slot(int, str, str, result=bool)
     @Slot(int, str, str, bool, result=bool)
+    @Slot(int, str, str, bool, "QVariantMap", result=bool)
     def updateStandaloneReminder(
         self,
         reminder_index: int,
         title: str,
         reminder_at_str: str,
         send_notification: bool = False,
+        repeat=None,
     ) -> bool:
         """Update a project-wide standalone reminder by its current list index."""
         if reminder_index < 0 or reminder_index >= len(self._standalone_reminders):
@@ -3679,8 +3776,13 @@ class ProjectManager(QObject):
         reminder_at = _parse_local_datetime(reminder_at_str)
         if reminder_at is None:
             return False
+        try:
+            rule = repeat_rule(repeat, reminder_at)
+        except (ValueError, TypeError):
+            return False
 
         reminder = self._standalone_reminders[reminder_index]
+        reminder.reminder_repeat = rule
         reminder.title = normalized_title
         reminder.reminder_at = reminder_at
         reminder.reminder_send_notification = bool(send_notification)
@@ -3791,6 +3893,36 @@ class ProjectManager(QObject):
             # Filter out non-existent files
             return [p for p in stored if p and os.path.exists(p)][:self.MAX_RECENT_PROJECTS]
         return []
+
+    def _load_project_open_counts(self) -> Dict[str, int]:
+        """Read counts independently of the bounded recent-project history."""
+        try:
+            stored = json.loads(self._settings.value("projectOpenCounts", "{}"))
+        except (TypeError, ValueError):
+            return {}
+        if not isinstance(stored, dict):
+            return {}
+        return {path: count for path, count in stored.items()
+                if isinstance(path, str) and type(count) is int and count > 0}
+
+    def _record_project_open(self, file_path: str) -> None:
+        self._project_open_counts[file_path] = self._project_open_counts.get(file_path, 0) + 1
+        self._settings.setValue("projectOpenCounts", json.dumps(self._project_open_counts))
+        self._settings.sync()
+        self.frequentProjectsChanged.emit()
+
+    @Property("QVariantList", notify=frequentProjectsChanged)
+    def frequentProjects(self) -> List[dict]:
+        """Most opened existing projects, with recent opens breaking ties."""
+        recency = {path: index for index, path in enumerate(self._recent_projects)}
+        paths = sorted(
+            (path for path in self._project_open_counts if os.path.isfile(path)),
+            key=lambda path: (-self._project_open_counts[path],
+                              recency.get(path, self.MAX_RECENT_PROJECTS), path),
+        )
+        return [{"path": path, "name": os.path.splitext(os.path.basename(path))[0],
+                 "openCount": self._project_open_counts[path]}
+                for path in paths[:self.MAX_RECENT_PROJECTS]]
 
     def _load_sidebar_expanded_setting(self) -> bool:
         """Load persisted sidebar expansion preference."""
@@ -4017,7 +4149,6 @@ class ProjectManager(QObject):
                     "tasks": current_tasks if index == current_tab_index else tab.tasks,
                     "diagram": current_diagram if index == current_tab_index else tab.diagram,
                     "action_paint": copy.deepcopy(getattr(tab, "action_paint", {})),
-                    "causal_model": copy.deepcopy(getattr(tab, "causal_model", {})),
                     "markdown_tabs": normalize_editor_tabs(tab.markdown_tabs, fallback_text=""),
                     "priority": tab.priority,
                     "priority_time_hours": tab.priority_time_hours,
@@ -4055,7 +4186,6 @@ class ProjectManager(QObject):
                 "tasks": self._task_model.to_dict(),
                 "diagram": self._diagram_model.to_dict(),
                 "action_paint": {"elements": [], "actions": [], "last_imported_signature": ""},
-                "causal_model": {"version": 2, "nodes": [], "edges": [], "description": "", "action_order": [], "last_imported_signature": "", "imported_action_ids": {"actiondraw": [], "mindmap": []}},
             }],
             "active_tab": 0,
             "workspace_markdown_tabs": normalize_editor_tabs(self._workspace_markdown_tabs, fallback_text=""),
@@ -4630,6 +4760,7 @@ class ProjectManager(QObject):
                                         priority_scoring=project_data.get("priority_scoring") or {})
 
             self.mindmap.load(project_data.get("mindmap"))
+            self.mindmap.migrate_causal_diagrams()
             self.mindmap.set_scope()
             self._setMindmapVisible(True)
 
@@ -4644,6 +4775,7 @@ class ProjectManager(QObject):
             self._add_to_recent(file_path)
             self._clearNavigationHistory()
             self._last_saved_snapshot = self._serialize_project_payload(self._build_project_data())
+            self._record_project_open(file_path)
             self.loadCompleted.emit(file_path)
             print(f"Project loaded from: {file_path}")
 
