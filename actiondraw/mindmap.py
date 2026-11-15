@@ -2433,12 +2433,13 @@ class MindMapController(QObject):
         return self._node_editor
 
     @Slot()
-    def openNodeEditor(self):
+    @Slot(bool)
+    def openNodeEditor(self, new_node=False):
         node = self._find(self._selected)
         if node is None or self._is_date_root(self._selected):
             return
         self.node_editor()
-        self._node_editor.open_node(_content(node))
+        self._node_editor.open_node(_content(node), new_node=new_node)
         self.editorVisibleChanged.emit()
 
     @Slot(str, str)

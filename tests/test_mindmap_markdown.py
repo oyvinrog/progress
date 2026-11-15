@@ -450,3 +450,47 @@ def test_previous_thought_link_metadata_is_retired_without_rewriting_names(model
     assert set(model.text_links[owner.id]) == {'note'}
     assert model.editNode(owner.id, 'New name', owner.note)
     assert model.text_links[owner.id]['note'][0]['target'] == target.id
+
+
+@pytest.mark.parametrize('creation', ['child', 'sibling', 'above', 'canvas'])
+def test_escape_discards_new_thought(model, creation):
+    existing = add(model, 'Existing')
+    model.select(existing.id)
+    before = copy.deepcopy(model.to_dict())
+    selection = model._selection_state()
+    history = list(model._undo)
+    if creation == 'above':
+        assert model.addSiblingRelative(existing.id, True)
+    elif creation == 'canvas':
+        assert model.addThoughtAt(10000, 10000)
+    else:
+        assert model.addThought(creation == 'sibling')
+    created = model._selected
+    model.openNodeEditor(True)
+    QTest.keyClick(model._node_editor.title, Qt.Key_Escape)
+    assert not model.editorVisible
+    assert model.map.find(created) is None
+    assert model.to_dict() == before
+    assert model._selection_state() == selection
+    assert model._undo == history
+    assert not model._redo
+
+
+def test_saved_new_thought_survives_later_editor_cancel(model):
+    assert model.addThought(False)
+    created = model._selected
+    model.openNodeEditor(True)
+    model._node_editor.title.setText('Keep this thought')
+    model._node_editor.accept()
+    model.openNodeEditor()
+    QTest.keyClick(model._node_editor.title, Qt.Key_Escape)
+    assert model.map.find(created).text == 'Keep this thought'
+
+
+def test_cancel_new_thought_does_not_revert_intervening_changes(model):
+    assert model.addThought(False)
+    model.openNodeEditor(True)
+    model.addChildNamed(model.map.root.id, 'Another thought')
+    before = copy.deepcopy(model.to_dict())
+    model._node_editor.reject()
+    assert model.to_dict() == before

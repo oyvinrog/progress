@@ -3097,7 +3097,9 @@ def test_qml_sibling_insertion_controls(project, app, zoom, before, actiondraw_w
     assert pane.property('panX') == -140 and pane.property('panY') == 50
     QMetaObject.invokeMethod(editor, 'reject')
     QTest.qWait(40)
-    assert m.map.find(new.id) is new
+    assert m.map.find(new.id) is None
+    assert [n.id for n in m.map.root.children] == original_ids
+    assert m.selectedId == a.id
     m.select(m.view_root.id)
     QTest.mouseMove(window, QPoint(5, 5))
     QTest.qWait(180)

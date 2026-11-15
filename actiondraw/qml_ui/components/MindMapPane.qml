@@ -247,12 +247,12 @@ FocusScope {
             return
         }
     }
-    function editNode() {
+    function editNode(newNode) {
         if (!controller || dateRootSelected) return
-        controller.openNodeEditor()
+        controller.openNodeEditor(newNode === true)
     }
     function addThought(sibling) {
-        if (controller.addThought(sibling)) editNode()
+        if (controller.addThought(sibling)) editNode(true)
     }
     Component.onDestruction: if (controller) controller.closeNodeEditor()
     onVisibleChanged: {
@@ -640,7 +640,7 @@ FocusScope {
                 onDoubleClicked: function(mouse) {
                     if (!pane.controller || mouse.button !== Qt.LeftButton || mouse.modifiers !== Qt.NoModifier) return
                     var point = mapToItem(world, mouse.x, mouse.y)
-                    if (pane.controller.addThoughtAt(point.x, point.y)) pane.editNode()
+                    if (pane.controller.addThoughtAt(point.x, point.y)) pane.editNode(true)
                 }
                 onPressed: function(mouse) {
                     pane.focusMap()
@@ -1304,7 +1304,7 @@ FocusScope {
                                 quickChildDialog.targetNodeId = nodeId
                                 quickChildTitle.text = ""
                                 quickChildDialog.open()
-                            } else if (pane.controller.addSiblingRelative(nodeId, before)) pane.editNode()
+                            } else if (pane.controller.addSiblingRelative(nodeId, before)) pane.editNode(true)
                         }
                     }
                 }

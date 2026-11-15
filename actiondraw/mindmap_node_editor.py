@@ -405,6 +405,7 @@ class MindMapNodeEditor(QDialog):
         self._return_window = None
         self.node_id = ''
         self.original = None
+        self._creation = None
         controller.loading.connect(self.clear_project)
         save = QAction(self)
         save.setShortcut('Ctrl+S')
@@ -439,13 +440,20 @@ class MindMapNodeEditor(QDialog):
             (self.notes.active_surface() if expanded else self.title).setFocus()
 
     def clear_project(self):
+        self._creation = None
         self.reject()
         self.node_id = ''
         self.original = None
         self.title.clear()
         self.notes.load_draft('', [])
 
-    def open_node(self, node):
+    def open_node(self, node, new_node=False):
+        self._creation = None
+        if new_node and self.controller._undo:
+            entry = self.controller._undo[-1]
+            previous, _ = self.controller.decode(entry[0])
+            if previous.find(node.id) is None:
+                self._creation = (entry, copy.deepcopy(self.controller.to_dict()))
         self._return_window = QGuiApplication.focusWindow()
         self.winId()
         if self._return_window is not self.windowHandle():
@@ -475,6 +483,14 @@ class MindMapNodeEditor(QDialog):
             super().accept()
 
     def done(self, result):
+        creation, self._creation = self._creation, None
+        if result == QDialog.DialogCode.Rejected and creation is not None:
+            entry, created_state = creation
+            controller = self.controller
+            # Only roll back our own insertion, never intervening project edits.
+            if (controller._undo and controller._undo[-1] is entry
+                    and controller.to_dict() == created_state):
+                controller._restore(controller._undo, [])
         self.notes.picker.hide()
         super().done(result)
         import shiboken6
