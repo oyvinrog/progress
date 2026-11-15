@@ -1,4 +1,4 @@
-"""Editable causal DAGs. Likelihoods are annotations, not an inference engine."""
+"""Editable causal DAGs. Connection weights are annotations, not an inference engine."""
 from __future__ import annotations
 
 import copy
@@ -73,7 +73,7 @@ def normalize_causal_model_state(value):
         weight = edge['likelihood']
         if (not edge['id'] or edge['source'] not in ids or edge['target'] not in ids
                 or edge['source'] == edge['target']
-                or (weight is not None and (not math.isfinite(weight) or not 0 <= weight <= 100))
+                or (weight is not None and (not math.isfinite(weight) or not -100 <= weight <= 100))
                 or edge['id'] in edge_ids or (edge['source'], edge['target']) in pairs
                 or _reachable(adjacency, edge['target'], edge['source'])):
             continue
@@ -377,7 +377,7 @@ class CausalModelModel(QObject):
         if not str(text).strip():
             return None
         weight = float(text)
-        if not math.isfinite(weight) or not 0 <= weight <= 100:
+        if not math.isfinite(weight) or not -100 <= weight <= 100:
             raise ValueError()
         return weight
 
@@ -399,7 +399,7 @@ class CausalModelModel(QObject):
         try:
             weight = self._weight(likelihood)
         except (TypeError, ValueError):
-            self._fail('Likelihood must be blank or a number from 0 to 100.')
+            self._fail('Connection weight must be blank or a number from -100 to 100.')
             return ''
         before = self.to_dict()
         key = str(uuid.uuid4())
@@ -415,7 +415,7 @@ class CausalModelModel(QObject):
         try:
             weight = self._weight(likelihood)
         except (TypeError, ValueError):
-            return self._fail('Likelihood must be blank or a number from 0 to 100.')
+            return self._fail('Connection weight must be blank or a number from -100 to 100.')
         before = self.to_dict()
         edge.update(likelihood=weight, notes=notes)
         self._commit(before)

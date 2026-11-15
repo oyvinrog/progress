@@ -34,9 +34,9 @@ def test_branching_graph_validation_and_weights(app):
     assert 'already' in model.validationError
     assert not model.addEdge(d, a, '', '')
     assert 'cycle' in model.validationError
-    for weight in ['-1', '101', 'nan', 'inf', 'not a number']:
+    for weight in ['-101', '101', 'nan', 'inf', '-inf', 'not a number']:
         assert not model.addEdge(a, d, weight, '')
-    for weight in ['0', '100', '']:
+    for weight in ['-100', '-30.5', '-1', '0', '100', '']:
         edge = model.addEdge(a, d, weight, '')
         assert edge
         model.removeEdge(edge)
@@ -45,6 +45,25 @@ def test_branching_graph_validation_and_weights(app):
     assert model.edges[0]['likelihood'] == 30.5
     assert not model.editEdge(edge, '101', '')
     assert model.edges[0]['likelihood'] == 30.5
+
+
+
+@pytest.mark.parametrize('weight', ['-100', '-30.5', '-1'])
+def test_negative_connection_weights_survive_history_and_reload(app, weight):
+    model, *_ = graph()
+    edge = model.edges[0]['id']
+    assert model.editEdge(edge, weight, 'Reducing effect')
+    expected = model.to_dict()
+    assert model.edges[0]['likelihood'] == float(weight)
+    assert not model.editEdge(edge, '-100.1', '')
+    assert model.to_dict() == expected
+    model.undo()
+    assert model.edges[0]['likelihood'] == 80
+    model.redo()
+    assert model.to_dict() == expected
+    restored = CausalModelModel()
+    restored.from_dict(json.loads(json.dumps(expected)))
+    assert restored.to_dict() == expected
 
 
 def test_action_order_types_deletion_and_history(app):

@@ -356,7 +356,7 @@ or press Escape to cancel. Connections must form a directed
 acyclic graph; represent feedback with separate nodes for successive times.
 
 Drag nodes to arrange the canvas. Double-click a node to edit its label, type,
-or notes; double-click an arrow to edit its optional likelihood (0–100%) and explanation.
+or notes; double-click an arrow to edit its optional connection weight (−100–100%) and explanation.
 Click a node or arrow to select it, then press **Delete** (or use the toolbar's
 **Delete** button) to remove it. Deleting a node also removes its connections;
 Undo restores them together.
@@ -385,7 +385,7 @@ existing copies. Import history is saved with the project and survives graph
 Undo/Redo. For older projects, ActionDraw history is recovered from the last
 import signature; mindmap history starts empty because it was not recorded.
 
-Edge percentages record your estimated likelihoods. They need not sum to 100%,
+Edge percentages record estimated influence; negative values indicate a reducing effect. They need not sum to 100%,
 and they do not calculate outcome probabilities. Numerical causal question
 answering is reserved for a later version with explicit probability rules.
 

@@ -482,7 +482,7 @@ ApplicationWindow {
             }
         }
         Label { text: modelRef.validationError || root.statusText; color: modelRef.validationError ? "#b71c1c" : palette.text; wrapMode: Text.Wrap; Layout.fillWidth: true }
-        Label { text: "Edge percentages are estimated likelihoods. They do not calculate outcome probabilities."; font.pixelSize: 12 }
+        Label { text: "Edge weights describe influence; negative values indicate a reducing effect. They do not calculate outcome probabilities."; font.pixelSize: 12 }
     }
     Dialog {
         id: nodeDialog; title: root.selectedNode ? "Edit node" : "Add node"
@@ -525,7 +525,7 @@ ApplicationWindow {
             TextField {
                 id: edgeWeight
                 objectName: "causalEdgeWeight"
-                placeholderText: "Likelihood 0–100% (optional)"
+                placeholderText: "Connection weight −100–100% (optional)"
                 Layout.fillWidth: true
                 onAccepted: root.saveEdge()
             }
