@@ -88,6 +88,8 @@ def test_references_cycles_completion_and_history(project):
         edit(api, 'move', node=container['id'], target=goal_node['id'])
     edit(api, 'delete', node=ref['id'])
     assert project._tab_model.goalIndex(goal.id) >= 0
+    assert edit(api, 'move', node=container['id'], target=goal_node['id'])['saved']
+    assert project.mindmap.map.find(container['id']).parent.id == goal_node['id']
 
 
 def test_planning_and_markdown(project):

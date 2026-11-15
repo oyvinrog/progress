@@ -1196,7 +1196,7 @@ class TestCreateActionDrawWindow:
         overview_qml = (QML_DIR / "components" / "ReminderOverview.qml").read_text(encoding="utf-8")
         assert 'ReminderOverview {' in window_qml
         assert 'text: "Due in " + (reminderRow.entry.countdownText || "0:00")' in overview_qml
-        assert 'text: (reminderRow.isPlan ? "Add and notify at " : "Remind at ") + reminderRow.entry.reminderText' in overview_qml
+        assert 'text: (reminderRow.isPlan ? "Add and notify at " : "Remind at ") + (reminderRow.entry.occurrenceText || reminderRow.entry.reminderText)' in overview_qml
 
 
 class TestMarkdownTabClipboard:

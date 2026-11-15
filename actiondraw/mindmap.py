@@ -2567,7 +2567,7 @@ class MindMapController(QObject):
                 return None
         return parent, index
 
-    @Slot(str, str, str)
+    @Slot(str, str, str, result=bool)
     def moveNode(self, node_id, target_id, placement):
         node, target = self._find(node_id), self._find(target_id)
         destination = self._move_destination(node, target, placement)
@@ -2576,7 +2576,7 @@ class MindMapController(QObject):
             if (node is not None and target is not None and node is not target
                     and parent is not None and _content(parent).id in self._parent_forbidden(_placement(node))):
                 self.errorOccurred.emit('Moving the node there would create a cycle.')
-            return
+            return False
         parent, index = destination
         sides = assigned_sides(SimpleNamespace(root=self.view_root))
         def mutate():
@@ -2588,6 +2588,8 @@ class MindMapController(QObject):
             self._set_selection([node.id])
         if self._commit(mutate):
             self.revealNode.emit(node.id)
+            return True
+        return False
 
     @Slot()
     def clearDropTargets(self):

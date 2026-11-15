@@ -7,7 +7,7 @@ from pathlib import Path
 import uuid
 
 import pytest
-from PySide6.QtCore import QCoreApplication, QEvent, QMetaObject, QObject, QPoint, Qt, QUrl
+from PySide6.QtCore import Q_ARG, QCoreApplication, QEvent, QMetaObject, QObject, QPoint, Qt, QUrl
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtTest import QTest
 from PySide6.QtQml import QQmlProperty, qmlContext
@@ -2857,6 +2857,14 @@ def test_qml_double_click_empty_canvas(project, app, zoom, pan, actiondraw_windo
     assert native_editor(window).title.text() == 'New thought'
     QMetaObject.invokeMethod(editor, 'reject')
     QTest.qWait(50)
+    assert len(list(m.map.walk())) == count
+    assert m.map.find(created.id) is None
+    QTest.mouseDClick(window, Qt.LeftButton, Qt.NoModifier, gap)
+    QTest.qWait(50)
+    created = m.map.find(m.selectedId)
+    assert editor.isVisible()
+    QMetaObject.invokeMethod(editor, 'accept')
+    QTest.qWait(50)
     assert len(list(m.map.walk())) == count + 1
     box = m._layout()[created]
     QTest.mouseDClick(window, Qt.LeftButton, Qt.NoModifier, point(box.x + box.width / 2, box.center_y))
@@ -4899,7 +4907,7 @@ def test_qml_calendar_linked_title_editor(project, app, actiondraw_window, via_r
         m.setActivityFilter(goal)
     QTest.qWait(50)
     pane = window.findChild(QObject, 'mindmapPane')
-    assert QMetaObject.invokeMethod(pane, 'editNode')
+    assert QMetaObject.invokeMethod(pane, 'editNode', Q_ARG('QVariant', False))
     title = native_editor(window).title
     assert not title.property('readOnly')
     title.setText('Edited in mindmap')
